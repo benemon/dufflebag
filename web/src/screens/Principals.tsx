@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import {
-  Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
+  ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
   FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
   PageSection, Radio, TextInput, Title,
 } from '@patternfly/react-core'
@@ -329,18 +329,20 @@ export function CreatePrincipalForm({
             <Content component="p">{ROLE_DESCRIPTIONS[role]}</Content>
           </FormGroup>
 
-          <RoleRestrictedButton
-            action="managePrincipals"
-            callerRole={callerRole}
-            variant="primary"
-            isDisabled={name.trim() === '' || roles.length === 0}
-            onClick={() => void onCreate(name.trim(), role)}
-          >
-            Create principal
-          </RoleRestrictedButton>
-          <Button variant="link" onClick={onCancel}>
-            Cancel
-          </Button>
+          <ActionGroup>
+            <RoleRestrictedButton
+              action="managePrincipals"
+              callerRole={callerRole}
+              variant="primary"
+              isDisabled={name.trim() === '' || roles.length === 0}
+              onClick={() => void onCreate(name.trim(), role)}
+            >
+              Create principal
+            </RoleRestrictedButton>
+            <Button variant="link" onClick={onCancel}>
+              Cancel
+            </Button>
+          </ActionGroup>
           <Content component="p">
             Created without a secret. Issue one from its row when you are ready — it is
             shown once and never again.
