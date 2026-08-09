@@ -1,0 +1,58 @@
+name: spec-drift
+
+# Scheduled rather than per-push: this watches for change in someone else's
+# repository, which our own commits cannot cause.
+on:
+  schedule:
+    - cron: "17 6 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Check for upstream spec drift
+        id: drift
+        run: |
+          set +e
+          go run ./cmd/spec-drift 2>&1 | tee drift.log
+          echo "status=${PIPESTATUS[0]}" >> "$GITHUB_OUTPUT"
+      - name: Raise an issue when drift is detected
+        if: steps.drift.outputs.status != '0'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const fs = require('fs')
+            const log = fs.readFileSync('drift.log', 'utf8')
+            const title = 'Upstream spec drift detected'
+            // Reuse an open issue rather than filing one a week until someone looks.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'spec-drift',
+            })
+            const body = [
+              'The scheduled drift check found a difference between hcp-sdk-go and our vendored specs.',
+              '', '```', log.trim(), '```',
+            ].join('\n')
+            if (existing.data.length > 0) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: existing.data[0].number, body,
+              })
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['spec-drift'],
+              })
+            }
+      - name: Fail the run so the schedule shows red
+        if: steps.drift.outputs.status != '0'
+        run: exit 1

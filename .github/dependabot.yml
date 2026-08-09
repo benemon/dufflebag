@@ -1,0 +1,50 @@
+# Three ecosystems, one grouped PR each. The client stack pinned to what
+# Packer links against (hcp-sdk-go, go-openapi/runtime, go-openapi/strfmt) is
+# excluded in both Go modules: bumping it is a deliberate, reviewable event
+# tied to declaring support for a new Packer release — an automated bump would
+# not break the contract tests, it would silently change what they prove
+# (contract/pin_test.go enforces this; the exclusions keep the noise away).
+# No docker entry: the Containerfile tracks moving tags, which dependabot has
+# nothing to bump.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go:
+        patterns: ["*"]
+    ignore:
+      # The whole family, not just the pinned pair: bumping any go-openapi
+      # module drags strfmt past the pin transitively (observed: PR #2 raised
+      # strfmt to v0.27.0 via the group even with strfmt ignored).
+      - dependency-name: github.com/go-openapi/*
+      - dependency-name: github.com/hashicorp/hcp-sdk-go
+
+  - package-ecosystem: gomod
+    directory: /contract
+    schedule:
+      interval: weekly
+    groups:
+      go-contract:
+        patterns: ["*"]
+    ignore:
+      - dependency-name: github.com/go-openapi/*
+      - dependency-name: github.com/hashicorp/hcp-sdk-go
+
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: weekly
+    groups:
+      frontend:
+        patterns: ["*"]

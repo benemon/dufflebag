@@ -1,0 +1,65 @@
+version: "2"
+
+linters:
+  enable:
+    - depguard
+
+  settings:
+    depguard:
+      rules:
+        # ADR-0002: wire models never reach the domain. The generated compat
+        # packages carry the "v0" sentinel, gRPC codes in bodies and go-swagger
+        # conventions; none of that is allowed to define the domain.
+        domain:
+          files:
+            - "**/internal/domain/**"
+          deny:
+            - pkg: github.com/benemon/dufflebag/internal/compat
+              desc: "ADR-0002: the domain must not import compatibility-plane models"
+            - pkg: github.com/benemon/dufflebag/internal/platform
+              desc: "ADR-0002: the domain must not import a transport layer"
+            - pkg: github.com/benemon/dufflebag/internal/store
+              desc: "ADR-0002: dependencies point inward; store depends on domain, not the reverse"
+            - pkg: github.com/hashicorp/hcp-sdk-go
+              desc: "ADR-0002: hcp-sdk-go is a wire library and belongs only under internal/compat"
+            - pkg: github.com/go-openapi
+              desc: "ADR-0002: go-openapi types are wire types and belong only under internal/compat"
+
+        # The persistence layer knows the domain and nothing about transport.
+        store:
+          files:
+            - "**/internal/store/**"
+          deny:
+            - pkg: github.com/benemon/dufflebag/internal/compat
+              desc: "ADR-0002: persistence must not import compatibility-plane models"
+            - pkg: github.com/benemon/dufflebag/internal/platform
+              desc: "ADR-0002: persistence must not import a transport layer"
+            - pkg: github.com/hashicorp/hcp-sdk-go
+              desc: "ADR-0002: hcp-sdk-go is a wire library and belongs only under internal/compat"
+
+        # ADR-0001: the two planes are independent. Neither may reach into the
+        # other; they meet only at the domain.
+        platform:
+          files:
+            - "**/internal/platform/**"
+          deny:
+            - pkg: github.com/benemon/dufflebag/internal/compat
+              desc: "ADR-0001: the platform plane must not import compatibility-plane models"
+
+        compat:
+          files:
+            - "**/internal/compat/**"
+          deny:
+            - pkg: github.com/benemon/dufflebag/internal/platform
+              desc: "ADR-0001: the compatibility plane must not import the platform plane"
+
+  exclusions:
+    rules:
+      # Generated code is exempt from style linting; it is not ours to fix.
+      - path: internal/compat/.*/models/.*\.go
+        linters:
+          - depguard
+
+formatters:
+  enable:
+    - gofmt

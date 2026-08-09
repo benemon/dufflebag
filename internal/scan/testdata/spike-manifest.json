@@ -1,0 +1,412 @@
+{
+  "title": "OSV.dev spike manifest (duf-o0ou.1)",
+  "generated": "2026-08-06",
+  "endpoint": "https://api.osv.dev",
+  "corpus": [
+    {
+      "document": "lane-source",
+      "provenance": "packer sbom-generate -o spdx-json . (Packer v1.16.0, Syft-backed) over the repository work tree \u2014 the identical command e2e/packer/e2e.test.mjs uses to produce the SBOM the lane uploads",
+      "entries": 1274,
+      "purl_types": {
+        "golang": 1168,
+        "npm": 69,
+        "github": 33,
+        "empty": 4
+      }
+    },
+    {
+      "document": "alpine-3.20",
+      "provenance": "syft 1.50.0 (container) registry:alpine:3.20 -o cyclonedx-json, pulled 2026-08-06; alpine:3.20 is the packer lane base image (Makefile PACKER_E2E_IMAGE)",
+      "entries": 92,
+      "purl_types": {
+        "apk": 14,
+        "empty": 78
+      }
+    },
+    {
+      "document": "ubi9",
+      "provenance": "syft 1.50.0 (container) registry:registry.access.redhat.com/ubi9/ubi:latest -o cyclonedx-json, pulled 2026-08-06 (rhel-9.8 content)",
+      "entries": 6742,
+      "purl_types": {
+        "rpm": 188,
+        "pypi": 18,
+        "empty": 6536
+      }
+    },
+    {
+      "document": "debian-12",
+      "provenance": "syft 1.50.0 (container) registry:debian:12 -o cyclonedx-json, pulled 2026-08-06 (debian-12.15 content)",
+      "entries": 5050,
+      "purl_types": {
+        "deb": 88,
+        "empty": 4962
+      }
+    }
+  ],
+  "corpus_counts": {
+    "deduped_entries": 12183,
+    "queryable_submitted": 593,
+    "empty": 11578,
+    "unsupported": 8,
+    "unversioned": 4,
+    "invalid": 0,
+    "packages_with_candidate_findings": 110,
+    "candidate_findings_by_document": {
+      "lane-source": 9,
+      "ubi9": 63,
+      "debian-12": 38,
+      "alpine-3.20": 0
+    },
+    "note": "candidate counts are phase-1 only; the ubi9 figure is inflated by Red Hat cross-stream matches \u2014 see decisions.redhat_two_phase. empty entries are SBOM components without a purl (files, relationships, document nodes); they are never submitted anywhere."
+  },
+  "decisions": {
+    "request_shape": "Always query OSV in ecosystem form ({package:{name,ecosystem},version}), never purl form. Three live findings force this: (1) Alpine purl queries return {} even for known-vulnerable versions (pkg:apk/alpine/busybox@1.36.1-r0 -> {}, ecosystem form -> 7 advisories); (2) purl queries evaluate every distribution stream, producing cross-stream false positives (pkg:deb/debian/glibc@2.36-9+deb12u1 purl-form 39 vs stream-scoped Debian:12 form 35); (3) rpm purls carry epoch as a qualifier Syft emits separately, and ignoring it makes Red Hat matching wildly wrong (openssl 1.1.1k-7.el8 without epoch: 115 advisories including 2014-era; with 1: epoch folded in: 54).",
+    "classification_rule": "Deterministic, adapter-side, applied before any query is issued: no purl -> empty; purl fails to parse or percent-decode -> invalid; parsed purl without version -> unversioned; (type,namespace) outside the proven mapping table, or apk/deb purl without the distro qualifier that selects the OSV stream -> unsupported, with reason; otherwise queryable with the translated ecosystem-form query. The mapping table IS the supported-ecosystem list; OSV returns {} for unsupported ecosystems (probed pkg:rpm/amzn openssl: {}), indistinguishable from supported-with-zero-findings, so classification can never be inferred from responses. Unversioned purls must never be submitted: a versionless query returns the package's entire advisory history (pkg:apk/alpine/busybox -> 30 advisories).",
+    "redhat_two_phase": "Red Hat OSV records key streams as ecosystem strings with unguessable variants (Red Hat:enterprise_linux:8::baseos, Red Hat:enterprise_linux:10.0, Red Hat:enterprise_linux_eus:10.0, Red Hat:hummingbird:1), so no single ecosystem string can be derived from a Syft purl (distro=rhel-9.8 gives major.minor, never the variant). Rule: phase 1 queries ecosystem 'Red Hat' (name, epoch-folded version) for candidates; phase 2 fetches each candidate record (needed anyway for severity and ranges), keeps affected entries whose package.name matches and whose ecosystem parses to the same enterprise_linux major as the distro qualifier, and re-queries with that entry's exact ecosystem string; the finding is confirmed only when the advisory id comes back from the stream-scoped query. Version semantics stay server-side; the adapter owns no rpm version comparator. Live proof: fully patched ubi9 glibc 2.34-275.el9_8 had 11 phase-1 candidates, all el10/hummingbird streams, and 0 survived phase 2.",
+    "fixed_version_projection": "From the confirmed record, take affected entries matching the queried (ecosystem string, name); collect the 'fixed' events of their ranges. Exactly one distinct fixed value (the overwhelmingly common case, e.g. RHSA-2023:7877 el8 baseos: [introduced 0, fixed 1:1.1.1k-12.el8_9]) projects as-is. Multiple distinct values are all stored verbatim and displayed as the full set sorted lexicographically for stability \u2014 the adapter never invents a semantic 'minimum' across ranges because that would require a per-ecosystem version comparator it deliberately does not own. Ranges with only last_affected events (e.g. GHSA-78h2-9frx-2jm8's go-jose v2 entry) project as no-fix-available.",
+    "severity": "OSV severity arrives as severity[] CVSS vectors (CVSS_V3/CVSS_V4 type + vector string, no numeric score), sometimes plus database_specific.severity qualitative labels (GHSA: 'HIGH') and ecosystem_specific.urgency (Debian). All are stored verbatim with the record; the fixed display scale is derived (qualitative label preferred, else CVSS base score banded, else unknown). Some records carry no severity at all (GO-2026-4945: severity null) \u2014 unknown is a first-class display state.",
+    "batch_behavior": "POST /v1/querybatch accepts up to 1000 queries; 593 real-corpus queries completed in two chunks of <=500 in ~1.4s total with zero next_page_token. One malformed query fails the ENTIRE batch with a single code-3 error naming the query index. Because classification runs before batching, a batch error can only mean an adapter bug: the run fails closed rather than papering over it.",
+    "go_version_prefix": "Immaterial: golang.org/x/crypto queried as v0.16.0 and 0.16.0 return identical 38 advisories. Versions pass through as Syft emits them.",
+    "osv_first": "OSV.dev is the MVP provider. api.osv.dev serves Red Hat data (stale docs omit it; the API is ground truth) sourced from Red Hat's own CSAF/VEX-derived OSV feed (every RHSA record's database_specific.source points at https://security.access.redhat.com/data/osv/...), so backport-awareness is inherited by construction. Red Hat's direct feed (https://security.access.redhat.com/data/osv/all.json) is recorded as fallback evidence only \u2014 not an MVP adapter, not a config surface.",
+    "database_revision": "No query, querybatch, or vulns response carries a database snapshot identifier; per-record 'modified' timestamps are the only versioning. Recorded as the accepted 'database_revision unreported' rider."
+  },
+  "unsupported_ecosystem_case": {
+    "purl": "pkg:rpm/amzn/openssl@1.0.2k-24.amzn2.0.7",
+    "ecosystem": "Amazon Linux",
+    "observed": "{} \u2014 HTTP 200, empty object, byte-identical to supported-with-zero-findings",
+    "consequence": "ecosystem support can only be asserted by the adapter's own mapping table, fixture-tested here; absence from the table classifies as unsupported and is reported as coverage, never as zero findings",
+    "source": "live POST /v1/query 2026-08-06; Amazon Linux absent from https://osv-vulnerabilities.storage.googleapis.com/ecosystems.txt (46 entries, captured in spike evidence)"
+  },
+  "controls": [
+    {
+      "id": "alpine-vulnerable",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r0?arch=aarch64&distro=alpine-3.20.10",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "busybox",
+        "version": "1.36.1-r0"
+      },
+      "advisory": "ALPINE-CVE-2022-48174",
+      "expect": "present",
+      "fixed": "1.36.1-r2",
+      "source": "live OSV query 2026-08-06 (7 advisories); OSV record ALPINE-CVE-2022-48174 Alpine:v3.20 range [introduced 0, fixed 1.36.1-r2]; independently cross-checked against https://secdb.alpinelinux.org/v3.20/main.json busybox secfixes ('1.36.1-r2': [CVE-2022-48174])"
+    },
+    {
+      "id": "alpine-patched",
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r31?arch=aarch64&distro=alpine-3.20.10",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "busybox",
+        "version": "1.36.1-r31"
+      },
+      "advisory": "ALPINE-CVE-2022-48174",
+      "expect": "absent",
+      "source": "corpus purl from the alpine:3.20 image; live OSV query 2026-08-06 returned {} (1.36.1-r31 >= fixed 1.36.1-r2)"
+    },
+    {
+      "id": "debian-vulnerable",
+      "purl": "pkg:deb/debian/libc6@2.36-9+deb12u1?arch=arm64&distro=debian-12.15&upstream=glibc",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "glibc",
+        "version": "2.36-9+deb12u1"
+      },
+      "advisory": "DEBIAN-CVE-2023-4527",
+      "expect": "present",
+      "fixed": "2.36-9+deb12u3",
+      "source": "live OSV query 2026-08-06 (35 advisories, DEBIAN-CVE-2023-4527 present); OSV record Debian:12 range [introduced 0, fixed 2.36-9+deb12u3]. Binary purl deliberately used: pkg:deb/debian/libc6@2.36-9+deb12u1 direct returns {} because Debian OSV keys source package names \u2014 the upstream qualifier carries the mapping"
+    },
+    {
+      "id": "debian-patched",
+      "purl": "pkg:deb/debian/libc6@2.36-9+deb12u3?arch=arm64&distro=debian-12.15&upstream=glibc",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "glibc",
+        "version": "2.36-9+deb12u3"
+      },
+      "advisory": "DEBIAN-CVE-2023-4527",
+      "expect": "absent",
+      "source": "live OSV query 2026-08-06: 31 advisories (unfixed/no-DSA residue), DEBIAN-CVE-2023-4527 absent"
+    },
+    {
+      "id": "redhat-vulnerable",
+      "purl": "pkg:rpm/redhat/openssl@1.1.1k-7.el8?arch=x86_64&distro=rhel-8.5&epoch=1&upstream=openssl-1.1.1k-7.el8.src.rpm",
+      "query": {
+        "ecosystem": "Red Hat",
+        "name": "openssl",
+        "version": "1:1.1.1k-7.el8",
+        "redhat_major": "8"
+      },
+      "advisory": "RHSA-2023:7877",
+      "expect": "present",
+      "fixed": "1:1.1.1k-12.el8_9",
+      "confirm_ecosystem": "Red Hat:enterprise_linux:8::baseos",
+      "source": "live OSV queries 2026-08-06: phase-1 'Red Hat' 54 advisories; stream-scoped Red Hat:enterprise_linux:8::baseos at 1:1.1.1k-7.el8 -> 8 advisories incl. RHSA-2023:7877, whose el8 baseos range is [introduced 0, fixed 1:1.1.1k-12.el8_9]. NOTE: the epic's bead quoted this control WITHOUT the epoch; the epoch-less purl matches only via the version-insensitive path (115 advisories incl. 2014-era el6/el7) and is wrong as a control \u2014 epoch folding is mandatory"
+    },
+    {
+      "id": "redhat-patched",
+      "purl": "pkg:rpm/redhat/openssl@1.1.1k-12.el8_9?arch=x86_64&distro=rhel-8.9&epoch=1&upstream=openssl-1.1.1k-12.el8_9.src.rpm",
+      "query": {
+        "ecosystem": "Red Hat",
+        "name": "openssl",
+        "version": "1:1.1.1k-12.el8_9",
+        "redhat_major": "8"
+      },
+      "advisory": "RHSA-2023:7877",
+      "expect": "absent",
+      "confirm_ecosystem": "Red Hat:enterprise_linux:8::baseos",
+      "source": "live OSV query 2026-08-06: Red Hat:enterprise_linux:8::baseos at 1:1.1.1k-12.el8_9 -> 5 advisories, RHSA-2023:7877 absent"
+    }
+  ],
+  "fixtures": [
+    {
+      "purl": "",
+      "class": "empty"
+    },
+    {
+      "purl": "registry.terraform.io/hashicorp/hcp",
+      "class": "invalid",
+      "note": "a non-purl string fails the pkg: grammar before any query is considered"
+    },
+    {
+      "purl": "pkg:rpm/redhat/openssl@@@bad %%",
+      "class": "invalid",
+      "note": "percent-decode failure; live /v1/query rejects it with code 3 'error unescaping version'"
+    },
+    {
+      "purl": "pkg:npm/foo@1@2",
+      "class": "invalid",
+      "note": "review finding: a second raw '@' would submit name 'foo@1' \u2014 a different identity; rejected outright"
+    },
+    {
+      "purl": "pkg:pypi/foo%2Fbar@1",
+      "class": "invalid",
+      "note": "review finding: an encoded path separator inside a segment smuggles a different identity past the structure"
+    },
+    {
+      "purl": "pkg:npm//foo@1",
+      "class": "invalid",
+      "note": "review finding: empty segments collapse to a valid-looking but different name"
+    },
+    {
+      "purl": "pkg:npm/foo@1.0.0?keyonly",
+      "class": "invalid",
+      "note": "review finding: a qualifier without '=' is malformed, not ignorable"
+    },
+    {
+      "purl": "pkg:golang/github.com/benemon/dufflebag",
+      "class": "unversioned",
+      "note": "real lane-source purl; versionless queries return whole advisory histories and are never submitted"
+    },
+    {
+      "purl": "pkg:npm/dufflebag-ui",
+      "class": "unversioned",
+      "note": "real lane-source purl for the unpublished workspace package"
+    },
+    {
+      "purl": "pkg:rpm/amzn/openssl@1.0.2k-24.amzn2.0.7",
+      "class": "unsupported",
+      "note": "Amazon Linux: no OSV coverage; {} is indistinguishable from zero findings"
+    },
+    {
+      "purl": "pkg:github/actions/checkout@v7",
+      "class": "unsupported",
+      "note": "real lane-source purl. OSV has a 'GitHub Actions' ecosystem but /v1/query version matching returns nothing even for known-compromised tj-actions/changed-files@45.0.7 (GHSA-mrrh-fwg8-r2c3), probed 2026-08-06 in both v-prefixed and bare forms"
+    },
+    {
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r0",
+      "class": "unsupported",
+      "note": "apk without a distro qualifier: the OSV stream (Alpine:vX.Y) cannot be selected, and Alpine fixed versions differ per stream (ALPINE-CVE-2022-48174: v3.18 fixes at 1.36.1-r1, v3.20 at 1.36.1-r2)"
+    },
+    {
+      "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=arm64",
+      "class": "unsupported",
+      "note": "deb without a distro qualifier: Debian:N cannot be selected"
+    },
+    {
+      "purl": "pkg:rpm/redhat/openssl@1.1.1k-7.el8?arch=x86_64&epoch=1",
+      "class": "unsupported",
+      "note": "rpm without a rhel-N distro qualifier: phase-2 stream confirmation cannot select a release; deny-by-default rather than report unconfirmable candidates"
+    },
+    {
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r0?arch=aarch64&distro=alpine-3.20.10",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "busybox",
+        "version": "1.36.1-r0"
+      }
+    },
+    {
+      "purl": "pkg:apk/alpine/busybox@1.36.1-r31?arch=aarch64&distro=alpine-3.20.10",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "busybox",
+        "version": "1.36.1-r31"
+      }
+    },
+    {
+      "purl": "pkg:apk/alpine/libcrypto3@3.3.7-r0?arch=aarch64&distro=alpine-3.20.10&upstream=openssl",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "openssl",
+        "version": "3.3.7-r0"
+      },
+      "note": "real corpus purl; apk subpackages miss without origin mapping (libcrypto3@3.3.0-r0 -> 0, openssl@3.3.0-r0 -> 26 advisories, probed 2026-08-06)"
+    },
+    {
+      "purl": "pkg:apk/alpine/alpine-baselayout-data@3.6.5-r0?arch=aarch64&distro=alpine-3.20.10&upstream=alpine-baselayout",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Alpine:v3.20",
+        "name": "alpine-baselayout",
+        "version": "3.6.5-r0"
+      }
+    },
+    {
+      "purl": "pkg:deb/debian/libc6@2.36-9+deb12u1?arch=arm64&distro=debian-12.15&upstream=glibc",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "glibc",
+        "version": "2.36-9+deb12u1"
+      }
+    },
+    {
+      "purl": "pkg:deb/debian/libc6@2.36-9+deb12u3?arch=arm64&distro=debian-12.15&upstream=glibc",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "glibc",
+        "version": "2.36-9+deb12u3"
+      }
+    },
+    {
+      "purl": "pkg:deb/debian/zlib1g@1%3A1.2.13.dfsg-1?arch=arm64&distro=debian-12.15&upstream=zlib",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "zlib",
+        "version": "1:1.2.13.dfsg-1"
+      },
+      "note": "real corpus purl: deb embeds the epoch inside the percent-encoded version, unlike rpm"
+    },
+    {
+      "purl": "pkg:deb/debian/libgnutls30@3.7.9-2%2Bdeb12u7?arch=arm64&distro=debian-12.15&upstream=gnutls28",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "gnutls28",
+        "version": "3.7.9-2+deb12u7"
+      }
+    },
+    {
+      "purl": "pkg:deb/debian/base-files@12.4%2Bdeb12u15?arch=arm64&distro=debian-12.15",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Debian:12",
+        "name": "base-files",
+        "version": "12.4+deb12u15"
+      },
+      "note": "no upstream qualifier: the binary name is its own source package"
+    },
+    {
+      "purl": "pkg:rpm/redhat/dbus@1.12.20-8.el9?arch=aarch64&distro=rhel-9.8&epoch=1&upstream=dbus-1.12.20-8.el9.src.rpm",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Red Hat",
+        "name": "dbus",
+        "version": "1:1.12.20-8.el9",
+        "redhat_major": "9"
+      },
+      "note": "real corpus purl: rpm epoch arrives as a qualifier and must be folded into the version as 'epoch:version'"
+    },
+    {
+      "purl": "pkg:rpm/redhat/openssl@1.1.1k-7.el8?arch=x86_64&distro=rhel-8.5&epoch=1&upstream=openssl-1.1.1k-7.el8.src.rpm",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Red Hat",
+        "name": "openssl",
+        "version": "1:1.1.1k-7.el8",
+        "redhat_major": "8"
+      }
+    },
+    {
+      "purl": "pkg:rpm/redhat/alternatives@1.24-2.el9?arch=aarch64&distro=rhel-9.8&upstream=chkconfig-1.24-2.el9.src.rpm",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Red Hat",
+        "name": "alternatives",
+        "version": "1.24-2.el9",
+        "redhat_major": "9"
+      },
+      "note": "rpm binary names are queried as-is \u2014 Red Hat OSV records carry per-binary affected entries (openssl-libs, openssl-debuginfo...), so no src.rpm mapping is applied"
+    },
+    {
+      "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Go",
+        "name": "github.com/go-jose/go-jose/v4",
+        "version": "v4.1.1"
+      },
+      "note": "real corpus purl; matched GHSA-78h2-9frx-2jm8 + GO-2026-4945 (fixed 4.1.4) in the corpus batch \u2014 the same advisory pair behind Dependabot bead duf-85ip"
+    },
+    {
+      "purl": "pkg:golang/stdlib@1.25.11",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Go",
+        "name": "stdlib",
+        "version": "1.25.11"
+      },
+      "note": "Syft emits the Go toolchain as pkg:golang/stdlib; matched GO-2026-4970/GO-2026-5856 in the corpus batch"
+    },
+    {
+      "purl": "pkg:npm/%40patternfly/react-core@6.6.0",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "npm",
+        "name": "@patternfly/react-core",
+        "version": "6.6.0"
+      }
+    },
+    {
+      "purl": "pkg:pypi/idna@2.10",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "PyPI",
+        "name": "idna",
+        "version": "2.10"
+      },
+      "note": "real corpus purl (ubi9 ships python3 content); matched 4 advisories in the corpus batch"
+    },
+    {
+      "purl": "pkg:deb/ubuntu/libssl1.1@1.1.1f-1ubuntu2.24?arch=amd64&distro=ubuntu-20.04&upstream=openssl",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Ubuntu:20.04",
+        "name": "openssl",
+        "version": "1.1.1f-1ubuntu2.24"
+      },
+      "note": "real purl from a syft 1.50.0 scan of ubuntu:20.04, 2026-08-07. Ubuntu keys OSV streams by the FULL release (Ubuntu:20.04), unlike Debian's major alone. Live-probed the same day: 92 purls from that image translated this way returned findings on 46 packages across 242 advisories, which is also the first real exercise of the Ubuntu mapping the duf-o0ou.1 spike recorded as unverified."
+    },
+    {
+      "purl": "pkg:deb/ubuntu/base-files@11ubuntu5.8?arch=amd64&distro=ubuntu-20.04",
+      "class": "queryable",
+      "query": {
+        "ecosystem": "Ubuntu:20.04",
+        "name": "base-files",
+        "version": "11ubuntu5.8"
+      },
+      "note": "no upstream qualifier: the binary name is its own source package"
+    },
+    {
+      "purl": "pkg:deb/ubuntu/libssl1.1@1.1.1f-1ubuntu2.24?arch=amd64",
+      "class": "unsupported",
+      "note": "deb without an ubuntu-NN.NN distro qualifier: the Ubuntu stream cannot be selected, and Ubuntu fixed versions differ per release"
+    }
+  ]
+}

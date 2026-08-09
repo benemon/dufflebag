@@ -1,0 +1,10 @@
+# Node / frontend build
+node_modules/
+web/dist/*
+!web/dist/not-built.html
+web/tsconfig.tsbuildinfo
+.demo/
+
+# Local go build output
+/spec-drift
+/dufflebag

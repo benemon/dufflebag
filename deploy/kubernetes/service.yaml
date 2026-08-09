@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: dufflebag
+spec:
+  type: ClusterIP
+  selector:
+    app: dufflebag
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+# Supply an Ingress or OpenShift Route for your environment. It must preserve
+# deployment.md's one-hostname, no-path-prefix constraints; also configure
+# DFBG_TRUSTED_PROXIES for the ingress or proxy egress range.

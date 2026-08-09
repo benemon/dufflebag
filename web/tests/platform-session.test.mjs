@@ -1,0 +1,334 @@
+import assert from 'node:assert/strict'
+import { createHmac } from 'node:crypto'
+import { after, before, test } from 'node:test'
+
+import React from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { createServer } from 'vite'
+
+let vite
+let decodeClaims
+let platformTenancyGap
+let organizationRows
+let AuthContext
+let TenantSwitcher
+let applyOrganizationRefresh
+let selectionAfterOrganizationRefresh
+let startOrganizationRefresh
+let refreshOrganizationsOnPickerOpen
+let grantableRoles
+let PrincipalsView
+let BucketsView
+let ChannelsView
+
+before(async () => {
+  vite = await createServer({
+    root: process.cwd(),
+    logLevel: 'silent',
+    server: { middlewareMode: true },
+    appType: 'custom',
+    ssr: { noExternal: [/@patternfly\//] },
+  })
+  ;({ decodeClaims } = await vite.ssrLoadModule('/src/auth/token.ts'))
+  ;({ platformTenancyGap, organizationRows } = await vite.ssrLoadModule('/src/data/tenant.ts'))
+  ;({
+    AuthContext, applyOrganizationRefresh, selectionAfterOrganizationRefresh,
+    startOrganizationRefresh,
+  } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
+  ;({
+    TenantSwitcher, refreshOrganizationsOnPickerOpen,
+  } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
+  ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
+  ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
+  ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
+  ;({ ChannelsView } = await vite.ssrLoadModule('/src/screens/Channels.tsx'))
+})
+
+after(async () => {
+  await vite.close()
+})
+
+const b64url = (value) => Buffer.from(value).toString('base64url')
+
+/** A real HS256 JWT over exactly the given payload, signed like the server signs. */
+function sign(payload) {
+  const head = b64url(JSON.stringify({ alg: 'HS256', typ: 'JWT' }))
+  const body = b64url(JSON.stringify(payload))
+  const signature = createHmac('sha256', 'test-signing-key').update(`${head}.${body}`).digest('base64url')
+  return `${head}.${body}.${signature}`
+}
+
+const inFifteenMinutes = () => Math.floor(Date.now() / 1000) + 900
+
+// The claim set BasicAuthIssuer.Issue emits for the PLATFORM-scoped bootstrap
+// principal, byte-derived from internal/domain/identity/token.go (Claims plus
+// jwt.RegisteredClaims; organization_id and project_id are omitempty and a
+// platform scope leaves both zero, so the keys are genuinely ABSENT — not
+// empty, not null):
+//
+//   {"iss":...,"sub":...,"aud":["https://api.hashicorp.cloud"],
+//    "exp":...,"iat":...,"sid":...,"scope":[],"grants":[]}
+//
+// This is the token /init's credential produces, and the one shape the suite
+// never held before — which is how a decoder requiring organization_id
+// survived every gate (duf-tkw).
+function platformToken(exp = inFifteenMinutes()) {
+  return sign({
+    iss: 'https://dufflebag.local',
+    sub: '01ARZ3NDEKTSV4RRFFQ69G5FAV',
+    aud: ['https://api.hashicorp.cloud'],
+    exp,
+    iat: exp - 900,
+    sid: '3b7fe617-532a-4e23-bb70-678ec8ec7661',
+    scope: [],
+    grants: [],
+  })
+}
+
+test('the token Issue emits for a platform principal decodes as platform scope', () => {
+  const claims = decodeClaims(platformToken())
+  assert.ok(claims, 'the bootstrap token must decode rather than read as malformed')
+  assert.equal(claims.sub, '01ARZ3NDEKTSV4RRFFQ69G5FAV')
+  assert.equal(claims.organizationID, null)
+  assert.equal(claims.projectID, null)
+})
+
+test('a tenancy token still carries its organisation, and an absent project stays null', () => {
+  const exp = inFifteenMinutes()
+  const claims = decodeClaims(sign({
+    iss: 'https://dufflebag.local',
+    sub: 'p-1',
+    aud: ['https://api.hashicorp.cloud'],
+    exp,
+    iat: exp - 900,
+    sid: 's-1',
+    scope: [],
+    grants: [],
+    organization_id: '3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+  }))
+  assert.ok(claims)
+  assert.equal(claims.organizationID, '3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d')
+  assert.equal(claims.projectID, null)
+})
+
+// Absence means platform; PRESENCE of something that is not a string means the
+// token was not minted by this server. The two must not blur, or the decoder
+// starts accepting shapes Verify would refuse (token.go).
+test('a present but non-string tenancy claim stays malformed', () => {
+  const exp = inFifteenMinutes()
+  const base = {
+    iss: 'https://dufflebag.local', sub: 'p-1', aud: ['https://api.hashicorp.cloud'],
+    exp, iat: exp - 900, sid: 's-1', scope: [], grants: [],
+  }
+  assert.equal(decodeClaims(sign({ ...base, organization_id: 7 })), null)
+  assert.equal(decodeClaims(sign({ ...base, organization_id: null })), null)
+  assert.equal(decodeClaims(sign({ ...base, organization_id: 'org-1', project_id: 7 })), null)
+})
+
+// Verify refuses a project without an organization as malformed rather than
+// narrow (token.go), so the decoder must not construct that state either.
+test('a project without an organisation is malformed, not narrow', () => {
+  const exp = inFifteenMinutes()
+  const claims = decodeClaims(sign({
+    iss: 'https://dufflebag.local', sub: 'p-1', aud: ['https://api.hashicorp.cloud'],
+    exp, iat: exp - 900, sid: 's-1', scope: [], grants: [],
+    project_id: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+  }))
+  assert.equal(claims, null)
+})
+
+// The gap states a platform session can be in, each said plainly rather than
+// rendered as a healthy empty table (the finding-17 rule applied to tenancy).
+test('a platform session states what is missing, in order', () => {
+  const base = {
+    platform: true, organizationCount: 1,
+    selectedOrganization: 'org-1', projectCount: 1, selectedProject: 'proj-1',
+  }
+  assert.equal(platformTenancyGap(base), null)
+  assert.match(platformTenancyGap({ ...base, organizationCount: 0 }).title, /No organisations exist/)
+  assert.match(platformTenancyGap({ ...base, selectedOrganization: null }).title, /Choose an organisation/)
+  assert.match(platformTenancyGap({ ...base, projectCount: 0 }).title, /No projects in this organisation/)
+  assert.match(platformTenancyGap({ ...base, selectedProject: null }).title, /Choose a project/)
+  assert.equal(platformTenancyGap({ ...base, platform: false, organizationCount: 0 }), null)
+})
+
+// duf-4qr: the blank project row means an ORGANISATION-scoped session can also
+// stand above a project. Its organisation is the token's and never a choice,
+// so only the project half of the gap applies — and it must apply, or the
+// deliberate step up renders as a healthy empty table.
+test('an organisation-scoped session at the blank project row gets the project gap', () => {
+  const atBlank = {
+    platform: false, organizationCount: 0,
+    selectedOrganization: 'org-1', projectCount: 3, selectedProject: null,
+  }
+  assert.match(platformTenancyGap(atBlank).title, /Choose a project/)
+  assert.match(
+    platformTenancyGap({ ...atBlank, projectCount: 0 }).title,
+    /No projects in this organisation/,
+  )
+})
+
+/**
+ * A constructed session for rendering context consumers. The defaults are a
+ * PLATFORM session that has discovered one organisation — the state whose
+ * auto-select used to trap the root inside the tenancy (adversarial review;
+ * ADR-0014 says "nothing selected" is platform standing and must remain
+ * reachable).
+ */
+function session(over = {}) {
+  return {
+    state: {
+      token: 't',
+      claims: { sub: 'p-1', organizationID: null, projectID: null, expiresAt: new Date(Date.now() + 900000) },
+    },
+    signIn: async () => {}, signOut: () => {},
+    organizations: [{ id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' }],
+    boundOrganizationName: null,
+    organizationsLoading: false, organizationFailure: null,
+    organizationRefreshFailure: null, refreshOrganizations: async () => {},
+    selectedOrganization: null, selectOrganization: () => {},
+    permittedProjects: [], projectNames: {},
+    selectedProject: null, selectProject: () => {},
+    projectsLoading: false, projectFailure: null,
+    ...over,
+  }
+}
+
+const switcherMarkup = (value) =>
+  renderToStaticMarkup(React.createElement(
+    AuthContext.Provider, { value },
+    React.createElement(TenantSwitcher),
+  ))
+
+// The organisation select in a PLATFORM session leads with the dash row — the
+// same treatment as the blank project row (duf-4qr) — so the root can always
+// step back up to platform standing instead of being trapped by the
+// sole-organisation auto-select. It stores '', which the auto-select cannot
+// undo ('' is not nullish).
+test('the organisation rows lead with the dash row back to platform standing', () => {
+  const rows = organizationRows([{ id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' }])
+  assert.equal(rows[0].id, '')
+  assert.equal(rows[0].name, '—')
+  assert.deepEqual(rows.slice(1).map((row) => row.id), ['org-1'])
+})
+
+test('opening the organisation picker refreshes once, while closing it does not', async () => {
+  let refreshes = 0
+  const refresh = async () => { refreshes++ }
+  refreshOrganizationsOnPickerOpen(false, refresh)
+  assert.equal(refreshes, 0)
+  refreshOrganizationsOnPickerOpen(true, refresh)
+  assert.equal(refreshes, 1)
+})
+
+test('concurrent organisation refresh signals share one request', async () => {
+  let finish
+  let starts = 0
+  const flight = { current: null }
+  const start = () => {
+    starts++
+    return new Promise((resolve) => { finish = resolve })
+  }
+  const first = startOrganizationRefresh(flight, start)
+  const second = startOrganizationRefresh(flight, start)
+  assert.equal(first, second)
+  assert.equal(starts, 1)
+  finish()
+  await first
+  await startOrganizationRefresh(flight, async () => { starts++ })
+  assert.equal(starts, 2, 'a later picker opening must be allowed to refresh again')
+})
+
+test('a failed organisation refresh keeps the loaded list and reports the failure', () => {
+  const organizations = [
+    { id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' },
+    { id: 'org-2', name: 'acme', created_at: '2026-07-02T00:00:00Z' },
+  ]
+  const refreshed = applyOrganizationRefresh(
+    { organizations, failure: null },
+    { kind: 'failed', failure: 'network unavailable' },
+  )
+  assert.equal(refreshed.organizations, organizations)
+  assert.equal(refreshed.failure, 'network unavailable')
+
+  const markup = switcherMarkup(session({
+    organizations,
+    organizationRefreshFailure: refreshed.failure,
+    selectedOrganization: 'org-1',
+  }))
+  assert.match(markup, /default/)
+  assert.match(markup, /Organisations could not be refreshed: network unavailable/)
+})
+
+test('refresh selection changes only when the selected organisation disappeared', () => {
+  const listed = [
+    { id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' },
+    { id: 'org-2', name: 'acme', created_at: '2026-07-02T00:00:00Z' },
+  ]
+  assert.equal(selectionAfterOrganizationRefresh('org-1', listed), 'org-1')
+  assert.equal(selectionAfterOrganizationRefresh('', listed), '')
+  assert.equal(selectionAfterOrganizationRefresh(null, [listed[0]]), null)
+  assert.equal(selectionAfterOrganizationRefresh('deleted-org', listed), '')
+})
+
+test('a platform session at the dash row stands at the platform: root only', () => {
+  // The toggle names the dash — the step up reads as deliberate, not as an
+  // unanswered prompt — and no project select renders beneath a non-organisation.
+  const markup = switcherMarkup(session({ selectedOrganization: '' }))
+  assert.match(markup, /tenant-organization/)
+  assert.match(markup, /—/)
+  assert.doesNotMatch(markup, /Choose an organisation/)
+  assert.doesNotMatch(markup, /tenant-project/)
+
+  // At '' the principals screen answers the PLATFORM scope again: its empty
+  // state is the platform one, never the organisation-level explanation…
+  const principals = renderToStaticMarkup(React.createElement(PrincipalsView, {
+    principals: [], loading: false, failure: null, reload: async () => {},
+    selfID: null, callerRole: null, token: 't', organizationID: '', projectID: null,
+  }))
+  assert.match(principals, /No service principals are visible to you/)
+  assert.doesNotMatch(principals, /No organisation-scoped principals/)
+  // …and the role list reverts to the one legally unscoped role.
+  assert.deepEqual(grantableRoles('platform', null), ['root'])
+})
+
+// Tenancy sessions are untouched: their organisation is the token's and never
+// a choice, so the combined selector renders alone, with no organisation
+// select and no dash row to step out of the tenancy with.
+test('a tenancy session gets no dash row', () => {
+  const markup = switcherMarkup(session({
+    state: {
+      token: 't',
+      claims: { sub: 'p-1', organizationID: 'org-1', projectID: 'proj-1', expiresAt: new Date(Date.now() + 900000) },
+    },
+    organizations: [],
+    boundOrganizationName: 'acme',
+    selectedOrganization: 'org-1',
+    selectedProject: 'proj-1',
+    permittedProjects: ['proj-1'],
+    projectNames: { 'proj-1': 'widgets' },
+  }))
+  assert.match(markup, /tenant-project/)
+  assert.match(markup, /acme \/ widgets/)
+  assert.doesNotMatch(markup, /tenant-organization/)
+  assert.doesNotMatch(markup, /—/)
+})
+
+test('the data screens render a tenancy gap instead of a healthy empty state', () => {
+  const gap = platformTenancyGap({
+    platform: true, organizationCount: 0,
+    selectedOrganization: null, projectCount: 0, selectedProject: null,
+  })
+  const buckets = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [], total: 0, loading: false, failure: null, gap,
+  }))
+  assert.match(buckets, /No organisations exist/)
+  assert.match(buckets, /Principals and Instance work/)
+  assert.doesNotMatch(buckets, /No buckets in this project/)
+
+  const channels = renderToStaticMarkup(React.createElement(ChannelsView, {
+    byChannel: [], loading: false, failure: null, gap,
+  }))
+  assert.match(channels, /No organisations exist/)
+  assert.doesNotMatch(channels, /No channels in this project/)
+})

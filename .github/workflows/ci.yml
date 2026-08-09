@@ -1,0 +1,232 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cost split (duf-qlo3, private-repo Actions budget): pull requests run the
+# fast, high-signal lanes only — compile, unit, lint, generated-code drift and
+# the AI-marker guard. The heavy suite — scanner, contract, Postgres
+# integration, RLS sabotage, browser smoke, Terraform and the Packer matrix —
+# runs on the push to main, which is where every change lands and is fully
+# validated. Steps and jobs so gated carry `if: github.event_name == 'push'`.
+# This is a private-repo economy; a public repo gets free standard runners and
+# the gates can go back to running on every PR.
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            contract/go.sum
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # Compile (Go + web console) and unit tests run on every event: the fast
+      # signal a pull request needs.
+      - name: Build Go and web console
+        run: make test-build-clean
+      - name: Run remaining unit tests
+        run: make test-without-scanner
+      # Built once, here, and driven by every heavy gate below. Each of them
+      # would otherwise compile its own copy of the same commit, and no lane
+      # would be proving the artifact another lane tested. Push-only: the gates
+      # it feeds are push-only.
+      - name: Build the server the gates will drive
+        if: ${{ github.event_name == 'push' }}
+        run: make server SERVER_BIN="$GITHUB_WORKSPACE/dufflebag"
+      - name: Run scanner tests on an internal network
+        if: ${{ github.event_name == 'push' }}
+        run: make test-scanner
+      - name: Run API contract tests
+        if: ${{ github.event_name == 'push' }}
+        run: make test-contract
+      - name: Run Postgres integration tests
+        if: ${{ github.event_name == 'push' }}
+        run: make test-integration
+      - name: Prove tenant isolation detects disabled RLS
+        if: ${{ github.event_name == 'push' }}
+        run: make test-rls-sabotage
+      - name: Set up Chrome
+        if: ${{ github.event_name == 'push' }}
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+      - name: Run browser smoke test
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          make test-smoke \
+            DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag" \
+            SMOKE_CHROME='${{ steps.chrome.outputs.chrome-path }}'
+      # Handed to the client gates below, which branch off this job rather than
+      # queueing behind each other. They drive this exact binary, so a failure
+      # there is a failure of the artifact this job built and tested.
+      - name: Publish the server for the client gates
+        if: ${{ github.event_name == 'push' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: dufflebag-server
+          path: dufflebag
+          retention-days: 1
+          if-no-files-found: error
+
+  # Real Terraform and the real provider against the built server (ADR-0013).
+  # Push-only (private-repo cost split): validated on the merge to main.
+  terraform:
+    if: ${{ github.event_name == 'push' }}
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Download the built server
+        uses: actions/download-artifact@v8
+        with:
+          name: dufflebag-server
+      # Artifacts are zipped, and the archive does not carry the executable
+      # bit; without this the gate fails on exec format rather than on anything
+      # it means to test.
+      - name: Make the server executable
+        run: chmod +x dufflebag
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.14.7
+          terraform_wrapper: false
+      - name: Run Terraform end-to-end test
+        run: make test-e2e-terraform DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag"
+      # Same gate, encrypted: the keyring wraps against a dev-mode Vault in a
+      # container, and the harness adds a row-MAC sabotage proof on top of the
+      # usual assertions (duf-egk2.7). Runs beside the unencrypted gate, not
+      # instead of it — unencrypted is what most deployments run.
+      - name: Run Terraform end-to-end test, encrypted
+        run: make test-e2e-terraform-encrypted DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag"
+
+  # The only lane that drives the real Packer binary, and until now the only one
+  # CI never ran: it wanted the lab's CA, a provisioned certificate and a DNS
+  # record. None of that is needed any more — the CA is minted inside the run and
+  # the hostname is loopback — so it runs on every pull request, including from
+  # forks, because there is no secret in it to steal.
+  packer:
+    name: Packer ${{ matrix.packer_version }}
+    # Push-only (private-repo cost split): the matrix runs on the merge to main.
+    if: ${{ github.event_name == 'push' }}
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        packer_version: ['1.16.0', '1.15.4']
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Download the built server
+        uses: actions/download-artifact@v8
+        with:
+          name: dufflebag-server
+      - name: Make the server executable
+        run: chmod +x dufflebag
+      # Pinned, and verified against HashiCorp's published checksums: the gate
+      # asserts this exact version, because each Packer release links a
+      # different hcp-sdk-go stack and that stack is what the lane proves
+      # against (ADR-0010).
+      - name: Install stock Packer ${{ matrix.packer_version }}
+        run: |
+          set -euo pipefail
+          version='${{ matrix.packer_version }}'
+          base="https://releases.hashicorp.com/packer/$version"
+          curl -fsSLO "$base/packer_${version}_linux_amd64.zip"
+          curl -fsSLO "$base/packer_${version}_SHA256SUMS"
+          grep "packer_${version}_linux_amd64.zip" "packer_${version}_SHA256SUMS" | sha256sum -c -
+          sudo unzip -o -d /usr/local/bin "packer_${version}_linux_amd64.zip"
+          packer version
+      - name: Pull the builder's base image
+        run: docker pull alpine:3.20
+      - name: Run the Packer end-to-end gate
+        run: |
+          make test-packer-ci \
+            DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag" \
+            PACKER_E2E_EXPECT_VERSION='${{ matrix.packer_version }}'
+      # Same gate, encrypted: the keyring wraps against a dev-mode Vault in a
+      # container instead of the lab's. The namespaced-transit proof stays
+      # lab-bound and local (duf-j6aa) — namespaces are Enterprise-only.
+      - name: Run the Packer end-to-end gate, encrypted
+        run: |
+          make test-packer-ci-encrypted \
+            DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag" \
+            PACKER_E2E_EXPECT_VERSION='${{ matrix.packer_version }}'
+      # expand-contract is not run. It proves the previous release survives the
+      # new schema, which only matters while two versions share one database —
+      # a rolling update, or more than one replica. Neither exists yet, so the
+      # gate protected nothing and cost a residue column per schema change.
+      # The target and cmd/schema-compat stay in the tree; reinstating this
+      # step is the whole reintroduction, but see duf-0ll: the probe will be
+      # stale by then and needs auditing before it is believed.
+
+  # The tree was cleaned of AI-tooling markers once and they crept back; the
+  # gate, not the sweep, is what keeps it clean (duf-qlo3.3).
+  check-markers:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Check for AI-tooling markers
+        run: make check-markers
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run linters
+        run: make lint
+
+  # ADR-0007: the spec is the source of truth. Generated code that has drifted
+  # from the vendored specs is a build failure, not a nag.
+  generate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check generated code
+        run: make generate-check

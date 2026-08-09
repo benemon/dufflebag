@@ -1,0 +1,12 @@
+# Generates the platform-plane server interface and types from spec/platform/openapi.yaml.
+# ADR-0007: the spec is authored first and is the source of truth; this output is
+# derived from it and must never be hand-edited.
+package: v1
+output: internal/platform/v1/api.gen.go
+generate:
+  client: true
+  std-http-server: true
+  models: true
+  strict-server: true
+output-options:
+  skip-prune: true

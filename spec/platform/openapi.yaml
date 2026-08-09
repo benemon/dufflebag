@@ -1,0 +1,1527 @@
+openapi: 3.0.3
+
+# The platform plane. Ours to design, versioned on our terms, and authored
+# before implementation per ADR-0007.
+#
+# It covers only what HCP's platform APIs cover and we are deliberately not
+# cloning — tenancy, principals, authorization — plus project pins, which have
+# no representation in the HCP Packer API at all. Everything a Packer or
+# Terraform client touches lives in the frozen compatibility plane instead; see
+# ADR-0001.
+
+info:
+  title: dufflebag platform API
+  version: "1.0.0"
+  description: |
+    Tenancy, service principals and project pins for a dufflebag registry.
+
+    This is not an HCP-compatible surface and makes no attempt to be. The
+    compatibility plane at /packer/2023-01-01/... and /resource-manager/... is
+    where shape is dictated by clients we do not control.
+  license:
+    name: MPL-2.0
+    url: https://www.mozilla.org/en-US/MPL/2.0/
+
+servers:
+  - url: /
+
+tags:
+  - name: init
+    description: One-time bootstrap.
+  - name: instance
+    description: Authenticated instance and caller information.
+  - name: tenancy
+    description: Organizations and projects.
+  - name: principals
+    description: Service principals and their secrets.
+  - name: pins
+    description: Per-project pinned buckets.
+  - name: session
+    description: The console's cookie-backed session.
+  - name: audit
+    description: File targets for the request audit trail.
+  - name: encryption
+    description: Keyring state and rotation for encryption at rest (ADR-0024).
+
+security:
+  - bearerAuth: []
+
+paths:
+  /sys/init:
+    post:
+      tags: [init]
+      operationId: initialize
+      security: []          # unauthenticated by necessity — nothing exists yet
+      summary: Initialize an uninitialized instance
+      description: |
+        Mints the initial administrative principal and returns its credentials
+        **exactly once**, in the response body. They are never retrievable
+        again, never logged, and the secret is hashed with argon2id on write.
+
+        Callable only while no root principal exists; afterwards it refuses
+        permanently. A transaction-scoped singleton guard makes concurrent
+        claims atomic.
+
+        The first-run UI wizard and unattended deployment begin with this same
+        endpoint, then use the ordinary authenticated platform endpoints. There
+        is no privileged side door — that is what allows end-to-end tests to
+        bootstrap a server without a browser (ADR-0012).
+
+        Accepted risk, documented rather than engineered around: while
+        uninitialized, whoever reaches this endpoint first owns the deployment.
+        Do not expose an uninitialized instance publicly.
+
+        Alongside the credentials, the response carries the recovery shares
+        (ADR-0024): a sharded proof of custody for `/sys/recovery`, shown once
+        like the credentials and verified server-side against a stored digest.
+        The share count and threshold are fixed here, at initialization —
+        there is no rekey ceremony.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/InitRequest" }
+      responses:
+        "200":
+          description: Credentials and recovery shares, returned once and never again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/InitResponse" }
+        "400":
+          description: Unusable recovery share parameters.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Already initialized. Permanent.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /sys/recovery:
+    post:
+      tags: [init]
+      operationId: recover
+      security: []          # the shares are the credential
+      summary: Recover administrative access by proving custody of the recovery shares
+      description: |
+        Accepts the threshold number of recovery shares in one request,
+        verifies the recombined secret against the digest stored at
+        initialization, and on success mints a **fresh root principal**,
+        returning its credentials once in the response body — exactly the
+        `/sys/init` contract (ADR-0024). The shares are a proof of custody,
+        not key material: they reconstruct nothing, remain valid after use,
+        and mint a new principal rather than resurrecting an old one, so the
+        ceremony is loud and distinct in the audit trail.
+
+        Refusals are audited distinctly: malformed or too few shares answer
+        400, shares that recombine to the wrong secret answer 403, and an
+        instance without a verifier — never initialized, or initialized
+        before recovery existed — answers 409.
+
+        This is an anonymous surface, so it sits behind the same per-caller
+        rate limit as the token endpoint and answers 429 outside the audit
+        seam when it is exceeded (ADR-0020's audit-amplification coupling).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/RecoveryRequest" }
+      responses:
+        "200":
+          description: Fresh root credentials, returned once and never again.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/RecoveryResponse" }
+        "400":
+          description: Malformed, duplicated, or too few shares.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "403":
+          description: The shares do not recombine to the recovery secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: No recovery verifier exists on this instance.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /sys/health:
+    get:
+      tags: [init]
+      operationId: health
+      security: []          # unauthenticated: a probe cannot hold a credential
+      summary: Report whether this instance is initialized and able to serve
+      description: |
+        Modelled on Vault's `/sys/health`: the status code carries the state so
+        a liveness or readiness probe needs no body parsing, and the body says
+        the same thing for a human.
+
+        `200` — initialized, the database answers, and audit is disabled or at
+        least one configured target can be written. A partial audit failure
+        remains ready because requests can still be recorded.
+        `501` — reachable, but not initialized (Vault's code for the same
+        state). The console reads this to decide whether first run is the
+        wizard or the sign-in screen, WITHOUT posting to `/sys/init`, which would
+        claim the instance.
+        `503` — the database does not answer, OR audit is configured and no
+        target can be written. Either way nothing can be served: audit fails
+        closed, so an instance that cannot record a request cannot answer one
+        (duf-dya). This is a READINESS signal — a degraded instance should be
+        taken out of rotation, not restarted, because a restart cannot empty a
+        full disk.
+
+        The `encryption` field never sets the status code. A degraded key
+        service does not stop a serving instance — per-write encryption never
+        calls out (ADR-0024) — and failing the probe would evict exactly the
+        replicas that are safe, when what degraded actually threatens is the
+        next process start.
+
+        Deliberately contentless beyond that. It is unauthenticated, so it
+        names no tenancy, no principal, no host, and never carries a database
+        error string — those identify schema and infrastructure (review
+        finding 16). Disclosing initialized-or-not is already accepted by
+        ADR-0012, and unlike probing `/sys/init` to learn the same thing, this does
+        not consume the instance.
+      responses:
+        "200":
+          description: Initialized, database reachable, audit not fully degraded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "501":
+          description: Not initialized.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+        "503":
+          description: Database unreachable, or audit configured and degraded.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Health" }
+
+  /sys/session:
+    post:
+      tags: [session]
+      operationId: createSession
+      summary: Persist the caller's token as an httpOnly session cookie
+      description: |
+        The console holds its token in memory only (a bearer token in web
+        storage is readable by injected script), which made every reload a
+        sign-in. This endpoint keeps that property while letting a session
+        survive reload: the verified bearer token is set as an httpOnly,
+        SameSite=Strict cookie scoped to this path, which script cannot read.
+
+        The session still ends when the token does — GET refuses and clears an
+        expired cookie rather than renewing it.
+
+        CSRF: a cross-site form cannot set the Authorization header this
+        operation requires, and SameSite=Strict keeps the cookie off cross-site
+        requests entirely.
+
+        Honest limit, stated rather than implied: injected script cannot read
+        the cookie, but it can drive the same exchange the console boot does.
+        The win over web storage is that no credential sits readable at rest,
+        not that a compromised page is powerless.
+      responses:
+        "204":
+          description: Cookie set. The response carries no body and no token.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+    get:
+      tags: [session]
+      operationId: readSession
+      security: []          # the cookie IS the credential; there is no bearer yet
+      summary: Exchange the session cookie for the access token it holds
+      responses:
+        "200":
+          description: A live session.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SessionResponse" }
+        "204":
+          description: No session, or one whose token has expired — the cookie
+            is cleared. Not a 401, because no credential was presented wrongly;
+            there is simply nothing to resume.
+    delete:
+      tags: [session]
+      operationId: deleteSession
+      security: []          # clearing a session must work for a caller whose token just expired
+      summary: End the session by clearing the cookie
+      responses:
+        "204":
+          description: Cookie cleared, whether or not one existed.
+
+  /api/v1/instance:
+    get:
+      tags: [instance]
+      operationId: getInstance
+      summary: Read build and backing-service state for this instance
+      description: |
+        Authenticated because version and backing-service state are useful
+        reconnaissance. Every valid principal may read it. Values come from
+        the running binary, the mounted route table, and the same remembered
+        service state used by `/sys/health`; no probe is performed just for
+        this response.
+      responses:
+        "200":
+          description: Instance build and backing-service state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Instance" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/self:
+    get:
+      tags: [instance]
+      operationId: getSelf
+      summary: Read the current principal and its server-resolved role
+      description: |
+        Describes only the authenticated caller. The principal is resolved
+        from storage for this request, so a role or binding change is visible
+        without waiting for the access token to expire.
+      responses:
+        "200":
+          description: The current principal.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Self" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/audit/targets:
+    get:
+      tags: [audit]
+      operationId: listAuditTargets
+      summary: List configured audit file targets and their health
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  targets:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuditTarget" }
+                required: [targets]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [audit]
+      operationId: createAuditTarget
+      summary: Enable an audit file target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AuditTargetCreate" }
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditTarget" }
+        "400":
+          description: Invalid target path.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuditTargetOpenError" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: Three targets are already configured.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/audit/targets/{targetId}:
+    parameters:
+      - name: targetId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    delete:
+      tags: [audit]
+      operationId: deleteAuditTarget
+      summary: Disable an audit file target
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/encryption:
+    get:
+      tags: [encryption]
+      operationId: getEncryption
+      summary: Read keyring state and the remembered encryption health
+      description: |
+        Root-only, like the audit target list: KEK references and key versions
+        are rotation bookkeeping, not something every principal needs. The
+        keyring listing carries no key material — only each entry's purpose,
+        version, the KEK version that wrapped it, and when that wrapping was
+        produced. `state` is the same remembered heartbeat answer `/sys/health`
+        reports; after rotating the KEK at the key service, entries whose
+        `kek_ref` still names the old version are the rows `rewrap` exists for.
+      responses:
+        "200":
+          description: Keyring state. On an unencrypted instance `state` is
+            `unconfigured` and the keyring is empty.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Encryption" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/encryption/rewrap:
+    post:
+      tags: [encryption]
+      operationId: rewrapEncryption
+      summary: Rewrap every keyring entry under the key service's current KEK
+      description: |
+        The explicit follow-through a KEK rotation requires (ADR-0024): the key
+        service rotates its KEK on the operator's order, and this operation —
+        equally deliberate, equally attributable — rewraps the stored keyring
+        rows under the new version. Payloads are never touched; the data keys
+        do not change. Until it runs, keyring rows stay wrapped under the old
+        KEK version, and retiring that version at the key service would leave
+        the next process start unable to unwrap anything ("sealed").
+
+        The request body is empty. The operation attempts the real rewrap
+        rather than pre-refusing on remembered health — a failed attempt is an
+        audited failure — and the stored rows change only when every entry
+        rewrapped, so a partial key-service failure changes nothing.
+      responses:
+        "200":
+          description: Every keyring entry is wrapped under the current KEK.
+            The body is the updated keyring state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Encryption" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: This instance does not have encryption at rest.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The key service refused or was unreachable, and no
+            stored row changed. Which call failed and why stays server-side —
+            error detail names infrastructure.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/encryption/rotate:
+    post:
+      tags: [encryption]
+      operationId: rotateEncryption
+      summary: Mint a new data-key version for every keyring purpose
+      description: |
+        DEK rotation (ADR-0024): a fresh key version is minted locally for
+        every purpose, wrapped by the key service, and becomes what new writes
+        use. Old versions stay in the keyring so existing payloads, MACs and
+        audit entries verify forever — nothing is re-encrypted. Tokens signed
+        with the previous key version keep verifying and age out within the
+        token TTL. Audit-entry HMACs record the key version that produced
+        them, so HMAC correlation of a sensitive value across the rotation
+        boundary changes by design.
+
+        The request body is empty. Peer replicas adopt the new versions at
+        their next heartbeat; until then a payload written or token signed
+        under the new version by this replica does not verify on a peer that
+        has not yet refreshed. Rotate in a quiet window on multi-replica
+        deployments.
+      responses:
+        "200":
+          description: A new key version exists for every purpose. The body is
+            the updated keyring state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Encryption" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409":
+          description: This instance does not have encryption at rest, or a
+            concurrent rotation won — re-read the keyring before retrying.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "502":
+          description: The key service refused or was unreachable, and no new
+            version was stored. Detail stays server-side.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations:
+    get:
+      tags: [tenancy]
+      operationId: listOrganizations
+      summary: List organizations visible to the caller
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  organizations:
+                    type: array
+                    items: { $ref: "#/components/schemas/Organization" }
+                required: [organizations]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [tenancy]
+      operationId: createOrganization
+      summary: Create an organization
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+              required: [name]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Organization" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/organizations/{organizationId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [tenancy]
+      operationId: getOrganization
+      summary: Get an organization
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Organization" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [tenancy]
+      operationId: deleteOrganization
+      summary: Delete an empty organization
+      description: |
+        Refused while the organization still contains projects. Deleting a
+        tenant is not an operation that should cascade silently through a
+        registry's contents.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Still contains projects.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/projects:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [tenancy]
+      operationId: listProjects
+      summary: List projects in an organization
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  projects:
+                    type: array
+                    items: { $ref: "#/components/schemas/Project" }
+                required: [projects]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+    post:
+      tags: [tenancy]
+      operationId: createProject
+      summary: Create a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+              required: [name]
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [tenancy]
+      operationId: getProject
+      summary: Get a project
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Project" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [tenancy]
+      operationId: deleteProject
+      summary: Delete an empty project
+      description: Refused while the project still contains buckets.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Still contains buckets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/principals:
+    get:
+      tags: [principals]
+      operationId: listPrincipals
+      summary: List service principals at a scope
+      description: |
+        Lists the principals bound to EXACTLY one scope — platform, one
+        organization, or one project — never a subtree. Omitting both filters
+        lists the scope the caller itself stands at. Secret *metadata* only.
+        Secret values are never returned here.
+
+        The filters authorize like any other tenancy argument: a caller naming
+        a scope it may not see is answered not-found, and a tenancy-bound
+        caller is never given more than its own binding regardless of what it
+        names (ADR-0017).
+      parameters:
+        # Query filters reuse the Principal schema's own field names
+        # (organization_id / project_id, as in the create body) rather than the
+        # camelCase path-parameter names: they select on those fields, and the
+        # console passes response values straight back as filters.
+        - name: organization_id
+          in: query
+          required: false
+          description: |
+            List principals bound to this organization. Alone, that means the
+            ORGANIZATION-scoped principals only — project-scoped principals
+            are listed at their project.
+          schema: { type: string, format: uuid }
+        - name: project_id
+          in: query
+          required: false
+          description: |
+            With organization_id, list the principals bound to exactly this
+            project. Meaningless without organization_id, and refused as a
+            scope the caller cannot see.
+          schema: { type: string, format: uuid }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  principals:
+                    type: array
+                    items: { $ref: "#/components/schemas/Principal" }
+                required: [principals]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: The named scope is not visible to the caller.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    post:
+      tags: [principals]
+      operationId: createPrincipal
+      summary: Create a service principal
+      description: |
+        Creates a principal bound to a platform or tenancy scope, holding NO
+        secrets. It cannot authenticate until one is issued.
+
+        Issuing is a separate, explicit call to `POST
+        /api/v1/principals/{principalId}/secrets` — the same path used for a
+        second secret and for rotation, so there is one issuance path rather
+        than a create-time special case. A principal with no secrets is an
+        ordinary state: it is also what a non-root principal is left in when its
+        last secret is revoked (ADR-0004, amended 2026-08-02).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, minLength: 1, maxLength: 200 }
+                role: { $ref: "#/components/schemas/Role" }
+                organization_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: |
+                    Omit only for a platform-scoped root principal. Every other
+                    role must name an organization.
+                project_id:
+                  type: string
+                  format: uuid
+                  nullable: true
+                  description: |
+                    Omit for an ORGANIZATION-scoped principal, which sees every
+                    project in its organization. Supply it for a PROJECT-scoped
+                    principal, which sees only that one.
+
+                    Both exist because the Packer CLI distinguishes them.
+                    ProjectService_List answers 403 for a project-scoped
+                    principal, which the CLI turns into "try setting
+                    HCP_PROJECT_ID"; an org-scoped principal seeing several
+                    projects instead makes it warn and select the oldest. Support
+                    only one kind and one of those documented paths becomes
+                    unreachable.
+              required: [name, role]
+      responses:
+        "201":
+          description: Created, holding no secrets.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Principal" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409": { $ref: "#/components/responses/Conflict" }
+
+  /api/v1/principals/{principalId}:
+    parameters:
+      - $ref: "#/components/parameters/PrincipalId"
+    get:
+      tags: [principals]
+      operationId: getPrincipal
+      summary: Get a service principal
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Principal" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [principals]
+      operationId: deletePrincipal
+      summary: Delete a service principal and revoke its secrets
+      description: |
+        Revokes every secret and removes the principal. This can strip a running
+        pipeline of its credentials, so clients should confirm and name the
+        impact. Deleting the caller's own principal and deleting the last root
+        principal are refused.
+      responses:
+        "204": { description: Deleted }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403":
+          description: Refused — a principal may not delete itself.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Refused — the last root principal cannot be deleted.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/principals/{principalId}/secrets:
+    parameters:
+      - $ref: "#/components/parameters/PrincipalId"
+    post:
+      tags: [principals]
+      operationId: createPrincipalSecret
+      summary: Issue a secret
+      description: |
+        Issues a secret, and is the ONLY way any credential comes into
+        existence: creating a principal mints none, so this endpoint serves both
+        the first secret and a second one for rotation.
+
+        A principal may hold two active secrets at once, which is what makes
+        rotation possible with no authentication gap: issue the second,
+        redeploy, then revoke the first (ADR-0004).
+
+        Refused when two are already USABLE — revoke one first, so that
+        rotation is a deliberate sequence rather than unbounded accumulation.
+        An expired secret does not count against the cap: it grants nothing,
+        and demanding its revocation first would add a step at exactly the
+        moment someone is fixing an outage (duf-2rw).
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expires_at:
+                  type: string
+                  format: date-time
+                  description: |
+                    When this credential stops granting anything. Absent means
+                    it never expires. Must be in the future. Expiry lives on
+                    the secret, not the principal — the outgoing secret of a
+                    rotation expires soon, the incoming one later.
+      responses:
+        "201":
+          description: Created, with the one-time secret.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SecretIssued" }
+        "400":
+          description: The expiry is not in the future.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Two secrets are already active.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/principals/{principalId}/secrets/{secretId}:
+    parameters:
+      - $ref: "#/components/parameters/PrincipalId"
+      - name: secretId
+        in: path
+        required: true
+        schema: { type: string }
+    delete:
+      tags: [principals]
+      operationId: revokePrincipalSecret
+      summary: Revoke a secret
+      description: |
+        Refused when it would leave a ROOT principal without a usable,
+        never-expiring secret — secretless root leaves the instance
+        administrable by direct database access alone, and a root holding only
+        expiring secrets is the same lockout on a timer (ADR-0004, amended
+        2026-08-02; extended by duf-2rw).
+
+        Every other principal may be left with no secrets: a maintainer issues
+        it a replacement, so a leaked credential can be revoked immediately
+        rather than after minting its successor. Revocation is also how an
+        EXPIRED secret is cleaned up — expiry never deletes anything.
+      responses:
+        "204": { description: Revoked }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Would leave the principal with no way to authenticate.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/scanner/health:
+    get:
+      tags: [scanner]
+      operationId: getScannerHealth
+      summary: Read scanner adapter health in detail
+      description: |
+        Root only. `/sys/health` reports a coarse scanner state and
+        deliberately names neither the adapter nor its endpoint, because it is
+        unauthenticated. This route carries that detail for an operator
+        diagnosing why scanning stopped.
+
+        Like the coarse state, this reports what the last interaction
+        observed rather than probing the provider while answering — a health
+        route that reaches out to a third party turns monitoring into traffic
+        against someone else's service.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ScannerHealth" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: string }
+    post:
+      tags: [scanner]
+      operationId: rescanBuild
+      summary: Queue a build for rescanning
+      description: |
+        Queues this build through the SAME queue, locks and worker limits as
+        any other scan. It does not scan inline and it cannot jump the queue:
+        the button is a request for work, not a private fast path, because a
+        console user repeatedly pressing it must not be able to starve another
+        tenant's already-due work.
+
+        Idempotent by construction — the queue holds one row per build, so
+        pressing twice before the first scan runs coalesces into a single
+        execution. The answer is 202 either way; there is no way for a caller
+        to tell how many presses became how many scans, and no reason to
+        expose one.
+
+        The HTTP request is audited as the calling principal. The execution
+        that follows is audited separately as `system:scanner`, because it
+        happens later, in a different process possibly, and attributing a
+        background write to a human who has since logged out would be a lie.
+
+        Requires maintainer in the owning project. A build outside the current
+        scan set is refused rather than queued: scanning a version no channel
+        selects would produce findings nothing displays.
+      responses:
+        "202":
+          description: Queued. The scan runs when a worker reaches it.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: |
+            No such build in this project, or the build is not in the current
+            scan set. The two are deliberately indistinguishable — existence
+            is a disclosure (ADR-0017).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: Scanning is not configured on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/pins:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [pins]
+      operationId: listPins
+      summary: List pinned buckets for a project
+      description: |
+        Pinned buckets for this project. Pins are per **project**, not per
+        principal — a pinned set is the project's shared answer to which buckets
+        matter, so pinning changes what every project member sees (ADR-0015).
+
+        A pin cannot outlive its bucket: deleting a bucket removes any pin to
+        it, enforced by a foreign key rather than by application code. The
+        alternative — tolerating a pin as a soft reference — was rejected
+        because it puts a card in the gallery with no data behind it, and every
+        reader then has to handle that state. Pins live in the same database as
+        buckets, so the constraint is free.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  pins:
+                    type: array
+                    items: { $ref: "#/components/schemas/Pin" }
+                required: [pins]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - name: bucketName
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [pins]
+      operationId: setPin
+      summary: Pin a bucket to a project
+      description: Idempotent — pinning an already-pinned bucket succeeds unchanged.
+      responses:
+        "200":
+          description: Pinned
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Pin" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No such bucket in this project.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [pins]
+      operationId: deletePin
+      summary: Unpin a bucket
+      description: Idempotent — unpinning something not pinned succeeds.
+      responses:
+        "204": { description: Unpinned }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: |
+        The same token the compatibility plane accepts. Everything downstream
+        authorizes off verified claims rather than the credential that produced
+        them, so a second issuer can be added without touching any consumer
+        (ADR-0004).
+
+  parameters:
+    OrganizationId:
+      name: organizationId
+      in: path
+      required: true
+      description: |
+        UUID. Organization and project identifiers appear in compatibility-plane
+        paths and in HCP_ORGANIZATION_ID / HCP_PROJECT_ID, so they must look
+        like what clients already expect — UUIDs, not the ULIDs used for
+        registry resources.
+      schema: { type: string, format: uuid }
+    ProjectId:
+      name: projectId
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PrincipalId:
+      name: principalId
+      in: path
+      required: true
+      description: ULID.
+      schema: { type: string }
+
+  responses:
+    Unauthorized:
+      description: Missing or invalid token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Forbidden:
+      description: |
+        The caller is entitled to this tenancy but its role does not permit the
+        operation. Distinct from 404, which is what a tenancy the caller may not
+        see returns — confirming a tenancy exists is itself a disclosure, whereas
+        a role refusal within a visible tenancy conceals nothing (ADR-0017).
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+    NotFound:
+      description: No such resource.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Conflict:
+      description: Already exists.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+
+  schemas:
+    Error:
+      type: object
+      description: |
+        Deliberately NOT the compatibility plane's GoogleRPCStatus shape. This
+        plane is ours and has no client regex-matching its error text.
+      properties:
+        message: { type: string }
+        detail: { type: string }
+      required: [message]
+
+    InitRequest:
+      type: object
+      description: |
+        Recovery share parameters, fixed at initialization (ADR-0024). The
+        default is 1-of-1: one share, and the ceremony degenerates to a single
+        recovery key exactly as Vault's does at threshold one.
+      properties:
+        recovery_share_count:
+          type: integer
+          minimum: 1
+          maximum: 255
+          default: 1
+          description: How many shares to mint.
+        recovery_threshold:
+          type: integer
+          minimum: 1
+          default: 1
+          description: How many shares /sys/recovery requires. At most recovery_share_count.
+
+    InitResponse:
+      type: object
+      properties:
+        client_id: { type: string, description: Never previously used against any registry. }
+        client_secret: { type: string, description: Shown once. Not retrievable. }
+        recovery_shares:
+          type: array
+          items: { type: string }
+          description: |
+            Sharded proof of custody for /sys/recovery. Shown once, like the
+            credentials; the server stores only a digest of the recombined
+            secret. Store each share offline, separately from the credentials.
+        recovery_threshold:
+          type: integer
+          description: How many shares /sys/recovery requires in one request.
+      required: [client_id, client_secret, recovery_shares, recovery_threshold]
+
+    RecoveryRequest:
+      type: object
+      properties:
+        shares:
+          type: array
+          items: { type: string }
+          minItems: 1
+          description: At least the threshold number of distinct shares.
+      required: [shares]
+
+    RecoveryResponse:
+      type: object
+      properties:
+        client_id: { type: string, description: A fresh root principal, distinct from every earlier one. }
+        client_secret: { type: string, description: Shown once. Not retrievable. }
+      required: [client_id, client_secret]
+
+    SessionResponse:
+      type: object
+      properties:
+        access_token: { type: string, description: The token the cookie was holding, still live. }
+      required: [access_token]
+
+    Health:
+      type: object
+      properties:
+        initialized: { type: boolean, description: A root principal exists, so /sys/init refuses. }
+        database: { type: boolean, description: The database answered. No detail beyond that — it is unauthenticated. }
+        audit:
+          type: string
+          enum: [disabled, ok, partial, degraded]
+          description: |
+            Aggregate audit state: `disabled` means no targets are configured;
+            `ok` means every configured target is healthy; `partial` means a
+            mixture of healthy and failing targets; `degraded` means targets
+            are configured but none is healthy. A partial state remains ready,
+            while degraded returns 503 because requests cannot be recorded.
+            Which target failed, its path, and why are not said here — this
+            endpoint is unauthenticated, and a path or an errno names
+            infrastructure (review finding 16). The authenticated target list
+            carries the detail.
+        object_storage:
+          type: string
+          enum: [unconfigured, ok, unreachable]
+          description: |
+            Where SBOM payloads are kept. `unconfigured` is a working registry
+            for anyone not producing SBOMs — only their upload refuses, so it
+            is not a fault and does not fail this probe. `ok` and `unreachable`
+            report WHAT THE LAST OPERATION OBSERVED, not a check made while
+            answering: this endpoint is polled far harder than the store is
+            used, and opening a connection per probe would make an
+            unauthenticated route a lever on infrastructure. The startup check
+            supplies the first observation, so the answer is never unset — but
+            when nothing has touched the store for a while, it is the age of
+            that traffic, not of this request. Do not alert on it as a live
+            check. As with `audit`, no endpoint, bucket or errno is named here.
+        encryption:
+          type: string
+          enum: [unconfigured, ok, degraded]
+          description: |
+            Whether the external key service can still unwrap this instance's
+            keyring (ADR-0024). `unconfigured` is an instance without
+            encryption at rest — not a fault. `ok` and `degraded` report what
+            the last heartbeat observed: a real unwrap of one stored keyring
+            row roughly every five minutes, the same operation a process start
+            performs. The write path never touches the key service, so a
+            serving instance stays up while degraded and this state NEVER
+            fails the probe — evicting running replicas would remove exactly
+            the pods that are safe, and a restart cannot fix what degraded
+            reports; it is the failure it predicts. What degraded threatens is
+            the next process start, which would refuse to serve ("sealed").
+            After a KEK rotation it is also the signal that the keyring still
+            needs rewrapping before old KEK versions are retired. Which call
+            failed and why stays server-side, as with `audit` (review finding
+            16).
+        scanner:
+          type: string
+          enum: [disabled, ok, degraded, audit_paused]
+          description: |
+            Whether external vulnerability scanning is working. `disabled` is
+            an instance with no scanner adapter configured — not a fault, and
+            the ordinary posture. `ok` and `degraded` report what the last
+            provider interaction observed, on the same remembered-state basis
+            as `object_storage`: this route is polled far harder than the
+            scanner runs, and probing an external service per request would
+            make an unauthenticated route a lever on someone else's
+            infrastructure. `audit_paused` means the audit circuit is open, so
+            scanning has deliberately stopped rather than proceed unrecorded
+            (ADR-0020).
+
+            NONE of these states ever changes the HTTP status. A registry
+            serves builds, versions and channels perfectly well while its
+            scanner is degraded, and failing the probe would evict replicas
+            that are doing their actual job. The adapter, its endpoint and the
+            reason for a degraded state are NOT named here — this endpoint is
+            unauthenticated, and an endpoint names infrastructure (review
+            finding 16). The root-only detailed health route carries that.
+      required: [initialized, database, audit, object_storage, encryption, scanner]
+
+    ScannerHealth:
+      type: object
+      description: |
+        The detail deliberately withheld from `/sys/health`. Root only,
+        because it names the external service this deployment talks to.
+      properties:
+        state:
+          type: string
+          enum: [disabled, ok, degraded, audit_paused]
+          description: The same state `/sys/health` reports, repeated so a caller needs one request.
+        adapter: { type: string, description: "Configured adapter, empty when disabled." }
+        endpoint: { type: string, description: "Provider base URL as configured." }
+        last_observed_at:
+          type: string
+          format: date-time
+          description: When the reported state was observed. Absent if the scanner has not yet run.
+        detail: { type: string, description: "Why the state is degraded, as reported by the provider. Empty when healthy." }
+        audit_circuit_open_until:
+          type: string
+          format: date-time
+          description: |
+            When the audit circuit will next allow an attempt. Present only
+            while `audit_paused`; the backoff is jittered, so this is the
+            earliest attempt rather than a promise.
+      required: [state, adapter, endpoint]
+
+    Instance:
+      type: object
+      properties:
+        version: { type: string }
+        commit: { type: string }
+        api_versions:
+          type: array
+          items: { type: string }
+        initialized_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Absent when the initialization time was never recorded.
+        store:
+          type: boolean
+          description: The database answered the same status read used by `/sys/health`.
+        object_storage:
+          type: string
+          enum: [unconfigured, ok, unreachable]
+          description: The remembered object-storage state used by `/sys/health`.
+        audit:
+          type: string
+          enum: [disabled, enabled]
+          description: Enabled when at least one audit target is configured.
+        encryption:
+          type: string
+          enum: [unconfigured, ok, degraded]
+          description: The remembered encryption heartbeat state used by `/sys/health`.
+        scanner:
+          $ref: "#/components/schemas/InstanceScanner"
+      required:
+        [version, commit, api_versions, store, object_storage, audit, encryption, scanner]
+
+    InstanceScanner:
+      type: object
+      description: |
+        Coarse scanner configuration for every authenticated principal. The
+        provider endpoint remains absent because infrastructure detail belongs
+        only on the root-only scanner health route.
+      properties:
+        configured:
+          type: boolean
+          description: Whether this deployment has a scanner adapter configured.
+        adapter:
+          type: string
+          description: The configured adapter name. Absent when scanning is not configured.
+      required: [configured]
+
+    Self:
+      type: object
+      properties:
+        principal_id: { type: string }
+        name: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        organization_id: { type: string, format: uuid, nullable: true }
+        project_id: { type: string, format: uuid, nullable: true }
+      required: [principal_id, name, role]
+
+    AuditTargetCreate:
+      type: object
+      properties:
+        path: { type: string, minLength: 1 }
+      required: [path]
+
+    AuditTargetOpenError:
+      type: object
+      properties:
+        message: { type: string }
+        reason:
+          type: string
+          enum:
+            - not-a-regular-file
+            - permission-denied
+            - symlink-refused
+            - world-writable-parent
+            - path-unavailable
+      required: [message, reason]
+
+    AuditTarget:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        path: { type: string }
+        created_at: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [healthy, failing]
+        since:
+          type: string
+          format: date-time
+          nullable: true
+        consecutive_failures: { type: integer, minimum: 0 }
+        cumulative_failures: { type: integer, minimum: 0 }
+        last_failure_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_reopened_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            The last successful reopen of this process's file descriptor. A
+            current-file size can fall after rotation, so this timestamp keeps
+            that normal reset distinguishable from unexplained data loss.
+        measurement:
+          $ref: '#/components/schemas/AuditTargetMeasurement'
+      required:
+        - id
+        - path
+        - created_at
+        - status
+        - since
+        - consecutive_failures
+        - cumulative_failures
+        - last_failure_at
+        - last_reopened_at
+        - measurement
+
+    AuditTargetMeasurement:
+      oneOf:
+        - $ref: '#/components/schemas/AuditTargetMeasurementAvailable'
+        - $ref: '#/components/schemas/AuditTargetMeasurementUnavailable'
+      discriminator:
+        propertyName: state
+        mapping:
+          available: '#/components/schemas/AuditTargetMeasurementAvailable'
+          unavailable: '#/components/schemas/AuditTargetMeasurementUnavailable'
+
+    AuditTargetMeasurementAvailable:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [available]
+        current_file_size_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Size of the file currently open by this process, not historical audit volume.
+        filesystem_free_bytes:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Space available on the filesystem containing the open file.
+      required: [state, current_file_size_bytes, filesystem_free_bytes]
+
+    AuditTargetMeasurementUnavailable:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [unavailable]
+      required: [state]
+
+    Encryption:
+      type: object
+      properties:
+        state:
+          type: string
+          enum: [unconfigured, ok, degraded]
+          description: The same remembered heartbeat state `/sys/health` reports.
+        keyring:
+          type: array
+          items: { $ref: "#/components/schemas/KeyringEntry" }
+          description: Empty on an unencrypted instance. Never carries key material.
+      required: [state, keyring]
+
+    KeyringEntry:
+      type: object
+      properties:
+        purpose:
+          type: string
+          enum: [payload, integrity, token_signing, audit_hmac]
+        version:
+          type: integer
+          minimum: 1
+          description: The data-key version. New writes use the newest version
+            per purpose; older versions remain readable forever.
+        kek_ref:
+          type: string
+          description: |
+            The key service's KEK version this entry is currently wrapped
+            under (for Vault transit, the `v2` of `vault:v2:...`). After a KEK
+            rotation, entries still naming the old version are what `rewrap`
+            exists to move.
+        wrapped_at:
+          type: string
+          format: date-time
+          description: When this entry's current wrapping was produced — its
+            creation, or the last rewrap that replaced the stored blob.
+      required: [purpose, version, kek_ref, wrapped_at]
+
+    Organization:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+      required: [id, name, created_at]
+
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        organization_id: { type: string, format: uuid }
+        name: { type: string }
+        created_at:
+          type: string
+          format: date-time
+          description: |
+            Load-bearing. An unpinned Packer CLI selects the OLDEST project when
+            several exist, so this timestamp determines default tenant selection
+            and must never be rewritten (ADR-0003).
+      required: [id, organization_id, name, created_at]
+
+    Principal:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        client_id: { type: string }
+        role: { $ref: "#/components/schemas/Role" }
+        organization_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for a platform-scoped root principal.
+        project_id:
+          type: string
+          format: uuid
+          nullable: true
+          description: Null for an organization-scoped principal.
+        created_at: { type: string, format: date-time }
+        secrets:
+          type: array
+          description: Metadata only. Values are never returned after issuance.
+          items: { $ref: "#/components/schemas/SecretMetadata" }
+      required: [id, name, client_id, role, organization_id, created_at, secrets]
+
+    Role:
+      type: string
+      enum: [reader, builder, publisher, maintainer, root]
+      description: |
+        The principal's authority within its scope. A caller may grant or modify
+        only roles at or below its own.
+
+    SecretMetadata:
+      type: object
+      properties:
+        id: { type: string }
+        created_at: { type: string, format: date-time }
+        last_used_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null when never used — which is how a failed rotation is spotted.
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            Null when the secret never expires. An expired secret stays listed
+            — 'expired on the 4th' beats 'authentication failed' — and is
+            removed only by revocation.
+      required: [id, created_at, last_used_at, expires_at]
+
+    SecretIssued:
+      type: object
+      properties:
+        id: { type: string }
+        secret: { type: string, description: Shown once. Not retrievable. }
+        created_at: { type: string, format: date-time }
+        expires_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Null when the secret never expires.
+      required: [id, secret, created_at, expires_at]
+
+    Pin:
+      type: object
+      properties:
+        bucket_name: { type: string }
+        pinned_at: { type: string, format: date-time }
+        pinned_by:
+          type: string
+          description: Principal id. Recorded because a pin is a shared write.
+      required: [bucket_name, pinned_at]

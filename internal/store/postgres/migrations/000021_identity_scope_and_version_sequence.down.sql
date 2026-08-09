@@ -1,0 +1,2 @@
+ALTER TABLE principals DROP CONSTRAINT principals_project_scope_fkey;
+ALTER TABLE principals DROP CONSTRAINT principals_organization_id_fkey;

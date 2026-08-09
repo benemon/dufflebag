@@ -1,0 +1,18 @@
+FROM golang:1.26-alpine AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY internal/scan/ internal/scan/
+COPY cmd/osv-stub/ cmd/osv-stub/
+RUN go test -c -o /scan.test ./internal/scan
+RUN CGO_ENABLED=0 go build -trimpath -o /osv-stub ./cmd/osv-stub
+
+FROM alpine:3.23 AS test
+WORKDIR /src/internal/scan
+COPY --from=build /scan.test /scan.test
+COPY internal/scan/testdata/ testdata/
+ENTRYPOINT ["/scan.test"]
+
+FROM scratch AS stub
+COPY --from=build /osv-stub /osv-stub
+EXPOSE 8080
+ENTRYPOINT ["/osv-stub"]

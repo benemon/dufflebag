@@ -1,0 +1,6 @@
+.git
+.demo
+.schema-compat
+web/node_modules
+web/coverage
+e2e/terraform/.work.*

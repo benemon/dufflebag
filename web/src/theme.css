@@ -1,0 +1,185 @@
+:root {
+  --pf-t--global--font--family--body: "Red Hat Text", Helvetica, Arial, sans-serif;
+  --pf-t--global--font--family--heading: "Red Hat Display", Helvetica, Arial, sans-serif;
+  --pf-t--global--font--family--mono: "Red Hat Mono", monospace;
+  --pf-t--global--font--size--body--default: 13.5px;
+  --pf-t--global--font--size--body--sm: 13px;
+  --pf-t--global--font--size--heading--xs: 18px;
+
+  --pf-t--global--background--color--100: #fff;
+  --pf-t--global--background--color--200: #f2f2f2;
+  --pf-t--global--background--color--300: #e0e0e0;
+  --pf-t--global--background--color--floating--secondary--default: #fff;
+
+  --pf-t--global--text--color--100: #151515;
+  --pf-t--global--text--color--200: #4d4d4d;
+  --pf-t--global--text--color--250: #4d4d4d;
+  --pf-t--global--text--color--regular: #151515;
+  --pf-t--global--text--color--subtle: #4d4d4d;
+  --pf-t--global--text--color--link--default: #0066cc;
+  --pf-t--global--text--color--link--hover: #004d99;
+  --pf-t--global--color--brand--default: #0066cc;
+  --pf-t--global--color--brand--hover: #004d99;
+  --pf-t--global--color--brand--clicked: #004d99;
+
+  --pf-t--global--border--color--50: #e0e0e0;
+  --pf-t--global--border--color--100: #e0e0e0;
+  --pf-t--global--border--color--200: #c7c7c7;
+  --pf-t--global--border--color--300: #c7c7c7;
+  --pf-t--global--border--color--default: #e0e0e0;
+  --pf-t--global--border--color--subtle: #e0e0e0;
+  --pf-t--global--border--color--control--default: #e0e0e0;
+  --pf-t--global--border--color--hover: #c7c7c7;
+
+  --pf-t--global--color--nonstatus--green--default: #e9f7df;
+  --pf-t--global--text--color--nonstatus--on-green--default: #3d7317;
+  --pf-t--global--border--color--nonstatus--green--default: #3d7317;
+  --pf-t--global--color--status--success--default: #3d7317;
+  --pf-t--global--border--color--status--success--default: #3d7317;
+
+  --pf-t--global--color--nonstatus--red--default: #ffe3d9;
+  --pf-t--global--text--color--nonstatus--on-red--default: #b1380b;
+  --pf-t--global--border--color--nonstatus--red--default: #b1380b;
+  --pf-t--global--color--status--danger--default: #b1380b;
+  --pf-t--global--border--color--status--danger--default: #b1380b;
+
+  --pf-t--global--color--nonstatus--yellow--default: #fff4cc;
+  --pf-t--global--text--color--nonstatus--on-yellow--default: #795600;
+  --pf-t--global--border--color--nonstatus--yellow--default: #dca614;
+  --pf-t--global--color--status--warning--default: #dca614;
+  --pf-t--global--text--color--status--warning--default: #795600;
+  --pf-t--global--border--color--status--warning--default: #dca614;
+
+  --pf-t--global--color--nonstatus--purple--default: #ece6ff;
+  --pf-t--global--text--color--nonstatus--on-purple--default: #5e40be;
+  --pf-t--global--border--color--nonstatus--purple--default: #5e40be;
+  --pf-t--global--color--status--info--default: #5e40be;
+  --pf-t--global--border--color--status--info--default: #5e40be;
+
+  --pf-t--global--color--nonstatus--teal--default: #daf2f2;
+  --pf-t--global--text--color--nonstatus--on-teal--default: #147878;
+  --pf-t--global--border--color--nonstatus--teal--default: #147878;
+  --pf-t--global--color--status--custom--default: #147878;
+  --pf-t--global--border--color--status--custom--default: #147878;
+
+  --pf-t--global--color--nonstatus--gray--default: #f2f2f2;
+  --pf-t--global--text--color--nonstatus--on-gray--default: #4d4d4d;
+  --pf-t--global--border--color--nonstatus--gray--default: #4d4d4d;
+
+  --pf-t--global--color--nonstatus--orange--default: #ffe8cc;
+  --pf-t--global--text--color--nonstatus--on-orange--default: #8f4700;
+  --pf-t--global--border--color--nonstatus--orange--default: #8f4700;
+
+  --pf-t--global--border--radius--medium: 3px;
+  --pf-t--global--box-shadow--sm: 0 0.0625rem 0.125rem 0 rgb(3 3 3 / 12%),
+    0 0 0.125rem 0 rgb(3 3 3 / 6%);
+
+  --sf0: var(--pf-t--global--background--color--100);
+  --sf1: var(--pf-t--global--background--color--200);
+  --tx1: var(--pf-t--global--text--color--200);
+  --bd: var(--pf-t--global--border--color--100);
+  --lk: var(--pf-t--global--text--color--link--default);
+}
+
+.pf-v6-c-card {
+  box-shadow: var(--pf-t--global--box-shadow--sm);
+}
+
+.pf-v6-c-page.app-page {
+  /* --Width is the one PatternFly's rules read; the other two are inputs it
+     derives from and neither reaches the grid column or the element width. */
+  --pf-v6-c-page__sidebar--Width: 212px;
+  --pf-v6-c-page__sidebar--Width--base: 212px;
+  --pf-v6-c-page__sidebar--xl--Width: 212px;
+  --pf-v6-c-page__sidebar--BackgroundColor: var(--sf0);
+  --pf-v6-c-page__sidebar--xl--BackgroundColor: var(--sf0);
+  --pf-v6-c-page__sidebar--MarginInlineEnd: 0;
+  --pf-v6-c-page__sidebar--PaddingBlockEnd: 8px;
+  --pf-v6-c-page__sidebar--PaddingInlineStart: 0;
+  --pf-v6-c-page__sidebar--PaddingInlineEnd: 0;
+  --pf-v6-c-page__sidebar--BorderInlineEndWidth: 1px;
+  --pf-v6-c-page__sidebar--BorderInlineEndColor: var(--bd);
+  /* PatternFly only draws the secondary section's top border in its glass and
+     high-contrast themes (the width token is unset otherwise). The design
+     wants the line under every page header, including across the facet rail. */
+  --pf-v6-c-page__main-section--m-secondary--BorderBlockStartWidth: 1px;
+  /* PatternFly v6 floats the scrollable main container spacer-lg short of the
+     viewport foot with inset margins and rounded corners. The design runs the
+     content area flush to every edge, so the "footer" strip of page
+     background must never show. */
+  --pf-v6-c-page__main-container--MaxHeight: 100%;
+  --pf-v6-c-page__main-container--MarginInlineStart: 0;
+  --pf-v6-c-page__main-container--MarginInlineEnd: 0;
+  --pf-v6-c-page__main-container--BorderRadius: 0;
+}
+
+.pf-v6-c-page__sidebar.app-sidebar {
+  width: 212px;
+  padding-block-start: 8px;
+}
+
+.app-global-nav {
+  row-gap: 0;
+  padding: 0;
+  /* PatternFly paints the row from these, and its defaults are action--plain
+     overlays — deliberately translucent so a plain button tints whatever sits
+     beneath it. Setting background on our own rule never reaches the paint,
+     which is why the selected row kept rendering a low-alpha grey. */
+  --pf-v6-c-nav__link--BackgroundColor: transparent;
+  --pf-v6-c-nav__link--hover--BackgroundColor: var(--sf1);
+  --pf-v6-c-nav__link--m-current--BackgroundColor: var(--sf1);
+}
+
+.app-global-nav .pf-v6-c-nav__section-title {
+  padding: 16px 16px 6px;
+  font: 400 14px/1.4 "Red Hat Text", sans-serif;
+  color: var(--tx1);
+}
+
+.app-global-nav .pf-v6-c-nav__list {
+  row-gap: 0;
+}
+
+.app-global-nav .pf-v6-c-nav__item::before {
+  display: none;
+}
+
+.app-global-nav .nv {
+  display: block;
+  width: var(--pf-v6-c-page__sidebar--Width);
+  padding: 8px 16px 8px 13px;
+  border-left: 3px solid transparent;
+  font: 400 16px/1.4 "Red Hat Text", sans-serif;
+}
+
+.app-global-nav .nv:hover {
+  background-color: var(--sf1);
+  color: var(--tx0);
+}
+
+.app-global-nav .nv[aria-current="page"] {
+  border-left-color: var(--lk);
+  /* Set on the element, not inherited: PatternFly declares its own
+     --m-current--BackgroundColor on this element, and a direct declaration
+     always beats an inherited one whatever the layers say. */
+  background-color: var(--sf1);
+  font-weight: 500;
+}
+
+.registry-fingerprint {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+/*
+ * Figures that are no longer being maintained, because no channel selects the
+ * version any more. Desaturated and outlined rather than labelled "stale":
+ * the word is skimmed past, a visibly different treatment is not. The as-of
+ * timestamp beside it carries the actual fact.
+ */
+.dfbg-findings-unmaintained {
+  filter: saturate(0.35);
+  opacity: 0.85;
+  border-left: 2px solid var(--pf-t--global--border--color--default, #c7c7c7);
+  padding-left: 10px;
+}
