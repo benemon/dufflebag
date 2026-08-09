@@ -255,6 +255,18 @@ const clickInRow = (name, label) =>
       return true
   }, name, label))
 
+/** Clicks a visible, enabled button in the active modal. */
+const clickInModal = (label) =>
+  until(`"${label}" in the active modal`, () =>
+    page.$$eval('[role="dialog"] button', (buttons, wanted) => {
+      const button = buttons.find(
+        (candidate) => candidate.innerText.trim() === wanted && !candidate.disabled,
+      )
+      if (!button) return false
+      button.click()
+      return true
+    }, label))
+
 const toggleRow = (name) =>
   until(`expand control in the ${name} row`, () =>
     page.$$eval('tr', (rows, needle) => {
@@ -277,13 +289,15 @@ const roleOptions = () =>
   page.$$eval('#principal-role option', (options) => options.map((option) => option.value))
 
 /**
- * Reads the one-time credential card: a uuid client id and a long secret,
- * both in read-only clipboard inputs.
+ * Reads the one-time credential from the active modal: a uuid client id and a
+ * long secret, both in read-only clipboard inputs.
  */
 const readCredentialCard = () =>
   until('the issued credentials to be readable', () =>
     page.evaluate(() => {
-      const values = [...document.querySelectorAll('input')].map((i) => i.value)
+      const modal = document.querySelector('[role="dialog"]')
+      if (!modal) return null
+      const values = [...modal.querySelectorAll('input')].map((i) => i.value)
       const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
       const clientID = values.find((v) => uuid.test(v))
       const secret = values.find((v) => v && v.length >= 40 && !uuid.test(v))
@@ -1882,9 +1896,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Issuing is the second, explicit action, from the principal's own row —
     // the same control that adds a second secret.
     await clickInRow('console-builder', 'Issue secret')
-    await clickByText('button', 'Confirm')
+    await clickInModal('Confirm')
     await waitForText('console-builder — credential issued')
     consoleBuilder = await readCredentialCard()
+    await clickInModal('Close')
     await until('the principal to hold the issued secret', async () =>
       (await rowText('console-builder')).includes('1 of 2'))
     // The new principal lists at the scope it was created in, labelled as such.
@@ -1930,9 +1945,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('doomed-builder')
 
     await clickInRow('doomed-builder', 'Issue secret')
-    await clickByText('button', 'Confirm')
+    await clickInModal('Confirm')
     await waitForText('doomed-builder — credential issued')
     const doomedFirst = await readCredentialCard()
+    await clickInModal('Close')
     // Baseline first: a later refusal only means the revoke did it if the
     // credential demonstrably worked beforehand.
     assert.equal(await tokenStatus(doomedFirst), 200, 'the issued credential must mint a token')
@@ -1940,12 +1956,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // A second secret makes revoking the first the ordinary rotation, not the
     // sole-secret case the server refuses.
     await clickInRow('doomed-builder', 'Issue secret')
-    await clickByText('button', 'Confirm')
+    await clickInModal('Confirm')
     await until('the second issued credential to replace the card', async () => {
       const card = await readCredentialCard()
       return card.secret !== doomedFirst.secret ? card : false
     })
     const doomedSecond = await readCredentialCard()
+    await clickInModal('Close')
     await until('the principal to hold both secrets', async () =>
       (await rowText('doomed-builder')).includes('2 of 2'))
 
