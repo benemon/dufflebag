@@ -79,9 +79,11 @@ COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # targets encode that split so CI cannot get it wrong per-invocation.
 IMAGE_EXPIRES ?= 2w
 
-# The image demo-up runs. Override DEMO_IMAGE_TAG to demo a specific release,
-# or DEMO_IMAGE to point at another registry entirely.
-DEMO_IMAGE_TAG ?= v0.1.0-rc1
+# The image demo-up runs: the continuous head-of-main build that ci.yml
+# publishes to quay.io/.../dufflebag:latest on every green push. Override
+# DEMO_IMAGE_TAG to demo a specific release or RC, or DEMO_IMAGE to point at
+# another registry entirely.
+DEMO_IMAGE_TAG ?= latest
 DEMO_IMAGE     ?= $(IMAGE):$(DEMO_IMAGE_TAG)
 
 .PHONY: help
