@@ -6,7 +6,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
-let PrincipalsView, CreatePrincipalForm, IssueSecretFormView, IssuedCredentialCard
+let PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard
+let PrincipalTableView
 let grantableRoles
 
 before(async () => {
@@ -17,7 +18,10 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ PrincipalsView, CreatePrincipalForm, IssueSecretFormView, IssuedCredentialCard } =
+  ;({
+    PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard,
+    PrincipalTableView,
+  } =
     await vite.ssrLoadModule('/src/screens/Principals.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
 })
@@ -50,10 +54,10 @@ const view = (over = {}) => renderToStaticMarkup(React.createElement(PrincipalsV
   projectID: 'proj-1', ...over,
 }))
 
-const issueFormProps = (over = {}) => ({
-  idPrefix: 'issue-secret-test', callerRole: 'maintainer', choice: 'never', customDate: '',
-  onChoiceChange: () => {}, onCustomDateChange: () => {}, onConfirm: () => {},
-  onCancel: () => {}, ...over,
+const issueModalProps = (over = {}) => ({
+  principal: principal(), callerRole: 'maintainer', credential: null, failure: null,
+  choice: 'never', customDate: '', onChoiceChange: () => {},
+  onCustomDateChange: () => {}, onConfirm: async () => {}, onClose: () => {}, ...over,
 })
 
 const findElement = (node, predicate) => {
@@ -144,7 +148,7 @@ test('a granter is never offered a role above its own', () => {
 })
 
 // The secret exists nowhere else. The card carries the warning and both values;
-// it is cleared by navigation or by issuing another credential, not by a button.
+// the modal keeps it visible until Close acknowledges it.
 test('the one-time credential shows the secret and its warning', () => {
   const markup = renderToStaticMarkup(React.createElement(IssuedCredentialCard, {
     name: 'sp-packer-ci',
@@ -154,71 +158,114 @@ test('the one-time credential shows the secret and its warning', () => {
   assert.match(markup, /only time it can be read/)
 })
 
-test('issuing a secret offers three expiry choices with Never expires selected', () => {
+test('Issue secret opens the selected principal workflow in the modal view', () => {
+  let opened = null
+  const selected = principal()
+  const table = PrincipalTableView({
+    principals: [selected], selfID: null, callerRole: 'maintainer', expanded: null,
+    onToggle: () => {}, onOpenIssue: (value) => { opened = value },
+    onRevoke: () => {}, onDelete: () => {},
+  })
+  findElement(table, (element) => element.props.children === 'Issue secret').props.onClick()
+  assert.equal(opened, selected)
+
   const markup = renderToStaticMarkup(React.createElement(
-    IssueSecretFormView, issueFormProps(),
+    IssueSecretModalView, issueModalProps({ principal: opened }),
   ))
+  assert.match(markup, /Issue secret — sp-packer-ci/)
   assert.match(markup, /Never expires/)
   assert.match(markup, /90 days/)
   assert.match(markup, /Custom date/)
-  assert.match(markup, /id="issue-secret-test-never"[^>]*checked/)
+  assert.match(markup, /id="issue-secret-p-1-never"[^>]*checked/)
 })
 
 test('the 90-day choice supplies issueSecret with an expiry about 90 days from now', () => {
   let choice = 'never'
   const issueCalls = []
-  const props = () => issueFormProps({
+  const props = () => issueModalProps({
     choice,
     onChoiceChange: (selected) => { choice = selected },
-    onConfirm: (expiresAt) => issueCalls.push(['t', principal(), expiresAt]),
+    onConfirm: async (expiresAt) => issueCalls.push({
+      token: 't', principal: principal(), expires_at: expiresAt,
+    }),
   })
 
-  const choiceView = IssueSecretFormView(props())
+  const choiceView = IssueSecretModalView(props())
   findElement(choiceView, (element) => element.props.label === '90 days').props.onChange({}, true)
   assert.equal(choice, '90-days')
 
   const before = Date.now()
-  const selectedView = IssueSecretFormView(props())
+  const selectedView = IssueSecretModalView(props())
   findElement(selectedView, (element) => element.props.children === 'Confirm').props.onClick()
   const after = Date.now()
 
   assert.equal(issueCalls.length, 1)
-  assert.equal(issueCalls[0][0], 't')
-  assert.deepEqual(issueCalls[0][1], principal())
-  const expiry = Date.parse(issueCalls[0][2])
+  assert.deepEqual(Object.keys(issueCalls[0]).sort(), ['expires_at', 'principal', 'token'])
+  assert.equal(issueCalls[0].token, 't')
+  assert.deepEqual(issueCalls[0].principal, principal())
+  const expiry = Date.parse(issueCalls[0].expires_at)
   const ninetyDays = 90 * 24 * 60 * 60 * 1000
   assert.ok(expiry >= before + ninetyDays && expiry <= after + ninetyDays)
 })
 
-test('a past custom date disables Confirm and explains why inline', () => {
-  const props = issueFormProps({ choice: 'custom', customDate: '2000-01-01' })
-  const form = IssueSecretFormView(props)
-  const confirm = findElement(form, (element) => element.props.children === 'Confirm')
+test('a past custom date disables modal Confirm and explains why inline', () => {
+  const props = issueModalProps({ choice: 'custom', customDate: '2000-01-01' })
+  const modal = IssueSecretModalView(props)
+  const confirm = findElement(modal, (element) => element.props.children === 'Confirm')
   assert.equal(confirm.props.isDisabled, true)
 
-  const markup = renderToStaticMarkup(React.createElement(IssueSecretFormView, props))
+  const markup = renderToStaticMarkup(React.createElement(IssueSecretModalView, props))
   assert.match(markup, /cannot be issued already expired/)
   assert.match(markup, /aria-invalid="true"/)
 })
 
-test('cancelling the expiry choice mints nothing', () => {
+test('cancelling the modal expiry choice mints nothing', () => {
   let cancelled = 0
   let issued = 0
-  const form = IssueSecretFormView(issueFormProps({
-    onCancel: () => { cancelled++ },
-    onConfirm: () => { issued++ },
+  const modal = IssueSecretModalView(issueModalProps({
+    onClose: () => { cancelled++ },
+    onConfirm: async () => { issued++ },
   }))
-  findElement(form, (element) => element.props.children === 'Cancel').props.onClick()
+  findElement(modal, (element) => element.props.children === 'Cancel').props.onClick()
   assert.equal(cancelled, 1)
   assert.equal(issued, 0)
 })
 
-test('the expiry flow remains disabled with a reason for a reader', () => {
+test('the modal expiry flow remains disabled with a reason for a reader', () => {
   const markup = renderToStaticMarkup(React.createElement(
-    IssueSecretFormView, issueFormProps({ callerRole: 'reader' }),
+    IssueSecretModalView, issueModalProps({ callerRole: 'reader' }),
   ))
   assert.match(markup, /Requires maintainer/)
   assert.match(markup, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Confirm/)
+})
+
+test('a successful mint reveals the secret in the modal with a Close-only footer', async () => {
+  const minted = { secretID: 's-2', secret: 'PLAINTEXT-SECRET', clientID: 'client-1' }
+  const mockIssueSecret = async () => minted
+  let credential = null
+  const props = issueModalProps({
+    onConfirm: async () => { credential = await mockIssueSecret() },
+  })
+  const choose = IssueSecretModalView(props)
+  await findElement(choose, (element) => element.props.children === 'Confirm').props.onClick()
+
+  const markup = renderToStaticMarkup(React.createElement(
+    IssueSecretModalView, { ...props, credential },
+  ))
+  assert.match(markup, /sp-packer-ci — credential issued/)
+  assert.match(markup, /PLAINTEXT-SECRET/)
+  assert.match(markup, />Close<\/span>/)
+  assert.doesNotMatch(markup, />Cancel<\/span>/)
+  assert.doesNotMatch(markup, />Confirm<\/span>/)
+})
+
+test('an issue refusal, including a keystone 409, stays inside the modal', () => {
+  const markup = renderToStaticMarkup(React.createElement(
+    IssueSecretModalView,
+    issueModalProps({ failure: 'A root principal must keep one secret that never expires.' }),
+  ))
+  assert.match(markup, /The action was refused/)
+  assert.match(markup, /root principal must keep one secret that never expires/)
 })
 
 // A list can never carry a secret, so no screen can render one by accident.
@@ -227,6 +274,7 @@ test('the listing never renders a secret value', () => {
     principals: [principal({ secrets: [secret('s-1'), secret('s-2')] })],
   })
   assert.doesNotMatch(markup, /PLAINTEXT/)
+  assert.doesNotMatch(markup, />Issue secret</)
   // A secret that never authenticated is the signal a rotation has not landed.
   assert.match(markup, /never used/)
 })

@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
-  FormSelect, FormSelectOption, Label, PageSection, Radio, TextInput, Title,
+  FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
+  PageSection, Radio, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -18,9 +19,9 @@ import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
  * Everything here mints or destroys a credential, so two rules shape it:
  *
  * A SECRET IS SHOWN ONCE. It is argon2id-hashed on write and cannot be
- * recovered, only replaced, so the card that displays one does not disappear on
- * a stray click — it stays until the operator navigates away or issues another
- * credential. The previous version of this screen invented credentials in the
+ * recovered, only replaced, so the modal that displays one does not disappear
+ * on a stray click — it stays until the operator explicitly closes it. The
+ * previous version of this screen invented credentials in the
  * browser and showed them under the same warning; the warning is now true.
  *
  * ROLES, NOT SCOPES. The design mockups model authority as token claims that can
@@ -37,7 +38,9 @@ export function PrincipalsView({
   principals, loading, failure, reload, selfID, callerRole, token, organizationID, projectID,
 }: ViewProps) {
   const [creating, setCreating] = useState(false)
-  const [issued, setIssued] = useState<{ credential: IssuedCredential; name: string } | null>(null)
+  const [issuing, setIssuing] = useState<Principal | null>(null)
+  const [issued, setIssued] = useState<IssuedCredential | null>(null)
+  const [issueFailure, setIssueFailure] = useState<string | null>(null)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
 
   // The picker selection IS the scope, of the listing and of anything created
@@ -93,13 +96,6 @@ export function PrincipalsView({
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{actionFailure}</Content>
           </Alert>
-        ) : null}
-
-        {issued ? (
-          <IssuedCredentialCard
-            name={issued.name}
-            credential={issued.credential}
-          />
         ) : null}
 
         {/*
@@ -173,13 +169,11 @@ export function PrincipalsView({
                 principals={principals}
                 selfID={selfID}
                 callerRole={callerRole}
-                onIssue={(principal, expiresAt) =>
-                  run(async () => {
-                    if (!token) return
-                    const credential = await issueSecret(token, principal, expiresAt)
-                    setIssued({ credential, name: principal.name })
-                  })
-                }
+                onOpenIssue={(principal) => {
+                  setIssuing(principal)
+                  setIssued(null)
+                  setIssueFailure(null)
+                }}
                 onRevoke={(principal, secret) =>
                   run(async () => {
                     if (!token) return
@@ -197,6 +191,34 @@ export function PrincipalsView({
           </Card>
         )}
       </PageSection>
+
+      {issuing ? (
+        <IssueSecretModal
+          key={issuing.id}
+          principal={issuing}
+          callerRole={callerRole}
+          credential={issued}
+          failure={issueFailure}
+          onConfirm={async (expiresAt) => {
+            if (!token) return
+            setIssueFailure(null)
+            try {
+              const credential = await issueSecret(token, issuing, expiresAt)
+              setIssued(credential)
+              await reload()
+            } catch (err: unknown) {
+              setIssueFailure(
+                refusalHint(err) ?? (err instanceof Error ? err.message : 'The action failed.'),
+              )
+            }
+          }}
+          onClose={() => {
+            setIssuing(null)
+            setIssued(null)
+            setIssueFailure(null)
+          }}
+        />
+      ) : null}
     </>
   )
 }
@@ -230,9 +252,8 @@ export function rootsLastSecret(principal: Principal): boolean {
  * The one-time credential.
  *
  * Deliberately NOT a toast or an auto-dismissing alert: this is the only moment
- * the secret exists anywhere but a hash, and a component that vanishes on a
- * click elsewhere would destroy it. It stays until the operator navigates away
- * or issues another credential.
+ * the secret exists anywhere but a hash. The containing modal stays in its
+ * reveal phase until the operator explicitly acknowledges it by closing.
  */
 export function IssuedCredentialCard({
   name, credential,
@@ -330,19 +351,34 @@ export function CreatePrincipalForm({
   )
 }
 
-function PrincipalTable({
-  principals, selfID, callerRole, onIssue, onRevoke, onDelete,
-}: {
+type PrincipalTableProps = {
   principals: Principal[]
   selfID: string | null
   callerRole: Role | null
-  onIssue: (principal: Principal, expiresAt?: string) => void
+  onOpenIssue: (principal: Principal) => void
   onRevoke: (principal: Principal, secret: SecretMetadata) => void
   onDelete: (principal: Principal) => void
-}) {
-  const [expanded, setExpanded] = useState<string | null>(null)
-  const [issuing, setIssuing] = useState<string | null>(null)
+}
 
+function PrincipalTable(props: PrincipalTableProps) {
+  const [expanded, setExpanded] = useState<string | null>(null)
+
+  return (
+    <PrincipalTableView
+      {...props}
+      expanded={expanded}
+      onToggle={(principal) => setExpanded(expanded === principal.id ? null : principal.id)}
+    />
+  )
+}
+
+/** Controlled table view keeps row actions testable without a browser renderer. */
+export function PrincipalTableView({
+  principals, selfID, callerRole, onOpenIssue, onRevoke, onDelete, expanded, onToggle,
+}: PrincipalTableProps & {
+  expanded: string | null
+  onToggle: (principal: Principal) => void
+}) {
   return (
     <Table aria-label="Service principals" variant="compact">
       <Thead>
@@ -363,7 +399,7 @@ function PrincipalTable({
               expand={{
                 rowIndex: index,
                 isExpanded: expanded === principal.id,
-                onToggle: () => setExpanded(expanded === principal.id ? null : principal.id),
+                onToggle: () => onToggle(principal),
               }}
             />
             <Td dataLabel="Name">
@@ -381,40 +417,26 @@ function PrincipalTable({
               {usableSecrets(principal).length} of 2
             </Td>
             <Td dataLabel="Actions">
-              {issuing === principal.id ? (
-                <IssueSecretForm
-                  idPrefix={`issue-secret-${principal.id}`}
-                  callerRole={callerRole}
-                  onConfirm={(expiresAt) => {
-                    setIssuing(null)
-                    onIssue(principal, expiresAt)
-                  }}
-                  onCancel={() => setIssuing(null)}
-                />
-              ) : (
-                <>
-                  {usableSecrets(principal).length < 2 ? (
-                    <RoleRestrictedButton
-                      action="managePrincipals" callerRole={callerRole}
-                      variant="secondary" onClick={() => setIssuing(principal.id)}
-                    >
-                      Issue secret
-                    </RoleRestrictedButton>
-                  ) : null}
-                  {/*
-                    A principal may not delete itself, and the server refuses it. The
-                    button is absent rather than disabled-with-a-tooltip: an action
-                    that cannot succeed should not look available.
-                  */}
-                  {principal.id === selfID ? null : (
-                    <RoleRestrictedButton
-                      action="managePrincipals" callerRole={callerRole}
-                      variant="link" isDanger onClick={() => onDelete(principal)}
-                    >
-                      Delete
-                    </RoleRestrictedButton>
-                  )}
-                </>
+              {usableSecrets(principal).length < 2 ? (
+                <RoleRestrictedButton
+                  action="managePrincipals" callerRole={callerRole}
+                  variant="secondary" onClick={() => onOpenIssue(principal)}
+                >
+                  Issue secret
+                </RoleRestrictedButton>
+              ) : null}
+              {/*
+                A principal may not delete itself, and the server refuses it. The
+                button is absent rather than disabled-with-a-tooltip: an action
+                that cannot succeed should not look available.
+              */}
+              {principal.id === selfID ? null : (
+                <RoleRestrictedButton
+                  action="managePrincipals" callerRole={callerRole}
+                  variant="link" isDanger onClick={() => onDelete(principal)}
+                >
+                  Delete
+                </RoleRestrictedButton>
               )}
             </Td>
           </Tr>
@@ -437,45 +459,59 @@ function PrincipalTable({
 
 type SecretExpiryChoice = 'never' | '90-days' | 'custom'
 
-function IssueSecretForm({
-  idPrefix, callerRole, onConfirm, onCancel,
+function IssueSecretModal({
+  principal, callerRole, credential, failure, onConfirm, onClose,
 }: {
-  idPrefix: string
+  principal: Principal
   callerRole: Role | null
-  onConfirm: (expiresAt?: string) => void
-  onCancel: () => void
+  credential: IssuedCredential | null
+  failure: string | null
+  onConfirm: (expiresAt?: string) => Promise<void>
+  onClose: () => void
 }) {
   const [choice, setChoice] = useState<SecretExpiryChoice>('never')
   const [customDate, setCustomDate] = useState('')
 
   return (
-    <IssueSecretFormView
-      idPrefix={idPrefix}
-      callerRole={callerRole}
-      choice={choice}
-      customDate={customDate}
-      onChoiceChange={setChoice}
-      onCustomDateChange={setCustomDate}
-      onConfirm={onConfirm}
-      onCancel={onCancel}
-    />
+    <Modal
+      aria-labelledby="issue-secret-modal-title"
+      isOpen
+      onClose={onClose}
+      variant="small"
+    >
+      <IssueSecretModalView
+        principal={principal}
+        callerRole={callerRole}
+        credential={credential}
+        failure={failure}
+        choice={choice}
+        customDate={customDate}
+        onChoiceChange={setChoice}
+        onCustomDateChange={setCustomDate}
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
+    </Modal>
   )
 }
 
-/** Controlled view exported for the screen's server-rendered component tests. */
-export function IssueSecretFormView({
-  idPrefix, callerRole, choice, customDate, onChoiceChange, onCustomDateChange,
-  onConfirm, onCancel,
+/** Modal contents exported because PatternFly portals are absent from server-rendered tests. */
+export function IssueSecretModalView({
+  principal, callerRole, credential, failure, choice, customDate,
+  onChoiceChange, onCustomDateChange, onConfirm, onClose,
 }: {
-  idPrefix: string
+  principal: Principal
   callerRole: Role | null
+  credential: IssuedCredential | null
+  failure: string | null
   choice: SecretExpiryChoice
   customDate: string
   onChoiceChange: (choice: SecretExpiryChoice) => void
   onCustomDateChange: (date: string) => void
-  onConfirm: (expiresAt?: string) => void
-  onCancel: () => void
+  onConfirm: (expiresAt?: string) => Promise<void>
+  onClose: () => void
 }) {
+  const idPrefix = `issue-secret-${principal.id}`
   const parsedCustomDate = customDate === '' ? null : new Date(`${customDate}T00:00:00.000Z`)
   const customDateMissing = choice === 'custom' && (
     parsedCustomDate === null || Number.isNaN(parsedCustomDate.getTime())
@@ -489,69 +525,92 @@ export function IssueSecretFormView({
       : null
 
   return (
-    <Form>
-      <FormGroup label="Expiry" fieldId={`${idPrefix}-expiry`} role="radiogroup">
-        <Radio
-          id={`${idPrefix}-never`}
-          name={`${idPrefix}-expiry`}
-          label="Never expires"
-          isChecked={choice === 'never'}
-          onChange={() => onChoiceChange('never')}
-        />
-        <Radio
-          id={`${idPrefix}-90-days`}
-          name={`${idPrefix}-expiry`}
-          label="90 days"
-          isChecked={choice === '90-days'}
-          onChange={() => onChoiceChange('90-days')}
-        />
-        <Radio
-          id={`${idPrefix}-custom`}
-          name={`${idPrefix}-expiry`}
-          label="Custom date"
-          isChecked={choice === 'custom'}
-          onChange={() => onChoiceChange('custom')}
-        />
-      </FormGroup>
+    <>
+      <ModalHeader
+        labelId="issue-secret-modal-title"
+        title={`Issue secret — ${principal.name}`}
+      />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        {credential ? (
+          <IssuedCredentialCard name={principal.name} credential={credential} />
+        ) : (
+          <Form>
+            <FormGroup label="Expiry" fieldId={`${idPrefix}-expiry`} role="radiogroup">
+              <Radio
+                id={`${idPrefix}-never`}
+                name={`${idPrefix}-expiry`}
+                label="Never expires"
+                isChecked={choice === 'never'}
+                onChange={() => onChoiceChange('never')}
+              />
+              <Radio
+                id={`${idPrefix}-90-days`}
+                name={`${idPrefix}-expiry`}
+                label="90 days"
+                isChecked={choice === '90-days'}
+                onChange={() => onChoiceChange('90-days')}
+              />
+              <Radio
+                id={`${idPrefix}-custom`}
+                name={`${idPrefix}-expiry`}
+                label="Custom date"
+                isChecked={choice === 'custom'}
+                onChange={() => onChoiceChange('custom')}
+              />
+            </FormGroup>
 
-      {choice === 'custom' ? (
-        <FormGroup label="Expiry date" isRequired fieldId={`${idPrefix}-custom-date`}>
-          <TextInput
-            id={`${idPrefix}-custom-date`}
-            type="date"
-            value={customDate}
-            validated={customDateFailure ? 'error' : 'default'}
-            aria-invalid={customDateFailure ? 'true' : undefined}
-            aria-describedby={customDateFailure ? `${idPrefix}-custom-date-error` : undefined}
-            onChange={(_event, value) => onCustomDateChange(value)}
-          />
-          {customDateFailure ? (
-            <Content component="p" id={`${idPrefix}-custom-date-error`}>
-              {customDateFailure}
-            </Content>
-          ) : null}
-        </FormGroup>
-      ) : null}
-
-      <RoleRestrictedButton
-        action="managePrincipals"
-        callerRole={callerRole}
-        variant="primary"
-        isDisabled={customDateFailure !== null}
-        onClick={() => {
-          if (choice === '90-days') {
-            onConfirm(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
-          } else if (choice === 'custom' && parsedCustomDate) {
-            onConfirm(parsedCustomDate.toISOString())
-          } else {
-            onConfirm()
-          }
-        }}
-      >
-        Confirm
-      </RoleRestrictedButton>
-      <Button variant="link" onClick={onCancel}>Cancel</Button>
-    </Form>
+            {choice === 'custom' ? (
+              <FormGroup label="Expiry date" isRequired fieldId={`${idPrefix}-custom-date`}>
+                <TextInput
+                  id={`${idPrefix}-custom-date`}
+                  type="date"
+                  value={customDate}
+                  validated={customDateFailure ? 'error' : 'default'}
+                  aria-invalid={customDateFailure ? 'true' : undefined}
+                  aria-describedby={customDateFailure ? `${idPrefix}-custom-date-error` : undefined}
+                  onChange={(_event, value) => onCustomDateChange(value)}
+                />
+                {customDateFailure ? (
+                  <Content component="p" id={`${idPrefix}-custom-date-error`}>
+                    {customDateFailure}
+                  </Content>
+                ) : null}
+              </FormGroup>
+            ) : null}
+          </Form>
+        )}
+      </ModalBody>
+      <ModalFooter>
+        {credential ? (
+          <Button variant="primary" onClick={onClose}>Close</Button>
+        ) : (
+          <>
+            <RoleRestrictedButton
+              action="managePrincipals"
+              callerRole={callerRole}
+              variant="primary"
+              isDisabled={customDateFailure !== null}
+              onClick={() => {
+                if (choice === '90-days') {
+                  return onConfirm(new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString())
+                } else if (choice === 'custom' && parsedCustomDate) {
+                  return onConfirm(parsedCustomDate.toISOString())
+                }
+                return onConfirm()
+              }}
+            >
+              Confirm
+            </RoleRestrictedButton>
+            <Button variant="link" onClick={onClose}>Cancel</Button>
+          </>
+        )}
+      </ModalFooter>
+    </>
   )
 }
 
