@@ -19,11 +19,16 @@ after(async () => { await vite.close() })
 
 test('each role gets the nested console action snapshot declared by the server', () => {
   assert.deepEqual(allowedActions('reader'), [])
-  assert.deepEqual(allowedActions('builder'), [])
-  assert.deepEqual(allowedActions('publisher'), [])
-  assert.deepEqual(allowedActions('maintainer'), ['managePrincipals'])
-  assert.deepEqual(allowedActions('root'), ['configureAudit', 'manageEncryption', 'managePrincipals'])
+  assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
+  assert.deepEqual(allowedActions('publisher'), ['pinBuckets'])
+  assert.deepEqual(allowedActions('maintainer'), ['pinBuckets', 'managePrincipals'])
+  assert.deepEqual(allowedActions('root'), ['pinBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals'])
   assert.deepEqual(allowedActions(null), [])
+})
+
+test('pinBuckets permission mapping requires builder', () => {
+  assert.equal(allowedActions('reader').includes('pinBuckets'), false)
+  assert.equal(allowedActions('builder').includes('pinBuckets'), true)
 })
 
 test('each role gets the navigation snapshot declared by the server', () => {

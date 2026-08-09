@@ -7,7 +7,9 @@ import { createServer } from 'vite'
 
 let vite
 let BucketsView
+let pinBucketAction
 let loadBuckets
+let toggleBucketPin
 
 before(async () => {
   vite = await createServer({
@@ -17,8 +19,8 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
-  ;({ loadBuckets } = await vite.ssrLoadModule('/src/data/buckets.ts'))
+  ;({ BucketsView, pinBucketAction } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
+  ;({ loadBuckets, toggleBucketPin } = await vite.ssrLoadModule('/src/data/buckets.ts'))
 })
 
 after(async () => {
@@ -103,4 +105,80 @@ test('ancestry carried only by older versions renders as its own state, not as n
   }))
   assert.equal(markup.split('>other versions<').length - 1, 2)
   assert.match(markup, />up to date</)
+})
+
+const galleryBucket = (name) => ({
+  name,
+  description: '',
+  labels: {},
+  templateTypes: ['HCL2'],
+  versionCount: 1,
+  newestVersion: { name: 'v1', fingerprint: `${name}-v1`, state: 'complete' },
+  parents: null,
+  children: null,
+  parentsInOlderVersions: false,
+  childrenInOlderVersions: false,
+  channels: [],
+  drift: { kind: 'current' },
+  platforms: ['linux/amd64'],
+  lastPush: '2026-08-09',
+  lastPushAt: '2026-08-09T10:00:00Z',
+})
+
+test('pinned bucket gallery renders joined cards and disappears when empty', () => {
+  const buckets = [galleryBucket('images'), galleryBucket('workers')]
+  const pinned = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets, total: 2, loading: false, failure: null,
+    pins: [{ bucket_name: 'images', pinned_at: '2026-08-09T10:00:00Z' }],
+    openBucket: () => {}, canPin: true,
+  }))
+  assert.match(pinned, /aria-label="Pinned buckets"/)
+  assert.match(pinned, />images</)
+  assert.match(pinned, /Newest version:.*v1/)
+  assert.match(pinned, /aria-label="Buckets"/)
+
+  const empty = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets, total: 2, loading: false, failure: null, pins: [],
+    openBucket: () => {}, canPin: true,
+  }))
+  assert.doesNotMatch(empty, /aria-label="Pinned buckets"/)
+})
+
+test('reader sees the kebab pin item disabled with its builder reason', () => {
+  assert.deepEqual(pinBucketAction(false), {
+    disabled: true,
+    label: 'Pin bucket — Requires builder',
+  })
+  assert.deepEqual(pinBucketAction(true), { disabled: false, label: 'Pin bucket' })
+})
+
+test('kebab pin toggle drives setPin and deletePin contract calls', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (path, options) => {
+    requests.push([String(path), options.method])
+    if (options.method === 'DELETE') return new Response(null, { status: 204 })
+    return json({ bucket_name: 'images', pinned_at: '2026-08-09T10:00:00Z', pinned_by: 'builder' })
+  }
+  try {
+    const tenant = { organizationID: 'org', projectID: 'project' }
+    await toggleBucketPin('token', tenant, 'images', false)
+    await toggleBucketPin('token', tenant, 'images', true)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(requests, [
+    ['/api/v1/organizations/org/projects/project/pins/images', 'PUT'],
+    ['/api/v1/organizations/org/projects/project/pins/images', 'DELETE'],
+  ])
+})
+
+test('pins failure is non-blocking and keeps the bucket table', () => {
+  const markup = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [galleryBucket('images')], total: 1, loading: false, failure: null,
+    pins: [], pinsFailure: 'pin service unavailable', openBucket: () => {}, canPin: true,
+  }))
+  assert.match(markup, /Pinned buckets could not be loaded/)
+  assert.match(markup, /pin service unavailable/)
+  assert.match(markup, /aria-label="Buckets"/)
 })

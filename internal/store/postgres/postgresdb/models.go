@@ -109,6 +109,14 @@ type Organization struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type Pin struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	BucketName     string    `json:"bucket_name"`
+	PinnedAt       time.Time `json:"pinned_at"`
+	PinnedBy       string    `json:"pinned_by"`
+}
+
 type Principal struct {
 	ID             string        `json:"id"`
 	Name           string        `json:"name"`

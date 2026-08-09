@@ -951,6 +951,9 @@ paths:
         because it puts a card in the gallery with no data behind it, and every
         reader then has to handle that state. Pins live in the same database as
         buckets, so the constraint is free.
+
+        Requires the reader role on this project. A tenancy the caller may
+        not see answers 404, indistinguishable from one that does not exist.
       responses:
         "200":
           description: OK
@@ -965,6 +968,7 @@ paths:
                 required: [pins]
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}:
     parameters:
@@ -978,7 +982,11 @@ paths:
       tags: [pins]
       operationId: setPin
       summary: Pin a bucket to a project
-      description: Idempotent — pinning an already-pinned bucket succeeds unchanged.
+      description: |
+        Idempotent — pinning an already-pinned bucket succeeds unchanged.
+        Requires the builder role on this project: builder is the lowest tier
+        with write authority, and pins have no registry consequence, so a
+        higher gate would add friction without protecting anything.
       responses:
         "200":
           description: Pinned
@@ -996,11 +1004,15 @@ paths:
       tags: [pins]
       operationId: deletePin
       summary: Unpin a bucket
-      description: Idempotent — unpinning something not pinned succeeds.
+      description: |
+        Idempotent — unpinning something not pinned succeeds.
+        Requires the builder role on this project. A tenancy the caller may
+        not see answers 404, indistinguishable from one that does not exist.
       responses:
         "204": { description: Unpinned }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
 components:
   securitySchemes:

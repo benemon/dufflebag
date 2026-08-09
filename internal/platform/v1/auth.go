@@ -376,6 +376,15 @@ func (response refusalResponse) VisitGetProjectResponse(w http.ResponseWriter) e
 func (response refusalResponse) VisitDeleteProjectResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitListPinsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitSetPinResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDeletePinResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListAuditTargetsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

@@ -357,40 +357,6 @@ func TestPrincipalLifecycleNeverReturnsIssuedSecretAgain(t *testing.T) {
 	)
 }
 
-func TestDeferredPlatformOperationsReturnNotImplemented(t *testing.T) {
-	repository := &fakeTenancyRepository{}
-	handler := newHandler(repository, &fakeInstanceRepository{}, testAuth{}, testRoles{}, testLogger(), time.Now)
-	for _, request := range []struct {
-		method string
-		path   string
-		body   any
-	}{
-		{
-			method: http.MethodGet,
-			path:   "/api/v1/organizations/" + testOrganizationID + "/projects/" + testProjectID + "/pins",
-		},
-		{
-			method: http.MethodPut,
-			path:   "/api/v1/organizations/" + testOrganizationID + "/projects/" + testProjectID + "/pins/images",
-		},
-		{
-			method: http.MethodDelete,
-			path:   "/api/v1/organizations/" + testOrganizationID + "/projects/" + testProjectID + "/pins/images",
-		},
-	} {
-		response := requestJSON(
-			t,
-			handler,
-			request.method,
-			request.path,
-			request.body,
-			http.StatusNotImplemented,
-			nil,
-		)
-		assertPlatformError(t, response, "not implemented")
-	}
-}
-
 func testLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
 }
@@ -443,6 +409,7 @@ func assertPlatformError(t *testing.T, response *httptest.ResponseRecorder, want
 type fakeTenancyRepository struct {
 	organizations         []store.Organization
 	projects              []store.Project
+	pins                  []store.Pin
 	principals            []*identity.Principal
 	listOrganizationsErr  error
 	createOrganizationErr error
@@ -452,6 +419,9 @@ type fakeTenancyRepository struct {
 	createProjectErr      error
 	getProjectErr         error
 	deleteProjectErr      error
+	listPinsErr           error
+	setPinErr             error
+	deletePinErr          error
 	listPrincipalsErr     error
 	createPrincipalErr    error
 	deletePrincipalErr    error
@@ -566,6 +536,45 @@ func (r *fakeTenancyRepository) GetProject(
 
 func (r *fakeTenancyRepository) DeleteProject(context.Context, string, string) error {
 	return r.deleteProjectErr
+}
+
+func (r *fakeTenancyRepository) ListPins(context.Context, store.Tenant) ([]store.Pin, error) {
+	if r.listPinsErr != nil {
+		return nil, r.listPinsErr
+	}
+	return append([]store.Pin(nil), r.pins...), nil
+}
+
+func (r *fakeTenancyRepository) SetPin(
+	_ context.Context, _ store.Tenant, bucketName, pinnedBy string, pinnedAt time.Time,
+) (*store.Pin, error) {
+	if r.setPinErr != nil {
+		return nil, r.setPinErr
+	}
+	for i := range r.pins {
+		if r.pins[i].BucketName == bucketName {
+			return &r.pins[i], nil
+		}
+	}
+	r.pins = append(r.pins, store.Pin{
+		BucketName: bucketName, PinnedAt: pinnedAt, PinnedBy: pinnedBy,
+	})
+	return &r.pins[len(r.pins)-1], nil
+}
+
+func (r *fakeTenancyRepository) DeletePin(
+	_ context.Context, _ store.Tenant, bucketName string,
+) error {
+	if r.deletePinErr != nil {
+		return r.deletePinErr
+	}
+	for i := range r.pins {
+		if r.pins[i].BucketName == bucketName {
+			r.pins = append(r.pins[:i:i], r.pins[i+1:]...)
+			break
+		}
+	}
+	return nil
 }
 
 // ListPrincipals filters exactly like the real repository: principals bound to

@@ -33,6 +33,9 @@ type PlatformRepository interface {
 	CreateProject(context.Context, store.Project) (*store.Project, error)
 	GetProject(context.Context, string, string) (*store.Project, error)
 	DeleteProject(context.Context, string, string) error
+	ListPins(context.Context, store.Tenant) ([]store.Pin, error)
+	SetPin(context.Context, store.Tenant, string, string, time.Time) (*store.Pin, error)
+	DeletePin(context.Context, store.Tenant, string) error
 	// ListPrincipals lists the principals bound to EXACTLY the selected scope.
 	// The caller authorizes, the selection filters; the store re-asserts the
 	// caller may see the selection rather than trusting it (duf-4qr).
@@ -534,30 +537,6 @@ func (response badRequestResponse) VisitCreatePrincipalResponse(w http.ResponseW
 	return nil
 }
 
-// TODO: implement pins in their bead.
-type notImplementedResponse struct{}
-
-func (notImplementedResponse) VisitListPinsResponse(w http.ResponseWriter) error {
-	return visitNotImplemented(w)
-}
-
-func (notImplementedResponse) VisitDeletePinResponse(w http.ResponseWriter) error {
-	return visitNotImplemented(w)
-}
-
-func (notImplementedResponse) VisitSetPinResponse(w http.ResponseWriter) error {
-	return visitNotImplemented(w)
-}
-
-func (notImplementedResponse) VisitInitializeResponse(w http.ResponseWriter) error {
-	return visitNotImplemented(w)
-}
-
-func visitNotImplemented(w http.ResponseWriter) error {
-	writeError(w, http.StatusNotImplemented, Error{Message: "not implemented"})
-	return nil
-}
-
 func writeError(w http.ResponseWriter, status int, body Error) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
@@ -565,24 +544,104 @@ func writeError(w http.ResponseWriter, status int, body Error) {
 }
 
 func (s *server) ListPins(
-	context.Context,
-	ListPinsRequestObject,
+	ctx context.Context,
+	request ListPinsRequestObject,
 ) (ListPinsResponseObject, error) {
-	return notImplementedResponse{}, nil
+	audit := s.beginLifecycleAudit()
+	defer func() { audit.log(ctx) }()
+
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleReader, request.OrganizationId.String(), request.ProjectId.String(),
+	)
+	if refused != permitted {
+		audit.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audit.actor(caller)
+	pins, err := s.repository.ListPins(
+		ctx, store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+	)
+	if err != nil {
+		audit.failed("storage_failed")
+		return nil, err
+	}
+	audit.succeeded("", "")
+	response := ListPins200JSONResponse{Pins: make([]Pin, 0, len(pins))}
+	for _, pin := range pins {
+		response.Pins = append(response.Pins, renderPin(pin))
+	}
+	return response, nil
 }
 
 func (s *server) DeletePin(
-	context.Context,
-	DeletePinRequestObject,
+	ctx context.Context,
+	request DeletePinRequestObject,
 ) (DeletePinResponseObject, error) {
-	return notImplementedResponse{}, nil
+	audit := s.beginLifecycleAudit()
+	audit.event.TargetID = request.BucketName
+	defer func() { audit.log(ctx) }()
+
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleBuilder, request.OrganizationId.String(), request.ProjectId.String(),
+	)
+	if refused != permitted {
+		audit.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audit.actor(caller)
+	if err := s.repository.DeletePin(
+		ctx,
+		store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+		request.BucketName,
+	); err != nil {
+		audit.failed("storage_failed")
+		return nil, err
+	}
+	audit.succeeded(request.BucketName, "")
+	return DeletePin204Response{}, nil
 }
 
 func (s *server) SetPin(
-	context.Context,
-	SetPinRequestObject,
+	ctx context.Context,
+	request SetPinRequestObject,
 ) (SetPinResponseObject, error) {
-	return notImplementedResponse{}, nil
+	audit := s.beginLifecycleAudit()
+	audit.event.TargetID = request.BucketName
+	defer func() { audit.log(ctx) }()
+
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleBuilder, request.OrganizationId.String(), request.ProjectId.String(),
+	)
+	if refused != permitted {
+		audit.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audit.actor(caller)
+	pin, err := s.repository.SetPin(
+		ctx,
+		store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+		request.BucketName,
+		caller.ID,
+		s.now().UTC(),
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		audit.refused("not_found")
+		return SetPin404JSONResponse{Message: "No such bucket in this project"}, nil
+	}
+	if err != nil {
+		audit.failed("storage_failed")
+		return nil, err
+	}
+	audit.succeeded(request.BucketName, "")
+	return SetPin200JSONResponse(renderPin(*pin)), nil
+}
+
+func renderPin(pin store.Pin) Pin {
+	return Pin{
+		BucketName: pin.BucketName,
+		PinnedAt:   pin.PinnedAt,
+		PinnedBy:   &pin.PinnedBy,
+	}
 }
 
 func (s *server) ListPrincipals(
