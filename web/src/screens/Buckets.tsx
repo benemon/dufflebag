@@ -1,6 +1,6 @@
 import { useEffect, useState, type Ref } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content, Label,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content, Gallery, GalleryItem, Label,
   Dropdown, DropdownItem, DropdownList, FormSelect, FormSelectOption, MenuToggle,
   PageSection, Pagination, TextInput, Title, Toolbar,
   ToolbarContent, ToolbarItem,
@@ -12,13 +12,15 @@ import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
+import { requirementReason } from '../auth/permissions'
+import type { ApiPin } from '../api/client'
 import type { TenancyGap } from '../data/tenant'
 
 /**
  * Buckets — the registry landing screen.
  *
- * Read-only: actions stay absent until their backing APIs exist. The one
- * navigation is the bucket name, which opens the versions drill-down.
+ * Pins are shared project presentation state. Pinned buckets remain in the
+ * complete table; their cards are a second, focused way into the same data.
  */
 export function Buckets() {
   const location = useLocation()
@@ -36,6 +38,11 @@ export function BucketsView({
   total,
   loading,
   failure,
+  pins = [],
+  pinsLoading = false,
+  pinsFailure = null,
+  canPin = false,
+  togglePin = async () => {},
   gap,
   openBucket,
 }: {
@@ -43,6 +50,11 @@ export function BucketsView({
   total: number
   loading: boolean
   failure: string | null
+  pins?: ApiPin[]
+  pinsLoading?: boolean
+  pinsFailure?: string | null
+  canPin?: boolean
+  togglePin?: (bucketName: string, pinned: boolean) => Promise<void>
   /** A platform session with no tenancy chosen yet — stated, never fetched around. */
   gap?: TenancyGap | null
   /** Navigation into a bucket's versions; a callback so the view stays router-free. */
@@ -66,6 +78,10 @@ export function BucketsView({
   const lastPage = Math.max(1, Math.ceil(filteredTotal / perPage))
   const first = (page - 1) * perPage
   const visibleBuckets = filteredBuckets.slice(first, first + perPage)
+  const pinnedBuckets = pins.flatMap((pin) => {
+    const bucket = buckets.find((candidate) => candidate.name === pin.bucket_name)
+    return bucket ? [bucket] : []
+  })
 
   useEffect(() => {
     if (page > lastPage) setPage(lastPage)
@@ -92,6 +108,37 @@ export function BucketsView({
       </PageSection>
 
       <PageSection variant="secondary" isFilled>
+        {pinsFailure && (
+          <Alert variant="warning" isInline title="Pinned buckets could not be loaded">
+            <Content component="p">{pinsFailure}</Content>
+          </Alert>
+        )}
+        {pinsLoading && !loading && <Content component="p">Loading pinned buckets…</Content>}
+        {!loading && pinnedBuckets.length > 0 && (
+          <section aria-label="Pinned buckets" style={{ marginBottom: 24 }}>
+            <Title headingLevel="h2" size="lg" style={{ marginBottom: 12 }}>Pinned buckets</Title>
+            <Gallery hasGutter minWidths={{ default: '260px' }}>
+              {pinnedBuckets.map((bucket) => (
+                <GalleryItem key={bucket.name}>
+                  <Card isCompact>
+                    <CardTitle>
+                      <Button variant="link" isInline onClick={() => openBucket(bucket.name)}>
+                        {bucket.name}
+                      </Button>
+                    </CardTitle>
+                    <CardBody>
+                      <Content component="p">
+                        Newest version: {bucket.newestVersion?.name ?? '—'}
+                      </Content>
+                      <PlatformList platforms={bucket.platforms} />
+                      <Content component="p">Last updated: {bucket.lastPush}</Content>
+                    </CardBody>
+                  </Card>
+                </GalleryItem>
+              ))}
+            </Gallery>
+          </section>
+        )}
         <Card>
           <CardTitle>All buckets</CardTitle>
           <CardBody>
@@ -260,7 +307,13 @@ export function BucketsView({
                         <Td dataLabel="Platforms"><PlatformList platforms={bucket.platforms} /></Td>
                         <Td dataLabel="Last updated">{bucket.lastPush}</Td>
                         <Td dataLabel="Actions">
-                          <BucketActions bucket={bucket.name} openBucket={openBucket} />
+                          <BucketActions
+                            bucket={bucket.name}
+                            openBucket={openBucket}
+                            pinned={pins.some((pin) => pin.bucket_name === bucket.name)}
+                            canPin={canPin}
+                            togglePin={togglePin}
+                          />
                         </Td>
                       </Tr>
                       <Tr isExpanded={expanded === bucket.name}>
@@ -369,11 +422,18 @@ function RelationshipLabel({
 function BucketActions({
   bucket,
   openBucket,
+  pinned,
+  canPin,
+  togglePin,
 }: {
   bucket: string
   openBucket: (bucket: string) => void
+  pinned: boolean
+  canPin: boolean
+  togglePin: (bucketName: string, pinned: boolean) => Promise<void>
 }) {
   const [open, setOpen] = useState(false)
+  const pinAction = pinBucketAction(canPin)
   return (
     <Dropdown
       isOpen={open}
@@ -393,9 +453,23 @@ function BucketActions({
     >
       <DropdownList>
         <DropdownItem onClick={() => openBucket(bucket)}>Open bucket</DropdownItem>
+        <DropdownItem
+          isSelected={pinned}
+          isDisabled={pinAction.disabled}
+          onClick={() => { void togglePin(bucket, pinned) }}
+        >
+          {pinAction.label}
+        </DropdownItem>
       </DropdownList>
     </Dropdown>
   )
+}
+
+export function pinBucketAction(canPin: boolean): { disabled: boolean; label: string } {
+  return {
+    disabled: !canPin,
+    label: `Pin bucket${canPin ? '' : ` — ${requirementReason('pinBuckets')}`}`,
+  }
 }
 
 function bucketComparator(sort: string): (a: Bucket, b: Bucket) => number {

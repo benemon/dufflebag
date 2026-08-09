@@ -16,6 +16,7 @@ sql:
       - internal/store/postgres/migrations/000016_encryption.up.sql
       - internal/store/postgres/migrations/000017_version_revocation.up.sql
       - internal/store/postgres/migrations/000018_secret_expiry.up.sql
+      - internal/store/postgres/migrations/000022_pins.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

@@ -529,6 +529,15 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id uuid.UUID) (string,
 	return result, err
 }
 
+const deletePin = `-- name: DeletePin :exec
+DELETE FROM pins WHERE bucket_name = $1
+`
+
+func (q *Queries) DeletePin(ctx context.Context, bucketName string) error {
+	_, err := q.db.ExecContext(ctx, deletePin, bucketName)
+	return err
+}
+
 const deletePrincipal = `-- name: DeletePrincipal :execrows
 DELETE FROM principals
 WHERE id = $1
@@ -691,6 +700,25 @@ func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (Organizati
 	row := q.db.QueryRowContext(ctx, getOrganization, id)
 	var i Organization
 	err := row.Scan(&i.ID, &i.Name, &i.CreatedAt)
+	return i, err
+}
+
+const getPin = `-- name: GetPin :one
+SELECT bucket_name, pinned_at, pinned_by
+FROM pins
+WHERE bucket_name = $1
+`
+
+type GetPinRow struct {
+	BucketName string    `json:"bucket_name"`
+	PinnedAt   time.Time `json:"pinned_at"`
+	PinnedBy   string    `json:"pinned_by"`
+}
+
+func (q *Queries) GetPin(ctx context.Context, bucketName string) (GetPinRow, error) {
+	row := q.db.QueryRowContext(ctx, getPin, bucketName)
+	var i GetPinRow
+	err := row.Scan(&i.BucketName, &i.PinnedAt, &i.PinnedBy)
 	return i, err
 }
 
@@ -914,6 +942,31 @@ func (q *Queries) GetVersionRelationships(ctx context.Context, versionID string)
 	return i, err
 }
 
+const insertPin = `-- name: InsertPin :exec
+INSERT INTO pins (organization_id, project_id, bucket_name, pinned_at, pinned_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING
+`
+
+type InsertPinParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	BucketName     string    `json:"bucket_name"`
+	PinnedAt       time.Time `json:"pinned_at"`
+	PinnedBy       string    `json:"pinned_by"`
+}
+
+func (q *Queries) InsertPin(ctx context.Context, arg InsertPinParams) error {
+	_, err := q.db.ExecContext(ctx, insertPin,
+		arg.OrganizationID,
+		arg.ProjectID,
+		arg.BucketName,
+		arg.PinnedAt,
+		arg.PinnedBy,
+	)
+	return err
+}
+
 const listArtifactsByBuild = `-- name: ListArtifactsByBuild :many
 SELECT organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac FROM artifacts WHERE build_id = $1 ORDER BY id DESC
 `
@@ -1090,6 +1143,41 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 	for rows.Next() {
 		var i Organization
 		if err := rows.Scan(&i.ID, &i.Name, &i.CreatedAt); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPins = `-- name: ListPins :many
+SELECT bucket_name, pinned_at, pinned_by
+FROM pins
+ORDER BY pinned_at, bucket_name
+`
+
+type ListPinsRow struct {
+	BucketName string    `json:"bucket_name"`
+	PinnedAt   time.Time `json:"pinned_at"`
+	PinnedBy   string    `json:"pinned_by"`
+}
+
+func (q *Queries) ListPins(ctx context.Context) ([]ListPinsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPinsRow
+	for rows.Next() {
+		var i ListPinsRow
+		if err := rows.Scan(&i.BucketName, &i.PinnedAt, &i.PinnedBy); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

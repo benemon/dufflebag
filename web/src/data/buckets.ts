@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 
 import {
-  listBuckets, listChannels, listVersions, signOutIfUnauthorized,
+  deletePin, listBuckets, listChannels, listPins, listVersions, setPin, signOutIfUnauthorized,
   type ApiAncestryLink, type ApiAncestryStatus, type ApiBucket, type ApiChannel,
-  type ApiVersion, type Tenant as ApiTenant,
+  type ApiPin, type ApiVersion, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { permitsAction } from '../auth/permissions'
 import { platformTenancyGap } from './tenant'
 import { isComplete, versionState, type Version } from './versions'
 
@@ -72,13 +73,16 @@ export type Bucket = {
 
 export function useBuckets(refreshKey = '') {
   const {
-    state, selectedOrganization, selectedProject, signOut,
+    state, self, selectedOrganization, selectedProject, signOut,
     organizations, organizationsLoading, organizationFailure,
     permittedProjects, projectsLoading, projectFailure,
   } = useAuth()
   const [buckets, setBuckets] = useState<Bucket[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
+  const [pins, setPins] = useState<ApiPin[]>([])
+  const [pinsLoading, setPinsLoading] = useState(false)
+  const [pinsFailure, setPinsFailure] = useState<string | null>(null)
 
   useEffect(() => {
     // The organisation comes from the session's selection — for a platform
@@ -120,6 +124,54 @@ export function useBuckets(refreshKey = '') {
     }
   }, [state, selectedOrganization, selectedProject, signOut, refreshKey])
 
+  useEffect(() => {
+    // A tenancy gap is not a project. Do not issue a pins request until both
+    // selections exist, matching the bucket fetch above.
+    if (!state || !selectedOrganization || !selectedProject) {
+      setPins([])
+      setPinsLoading(false)
+      setPinsFailure(null)
+      return
+    }
+    let cancelled = false
+    setPins([])
+    setPinsLoading(true)
+    setPinsFailure(null)
+    const tenant = { organizationID: selectedOrganization, projectID: selectedProject }
+    void listPins(state.token, tenant)
+      .then((listed) => {
+        if (!cancelled) setPins(listed)
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return
+        if (signOutIfUnauthorized(err, signOut)) return
+        setPinsFailure(err instanceof Error ? err.message : 'Could not load pinned buckets.')
+      })
+      .finally(() => {
+        if (!cancelled) setPinsLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [state, selectedOrganization, selectedProject, signOut, refreshKey])
+
+  const togglePin = useCallback(async (bucketName: string, pinned: boolean) => {
+    if (!state || !selectedOrganization || !selectedProject) return
+    const tenant = { organizationID: selectedOrganization, projectID: selectedProject }
+    setPinsFailure(null)
+    try {
+      const updated = await toggleBucketPin(state.token, tenant, bucketName, pinned)
+      if (!updated) {
+        setPins((current) => current.filter((pin) => pin.bucket_name !== bucketName))
+      } else {
+        setPins((current) => [...current.filter((item) => item.bucket_name !== bucketName), updated]
+          .sort((a, b) => a.pinned_at.localeCompare(b.pinned_at) ||
+            a.bucket_name.localeCompare(b.bucket_name)))
+      }
+    } catch (err: unknown) {
+      if (signOutIfUnauthorized(err, signOut)) return
+      setPinsFailure(err instanceof Error ? err.message : 'Could not update the pin.')
+    }
+  }, [state, selectedOrganization, selectedProject, signOut])
+
   // A session standing above a project folds its tenancy discovery into this
   // screen's states: discovery in flight is loading, a failed listing is a
   // failure, and a settled listing with nothing chosen (or nothing to choose)
@@ -136,6 +188,11 @@ export function useBuckets(refreshKey = '') {
     total: buckets.length,
     loading: loading || discovering,
     failure: failure ?? discoveryFailure,
+    pins,
+    pinsLoading,
+    pinsFailure,
+    canPin: permitsAction(self?.role ?? null, 'pinBuckets'),
+    togglePin,
     gap:
       aboveProjects && !discovering && !discoveryFailure
         ? platformTenancyGap({
@@ -149,6 +206,16 @@ export function useBuckets(refreshKey = '') {
           })
         : null,
   }
+}
+
+export async function toggleBucketPin(
+  token: string, tenant: ApiTenant, bucketName: string, pinned: boolean,
+): Promise<ApiPin | null> {
+  if (pinned) {
+    await deletePin(token, tenant, bucketName)
+    return null
+  }
+  return setPin(token, tenant, bucketName)
 }
 
 export async function loadBuckets(token: string, tenant: ApiTenant): Promise<Bucket[]> {

@@ -76,6 +76,24 @@ SELECT CASE
     ELSE 'not_found'
 END AS result;
 
+-- name: ListPins :many
+SELECT bucket_name, pinned_at, pinned_by
+FROM pins
+ORDER BY pinned_at, bucket_name;
+
+-- name: InsertPin :exec
+INSERT INTO pins (organization_id, project_id, bucket_name, pinned_at, pinned_by)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT DO NOTHING;
+
+-- name: GetPin :one
+SELECT bucket_name, pinned_at, pinned_by
+FROM pins
+WHERE bucket_name = $1;
+
+-- name: DeletePin :exec
+DELETE FROM pins WHERE bucket_name = $1;
+
 -- name: CreateBucket :one
 INSERT INTO buckets (
     organization_id, project_id, id, name, description, labels, created_at, updated_at

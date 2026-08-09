@@ -1305,6 +1305,37 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('smoke-images')
   })
 
+  await t.test('a privileged session pins, navigates from, and unpins a bucket', async () => {
+    const openPinMenu = () => until('the smoke-images pin menu', () =>
+      page.$$eval('table[aria-label="Buckets"] tr', (rows) => {
+        const row = rows.find((candidate) => candidate.innerText.includes('smoke-images'))
+        const toggle = row?.querySelector('button[aria-label="Actions for smoke-images"]')
+        if (!toggle) return false
+        toggle.click()
+        return true
+      }))
+
+    await openPinMenu()
+    await clickOptionExact('Pin bucket')
+    await until('the pinned gallery card to appear', () =>
+      page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) =>
+        buttons.some((button) => button.innerText.trim() === 'smoke-images')))
+
+    await page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) => {
+      const cardLink = buttons.find((button) => button.innerText.trim() === 'smoke-images')
+      cardLink?.click()
+    })
+    await until('the gallery card to navigate into the bucket', () =>
+      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
+
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    await openPinMenu()
+    await clickOptionExact('Pin bucket')
+    await until('the pinned gallery to empty', () =>
+      page.$('section[aria-label="Pinned buckets"]').then((section) => section === null))
+  })
+
   await t.test('a completed version and an incomplete v0 drill down from the bucket row', async () => {
     // Seed through the compat API with the SAME call sequence the contract
     // test drives via hcp-sdk-go (contract/hcp2023_contract_test.go): create

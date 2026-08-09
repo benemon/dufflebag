@@ -1253,12 +1253,17 @@ type ClientInterface interface {
 	// reader then has to handle that state. Pins live in the same database as
 	// buckets, so the constraint is free.
 	//
+	// Requires the reader role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
+	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/pins (the `ListPins` operationId).
 	ListPins(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// DeletePin Unpin a bucket
 	//
 	// Idempotent — unpinning something not pinned succeeds.
+	// Requires the builder role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
 	//
 	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName} (the `DeletePin` operationId).
 	DeletePin(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1266,6 +1271,9 @@ type ClientInterface interface {
 	// SetPin Pin a bucket to a project
 	//
 	// Idempotent — pinning an already-pinned bucket succeeds unchanged.
+	// Requires the builder role on this project: builder is the lowest tier
+	// with write authority, and pins have no registry consequence, so a
+	// higher gate would add friction without protecting anything.
 	//
 	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName} (the `SetPin` operationId).
 	SetPin(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1975,6 +1983,9 @@ func (c *Client) RescanBuild(ctx context.Context, organizationId OrganizationId,
 // reader then has to handle that state. Pins live in the same database as
 // buckets, so the constraint is free.
 //
+// Requires the reader role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
+//
 // Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/pins (the `ListPins` operationId).
 func (c *Client) ListPins(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPinsRequest(c.Server, organizationId, projectId)
@@ -1991,6 +2002,8 @@ func (c *Client) ListPins(ctx context.Context, organizationId OrganizationId, pr
 // DeletePin Unpin a bucket
 //
 // Idempotent — unpinning something not pinned succeeds.
+// Requires the builder role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
 //
 // Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName} (the `DeletePin` operationId).
 func (c *Client) DeletePin(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2008,6 +2021,9 @@ func (c *Client) DeletePin(ctx context.Context, organizationId OrganizationId, p
 // SetPin Pin a bucket to a project
 //
 // Idempotent — pinning an already-pinned bucket succeeds unchanged.
+// Requires the builder role on this project: builder is the lowest tier
+// with write authority, and pins have no registry consequence, so a
+// higher gate would add friction without protecting anything.
 //
 // Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName} (the `SetPin` operationId).
 func (c *Client) SetPin(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -3982,6 +3998,9 @@ type ClientWithResponsesInterface interface {
 	// reader then has to handle that state. Pins live in the same database as
 	// buckets, so the constraint is free.
 	//
+	// Requires the reader role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/pins (the `ListPins` operationId).
@@ -3990,6 +4009,8 @@ type ClientWithResponsesInterface interface {
 	// DeletePinWithResponse Unpin a bucket
 	//
 	// Idempotent — unpinning something not pinned succeeds.
+	// Requires the builder role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -3999,6 +4020,9 @@ type ClientWithResponsesInterface interface {
 	// SetPinWithResponse Pin a bucket to a project
 	//
 	// Idempotent — pinning an already-pinned bucket succeeds unchanged.
+	// Requires the builder role on this project: builder is the lowest tier
+	// with write authority, and pins have no registry consequence, so a
+	// higher gate would add friction without protecting anything.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -5345,6 +5369,8 @@ type ListPinsResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
 }
 
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
@@ -5362,6 +5388,11 @@ func (r ListPinsResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r ListPinsResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListPinsResponse) GetJSON404() *NotFound {
+	return r.JSON404
 }
 
 // GetBody returns the raw response body bytes
@@ -5400,6 +5431,8 @@ type DeletePinResponse struct {
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
 	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
 }
 
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
@@ -5410,6 +5443,11 @@ func (r DeletePinResponse) GetJSON401() *Unauthorized {
 // GetJSON403 returns the response for an HTTP 403 `application/json` response
 func (r DeletePinResponse) GetJSON403() *Forbidden {
 	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeletePinResponse) GetJSON404() *NotFound {
+	return r.JSON404
 }
 
 // GetBody returns the raw response body bytes
@@ -6627,6 +6665,9 @@ func (c *ClientWithResponses) RescanBuildWithResponse(ctx context.Context, organ
 // reader then has to handle that state. Pins live in the same database as
 // buckets, so the constraint is free.
 //
+// Requires the reader role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/pins (the `ListPins` operationId).
@@ -6641,6 +6682,8 @@ func (c *ClientWithResponses) ListPinsWithResponse(ctx context.Context, organiza
 // DeletePinWithResponse Unpin a bucket
 //
 // Idempotent — unpinning something not pinned succeeds.
+// Requires the builder role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -6656,6 +6699,9 @@ func (c *ClientWithResponses) DeletePinWithResponse(ctx context.Context, organiz
 // SetPinWithResponse Pin a bucket to a project
 //
 // Idempotent — pinning an already-pinned bucket succeeds unchanged.
+// Requires the builder role on this project: builder is the lowest tier
+// with write authority, and pins have no registry consequence, so a
+// higher gate would add friction without protecting anything.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -7907,6 +7953,13 @@ func ParseListPinsResponse(rsp *http.Response) (*ListPinsResponse, error) {
 		}
 		response.JSON403 = &dest
 
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
 	}
 
 	return response, nil
@@ -7942,6 +7995,13 @@ func ParseDeletePinResponse(rsp *http.Response) (*DeletePinResponse, error) {
 			return nil, err
 		}
 		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
@@ -10700,6 +10760,20 @@ func (response ListPins403JSONResponse) VisitListPinsResponse(w http.ResponseWri
 	return err
 }
 
+type ListPins404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListPins404JSONResponse) VisitListPinsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DeletePinRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
@@ -10742,6 +10816,20 @@ func (response DeletePin403JSONResponse) VisitDeletePinResponse(w http.ResponseW
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeletePin404JSONResponse) VisitDeletePinResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }

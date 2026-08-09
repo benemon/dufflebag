@@ -556,6 +556,31 @@ export async function platformGet<T>(token: string, path: string): Promise<T> {
   return (await request<T>(token, 'GET', `${PLATFORM_BASE}${path}`)) as T
 }
 
+export type ApiPin = {
+  bucket_name: string
+  pinned_at: string
+  pinned_by?: string
+}
+
+function pinsPath(tenant: Tenant, bucketName?: string): string {
+  const path = `/organizations/${encodeURIComponent(tenant.organizationID)}` +
+    `/projects/${encodeURIComponent(tenant.projectID)}/pins`
+  return bucketName === undefined ? path : `${path}/${encodeURIComponent(bucketName)}`
+}
+
+export async function listPins(token: string, tenant: Tenant): Promise<ApiPin[]> {
+  const body = await platformGet<{ pins?: ApiPin[] }>(token, pinsPath(tenant))
+  return body.pins ?? []
+}
+
+export async function setPin(token: string, tenant: Tenant, bucketName: string): Promise<ApiPin> {
+  return platformPut<ApiPin>(token, pinsPath(tenant, bucketName))
+}
+
+export async function deletePin(token: string, tenant: Tenant, bucketName: string): Promise<void> {
+  await platformDelete(token, pinsPath(tenant, bucketName))
+}
+
 export type ApiInstance = {
   version: string
   commit: string
@@ -651,6 +676,10 @@ export async function createProject(
 
 export async function platformPost<T>(token: string, path: string, body?: unknown): Promise<T> {
   return (await request<T>(token, 'POST', `${PLATFORM_BASE}${path}`, body)) as T
+}
+
+export async function platformPut<T>(token: string, path: string, body?: unknown): Promise<T> {
+  return (await request<T>(token, 'PUT', `${PLATFORM_BASE}${path}`, body)) as T
 }
 
 export async function platformDelete(token: string, path: string): Promise<void> {
