@@ -37,6 +37,11 @@ SCANNER_DISABLED_ENV := env -u DFBG_SCANNER_ADAPTER -u DFBG_SCANNER_ENDPOINT \
 DEMO_DIR       ?= $(CURDIR)/.demo
 DEMO_PORT      ?= 8443
 DEMO_CONTAINER ?= dufflebag-demo
+# dufflebag runs as a container alongside its backing services, on a shared
+# network where they reach each other by service name — the way a real
+# deployment is wired, not a host process reaching published ports.
+DEMO_SERVER_CONTAINER ?= dufflebag-demo-server
+DEMO_NET       ?= dufflebag-demo-net
 # SBOMs live in object storage, so a demo without one refuses every upload.
 DEMO_S3_CONTAINER ?= dufflebag-demo-s3
 DEMO_S3_IMAGE     ?= quay.io/benjamin_holmes/ceph-aio:v20
@@ -73,6 +78,11 @@ COMMIT        ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 # RC images expire; release images do not (conventions rule 6). The push
 # targets encode that split so CI cannot get it wrong per-invocation.
 IMAGE_EXPIRES ?= 2w
+
+# The image demo-up runs. Override DEMO_IMAGE_TAG to demo a specific release,
+# or DEMO_IMAGE to point at another registry entirely.
+DEMO_IMAGE_TAG ?= v0.1.0-rc1
+DEMO_IMAGE     ?= $(IMAGE):$(DEMO_IMAGE_TAG)
 
 .PHONY: help
 help:
@@ -502,28 +512,30 @@ check-markers: ## Fail on AI-tooling markers in tracked files
 # reached. /sys/init is one-shot and ADR-0012 accepts that whoever reaches it
 # first owns the deployment, so an unclaimed instance must never be exposed —
 # demo-expose refuses to tunnel to one.
-# Any server from a previous run is killed first: it keeps $(DEMO_PORT)
-# pointing at containers this target is about to remove, so /sys/init would
-# reach the stale process and 500. pkill rather than server.pid alone because
-# a manually restarted server leaves the pid file behind (duf-erxs).
+# Any server from a previous run is cleared first — the current container and
+# any legacy host-process binary from an older demo — since either holds
+# $(DEMO_PORT) and points at backing containers this target is about to
+# recreate, so /sys/init would otherwise reach a stale instance.
 # Unlike every CI gate, the demo deliberately sends versioned purl-derived
 # package metadata to live api.osv.dev and therefore requires internet egress.
-demo-up: build ## Stand up a long-lived demo instance and claim it
+demo-up: ## Stand up a long-lived demo instance and claim it
 	@set -e; \
 	command -v $(PACKER_E2E_DOCKER) >/dev/null || { echo "FAIL demo-up: docker is required"; exit 1; }; \
 	test -r "$(PACKER_E2E_CERT_FILE)" || { echo "FAIL demo-up: no TLS certificate at $(PACKER_E2E_CERT_FILE)"; exit 1; }; \
 	test -r "$(PACKER_E2E_CA_FILE)" || { echo "FAIL demo-up: no CA chain at $(PACKER_E2E_CA_FILE)"; exit 1; }; \
 	mkdir -p "$(DEMO_DIR)"; \
 	pkill -f "$(DEMO_DIR)/dufflebag" 2>/dev/null || true; \
+	$(PACKER_E2E_DOCKER) rm -f $(DEMO_SERVER_CONTAINER) >/dev/null 2>&1 || true; \
 	rm -f "$(DEMO_DIR)/server.pid"; \
-	go build -o "$(DEMO_DIR)/dufflebag" ./cmd/dufflebag; \
+	$(PACKER_E2E_DOCKER) pull $(DEMO_IMAGE); \
+	$(PACKER_E2E_DOCKER) network create $(DEMO_NET) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_CONTAINER) >/dev/null 2>&1 || true; \
-	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_CONTAINER) -e POSTGRES_PASSWORD=postgres \
+	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_CONTAINER) --network $(DEMO_NET) --network-alias postgres -e POSTGRES_PASSWORD=postgres \
 		-e POSTGRES_DB=dufflebag -p 127.0.0.1::5432 postgres:17-alpine >/dev/null; \
 	pg=$$($(PACKER_E2E_DOCKER) port $(DEMO_CONTAINER) 5432/tcp | head -1 | sed 's/.*://'); \
 	for _ in $$(seq 1 60); do $(PACKER_E2E_DOCKER) exec $(DEMO_CONTAINER) pg_isready -U postgres -d dufflebag >/dev/null 2>&1 && break; sleep 1; done; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_S3_CONTAINER) >/dev/null 2>&1 || true; \
-	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_S3_CONTAINER) -p 127.0.0.1::8000 $(DEMO_S3_IMAGE) >/dev/null; \
+	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_S3_CONTAINER) --network $(DEMO_NET) --network-alias s3 -p 127.0.0.1::8000 $(DEMO_S3_IMAGE) >/dev/null; \
 	s3=$$($(PACKER_E2E_DOCKER) port $(DEMO_S3_CONTAINER) 8000/tcp | head -1 | sed 's/.*://'); \
 	echo "waiting for Ceph (this takes a minute or so)"; \
 	ready=; \
@@ -539,7 +551,7 @@ demo-up: build ## Stand up a long-lived demo instance and claim it
 	$(PACKER_E2E_DOCKER) exec $(DEMO_S3_CONTAINER) python3 /tmp/create-bucket.py \
 		demoaccess demosecret $(DEMO_S3_BUCKET) >/dev/null; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_VAULT_CONTAINER) >/dev/null 2>&1 || true; \
-	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_VAULT_CONTAINER) \
+	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_VAULT_CONTAINER) --network $(DEMO_NET) --network-alias vault \
 		-e VAULT_DEV_ROOT_TOKEN_ID=$(DEMO_VAULT_TOKEN) -p 127.0.0.1::8200 \
 		$(DEMO_VAULT_IMAGE) >/dev/null; \
 	vault_port=$$($(PACKER_E2E_DOCKER) port $(DEMO_VAULT_CONTAINER) 8200/tcp | head -1 | sed 's/.*://'); \
@@ -549,24 +561,26 @@ demo-up: build ## Stand up a long-lived demo instance and claim it
 	curl -sf -X POST "http://127.0.0.1:$$vault_port/v1/sys/mounts/transit" \
 		-H "X-Vault-Token: $(DEMO_VAULT_TOKEN)" -d '{"type":"transit"}' >/dev/null || { \
 		echo "FAIL demo-up: could not mount the transit engine"; exit 1; }; \
-	sk=$$(openssl rand -hex 32); \
-	DFBG_DATABASE_URL="postgres://postgres:postgres@127.0.0.1:$$pg/dufflebag?sslmode=disable" \
-		DFBG_TOKEN_SIGNING_KEY="$$sk" "$(DEMO_DIR)/dufflebag" 2>&1 | grep -q 'refusing to serve' || true; \
+	$(PACKER_E2E_DOCKER) run --rm --network $(DEMO_NET) \
+		-e DFBG_DATABASE_URL="postgres://postgres:postgres@postgres:5432/dufflebag?sslmode=disable" \
+		$(DEMO_IMAGE) migrate >/dev/null; \
 	$(PACKER_E2E_DOCKER) exec $(DEMO_CONTAINER) psql -q -v ON_ERROR_STOP=1 -U postgres -d dufflebag \
 		-c "CREATE ROLE dufflebag_app LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS" \
 		-c 'GRANT USAGE ON SCHEMA public TO dufflebag_app' \
 		-c 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app' >/dev/null; \
-	nohup env DFBG_DATABASE_URL="postgres://dufflebag_app:app@127.0.0.1:$$pg/dufflebag?sslmode=disable" \
-		DFBG_HTTP_ADDR=127.0.0.1:$(DEMO_PORT) \
-		DFBG_TLS_CERT_FILE="$(PACKER_E2E_CERT_FILE)" DFBG_TLS_KEY_FILE="$(PACKER_E2E_KEY_FILE)" \
-		DFBG_KEY_PROVIDER=vault VAULT_ADDR="http://127.0.0.1:$$vault_port" \
-		VAULT_TOKEN=$(DEMO_VAULT_TOKEN) \
-		DFBG_OBJECT_STORAGE_ENDPOINT="http://127.0.0.1:$$s3" DFBG_OBJECT_STORAGE_REGION=us-east-1 \
-		DFBG_OBJECT_STORAGE_BUCKET=$(DEMO_S3_BUCKET) \
-		DFBG_OBJECT_STORAGE_ACCESS_KEY=demoaccess DFBG_OBJECT_STORAGE_SECRET_KEY=demosecret \
-		DFBG_SCANNER_ADAPTER=osv DFBG_SCANNER_ENDPOINT=https://api.osv.dev \
-		"$(DEMO_DIR)/dufflebag" > "$(DEMO_DIR)/server.log" 2>&1 & \
-	echo $$! > "$(DEMO_DIR)/server.pid"; sleep 3; \
+	$(PACKER_E2E_DOCKER) run -d --name $(DEMO_SERVER_CONTAINER) --network $(DEMO_NET) \
+		-p 127.0.0.1:$(DEMO_PORT):$(DEMO_PORT) \
+		-v "$(PACKER_E2E_CERT_FILE)":/tls/tls.crt:ro -v "$(PACKER_E2E_KEY_FILE)":/tls/tls.key:ro \
+		-e DFBG_DATABASE_URL="postgres://dufflebag_app:app@postgres:5432/dufflebag?sslmode=disable" \
+		-e DFBG_HTTP_ADDR=0.0.0.0:$(DEMO_PORT) \
+		-e DFBG_TLS_CERT_FILE=/tls/tls.crt -e DFBG_TLS_KEY_FILE=/tls/tls.key \
+		-e DFBG_KEY_PROVIDER=vault -e VAULT_ADDR="http://vault:8200" -e VAULT_TOKEN=$(DEMO_VAULT_TOKEN) \
+		-e DFBG_OBJECT_STORAGE_ENDPOINT="http://s3:8000" -e DFBG_OBJECT_STORAGE_REGION=us-east-1 \
+		-e DFBG_OBJECT_STORAGE_BUCKET=$(DEMO_S3_BUCKET) \
+		-e DFBG_OBJECT_STORAGE_ACCESS_KEY=demoaccess -e DFBG_OBJECT_STORAGE_SECRET_KEY=demosecret \
+		-e DFBG_SCANNER_ADAPTER=osv -e DFBG_SCANNER_ENDPOINT=https://api.osv.dev \
+		$(DEMO_IMAGE) >/dev/null; \
+	for _ in $$(seq 1 60); do curl -s --cacert "$(PACKER_E2E_CA_FILE)" "https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)/sys/health" >/dev/null 2>&1 && break; sleep 1; done; \
 	base="https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)"; \
 	curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" -X POST "$$base/sys/init" \
 		-H 'content-type: application/json' -d '{}' > "$(DEMO_DIR)/root.json"; \
@@ -712,8 +726,10 @@ demo-down: ## Tear down the demo stack and its tunnel
 	@set -e; \
 	[ -f "$(DEMO_DIR)/ngrok.pid" ] && kill "$$(cat $(DEMO_DIR)/ngrok.pid)" 2>/dev/null || true; \
 	[ -f "$(DEMO_DIR)/server.pid" ] && kill "$$(cat $(DEMO_DIR)/server.pid)" 2>/dev/null || true; \
+	$(PACKER_E2E_DOCKER) rm -f $(DEMO_SERVER_CONTAINER) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_CONTAINER) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_S3_CONTAINER) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_VAULT_CONTAINER) >/dev/null 2>&1 || true; \
+	$(PACKER_E2E_DOCKER) network rm $(DEMO_NET) >/dev/null 2>&1 || true; \
 	rm -f "$(DEMO_DIR)/ngrok.pid" "$(DEMO_DIR)/server.pid"; \
 	echo "demo stack down"
