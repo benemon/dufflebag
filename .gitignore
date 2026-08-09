@@ -8,3 +8,14 @@ web/tsconfig.tsbuildinfo
 # Local go build output
 /spec-drift
 /dufflebag
+
+# Credential and key material — these stay on the local machine and must never
+# be committed. hcp-packer-spn.env holds live HCP client credentials for the
+# manual live-conformance lane; the cert/key/CA files back the local TLS lanes.
+hcp-packer-spn.env
+*.env
+*.pem
+*.crt
+*.key
+*.p12
+*.pfx
