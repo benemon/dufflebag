@@ -34,6 +34,29 @@ var (
 	ErrInvalid        = errors.New("invalid bag drop configuration")
 	ErrResolution     = errors.New("bag drop destination did not resolve")
 	ErrCredentialSeal = errors.New("bag drop credential sealing unavailable")
+	ErrBucketNotFound = errors.New("bucket not found")
+	ErrCleanupPending = errors.New("bag drop destination cleanup is pending")
+)
+
+type AssociationState string
+
+const (
+	AssociationActive         AssociationState = "active"
+	AssociationPendingRemoval AssociationState = "pending_removal"
+)
+
+type SyncStatus string
+
+const (
+	SyncPending  SyncStatus = "pending"
+	SyncRemoving SyncStatus = "removing"
+)
+
+type RemovalOutcome string
+
+const (
+	RemovedClean   RemovalOutcome = "removed_clean"
+	RemovalPending RemovalOutcome = "removal_pending"
 )
 
 type HCPPackerConfig struct {
@@ -86,6 +109,30 @@ type Write struct {
 	Adapter      AdapterKind
 	HCPPacker    HCPPackerConfig
 	ClientSecret *string
+}
+
+type Association struct {
+	OrganizationID   string
+	ProjectID        string
+	BucketName       string
+	State            AssociationState
+	FirstAttemptedAt *time.Time
+	LastSyncedAt     *time.Time
+	CreatedAt        time.Time
+	UpdatedAt        time.Time
+}
+
+func (a Association) SyncStatus() SyncStatus {
+	if a.State == AssociationPendingRemoval {
+		return SyncRemoving
+	}
+	return SyncPending
+}
+
+type Status struct {
+	Configured   bool
+	Config       *Config
+	Associations []Association
 }
 
 func render(record *Record) *Config {

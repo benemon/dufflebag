@@ -115,7 +115,11 @@ ON CONFLICT (organization_id, project_id) DO UPDATE SET
 RETURNING *;
 
 -- name: DeleteBagDropConfig :execrows
-DELETE FROM bagdrop_configs;
+DELETE FROM bagdrop_configs
+WHERE NOT EXISTS (
+    SELECT 1 FROM bagdrop_associations
+    WHERE state = 'pending_removal' OR first_attempted_at IS NOT NULL
+);
 
 -- name: RecordBagDropVerification :one
 UPDATE bagdrop_configs
@@ -131,6 +135,58 @@ RETURNING *;
 UPDATE bagdrop_configs
 SET enabled = false, updated_at = $1
 RETURNING *;
+
+-- name: ListBagDropAssociations :many
+SELECT *
+FROM bagdrop_associations
+ORDER BY created_at, bucket_name;
+
+-- name: UpsertBagDropAssociation :one
+INSERT INTO bagdrop_associations (
+    organization_id, project_id, bucket_name, state, first_attempted_at,
+    last_synced_at, created_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+ON CONFLICT (organization_id, project_id, bucket_name) DO UPDATE SET
+    state = EXCLUDED.state,
+    first_attempted_at = COALESCE(
+        bagdrop_associations.first_attempted_at, EXCLUDED.first_attempted_at
+    ),
+    last_synced_at = COALESCE(
+        bagdrop_associations.last_synced_at, EXCLUDED.last_synced_at
+    ),
+    updated_at = CASE
+        WHEN bagdrop_associations.state <> EXCLUDED.state THEN EXCLUDED.updated_at
+        ELSE bagdrop_associations.updated_at
+    END
+RETURNING *;
+
+-- name: BagDropBucketExists :one
+SELECT EXISTS (SELECT 1 FROM buckets WHERE name = $1);
+
+-- name: RemoveBagDropAssociation :one
+WITH hard_deleted AS (
+    DELETE FROM bagdrop_associations
+    WHERE bagdrop_associations.bucket_name = $1
+      AND bagdrop_associations.first_attempted_at IS NULL
+    RETURNING bagdrop_associations.bucket_name
+), pending AS (
+    UPDATE bagdrop_associations
+    SET state = 'pending_removal', updated_at = $2
+    WHERE bagdrop_associations.bucket_name = $1
+      AND bagdrop_associations.first_attempted_at IS NOT NULL
+    RETURNING bagdrop_associations.bucket_name
+)
+SELECT CASE
+    WHEN EXISTS (SELECT 1 FROM pending) THEN 'removal_pending'
+    ELSE 'removed_clean'
+END AS outcome;
+
+-- name: HasBlockingBagDropAssociations :one
+SELECT EXISTS (
+    SELECT 1 FROM bagdrop_associations
+    WHERE state = 'pending_removal' OR first_attempted_at IS NOT NULL
+);
 
 -- name: CreateBucket :one
 INSERT INTO buckets (

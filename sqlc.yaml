@@ -18,6 +18,7 @@ sql:
       - internal/store/postgres/migrations/000018_secret_expiry.up.sql
       - internal/store/postgres/migrations/000022_pins.up.sql
       - internal/store/postgres/migrations/000023_bagdrop_configs.up.sql
+      - internal/store/postgres/migrations/000024_bagdrop_associations.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

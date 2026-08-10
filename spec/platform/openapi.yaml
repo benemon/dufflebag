@@ -1080,17 +1080,110 @@ paths:
       tags: [bagdrop]
       operationId: deleteBagDropConfig
       summary: Remove a project's Bag Drop destination configuration
-      description: Refuses while enabled; disable the configuration first.
+      description: |
+        Refuses while enabled or while destination cleanup is outstanding.
+        Clean associations which have never been attempted cascade with the
+        configuration.
       responses:
         "204": { description: Configuration removed. }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: The configuration is enabled.
+          description: The configuration is enabled or destination cleanup is outstanding.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BagDropConflict" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [bagdrop]
+      operationId: listBagDropAssociations
+      summary: List buckets selected for Bag Drop
+      description: Requires maintainer on this project.
+      responses:
+        "200":
+          description: Bucket associations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  associations:
+                    type: array
+                    items: { $ref: "#/components/schemas/BagDropAssociation" }
+                required: [associations]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - name: bucketName
+        in: path
+        required: true
+        schema: { type: string }
+    put:
+      tags: [bagdrop]
+      operationId: setBagDropAssociation
+      summary: Select a bucket for Bag Drop
+      description: |
+        Idempotently associates an existing local bucket. Re-associating a
+        pending removal reactivates it. Requires maintainer on this project and
+        an existing Bag Drop configuration.
+      responses:
+        "200":
+          description: Associated.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropAssociation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: Bag Drop is not configured, or the local bucket does not exist.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [bagdrop]
+      operationId: deleteBagDropAssociation
+      summary: Stop mirroring a bucket through Bag Drop
+      description: |
+        This is the consent boundary for destination-side deletion. An
+        association never attempted is removed immediately; otherwise it is
+        retained as pending removal for the reconciler. Requires maintainer.
+      responses:
+        "204": { description: Un-associated or marked for removal. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [bagdrop]
+      operationId: getBagDropStatus
+      summary: Read Bag Drop dashboard status
+      description: |
+        Returns configured false with an empty association list when no Bag
+        Drop configuration exists. This is the reader-visible Bag Drop surface
+        and never returns credential material.
+      responses:
+        "200":
+          description: Bag Drop status.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropStatus" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
 
   /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify:
     parameters:
@@ -1757,6 +1850,47 @@ components:
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
       required: [adapter, hcp_packer, secret_set, enabled, last_verification, created_at, updated_at]
+
+    BagDropAssociationState:
+      type: string
+      enum: [active, pending_removal]
+
+    BagDropSyncStatus:
+      type: string
+      enum: [pending, synced, removing]
+
+    BagDropAssociation:
+      type: object
+      properties:
+        bucket_name: { type: string }
+        state: { $ref: "#/components/schemas/BagDropAssociationState" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+        first_attempted_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_synced_at:
+          type: string
+          format: date-time
+          nullable: true
+        sync_status: { $ref: "#/components/schemas/BagDropSyncStatus" }
+      required: [bucket_name, state, created_at, updated_at, first_attempted_at, last_synced_at, sync_status]
+
+    BagDropStatus:
+      type: object
+      properties:
+        configured: { type: boolean }
+        adapter: { $ref: "#/components/schemas/BagDropAdapter" }
+        enabled: { type: boolean }
+        last_verification:
+          allOf:
+            - $ref: "#/components/schemas/BagDropLastVerification"
+          nullable: true
+        associations:
+          type: array
+          items: { $ref: "#/components/schemas/BagDropAssociation" }
+      required: [configured, associations]
 
     BagDropConflict:
       type: object

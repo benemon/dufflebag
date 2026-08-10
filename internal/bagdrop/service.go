@@ -13,6 +13,11 @@ type Repository interface {
 	DeleteBagDropConfig(context.Context, string, string) error
 	RecordBagDropVerification(context.Context, string, string, VerificationResult, time.Time) (*Record, error)
 	SetBagDropEnabled(context.Context, string, string, bool, *VerificationResult, time.Time) (*Record, error)
+	ListBagDropAssociations(context.Context, string, string) ([]Association, error)
+	PutBagDropAssociation(context.Context, Association) (*Association, error)
+	RemoveBagDropAssociation(context.Context, string, string, string, time.Time) (RemovalOutcome, error)
+	BagDropBucketExists(context.Context, string, string, string) (bool, error)
+	HasBlockingBagDropAssociations(context.Context, string, string) (bool, error)
 }
 
 type Service struct {
@@ -99,7 +104,65 @@ func (s *Service) Delete(ctx context.Context, organizationID, projectID string) 
 	if record.Enabled {
 		return ErrEnabled
 	}
+	blocked, err := s.repository.HasBlockingBagDropAssociations(ctx, organizationID, projectID)
+	if err != nil {
+		return err
+	}
+	if blocked {
+		return ErrCleanupPending
+	}
 	return s.repository.DeleteBagDropConfig(ctx, organizationID, projectID)
+}
+
+func (s *Service) ListAssociations(
+	ctx context.Context, organizationID, projectID string,
+) ([]Association, error) {
+	return s.repository.ListBagDropAssociations(ctx, organizationID, projectID)
+}
+
+func (s *Service) Associate(
+	ctx context.Context, organizationID, projectID, bucketName string,
+) (*Association, error) {
+	if _, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID); err != nil {
+		return nil, err
+	}
+	exists, err := s.repository.BagDropBucketExists(ctx, organizationID, projectID, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrBucketNotFound
+	}
+	now := s.now().UTC()
+	return s.repository.PutBagDropAssociation(ctx, Association{
+		OrganizationID: organizationID, ProjectID: projectID, BucketName: bucketName,
+		State: AssociationActive, CreatedAt: now, UpdatedAt: now,
+	})
+}
+
+func (s *Service) Unassociate(
+	ctx context.Context, organizationID, projectID, bucketName string,
+) (RemovalOutcome, error) {
+	return s.repository.RemoveBagDropAssociation(
+		ctx, organizationID, projectID, bucketName, s.now().UTC(),
+	)
+}
+
+func (s *Service) Status(
+	ctx context.Context, organizationID, projectID string,
+) (*Status, error) {
+	record, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
+	if errors.Is(err, ErrNotFound) {
+		return &Status{Associations: []Association{}}, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	associations, err := s.repository.ListBagDropAssociations(ctx, organizationID, projectID)
+	if err != nil {
+		return nil, err
+	}
+	return &Status{Configured: true, Config: render(record), Associations: associations}, nil
 }
 
 func (s *Service) Verify(

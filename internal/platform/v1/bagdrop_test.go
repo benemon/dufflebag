@@ -154,6 +154,7 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 		{http.MethodPost, bagDropPath("verify"), nil},
 		{http.MethodPost, bagDropPath("enable"), nil},
 		{http.MethodPost, bagDropPath("disable"), nil},
+		{http.MethodGet, bagDropPath("status"), nil},
 	}
 	for _, request := range requests {
 		response := call(t, handler, request.method, request.path, request.body, testToken)
@@ -175,6 +176,110 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("client_secret")) {
 		t.Fatalf("generated BagDropConfig read shape exposed secret material: %s", encoded)
 	}
+	encoded, err = json.Marshal(renderBagDropStatus(&bagdrop.Status{
+		Configured: true, Config: service.config(), Associations: []bagdrop.Association{},
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("client_secret")) ||
+		bytes.Contains(encoded, []byte("sealed_secret")) {
+		t.Fatalf("generated BagDropStatus read shape exposed secret material: %s", encoded)
+	}
+}
+
+func TestBagDropStatusReaderRoleAndAssociationRefusals(t *testing.T) {
+	for _, role := range []identity.Role{
+		identity.RoleReader, identity.RoleBuilder, identity.RolePublisher, identity.RoleMaintainer,
+	} {
+		handler, trail := auditedPlatform(t, bagDropHandler(role, &fakeBagDropService{}))
+		response := call(t, handler, http.MethodGet, bagDropPath("status"), nil, testToken)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s status = %d: %s", role, response.Code, response.Body)
+		}
+		if event := trail.response(t); event["operation"] != "bagdrop.status.read" ||
+			event["outcome"] != "success" {
+			t.Fatalf("%s audit = %#v", role, event)
+		}
+	}
+	reader := bagDropHandler(identity.RoleReader, &fakeBagDropService{})
+	for _, operation := range bagDropAssociationOperations() {
+		response := call(t, reader, operation.method, operation.path, operation.body, testToken)
+		if response.Code != http.StatusForbidden {
+			t.Fatalf("reader %s = %d: %s", operation.name, response.Code, response.Body)
+		}
+	}
+}
+
+func TestBagDropAssociationRefusalShapes(t *testing.T) {
+	for _, test := range []struct {
+		name, message string
+		err           error
+	}{
+		{"without config", "Bag Drop is not configured", bagdrop.ErrNotFound},
+		{"without bucket", "bucket not found", bagdrop.ErrBucketNotFound},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := &fakeBagDropService{associateErr: test.err}
+			response := call(
+				t, bagDropHandler(identity.RoleMaintainer, service), http.MethodPut,
+				bagDropPath("buckets/images"), nil, testToken,
+			)
+			if response.Code != http.StatusNotFound || !strings.Contains(response.Body.String(), test.message) {
+				t.Fatalf("response = %d: %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
+func TestBagDropAssociationDeleteAuditDistinguishesOutcome(t *testing.T) {
+	for _, outcome := range []bagdrop.RemovalOutcome{bagdrop.RemovedClean, bagdrop.RemovalPending} {
+		service := &fakeBagDropService{removalOutcome: outcome}
+		handler, trail := auditedPlatform(t, bagDropHandler(identity.RoleMaintainer, service))
+		response := call(t, handler, http.MethodDelete, bagDropPath("buckets/images"), nil, testToken)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("%s status = %d: %s", outcome, response.Code, response.Body)
+		}
+		if event := trail.response(t); event["reason"] != string(outcome) {
+			t.Fatalf("%s audit = %#v", outcome, event)
+		}
+	}
+}
+
+func TestBagDropStatusWithoutConfigAndForeignProject(t *testing.T) {
+	service := &fakeBagDropService{status: &bagdrop.Status{Associations: []bagdrop.Association{}}}
+	response := call(
+		t, bagDropHandler(identity.RoleReader, service), http.MethodGet,
+		bagDropPath("status"), nil, testToken,
+	)
+	if response.Code != http.StatusOK ||
+		response.Body.String() != "{\"associations\":[],\"configured\":false}\n" {
+		t.Fatalf("unconfigured status = %d: %s", response.Code, response.Body)
+	}
+	foreign := pinIdentity{
+		id: "foreign", role: identity.RoleReader,
+		scope: identity.Scope{OrganizationID: uuid.New(), ProjectID: uuid.New()},
+	}
+	handler := newHandlerWithBagDrop(
+		bagDropProjectRepository(), &fakeInstanceRepository{}, foreign, foreign,
+		testLogger(), service, time.Now,
+	)
+	response = call(t, handler, http.MethodGet, bagDropPath("status"), nil, testToken)
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("foreign status = %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestBagDropConfigDeleteCleanupGuardResponse(t *testing.T) {
+	service := &fakeBagDropService{deleteErr: bagdrop.ErrCleanupPending}
+	response := call(
+		t, bagDropHandler(identity.RoleMaintainer, service), http.MethodDelete,
+		bagDropPath(""), nil, testToken,
+	)
+	if response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "cleanup is pending") {
+		t.Fatalf("delete guard = %d: %s", response.Code, response.Body)
+	}
 }
 
 type bagDropOperation struct {
@@ -184,13 +289,21 @@ type bagDropOperation struct {
 }
 
 func bagDropOperations() []bagDropOperation {
-	return []bagDropOperation{
+	return append([]bagDropOperation{
 		{"get", http.MethodGet, bagDropPath(""), "bagdrop.config.read", nil, http.StatusOK},
 		{"put", http.MethodPut, bagDropPath(""), "bagdrop.config.write", bagDropWriteBody(), http.StatusOK},
 		{"delete", http.MethodDelete, bagDropPath(""), "bagdrop.config.delete", nil, http.StatusNoContent},
 		{"verify", http.MethodPost, bagDropPath("verify"), "bagdrop.verify", nil, http.StatusOK},
 		{"enable", http.MethodPost, bagDropPath("enable"), "bagdrop.enable", nil, http.StatusOK},
 		{"disable", http.MethodPost, bagDropPath("disable"), "bagdrop.disable", nil, http.StatusOK},
+	}, bagDropAssociationOperations()...)
+}
+
+func bagDropAssociationOperations() []bagDropOperation {
+	return []bagDropOperation{
+		{"association-list", http.MethodGet, bagDropPath("buckets"), "bagdrop.association.list", nil, http.StatusOK},
+		{"association-set", http.MethodPut, bagDropPath("buckets/images"), "bagdrop.association.set", nil, http.StatusOK},
+		{"association-delete", http.MethodDelete, bagDropPath("buckets/images"), "bagdrop.association.delete", nil, http.StatusNoContent},
 	}
 }
 
@@ -229,7 +342,12 @@ func bagDropHandler(role identity.Role, service BagDropService) http.Handler {
 	)
 }
 
-type fakeBagDropService struct{}
+type fakeBagDropService struct {
+	associateErr   error
+	deleteErr      error
+	removalOutcome bagdrop.RemovalOutcome
+	status         *bagdrop.Status
+}
 
 func (*fakeBagDropService) config() *bagdrop.Config {
 	return &bagdrop.Config{
@@ -251,7 +369,7 @@ func (s *fakeBagDropService) Put(
 	return s.config(), nil, nil
 }
 
-func (*fakeBagDropService) Delete(context.Context, string, string) error { return nil }
+func (s *fakeBagDropService) Delete(context.Context, string, string) error { return s.deleteErr }
 
 func (*fakeBagDropService) Verify(context.Context, string, string) (bagdrop.VerificationResult, error) {
 	return bagdrop.VerificationResult{Outcome: bagdrop.OutcomeResolved}, nil
@@ -269,6 +387,40 @@ func (s *fakeBagDropService) Disable(context.Context, string, string) (*bagdrop.
 	return s.config(), nil
 }
 
+func (*fakeBagDropService) ListAssociations(
+	context.Context, string, string,
+) ([]bagdrop.Association, error) {
+	return []bagdrop.Association{}, nil
+}
+
+func (s *fakeBagDropService) Associate(
+	_ context.Context, organizationID, projectID, bucketName string,
+) (*bagdrop.Association, error) {
+	if s.associateErr != nil {
+		return nil, s.associateErr
+	}
+	return &bagdrop.Association{
+		OrganizationID: organizationID, ProjectID: projectID, BucketName: bucketName,
+		State: bagdrop.AssociationActive, CreatedAt: initTestTime, UpdatedAt: initTestTime,
+	}, nil
+}
+
+func (s *fakeBagDropService) Unassociate(
+	context.Context, string, string, string,
+) (bagdrop.RemovalOutcome, error) {
+	if s.removalOutcome == "" {
+		return bagdrop.RemovedClean, nil
+	}
+	return s.removalOutcome, nil
+}
+
+func (s *fakeBagDropService) Status(context.Context, string, string) (*bagdrop.Status, error) {
+	if s.status != nil {
+		return s.status, nil
+	}
+	return &bagdrop.Status{Configured: true, Config: s.config(), Associations: []bagdrop.Association{}}, nil
+}
+
 type handlerBagDropAdapter struct {
 	result bagdrop.VerificationResult
 	calls  int
@@ -282,6 +434,36 @@ func (a *handlerBagDropAdapter) Resolve(context.Context, bagdrop.Destination) ba
 type handlerBagDropRepository struct {
 	record      *bagdrop.Record
 	enableCalls int
+}
+
+func (*handlerBagDropRepository) ListBagDropAssociations(
+	context.Context, string, string,
+) ([]bagdrop.Association, error) {
+	return nil, nil
+}
+
+func (*handlerBagDropRepository) PutBagDropAssociation(
+	_ context.Context, association bagdrop.Association,
+) (*bagdrop.Association, error) {
+	return &association, nil
+}
+
+func (*handlerBagDropRepository) RemoveBagDropAssociation(
+	context.Context, string, string, string, time.Time,
+) (bagdrop.RemovalOutcome, error) {
+	return bagdrop.RemovedClean, nil
+}
+
+func (*handlerBagDropRepository) BagDropBucketExists(
+	context.Context, string, string, string,
+) (bool, error) {
+	return true, nil
+}
+
+func (*handlerBagDropRepository) HasBlockingBagDropAssociations(
+	context.Context, string, string,
+) (bool, error) {
+	return false, nil
 }
 
 func (r *handlerBagDropRepository) GetBagDropConfig(context.Context, string, string) (*bagdrop.Record, error) {

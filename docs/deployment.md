@@ -134,6 +134,11 @@ HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
 hosts. No background mirroring runs in this release; the enabled flag is only
 configuration state until the later reconciler slice arrives.
 
+Bag Drop associations select which project buckets will mirror. Removing an
+association is the consent boundary for deleting its destination-side copy
+once syncing exists; this release records that intent without contacting the
+destination.
+
 The destination client secret is always stored in an AES-256-GCM envelope. On
 an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32
 random bytes. Without it, ordinary reads and deletion of a disabled existing
