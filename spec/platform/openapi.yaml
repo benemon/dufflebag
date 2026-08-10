@@ -4,8 +4,8 @@ openapi: 3.0.3
 # before implementation per ADR-0007.
 #
 # It covers only what HCP's platform APIs cover and we are deliberately not
-# cloning — tenancy, principals, authorization — plus project pins, which have
-# no representation in the HCP Packer API at all. Everything a Packer or
+# cloning — tenancy, principals, authorization — plus project pins and Bag Drop
+# configuration, which have no representation in the HCP Packer API at all. Everything a Packer or
 # Terraform client touches lives in the frozen compatibility plane instead; see
 # ADR-0001.
 
@@ -13,7 +13,8 @@ info:
   title: dufflebag platform API
   version: "1.0.0"
   description: |
-    Tenancy, service principals and project pins for a dufflebag registry.
+    Tenancy, service principals, project pins and Bag Drop configuration for a
+    dufflebag registry.
 
     This is not an HCP-compatible surface and makes no attempt to be. The
     compatibility plane at /packer/2023-01-01/... and /resource-manager/... is
@@ -36,6 +37,8 @@ tags:
     description: Service principals and their secrets.
   - name: pins
     description: Per-project pinned buckets.
+  - name: bagdrop
+    description: Per-project outbound registry destination configuration.
   - name: session
     description: The console's cookie-backed session.
   - name: audit
@@ -1014,6 +1017,152 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [bagdrop]
+      operationId: getBagDropConfig
+      summary: Read a project's Bag Drop destination configuration
+      description: |
+        Returns only non-secret destination fields. The client secret is never
+        returned; `secret_set` reports that the write-only credential exists.
+        Requires maintainer on this project. A tenancy the caller may not see
+        answers 404, indistinguishable from one that does not exist.
+      responses:
+        "200":
+          description: Configured destination.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [bagdrop]
+      operationId: putBagDropConfig
+      summary: Create or replace a project's Bag Drop destination configuration
+      description: |
+        `client_secret` is required when no configuration exists. On update it
+        may be omitted to retain the existing sealed secret.
+
+        A disabled configuration is stored without contacting the destination.
+        Changing connection details while enabled re-runs destination resolution
+        inline. A failed resolution answers 409 with the result and leaves the
+        stored configuration unchanged, preserving the invariant that enabled
+        means last-known-resolvable.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BagDropConfigWrite" }
+      responses:
+        "200":
+          description: Created or replaced configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConfig" }
+        "400":
+          description: Invalid configuration, including a missing create credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Credential sealing is unavailable, or an enabled replacement did not resolve.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConflict" }
+    delete:
+      tags: [bagdrop]
+      operationId: deleteBagDropConfig
+      summary: Remove a project's Bag Drop destination configuration
+      description: Refuses while enabled; disable the configuration first.
+      responses:
+        "204": { description: Configuration removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The configuration is enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConflict" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [bagdrop]
+      operationId: verifyBagDrop
+      summary: Resolve the configured destination and record the result
+      description: |
+        Resolution failure is a report, not an API error, so both resolved and
+        failed outcomes answer 200 and become the last verification.
+      responses:
+        "200":
+          description: Destination resolution result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropVerificationResult" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The configured credential cannot be unsealed on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConflict" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [bagdrop]
+      operationId: enableBagDrop
+      summary: Verify and enable the configured destination
+      description: |
+        Always re-runs destination resolution server-side. Success records the
+        resolved result and enables the configuration. Failure answers 409 with
+        the verification result and leaves the configuration unchanged.
+      responses:
+        "200":
+          description: Enabled configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The credential cannot be unsealed or the destination did not resolve.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConflict" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [bagdrop]
+      operationId: disableBagDrop
+      summary: Disable the configured destination without contacting it
+      responses:
+        "200":
+          description: Disabled configuration.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BagDropConfig" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1537,3 +1686,81 @@ components:
           type: string
           description: Principal id. Recorded because a pin is a shared write.
       required: [bucket_name, pinned_at]
+
+    BagDropAdapter:
+      type: string
+      enum: [hcp-packer]
+
+    BagDropHCPPackerWrite:
+      type: object
+      properties:
+        organization_id: { type: string }
+        project_id: { type: string }
+        client_id: { type: string }
+        client_secret:
+          type: string
+          description: Write-only. Required on create; omit on update to keep the existing sealed secret.
+      required: [organization_id, project_id, client_id]
+
+    BagDropHCPPacker:
+      type: object
+      properties:
+        organization_id: { type: string }
+        project_id: { type: string }
+        client_id: { type: string }
+      required: [organization_id, project_id, client_id]
+
+    BagDropConfigWrite:
+      type: object
+      properties:
+        adapter: { $ref: "#/components/schemas/BagDropAdapter" }
+        hcp_packer: { $ref: "#/components/schemas/BagDropHCPPackerWrite" }
+      required: [adapter, hcp_packer]
+
+    BagDropVerificationOutcome:
+      type: string
+      enum: [resolved, failed]
+
+    BagDropVerificationReason:
+      type: string
+      enum: [credential_refused, project_not_found, unreachable, tls_failure]
+
+    BagDropVerificationResult:
+      type: object
+      properties:
+        outcome: { $ref: "#/components/schemas/BagDropVerificationOutcome" }
+        reason: { $ref: "#/components/schemas/BagDropVerificationReason" }
+        message: { type: string }
+      required: [outcome]
+
+    BagDropLastVerification:
+      allOf:
+        - $ref: "#/components/schemas/BagDropVerificationResult"
+        - type: object
+          properties:
+            verified_at: { type: string, format: date-time }
+          required: [verified_at]
+
+    BagDropConfig:
+      type: object
+      properties:
+        adapter: { $ref: "#/components/schemas/BagDropAdapter" }
+        hcp_packer: { $ref: "#/components/schemas/BagDropHCPPacker" }
+        secret_set:
+          type: boolean
+          description: Always true for a stored configuration; the secret itself is never returned.
+        enabled: { type: boolean }
+        last_verification:
+          allOf:
+            - $ref: "#/components/schemas/BagDropLastVerification"
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required: [adapter, hcp_packer, secret_set, enabled, last_verification, created_at, updated_at]
+
+    BagDropConflict:
+      type: object
+      properties:
+        message: { type: string }
+        verification: { $ref: "#/components/schemas/BagDropVerificationResult" }
+      required: [message]

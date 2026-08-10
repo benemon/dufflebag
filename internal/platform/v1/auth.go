@@ -385,6 +385,24 @@ func (response refusalResponse) VisitSetPinResponse(w http.ResponseWriter) error
 func (response refusalResponse) VisitDeletePinResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListAuditTargetsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

@@ -96,6 +96,63 @@ func (e AuditTargetOpenErrorReason) Valid() bool {
 	}
 }
 
+// Defines values for BagDropAdapter.
+const (
+	HcpPacker BagDropAdapter = "hcp-packer"
+)
+
+// Valid indicates whether the value is a known member of the BagDropAdapter enum.
+func (e BagDropAdapter) Valid() bool {
+	switch e {
+	case HcpPacker:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BagDropVerificationOutcome.
+const (
+	Failed   BagDropVerificationOutcome = "failed"
+	Resolved BagDropVerificationOutcome = "resolved"
+)
+
+// Valid indicates whether the value is a known member of the BagDropVerificationOutcome enum.
+func (e BagDropVerificationOutcome) Valid() bool {
+	switch e {
+	case Failed:
+		return true
+	case Resolved:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BagDropVerificationReason.
+const (
+	BagDropVerificationReasonCredentialRefused BagDropVerificationReason = "credential_refused"
+	BagDropVerificationReasonProjectNotFound   BagDropVerificationReason = "project_not_found"
+	BagDropVerificationReasonTlsFailure        BagDropVerificationReason = "tls_failure"
+	BagDropVerificationReasonUnreachable       BagDropVerificationReason = "unreachable"
+)
+
+// Valid indicates whether the value is a known member of the BagDropVerificationReason enum.
+func (e BagDropVerificationReason) Valid() bool {
+	switch e {
+	case BagDropVerificationReasonCredentialRefused:
+		return true
+	case BagDropVerificationReasonProjectNotFound:
+		return true
+	case BagDropVerificationReasonTlsFailure:
+		return true
+	case BagDropVerificationReasonUnreachable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EncryptionState.
 const (
 	EncryptionStateDegraded     EncryptionState = "degraded"
@@ -402,6 +459,72 @@ type AuditTargetOpenError struct {
 
 // AuditTargetOpenErrorReason defines model for AuditTargetOpenError.Reason.
 type AuditTargetOpenErrorReason string
+
+// BagDropAdapter defines model for BagDropAdapter.
+type BagDropAdapter string
+
+// BagDropConfig defines model for BagDropConfig.
+type BagDropConfig struct {
+	Adapter          BagDropAdapter           `json:"adapter"`
+	CreatedAt        time.Time                `json:"created_at"`
+	Enabled          bool                     `json:"enabled"`
+	HcpPacker        BagDropHCPPacker         `json:"hcp_packer"`
+	LastVerification *BagDropLastVerification `json:"last_verification"`
+
+	// SecretSet Always true for a stored configuration; the secret itself is never returned.
+	SecretSet bool      `json:"secret_set"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// BagDropConfigWrite defines model for BagDropConfigWrite.
+type BagDropConfigWrite struct {
+	Adapter   BagDropAdapter        `json:"adapter"`
+	HcpPacker BagDropHCPPackerWrite `json:"hcp_packer"`
+}
+
+// BagDropConflict defines model for BagDropConflict.
+type BagDropConflict struct {
+	Message      string                     `json:"message"`
+	Verification *BagDropVerificationResult `json:"verification,omitempty"`
+}
+
+// BagDropHCPPacker defines model for BagDropHCPPacker.
+type BagDropHCPPacker struct {
+	ClientId       string `json:"client_id"`
+	OrganizationId string `json:"organization_id"`
+	ProjectId      string `json:"project_id"`
+}
+
+// BagDropHCPPackerWrite defines model for BagDropHCPPackerWrite.
+type BagDropHCPPackerWrite struct {
+	ClientId string `json:"client_id"`
+
+	// ClientSecret Write-only. Required on create; omit on update to keep the existing sealed secret.
+	ClientSecret   *string `json:"client_secret,omitempty"`
+	OrganizationId string  `json:"organization_id"`
+	ProjectId      string  `json:"project_id"`
+}
+
+// BagDropLastVerification defines model for BagDropLastVerification.
+type BagDropLastVerification struct {
+	Message    *string                    `json:"message,omitempty"`
+	Outcome    BagDropVerificationOutcome `json:"outcome"`
+	Reason     *BagDropVerificationReason `json:"reason,omitempty"`
+	VerifiedAt time.Time                  `json:"verified_at"`
+}
+
+// BagDropVerificationOutcome defines model for BagDropVerificationOutcome.
+type BagDropVerificationOutcome string
+
+// BagDropVerificationReason defines model for BagDropVerificationReason.
+type BagDropVerificationReason string
+
+// BagDropVerificationResult defines model for BagDropVerificationResult.
+type BagDropVerificationResult struct {
+	Message *string                    `json:"message,omitempty"`
+	Outcome BagDropVerificationOutcome `json:"outcome"`
+	Reason  *BagDropVerificationReason `json:"reason,omitempty"`
+}
 
 // Encryption defines model for Encryption.
 type Encryption struct {
@@ -877,6 +1000,9 @@ type CreateOrganizationJSONRequestBody CreateOrganizationJSONBody
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody CreateProjectJSONBody
 
+// PutBagDropConfigJSONRequestBody defines body for PutBagDropConfig for application/json ContentType.
+type PutBagDropConfigJSONRequestBody = BagDropConfigWrite
+
 // CreatePrincipalJSONRequestBody defines body for CreatePrincipal for application/json ContentType.
 type CreatePrincipalJSONRequestBody CreatePrincipalJSONBody
 
@@ -1213,6 +1339,77 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId} (the `GetProject` operationId).
 	GetProject(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteBagDropConfig Remove a project's Bag Drop destination configuration
+	//
+	// Refuses while enabled; disable the configuration first.
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
+	DeleteBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBagDropConfig Read a project's Bag Drop destination configuration
+	//
+	// Returns only non-secret destination fields. The client secret is never
+	// returned; `secret_set` reports that the write-only credential exists.
+	// Requires maintainer on this project. A tenancy the caller may not see
+	// answers 404, indistinguishable from one that does not exist.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
+	GetBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutBagDropConfigWithBody Create or replace a project's Bag Drop destination configuration
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// A disabled configuration is stored without contacting the destination.
+	// Changing connection details while enabled re-runs destination resolution
+	// inline. A failed resolution answers 409 with the result and leaves the
+	// stored configuration unchanged, preserving the invariant that enabled
+	// means last-known-resolvable.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+	PutBagDropConfigWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// A disabled configuration is stored without contacting the destination.
+	// Changing connection details while enabled re-runs destination resolution
+	// inline. A failed resolution answers 409 with the result and leaves the
+	// stored configuration unchanged, preserving the invariant that enabled
+	// means last-known-resolvable.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+	PutBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DisableBagDrop Disable the configured destination without contacting it
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
+	DisableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// EnableBagDrop Verify and enable the configured destination
+	//
+	// Always re-runs destination resolution server-side. Success records the
+	// resolved result and enables the configuration. Failure answers 409 with
+	// the verification result and leaves the configuration unchanged.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+	EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// VerifyBagDrop Resolve the configured destination and record the result
+	//
+	// Resolution failure is a report, not an API error, so both resolved and
+	// failed outcomes answer 200 and become the last verification.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
+	VerifyBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RescanBuild Queue a build for rescanning
 	//
@@ -1924,6 +2121,147 @@ func (c *Client) DeleteProject(ctx context.Context, organizationId OrganizationI
 // Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId} (the `GetProject` operationId).
 func (c *Client) GetProject(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetProjectRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteBagDropConfig Remove a project's Bag Drop destination configuration
+//
+// Refuses while enabled; disable the configuration first.
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
+func (c *Client) DeleteBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteBagDropConfigRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBagDropConfig Read a project's Bag Drop destination configuration
+//
+// Returns only non-secret destination fields. The client secret is never
+// returned; `secret_set` reports that the write-only credential exists.
+// Requires maintainer on this project. A tenancy the caller may not see
+// answers 404, indistinguishable from one that does not exist.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
+func (c *Client) GetBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBagDropConfigRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutBagDropConfigWithBody Create or replace a project's Bag Drop destination configuration
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// A disabled configuration is stored without contacting the destination.
+// Changing connection details while enabled re-runs destination resolution
+// inline. A failed resolution answers 409 with the result and leaves the
+// stored configuration unchanged, preserving the invariant that enabled
+// means last-known-resolvable.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+func (c *Client) PutBagDropConfigWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutBagDropConfigRequestWithBody(c.Server, organizationId, projectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// A disabled configuration is stored without contacting the destination.
+// Changing connection details while enabled re-runs destination resolution
+// inline. A failed resolution answers 409 with the result and leaves the
+// stored configuration unchanged, preserving the invariant that enabled
+// means last-known-resolvable.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+func (c *Client) PutBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewPutBagDropConfigRequest(c.Server, organizationId, projectId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DisableBagDrop Disable the configured destination without contacting it
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
+func (c *Client) DisableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDisableBagDropRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// EnableBagDrop Verify and enable the configured destination
+//
+// Always re-runs destination resolution server-side. Success records the
+// resolved result and enables the configuration. Failure answers 409 with
+// the verification result and leaves the configuration unchanged.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+func (c *Client) EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnableBagDropRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// VerifyBagDrop Resolve the configured destination and record the result
+//
+// Resolution failure is a report, not an API error, so both resolved and
+// failed outcomes answer 200 and become the last verification.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
+func (c *Client) VerifyBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewVerifyBagDropRequest(c.Server, organizationId, projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -3050,6 +3388,265 @@ func NewGetProjectRequest(server string, organizationId OrganizationId, projectI
 	return req, nil
 }
 
+// NewDeleteBagDropConfigRequest constructs an http.Request for the DeleteBagDropConfig method
+func NewDeleteBagDropConfigRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetBagDropConfigRequest constructs an http.Request for the GetBagDropConfig method
+func NewGetBagDropConfigRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewPutBagDropConfigRequest calls the generic PutBagDropConfig builder with application/json body
+func NewPutBagDropConfigRequest(server string, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewPutBagDropConfigRequestWithBody(server, organizationId, projectId, "application/json", bodyReader)
+}
+
+// NewPutBagDropConfigRequestWithBody constructs an http.Request for the PutBagDropConfig method, with any body, and a specified content type
+func NewPutBagDropConfigRequestWithBody(server string, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDisableBagDropRequest constructs an http.Request for the DisableBagDrop method
+func NewDisableBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/disable", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewEnableBagDropRequest constructs an http.Request for the EnableBagDrop method
+func NewEnableBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/enable", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewVerifyBagDropRequest constructs an http.Request for the VerifyBagDrop method
+func NewVerifyBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/verify", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewRescanBuildRequest constructs an http.Request for the RescanBuild method
 func NewRescanBuildRequest(server string, organizationId OrganizationId, projectId ProjectId, buildId string) (*http.Request, error) {
 	var err error
@@ -3956,6 +4553,87 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId} (the `GetProject` operationId).
 	GetProjectWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetProjectResponse, error)
+
+	// DeleteBagDropConfigWithResponse Remove a project's Bag Drop destination configuration
+	//
+	// Refuses while enabled; disable the configuration first.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
+	DeleteBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*DeleteBagDropConfigResponse, error)
+
+	// GetBagDropConfigWithResponse Read a project's Bag Drop destination configuration
+	//
+	// Returns only non-secret destination fields. The client secret is never
+	// returned; `secret_set` reports that the write-only credential exists.
+	// Requires maintainer on this project. A tenancy the caller may not see
+	// answers 404, indistinguishable from one that does not exist.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
+	GetBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetBagDropConfigResponse, error)
+
+	// PutBagDropConfigWithBodyWithResponse Create or replace a project's Bag Drop destination configuration
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// A disabled configuration is stored without contacting the destination.
+	// Changing connection details while enabled re-runs destination resolution
+	// inline. A failed resolution answers 409 with the result and leaves the
+	// stored configuration unchanged, preserving the invariant that enabled
+	// means last-known-resolvable.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+	PutBagDropConfigWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error)
+
+	// PutBagDropConfigWithResponse Create or replace a project's Bag Drop destination configuration
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// A disabled configuration is stored without contacting the destination.
+	// Changing connection details while enabled re-runs destination resolution
+	// inline. A failed resolution answers 409 with the result and leaves the
+	// stored configuration unchanged, preserving the invariant that enabled
+	// means last-known-resolvable.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+	PutBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error)
+
+	// DisableBagDropWithResponse Disable the configured destination without contacting it
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
+	DisableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*DisableBagDropResponse, error)
+
+	// EnableBagDropWithResponse Verify and enable the configured destination
+	//
+	// Always re-runs destination resolution server-side. Success records the
+	// resolved result and enables the configuration. Failure answers 409 with
+	// the verification result and leaves the configuration unchanged.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+	EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
+
+	// VerifyBagDropWithResponse Resolve the configured destination and record the result
+	//
+	// Resolution failure is a report, not an API error, so both resolved and
+	// failed outcomes answer 200 and become the last verification.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
+	VerifyBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*VerifyBagDropResponse, error)
 
 	// RescanBuildWithResponse Queue a build for rescanning
 	//
@@ -5296,6 +5974,406 @@ func (r GetProjectResponse) ContentType() string {
 	return ""
 }
 
+type DeleteBagDropConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *BagDropConflict
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeleteBagDropConfigResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeleteBagDropConfigResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteBagDropConfigResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeleteBagDropConfigResponse) GetJSON409() *BagDropConflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteBagDropConfigResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteBagDropConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteBagDropConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteBagDropConfigResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBagDropConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropConfig
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBagDropConfigResponse) GetJSON200() *BagDropConfig {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetBagDropConfigResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetBagDropConfigResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetBagDropConfigResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBagDropConfigResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBagDropConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBagDropConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBagDropConfigResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type PutBagDropConfigResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropConfig
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *BagDropConflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON200() *BagDropConfig {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r PutBagDropConfigResponse) GetJSON409() *BagDropConflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r PutBagDropConfigResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r PutBagDropConfigResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r PutBagDropConfigResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r PutBagDropConfigResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DisableBagDropResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropConfig
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r DisableBagDropResponse) GetJSON200() *BagDropConfig {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DisableBagDropResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DisableBagDropResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DisableBagDropResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r DisableBagDropResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DisableBagDropResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DisableBagDropResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DisableBagDropResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type EnableBagDropResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropConfig
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *BagDropConflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r EnableBagDropResponse) GetJSON200() *BagDropConfig {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r EnableBagDropResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r EnableBagDropResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r EnableBagDropResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r EnableBagDropResponse) GetJSON409() *BagDropConflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r EnableBagDropResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r EnableBagDropResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r EnableBagDropResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r EnableBagDropResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type VerifyBagDropResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropVerificationResult
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *BagDropConflict
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r VerifyBagDropResponse) GetJSON200() *BagDropVerificationResult {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r VerifyBagDropResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r VerifyBagDropResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r VerifyBagDropResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r VerifyBagDropResponse) GetJSON409() *BagDropConflict {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r VerifyBagDropResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r VerifyBagDropResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r VerifyBagDropResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r VerifyBagDropResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RescanBuildResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -6618,6 +7696,129 @@ func (c *ClientWithResponses) GetProjectWithResponse(ctx context.Context, organi
 	return ParseGetProjectResponse(rsp)
 }
 
+// DeleteBagDropConfigWithResponse Remove a project's Bag Drop destination configuration
+//
+// Refuses while enabled; disable the configuration first.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
+func (c *ClientWithResponses) DeleteBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*DeleteBagDropConfigResponse, error) {
+	rsp, err := c.DeleteBagDropConfig(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteBagDropConfigResponse(rsp)
+}
+
+// GetBagDropConfigWithResponse Read a project's Bag Drop destination configuration
+//
+// Returns only non-secret destination fields. The client secret is never
+// returned; `secret_set` reports that the write-only credential exists.
+// Requires maintainer on this project. A tenancy the caller may not see
+// answers 404, indistinguishable from one that does not exist.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
+func (c *ClientWithResponses) GetBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetBagDropConfigResponse, error) {
+	rsp, err := c.GetBagDropConfig(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBagDropConfigResponse(rsp)
+}
+
+// PutBagDropConfigWithBodyWithResponse Create or replace a project's Bag Drop destination configuration
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// A disabled configuration is stored without contacting the destination.
+// Changing connection details while enabled re-runs destination resolution
+// inline. A failed resolution answers 409 with the result and leaves the
+// stored configuration unchanged, preserving the invariant that enabled
+// means last-known-resolvable.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+func (c *ClientWithResponses) PutBagDropConfigWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error) {
+	rsp, err := c.PutBagDropConfigWithBody(ctx, organizationId, projectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutBagDropConfigResponse(rsp)
+}
+
+// PutBagDropConfigWithResponse Create or replace a project's Bag Drop destination configuration
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// A disabled configuration is stored without contacting the destination.
+// Changing connection details while enabled re-runs destination resolution
+// inline. A failed resolution answers 409 with the result and leaves the
+// stored configuration unchanged, preserving the invariant that enabled
+// means last-known-resolvable.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
+func (c *ClientWithResponses) PutBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error) {
+	rsp, err := c.PutBagDropConfig(ctx, organizationId, projectId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParsePutBagDropConfigResponse(rsp)
+}
+
+// DisableBagDropWithResponse Disable the configured destination without contacting it
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
+func (c *ClientWithResponses) DisableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*DisableBagDropResponse, error) {
+	rsp, err := c.DisableBagDrop(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDisableBagDropResponse(rsp)
+}
+
+// EnableBagDropWithResponse Verify and enable the configured destination
+//
+// Always re-runs destination resolution server-side. Success records the
+// resolved result and enables the configuration. Failure answers 409 with
+// the verification result and leaves the configuration unchanged.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+func (c *ClientWithResponses) EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error) {
+	rsp, err := c.EnableBagDrop(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEnableBagDropResponse(rsp)
+}
+
+// VerifyBagDropWithResponse Resolve the configured destination and record the result
+//
+// Resolution failure is a report, not an API error, so both resolved and
+// failed outcomes answer 200 and become the last verification.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
+func (c *ClientWithResponses) VerifyBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*VerifyBagDropResponse, error) {
+	rsp, err := c.VerifyBagDrop(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVerifyBagDropResponse(rsp)
+}
+
 // RescanBuildWithResponse Queue a build for rescanning
 //
 // Queues this build through the SAME queue, locks and worker limits as
@@ -7866,6 +9067,319 @@ func ParseGetProjectResponse(rsp *http.Response) (*GetProjectResponse, error) {
 	return response, nil
 }
 
+// ParseDeleteBagDropConfigResponse parses an HTTP response from a DeleteBagDropConfigWithResponse call
+func ParseDeleteBagDropConfigResponse(rsp *http.Response) (*DeleteBagDropConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteBagDropConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest BagDropConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBagDropConfigResponse parses an HTTP response from a GetBagDropConfigWithResponse call
+func ParseGetBagDropConfigResponse(rsp *http.Response) (*GetBagDropConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBagDropConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParsePutBagDropConfigResponse parses an HTTP response from a PutBagDropConfigWithResponse call
+func ParsePutBagDropConfigResponse(rsp *http.Response) (*PutBagDropConfigResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &PutBagDropConfigResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest BagDropConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDisableBagDropResponse parses an HTTP response from a DisableBagDropWithResponse call
+func ParseDisableBagDropResponse(rsp *http.Response) (*DisableBagDropResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DisableBagDropResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseEnableBagDropResponse parses an HTTP response from a EnableBagDropWithResponse call
+func ParseEnableBagDropResponse(rsp *http.Response) (*EnableBagDropResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &EnableBagDropResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropConfig
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest BagDropConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseVerifyBagDropResponse parses an HTTP response from a VerifyBagDropWithResponse call
+func ParseVerifyBagDropResponse(rsp *http.Response) (*VerifyBagDropResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &VerifyBagDropResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropVerificationResult
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest BagDropConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRescanBuildResponse parses an HTTP response from a RescanBuildWithResponse call
 func ParseRescanBuildResponse(rsp *http.Response) (*RescanBuildResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -8694,6 +10208,24 @@ type ServerInterface interface {
 	// GetProject Get a project
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId})
 	GetProject(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// DeleteBagDropConfig Remove a project's Bag Drop destination configuration
+	// (DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	DeleteBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// GetBagDropConfig Read a project's Bag Drop destination configuration
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	GetBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
+	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	PutBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// DisableBagDrop Disable the configured destination without contacting it
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable)
+	DisableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// EnableBagDrop Verify and enable the configured destination
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
+	EnableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// VerifyBagDrop Resolve the configured destination and record the result
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
+	VerifyBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
 	// RescanBuild Queue a build for rescanning
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan)
 	RescanBuild(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, buildId string)
@@ -9062,6 +10594,216 @@ func (siw *ServerInterfaceWrapper) GetProject(w http.ResponseWriter, r *http.Req
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetProject(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteBagDropConfig operation middleware
+func (siw *ServerInterfaceWrapper) DeleteBagDropConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteBagDropConfig(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBagDropConfig operation middleware
+func (siw *ServerInterfaceWrapper) GetBagDropConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBagDropConfig(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// PutBagDropConfig operation middleware
+func (siw *ServerInterfaceWrapper) PutBagDropConfig(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.PutBagDropConfig(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisableBagDrop operation middleware
+func (siw *ServerInterfaceWrapper) DisableBagDrop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisableBagDrop(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnableBagDrop operation middleware
+func (siw *ServerInterfaceWrapper) EnableBagDrop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnableBagDrop(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyBagDrop operation middleware
+func (siw *ServerInterfaceWrapper) VerifyBagDrop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyBagDrop(w, r, organizationId, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -9676,6 +11418,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins", wrapper.ListPins)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", wrapper.DeletePin)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", wrapper.SetPin)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.DeleteBagDropConfig)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.GetBagDropConfig)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.PutBagDropConfig)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify", wrapper.VerifyBagDrop)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable", wrapper.EnableBagDrop)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable", wrapper.DisableBagDrop)
 
 	return m
 }
@@ -10629,6 +12377,461 @@ func (response GetProject404JSONResponse) VisitGetProjectResponse(w http.Respons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropConfigRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type DeleteBagDropConfigResponseObject interface {
+	VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error
+}
+
+type DeleteBagDropConfig204Response struct {
+}
+
+func (response DeleteBagDropConfig204Response) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteBagDropConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteBagDropConfig401JSONResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteBagDropConfig403JSONResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteBagDropConfig404JSONResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropConfig409JSONResponse BagDropConflict
+
+func (response DeleteBagDropConfig409JSONResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropConfigRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type GetBagDropConfigResponseObject interface {
+	VisitGetBagDropConfigResponse(w http.ResponseWriter) error
+}
+
+type GetBagDropConfig200JSONResponse BagDropConfig
+
+func (response GetBagDropConfig200JSONResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetBagDropConfig401JSONResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetBagDropConfig403JSONResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetBagDropConfig404JSONResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfigRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+	Body           *PutBagDropConfigJSONRequestBody
+}
+
+type PutBagDropConfigResponseObject interface {
+	VisitPutBagDropConfigResponse(w http.ResponseWriter) error
+}
+
+type PutBagDropConfig200JSONResponse BagDropConfig
+
+func (response PutBagDropConfig200JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfig400JSONResponse Error
+
+func (response PutBagDropConfig400JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfig401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response PutBagDropConfig401JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfig403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response PutBagDropConfig403JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfig404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response PutBagDropConfig404JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type PutBagDropConfig409JSONResponse BagDropConflict
+
+func (response PutBagDropConfig409JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableBagDropRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type DisableBagDropResponseObject interface {
+	VisitDisableBagDropResponse(w http.ResponseWriter) error
+}
+
+type DisableBagDrop200JSONResponse BagDropConfig
+
+func (response DisableBagDrop200JSONResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableBagDrop401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DisableBagDrop401JSONResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableBagDrop403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DisableBagDrop403JSONResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisableBagDrop404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DisableBagDrop404JSONResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDropRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type EnableBagDropResponseObject interface {
+	VisitEnableBagDropResponse(w http.ResponseWriter) error
+}
+
+type EnableBagDrop200JSONResponse BagDropConfig
+
+func (response EnableBagDrop200JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDrop401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response EnableBagDrop401JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDrop403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response EnableBagDrop403JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDrop404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response EnableBagDrop404JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDrop409JSONResponse BagDropConflict
+
+func (response EnableBagDrop409JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyBagDropRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type VerifyBagDropResponseObject interface {
+	VisitVerifyBagDropResponse(w http.ResponseWriter) error
+}
+
+type VerifyBagDrop200JSONResponse BagDropVerificationResult
+
+func (response VerifyBagDrop200JSONResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyBagDrop401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response VerifyBagDrop401JSONResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyBagDrop403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response VerifyBagDrop403JSONResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyBagDrop404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response VerifyBagDrop404JSONResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyBagDrop409JSONResponse BagDropConflict
+
+func (response VerifyBagDrop409JSONResponse) VisitVerifyBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -11727,6 +13930,24 @@ type StrictServerInterface interface {
 	// GetProject Get a project
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId})
 	GetProject(ctx context.Context, request GetProjectRequestObject) (GetProjectResponseObject, error)
+	// DeleteBagDropConfig Remove a project's Bag Drop destination configuration
+	// (DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	DeleteBagDropConfig(ctx context.Context, request DeleteBagDropConfigRequestObject) (DeleteBagDropConfigResponseObject, error)
+	// GetBagDropConfig Read a project's Bag Drop destination configuration
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	GetBagDropConfig(ctx context.Context, request GetBagDropConfigRequestObject) (GetBagDropConfigResponseObject, error)
+	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
+	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
+	PutBagDropConfig(ctx context.Context, request PutBagDropConfigRequestObject) (PutBagDropConfigResponseObject, error)
+	// DisableBagDrop Disable the configured destination without contacting it
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable)
+	DisableBagDrop(ctx context.Context, request DisableBagDropRequestObject) (DisableBagDropResponseObject, error)
+	// EnableBagDrop Verify and enable the configured destination
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
+	EnableBagDrop(ctx context.Context, request EnableBagDropRequestObject) (EnableBagDropResponseObject, error)
+	// VerifyBagDrop Resolve the configured destination and record the result
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
+	VerifyBagDrop(ctx context.Context, request VerifyBagDropRequestObject) (VerifyBagDropResponseObject, error)
 	// RescanBuild Queue a build for rescanning
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan)
 	RescanBuild(ctx context.Context, request RescanBuildRequestObject) (RescanBuildResponseObject, error)
@@ -12212,6 +14433,175 @@ func (sh *strictHandler) GetProject(w http.ResponseWriter, r *http.Request, orga
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetProjectResponseObject); ok {
 		if err := validResponse.VisitGetProjectResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteBagDropConfig operation middleware
+func (sh *strictHandler) DeleteBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request DeleteBagDropConfigRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteBagDropConfig(ctx, request.(DeleteBagDropConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteBagDropConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteBagDropConfigResponseObject); ok {
+		if err := validResponse.VisitDeleteBagDropConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetBagDropConfig operation middleware
+func (sh *strictHandler) GetBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request GetBagDropConfigRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBagDropConfig(ctx, request.(GetBagDropConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBagDropConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBagDropConfigResponseObject); ok {
+		if err := validResponse.VisitGetBagDropConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// PutBagDropConfig operation middleware
+func (sh *strictHandler) PutBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request PutBagDropConfigRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	var body PutBagDropConfigJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.PutBagDropConfig(ctx, request.(PutBagDropConfigRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "PutBagDropConfig")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(PutBagDropConfigResponseObject); ok {
+		if err := validResponse.VisitPutBagDropConfigResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisableBagDrop operation middleware
+func (sh *strictHandler) DisableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request DisableBagDropRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisableBagDrop(ctx, request.(DisableBagDropRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisableBagDrop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisableBagDropResponseObject); ok {
+		if err := validResponse.VisitDisableBagDropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnableBagDrop operation middleware
+func (sh *strictHandler) EnableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request EnableBagDropRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnableBagDrop(ctx, request.(EnableBagDropRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnableBagDrop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnableBagDropResponseObject); ok {
+		if err := validResponse.VisitEnableBagDropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyBagDrop operation middleware
+func (sh *strictHandler) VerifyBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request VerifyBagDropRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyBagDrop(ctx, request.(VerifyBagDropRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyBagDrop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyBagDropResponseObject); ok {
+		if err := validResponse.VisitVerifyBagDropResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

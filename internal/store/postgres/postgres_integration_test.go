@@ -119,7 +119,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// catch, and the only hook that proves isolation comes from RLS rather
 	// than from application predicates.
 	rlsTables := []string{
-		"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins",
+		"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "pending_scans",
 	}
@@ -203,7 +203,7 @@ func TestTenantIsolation(t *testing.T) {
 			t.Fatal(err)
 		}
 		for _, table := range []string{
-			"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins",
+			"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs",
 			"scan_runs", "scan_findings", "scan_transcripts", "build_scan_state",
 			"scan_run_counters", "pending_scans",
 		} {
@@ -526,6 +526,10 @@ func insertAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, project
 			(organization_id, project_id, bucket_name, pinned_at, pinned_by)
 			VALUES ($1,$2,'images',$3,$4)`,
 			[]any{org, project, now, "principal-" + suffix}},
+		{`INSERT INTO bagdrop_configs
+			(organization_id, project_id, adapter, destination, sealed_secret, created_at, updated_at)
+			VALUES ($1,$2,'hcp-packer',$3,$4,$5,$5)`,
+			[]any{org, project, `{"organization_id":"hcp-org","project_id":"hcp-project","client_id":"client"}`, []byte("sealed-" + suffix), now}},
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {

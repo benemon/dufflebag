@@ -139,8 +139,21 @@ func Load(ctx context.Context, provider Provider, entries []Entry) (*Keyring, er
 func (r *Keyring) Encrypt(plaintext, aad []byte) ([]byte, error) {
 	r.mu.RLock()
 	version := r.active[PurposePayload]
+	key := append([]byte(nil), r.keys[PurposePayload][version]...)
 	r.mu.RUnlock()
-	sealer, err := r.sealer(version)
+	return encryptWithKey(plaintext, aad, key, version)
+}
+
+// EncryptWithKey seals a payload with an environment-supplied AES-256 key
+// using the same versioned envelope as Keyring.Encrypt. Version 1 is the sole
+// environment-key version; keyring-backed deployments carry their rotations
+// in the wrapped keyring instead.
+func EncryptWithKey(plaintext, aad, key []byte) ([]byte, error) {
+	return encryptWithKey(plaintext, aad, key, 1)
+}
+
+func encryptWithKey(plaintext, aad, key []byte, version uint32) ([]byte, error) {
+	sealer, err := newSealer(key)
 	if err != nil {
 		return nil, err
 	}
@@ -161,7 +174,28 @@ func (r *Keyring) Decrypt(envelope, aad []byte) ([]byte, error) {
 	if len(envelope) < 5 || envelope[0] != envelopeMagic {
 		return nil, ErrDecrypt
 	}
-	sealer, err := r.sealer(binary.BigEndian.Uint32(envelope[1:5]))
+	version := binary.BigEndian.Uint32(envelope[1:5])
+	r.mu.RLock()
+	key, ok := r.keys[PurposePayload][version]
+	key = append([]byte(nil), key...)
+	r.mu.RUnlock()
+	if !ok {
+		return nil, ErrDecrypt
+	}
+	return decryptWithKey(envelope, aad, key, version)
+}
+
+// DecryptWithKey opens a version-1 environment-key envelope.
+func DecryptWithKey(envelope, aad, key []byte) ([]byte, error) {
+	return decryptWithKey(envelope, aad, key, 1)
+}
+
+func decryptWithKey(envelope, aad, key []byte, version uint32) ([]byte, error) {
+	if len(envelope) < 5 || envelope[0] != envelopeMagic ||
+		binary.BigEndian.Uint32(envelope[1:5]) != version {
+		return nil, ErrDecrypt
+	}
+	sealer, err := newSealer(key)
 	if err != nil {
 		return nil, ErrDecrypt
 	}
@@ -176,13 +210,7 @@ func (r *Keyring) Decrypt(envelope, aad []byte) ([]byte, error) {
 	return plaintext, nil
 }
 
-func (r *Keyring) sealer(version uint32) (cipher.AEAD, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	key, ok := r.keys[PurposePayload][version]
-	if !ok {
-		return nil, fmt.Errorf("keyring: no payload key v%d", version)
-	}
+func newSealer(key []byte) (cipher.AEAD, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
 		return nil, err

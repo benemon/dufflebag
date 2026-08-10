@@ -126,6 +126,31 @@ The repository's long-lived `make demo-up` stack deliberately selects this
 live endpoint and therefore requires internet egress. CI uses recorded
 responses on an internal Docker network instead.
 
+## Bag Drop destination credentials
+
+Configuring or verifying an HCP Packer Bag Drop destination makes outbound
+HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
+`api.cloud.hashicorp.com` for the scoped project read. Permit egress to both
+hosts. No background mirroring runs in this release; the enabled flag is only
+configuration state until the later reconciler slice arrives.
+
+The destination client secret is always stored in an AES-256-GCM envelope. On
+an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32
+random bytes. Without it, ordinary reads and deletion of a disabled existing
+configuration still work, but writes that seal a secret and verify/enable
+operations that unseal one refuse and name the missing variable. There is no
+plaintext fallback.
+
+This environment key protects a database dump that does not also contain the
+process environment. It does **not** resist compromise of the host, container
+environment, or a process that can read the key. Treat it as credential
+material and source it from the deployment's secret manager.
+
+On a deployment with [encryption at rest](#encryption-at-rest-optional-decided-at-first-boot),
+Bag Drop credentials use the wrapped keyring instead. In that posture
+`DFBG_BAGDROP_CREDENTIAL_KEY` must not be set; the process refuses to start
+rather than accepting a second source of truth.
+
 Scan transcripts are written to object storage tagged
 `dufflebag-class=transcript`. dufflebag deletes each referenced transcript
 after its seven-day window, but two narrow crash windows can leave an object
@@ -228,8 +253,9 @@ What to know before choosing it:
   boot; a later boot whose configuration disagrees refuses to serve. There is
   no migration between postures — moving means a fresh database.
 - **Keys live in a wrapped keyring, not the environment.**
-  `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY` and `DFBG_AUDIT_HMAC_KEY_VERSION` must NOT
-  be set — data keys are generated locally, stored wrapped by the key
+  `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`,
+  `DFBG_AUDIT_HMAC_KEY_VERSION` and `DFBG_BAGDROP_CREDENTIAL_KEY` must NOT be
+  set — data keys are generated locally, stored wrapped by the key
   service's key, and unwrapped once at startup. KEK rotation rewraps keyring
   rows only; payloads are never re-encrypted (see
   [Key rotation](#key-rotation)).

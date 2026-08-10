@@ -53,6 +53,12 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"ListPins":              {"pin.list", "pin_collection", ""},
 		"SetPin":                {"pin.set", "pin", "bucketName"},
 		"DeletePin":             {"pin.delete", "pin", "bucketName"},
+		"GetBagDropConfig":      {"bagdrop.config.read", "bagdrop_config", ""},
+		"PutBagDropConfig":      {"bagdrop.config.write", "bagdrop_config", ""},
+		"DeleteBagDropConfig":   {"bagdrop.config.delete", "bagdrop_config", ""},
+		"VerifyBagDrop":         {"bagdrop.verify", "bagdrop_config", ""},
+		"EnableBagDrop":         {"bagdrop.enable", "bagdrop_config", ""},
+		"DisableBagDrop":        {"bagdrop.disable", "bagdrop_config", ""},
 	}
 	generated := generatedOperationIDs(t)
 	described := make([]string, 0, len(operationDescriptors))

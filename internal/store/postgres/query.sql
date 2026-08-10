@@ -94,6 +94,44 @@ WHERE bucket_name = $1;
 -- name: DeletePin :exec
 DELETE FROM pins WHERE bucket_name = $1;
 
+-- name: GetBagDropConfig :one
+SELECT *
+FROM bagdrop_configs;
+
+-- name: UpsertBagDropConfig :one
+INSERT INTO bagdrop_configs (
+    organization_id, project_id, adapter, destination, sealed_secret, enabled,
+    last_verification, last_verified_at, created_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (organization_id, project_id) DO UPDATE SET
+    adapter = EXCLUDED.adapter,
+    destination = EXCLUDED.destination,
+    sealed_secret = EXCLUDED.sealed_secret,
+    enabled = EXCLUDED.enabled,
+    last_verification = EXCLUDED.last_verification,
+    last_verified_at = EXCLUDED.last_verified_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: DeleteBagDropConfig :execrows
+DELETE FROM bagdrop_configs;
+
+-- name: RecordBagDropVerification :one
+UPDATE bagdrop_configs
+SET last_verification = $1, last_verified_at = $2, updated_at = $2
+RETURNING *;
+
+-- name: EnableBagDrop :one
+UPDATE bagdrop_configs
+SET enabled = true, last_verification = $1, last_verified_at = $2, updated_at = $2
+RETURNING *;
+
+-- name: DisableBagDrop :one
+UPDATE bagdrop_configs
+SET enabled = false, updated_at = $1
+RETURNING *;
+
 -- name: CreateBucket :one
 INSERT INTO buckets (
     organization_id, project_id, id, name, description, labels, created_at, updated_at
