@@ -33,6 +33,9 @@ type ReconcileRun interface {
 	ListBuilds(context.Context, string, string) ([]RemoteBuild, error)
 	CreateBuild(context.Context, string, string, BuildSnapshot) (string, error)
 	UpdateBuild(context.Context, string, string, string, BuildSnapshot) error
+	ListChannels(context.Context, string) ([]RemoteChannel, error)
+	CreateChannel(context.Context, string, string) error
+	UpdateChannelAssignment(context.Context, string, string, *string) error
 }
 
 type Registry map[AdapterKind]Adapter
@@ -248,6 +251,54 @@ func (r *hcpReconcileRun) UpdateBuild(
 		body["metadata"] = json.RawMessage(build.Metadata)
 	}
 	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID), body, nil)
+}
+
+func (r *hcpReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
+	var response struct {
+		Channels []struct {
+			Name    string `json:"name"`
+			Managed bool   `json:"managed"`
+			Version *struct {
+				Fingerprint string `json:"fingerprint"`
+			} `json:"version"`
+		} `json:"channels"`
+	}
+	err := r.do(ctx, http.MethodGet, r.channelPath(bucket), nil, &response)
+	channels := make([]RemoteChannel, 0, len(response.Channels))
+	for _, channel := range response.Channels {
+		remote := RemoteChannel{Name: channel.Name, Managed: channel.Managed}
+		if channel.Version != nil {
+			fingerprint := channel.Version.Fingerprint
+			remote.AssignedVersionFingerprint = &fingerprint
+		}
+		channels = append(channels, remote)
+	}
+	return channels, err
+}
+
+func (r *hcpReconcileRun) CreateChannel(ctx context.Context, bucket, name string) error {
+	err := r.do(ctx, http.MethodPost, r.channelPath(bucket), map[string]any{"name": name}, nil)
+	if remoteError(err, http.StatusConflict, 6) {
+		return nil
+	}
+	return err
+}
+
+func (r *hcpReconcileRun) UpdateChannelAssignment(
+	ctx context.Context, bucket, name string, fingerprint *string,
+) error {
+	value := ""
+	if fingerprint != nil {
+		value = *fingerprint
+	}
+	return r.do(ctx, http.MethodPatch, r.channelPath(bucket)+"/"+url.PathEscape(name), map[string]any{
+		"version_fingerprint": value,
+		"update_mask":         "versionFingerprint",
+	}, nil)
+}
+
+func (r *hcpReconcileRun) channelPath(bucket string) string {
+	return r.basePath() + "/buckets/" + url.PathEscape(bucket) + "/channels"
 }
 
 func (r *hcpReconcileRun) versionPath(bucket, fingerprint string) string {

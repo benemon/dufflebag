@@ -135,6 +135,8 @@ to both hosts. Once an enabled configuration has active associations, the
 background reconciler creates and converges destination buckets, completed
 versions, completed builds and their artifacts. It never deletes destination
 data in this slice.
+Ordinary channels and their assignments mirror as pointers; the managed
+`latest` channel is never touched, and channel deletion is not yet propagated.
 
 `DFBG_BAGDROP_RECONCILE_INTERVAL` controls the level-reconcile cadence as a Go
 duration and defaults to `5m`; an invalid or non-positive value refuses

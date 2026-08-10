@@ -58,6 +58,7 @@ func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	want := []string{
 		"mark:images", "get-bucket:images", "create-bucket:images", "get-version:fp-1",
 		"create-version:fp-1", "list-builds:fp-1", "create-build:amazon-ebs", "update-build:amazon-ebs",
+		"list-channels:images",
 	}
 	if strings.Join(repository.events, ",") != strings.Join(want, ",") {
 		t.Fatalf("events = %v, want %v", repository.events, want)
@@ -70,13 +71,16 @@ func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	}
 }
 
-func TestReconcileAgainstHCP2023FakeDestination(t *testing.T) {
+func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDestination(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Fixture source: internal/compat/hcpauth/handler.go tokenResponse.
 		_, _ = w.Write([]byte(tokenSuccessFixture))
 	}))
 	defer auth.Close()
 	var bucketExists, versionExists, buildExists, buildDone bool
+	var productionExists bool
+	productionFingerprint := ""
+	latestMutations := 0
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		if request.Header.Get("Authorization") != "Bearer fixture-token" {
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
@@ -161,6 +165,68 @@ func TestReconcileAgainstHCP2023FakeDestination(t *testing.T) {
 			}
 			buildDone = true
 			_, _ = w.Write([]byte(`{"build":{"id":"remote-build","component_type":"amazon-ebs","status":"BUILD_DONE"}}`))
+		case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images/channels"):
+			// Fixture source: internal/compat/hcp2023 renderChannel and
+			// docs/compatibility.md managed-latest capture (Appendix A.2).
+			production := ""
+			if productionExists {
+				version := "null"
+				if productionFingerprint != "" {
+					version = `{"fingerprint":"` + productionFingerprint + `"}`
+				}
+				production = `,{"name":"production","managed":false,"version":` + version + `}`
+			}
+			_, _ = w.Write([]byte(`{"channels":[{"name":"latest","managed":true,"version":{"fingerprint":"fp-1"}}` + production + `]}`))
+		case request.Method == http.MethodPost && strings.HasSuffix(path, "/buckets/images/channels"):
+			var body struct {
+				Name string `json:"name"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("decode channel create: %v", err)
+			}
+			if body.Name != "production" {
+				t.Errorf("channel create = %#v", body)
+			}
+			if productionExists {
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(alreadyExistsFixture))
+				return
+			}
+			productionExists = true
+			_, _ = w.Write([]byte(`{"channel":{"name":"production","managed":false,"version":null}}`))
+		case request.Method == http.MethodPatch && strings.HasSuffix(path, "/channels/latest"):
+			latestMutations++
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":9,"message":"Can't update channel assignment on channel \"latest\". This channel is managed by HCP Packer","details":[]}`))
+		case request.Method == http.MethodDelete && strings.HasSuffix(path, "/channels/latest"):
+			latestMutations++
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":3,"message":"Can't delete managed channel latest, it's controlled by HCP Packer","details":[]}`))
+		case request.Method == http.MethodPatch && strings.HasSuffix(path, "/channels/production"):
+			var body struct {
+				VersionFingerprint string `json:"version_fingerprint"`
+				UpdateMask         string `json:"update_mask"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Errorf("decode channel update: %v", err)
+			}
+			if body.UpdateMask == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code":3,"message":"body: (update_mask: field mask: must be set.).","details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","field_violations":[{"field":"body.update_mask","description":"field mask: must be set","reason":"","localized_message":null}]}]}`))
+				return
+			}
+			if body.UpdateMask != "versionFingerprint" {
+				t.Errorf("channel update mask = %q", body.UpdateMask)
+			}
+			if body.VersionFingerprint != "" && !versionExists {
+				// Fixture source: internal/compat/hcp2023 writeVersionNotFound
+				// and docs/compatibility.md version identity code 10.
+				w.WriteHeader(http.StatusConflict)
+				_, _ = w.Write([]byte(`{"code":10,"message":"version not found","details":[]}`))
+				return
+			}
+			productionFingerprint = body.VersionFingerprint
+			_, _ = w.Write([]byte(`{"channel":{"name":"production","managed":false,"version":{"fingerprint":"` + productionFingerprint + `"}}}`))
 		default:
 			t.Errorf("unexpected destination request %s %s", request.Method, path)
 			w.WriteHeader(http.StatusNotFound)
@@ -172,14 +238,20 @@ func TestReconcileAgainstHCP2023FakeDestination(t *testing.T) {
 	reconciler.adapters[AdapterHCPPacker] = NewHCPPackerAdapter(auth.URL, api.URL)
 	repository.associations = []Association{testAssociation("images")}
 	repository.snapshots["images"] = testSnapshot("images")
+	repository.snapshots["images"].Channels = []ChannelSnapshot{{
+		Name: "production", AssignedVersionFingerprint: fingerprintPointer("fp-1"),
+	}}
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
 		t.Fatal(err)
 	}
-	if !bucketExists || !versionExists || !buildDone || repository.successes["images"] != 1 {
-		t.Fatalf("destination state bucket=%v version=%v build_done=%v successes=%v",
-			bucketExists, versionExists, buildDone, repository.successes)
+	if !bucketExists || !versionExists || !buildDone || !productionExists ||
+		productionFingerprint != "fp-1" || latestMutations != 0 || repository.successes["images"] != 1 {
+		t.Fatalf("destination state bucket=%v version=%v build_done=%v channel=%v/%q latest_mutations=%d successes=%v",
+			bucketExists, versionExists, buildDone, productionExists, productionFingerprint, latestMutations, repository.successes)
 	}
 }
+
+func fingerprintPointer(value string) *string { return &value }
 
 func TestReconcilePartiallyExistingPushesOnlyBuilds(t *testing.T) {
 	reconciler, repository, run, writer := newTestReconciler(t, "secret")
@@ -197,6 +269,168 @@ func TestReconcilePartiallyExistingPushesOnlyBuilds(t *testing.T) {
 	}
 	if len(writer.records) != 4 {
 		t.Fatalf("audit records = %d, want build create/update pairs", len(writer.records))
+	}
+}
+
+func TestReconcileConvergesOrdinaryChannelPointers(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		remote        *string
+		local         *string
+		remoteExists  bool
+		wantCreate    bool
+		wantUpdate    string
+		wantAuditPair int
+	}{
+		{name: "absent created and assigned", local: fingerprintPointer("fp-1"), wantCreate: true, wantUpdate: "production:fp-1", wantAuditPair: 4},
+		{name: "unassigned remote assigned locally", remoteExists: true, local: fingerprintPointer("fp-1"), wantUpdate: "production:fp-1", wantAuditPair: 2},
+		{name: "drift overwritten", remoteExists: true, remote: fingerprintPointer("fp-old"), local: fingerprintPointer("fp-1"), wantUpdate: "production:fp-1", wantAuditPair: 2},
+		{name: "remote assignment cleared", remoteExists: true, remote: fingerprintPointer("fp-old"), wantUpdate: "production:clear", wantAuditPair: 2},
+		{name: "equal pointer untouched", remoteExists: true, remote: fingerprintPointer("fp-1"), local: fingerprintPointer("fp-1")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			repository.snapshots["images"] = &BucketSnapshot{
+				Name:     "images",
+				Versions: []VersionSnapshot{{Fingerprint: "fp-1", TemplateType: "HCL2"}},
+				Channels: []ChannelSnapshot{{Name: "production", AssignedVersionFingerprint: test.local}},
+			}
+			run.buckets["images"] = RemoteBucket{}
+			run.versions["fp-1"] = true
+			run.channels["images"] = map[string]RemoteChannel{
+				"latest": {Name: "latest", Managed: true, AssignedVersionFingerprint: fingerprintPointer("fp-1")},
+			}
+			if test.remoteExists {
+				run.channels["images"]["production"] = RemoteChannel{
+					Name: "production", AssignedVersionFingerprint: test.remote,
+				}
+			}
+
+			if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+				t.Fatal(err)
+			}
+			if gotCreate := len(run.createdChannels) != 0; gotCreate != test.wantCreate {
+				t.Fatalf("created channels = %v, want create %v", run.createdChannels, test.wantCreate)
+			}
+			if got := strings.Join(run.updatedChannels, ","); got != test.wantUpdate {
+				t.Fatalf("updated channels = %q, want %q", got, test.wantUpdate)
+			}
+			if strings.Contains(strings.Join(run.updatedChannels, ","), "latest") {
+				t.Fatalf("managed latest was mutated: %v", run.updatedChannels)
+			}
+			if len(writer.records) != test.wantAuditPair {
+				t.Fatalf("audit records = %d, want %d", len(writer.records), test.wantAuditPair)
+			}
+			if repository.successes["images"] != 1 {
+				t.Fatalf("association was not synced: %v", repository.successes)
+			}
+		})
+	}
+}
+
+func TestReconcileChannelMutationsAreAuditFailClosed(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		remoteExists bool
+		local        *string
+	}{
+		{name: "create", remoteExists: false},
+		{name: "update", remoteExists: true, local: fingerprintPointer("fp-1")},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			repository.snapshots["images"] = &BucketSnapshot{
+				Name: "images", Channels: []ChannelSnapshot{{Name: "production", AssignedVersionFingerprint: test.local}},
+			}
+			if test.local != nil {
+				repository.snapshots["images"].Versions = []VersionSnapshot{{Fingerprint: "fp-1"}}
+				run.versions["fp-1"] = true
+			}
+			run.buckets["images"] = RemoteBucket{}
+			run.channels["images"] = map[string]RemoteChannel{"latest": {Name: "latest", Managed: true}}
+			if test.remoteExists {
+				run.channels["images"]["production"] = RemoteChannel{Name: "production"}
+			}
+			writer.failAt = 1
+
+			err := reconciler.ReconcileProject(context.Background(), repository.project)
+			if !errors.Is(err, ErrAuditUnavailable) {
+				t.Fatalf("error = %v, want audit unavailable", err)
+			}
+			if len(run.createdChannels) != 0 || len(run.updatedChannels) != 0 {
+				t.Fatalf("channel mutation ran without request audit: creates=%v updates=%v",
+					run.createdChannels, run.updatedChannels)
+			}
+		})
+	}
+}
+
+func TestReconcileChannelUpdateAuditDistinguishesAssignAndClear(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		local  *string
+		remote *string
+		detail string
+	}{
+		{name: "assign", local: fingerprintPointer("fp-1"), detail: "assign version fingerprint fp-1"},
+		{name: "clear", remote: fingerprintPointer("fp-old"), detail: "clear assignment"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			repository.snapshots["images"] = &BucketSnapshot{
+				Name: "images", Channels: []ChannelSnapshot{{Name: "production", AssignedVersionFingerprint: test.local}},
+			}
+			if test.local != nil {
+				repository.snapshots["images"].Versions = []VersionSnapshot{{Fingerprint: "fp-1"}}
+				run.versions["fp-1"] = true
+			}
+			run.buckets["images"] = RemoteBucket{}
+			run.channels["images"] = map[string]RemoteChannel{
+				"production": {Name: "production", AssignedVersionFingerprint: test.remote},
+			}
+			if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+				t.Fatal(err)
+			}
+			for _, encoded := range writer.records {
+				var event map[string]any
+				if err := json.Unmarshal(encoded, &event); err != nil {
+					t.Fatal(err)
+				}
+				if event["operation"] != "bagdrop.sync.channel.update" || event["detail"] != test.detail {
+					t.Fatalf("channel update audit = %#v", event)
+				}
+			}
+		})
+	}
+}
+
+func TestReconcileUnknownAssignmentTargetIsAssociationFailure(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = &BucketSnapshot{
+		Name:     "images",
+		Versions: []VersionSnapshot{{Fingerprint: "fp-1"}},
+		Channels: []ChannelSnapshot{{
+			Name: "production", AssignedVersionFingerprint: fingerprintPointer("fp-1"),
+		}},
+	}
+	run.buckets["images"] = RemoteBucket{}
+	run.versions["fp-1"] = true
+	run.channels["images"] = map[string]RemoteChannel{
+		"production": {Name: "production"},
+	}
+	run.updateChannelError = &AdapterError{
+		StatusCode: http.StatusConflict, Code: 10, Summary: "version not found",
+	}
+
+	err := reconciler.ReconcileProject(context.Background(), repository.project)
+	if err == nil || repository.successes["images"] != 0 ||
+		!strings.Contains(repository.failures["images"], "HTTP 409 code 10: version not found") {
+		t.Fatalf("unknown target result error=%v successes=%v failures=%v",
+			err, repository.successes, repository.failures)
 	}
 }
 
@@ -321,6 +555,7 @@ func newTestReconciler(t *testing.T, secret string) (*Reconciler, *testReconcile
 	run := &testReconcileRun{
 		events: &repository.events, buckets: make(map[string]RemoteBucket), versions: make(map[string]bool),
 		builds: make(map[string][]RemoteBuild), readFailures: make(map[string]error), createdBuckets: make(map[string]bool),
+		channels: make(map[string]map[string]RemoteChannel),
 	}
 	writer := &testAuditWriter{}
 	reconciler, err := NewReconciler(repository, sealer, Registry{
@@ -398,14 +633,18 @@ func (a *testReconcileAdapter) BeginReconcile(context.Context, Destination) (Rec
 }
 
 type testReconcileRun struct {
-	events            *[]string
-	buckets           map[string]RemoteBucket
-	versions          map[string]bool
-	builds            map[string][]RemoteBuild
-	readFailures      map[string]error
-	createdBuckets    map[string]bool
-	createBucketError error
-	updatedArtifacts  []ArtifactSnapshot
+	events             *[]string
+	buckets            map[string]RemoteBucket
+	versions           map[string]bool
+	builds             map[string][]RemoteBuild
+	readFailures       map[string]error
+	createdBuckets     map[string]bool
+	createBucketError  error
+	updatedArtifacts   []ArtifactSnapshot
+	channels           map[string]map[string]RemoteChannel
+	createdChannels    []string
+	updatedChannels    []string
+	updateChannelError error
 }
 
 func (r *testReconcileRun) GetBucket(_ context.Context, name string) (*RemoteBucket, bool, error) {
@@ -457,6 +696,41 @@ func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id str
 		}
 	}
 	r.updatedArtifacts = append([]ArtifactSnapshot(nil), build.Artifacts...)
+	return nil
+}
+func (r *testReconcileRun) ListChannels(_ context.Context, bucket string) ([]RemoteChannel, error) {
+	*r.events = append(*r.events, "list-channels:"+bucket)
+	channels := r.channels[bucket]
+	listed := make([]RemoteChannel, 0, len(channels))
+	for _, channel := range channels {
+		listed = append(listed, channel)
+	}
+	return listed, nil
+}
+func (r *testReconcileRun) CreateChannel(_ context.Context, bucket, name string) error {
+	*r.events = append(*r.events, "create-channel:"+name)
+	if r.channels[bucket] == nil {
+		r.channels[bucket] = make(map[string]RemoteChannel)
+	}
+	r.channels[bucket][name] = RemoteChannel{Name: name}
+	r.createdChannels = append(r.createdChannels, name)
+	return nil
+}
+func (r *testReconcileRun) UpdateChannelAssignment(
+	_ context.Context, bucket, name string, fingerprint *string,
+) error {
+	*r.events = append(*r.events, "update-channel:"+name)
+	if r.updateChannelError != nil {
+		return r.updateChannelError
+	}
+	channel := r.channels[bucket][name]
+	channel.AssignedVersionFingerprint = fingerprint
+	r.channels[bucket][name] = channel
+	detail := "clear"
+	if fingerprint != nil {
+		detail = *fingerprint
+	}
+	r.updatedChannels = append(r.updatedChannels, name+":"+detail)
 	return nil
 }
 

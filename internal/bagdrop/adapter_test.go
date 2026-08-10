@@ -2,6 +2,7 @@ package bagdrop
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -202,6 +203,93 @@ func TestHCPPackerReconcileToleratesAlreadyExistsCreates(t *testing.T) {
 		ComponentType: "amazon-ebs", PackerRunUUID: "run-uuid",
 	}); err != nil {
 		t.Fatalf("CreateBuild 409/code-6 = %v", err)
+	}
+	if err := run.CreateChannel(context.Background(), "images", "production"); err != nil {
+		t.Fatalf("CreateChannel 409/code-6 = %v", err)
+	}
+}
+
+func TestHCPPackerUpdateChannelAssignmentRequiresCapturedMask(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body struct {
+			VersionFingerprint string `json:"version_fingerprint"`
+			UpdateMask         string `json:"update_mask"`
+		}
+		if request.Method != http.MethodPatch ||
+			request.URL.Path != "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/channels/production" {
+			t.Errorf("channel update request = %s %s", request.Method, request.URL.Path)
+		}
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.UpdateMask == "" {
+			// Fixture source: internal/compat/hcp2023 writeUpdateMaskRequired and
+			// docs/compatibility.md probe 15.
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":3,"message":"body: (update_mask: field mask: must be set.).","details":[{"@type":"type.googleapis.com/google.rpc.BadRequest","field_violations":[{"field":"body.update_mask","description":"field mask: must be set","reason":"","localized_message":null}]}]}`))
+			return
+		}
+		if body.UpdateMask != "versionFingerprint" || body.VersionFingerprint != "fp-1" {
+			t.Errorf("channel update body = %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"channel":{"name":"production","version":{"fingerprint":"fp-1"}}}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.UpdateChannelAssignment(context.Background(), "images", "production", fingerprintPointer("fp-1")); err != nil {
+		t.Fatalf("UpdateChannelAssignment = %v", err)
+	}
+}
+
+func TestHCPPackerUpdateChannelAssignmentClearsWithMaskedEmptyFingerprint(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body["update_mask"] != "versionFingerprint" || body["version_fingerprint"] != "" {
+			t.Errorf("clear body = %#v", body)
+		}
+		_, _ = w.Write([]byte(`{"channel":{"name":"production","version":null}}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.UpdateChannelAssignment(context.Background(), "images", "production", nil); err != nil {
+		t.Fatalf("clear UpdateChannelAssignment = %v", err)
+	}
+}
+
+func TestHCPPackerUpdateChannelDoesNotTolerate409Code6(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(alreadyExistsFixture))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = run.UpdateChannelAssignment(context.Background(), "images", "production", fingerprintPointer("fp-1"))
+	if !remoteError(err, http.StatusConflict, 6) {
+		t.Fatalf("UpdateChannelAssignment 409/code-6 = %v, want failure", err)
 	}
 }
 
