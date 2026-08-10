@@ -15,6 +15,7 @@ type SystemEvent struct {
 	Operation                 identity.AuditOperation
 	TargetType                string
 	TargetID                  string
+	Detail                    string
 	Scope                     identity.AuditScope
 	OrganizationID            string
 	ProjectID                 string
@@ -50,7 +51,7 @@ func (e *SystemEmitter) Request(event SystemEvent) (string, error) {
 		SchemaVersion: 2, Kind: eventKindRequest, CorrelationID: correlationID,
 		OccurredAt: e.now().UTC(), Method: "SYSTEM", Path: e.path,
 		IdentityKind: identity.IdentityKindSystem, Operation: event.Operation,
-		TargetType: event.TargetType, TargetID: event.TargetID,
+		TargetType: event.TargetType, TargetID: event.TargetID, Detail: event.Detail,
 		PrincipalID: e.principalID, PrincipalName: e.principalID,
 		Scope: event.Scope, OrganizationID: event.OrganizationID, ProjectID: event.ProjectID,
 		DestinationOrganizationID: event.DestinationOrganizationID,
@@ -71,7 +72,7 @@ func (e *SystemEmitter) Response(
 		SchemaVersion: 2, Kind: eventKindResponse, CorrelationID: correlationID,
 		OccurredAt: e.now().UTC(), RouteID: e.routeID, Status: status,
 		Outcome: outcome, Reason: reason, Operation: event.Operation,
-		TargetType: event.TargetType, TargetID: event.TargetID,
+		TargetType: event.TargetType, TargetID: event.TargetID, Detail: event.Detail,
 		PrincipalID: e.principalID, PrincipalName: e.principalID,
 		IdentityKind: identity.IdentityKindSystem, Scope: event.Scope,
 		OrganizationID: event.OrganizationID, ProjectID: event.ProjectID,

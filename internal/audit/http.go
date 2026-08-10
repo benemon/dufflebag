@@ -232,6 +232,7 @@ type requestRecord struct {
 	Operation                 identity.AuditOperation `json:"operation,omitempty"`
 	TargetType                string                  `json:"target_type,omitempty"`
 	TargetID                  string                  `json:"target_id,omitempty"`
+	Detail                    string                  `json:"detail,omitempty"`
 	PrincipalID               string                  `json:"principal_id,omitempty"`
 	PrincipalName             string                  `json:"principal_name,omitempty"`
 	Scope                     identity.AuditScope     `json:"scope,omitempty"`
@@ -255,6 +256,7 @@ type responseRecord struct {
 	Operation                 identity.AuditOperation `json:"operation"`
 	TargetType                string                  `json:"target_type"`
 	TargetID                  string                  `json:"target_id,omitempty"`
+	Detail                    string                  `json:"detail,omitempty"`
 	PrincipalID               string                  `json:"principal_id,omitempty"`
 	PrincipalName             string                  `json:"principal_name,omitempty"`
 	IdentityKind              identity.IdentityKind   `json:"identity_kind,omitempty"`

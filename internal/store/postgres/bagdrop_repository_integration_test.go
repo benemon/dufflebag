@@ -15,6 +15,7 @@ import (
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/bagdrop"
 	"github.com/benemon/dufflebag/internal/domain/identity"
+	"github.com/benemon/dufflebag/internal/domain/registry"
 	platform "github.com/benemon/dufflebag/internal/platform/v1"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
 	"github.com/google/uuid"
@@ -242,6 +243,69 @@ func TestBagDropAssociationReconcileStatusLifecycle(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].LastSyncedAt == nil ||
 		listed[0].LastSyncError != nil || listed[0].SyncStatus() != bagdrop.SyncSynced {
 		t.Fatalf("successful status = %#v, %v", listed, err)
+	}
+}
+
+func TestBagDropSnapshotExcludesManagedLatestTripwire(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	at := time.Date(2026, 8, 10, 15, 30, 0, 0, time.UTC)
+	bucket, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "images", Labels: map[string]string{}, CreatedAt: at,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, err := registry.NewVersion(
+		registry.NewID(at.Add(time.Second)), bucket.Name, "fp-1", registry.TemplateHCL2, at.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
+		t.Fatal(err)
+	}
+	build, err := repository.CreateBuild(
+		ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2,
+		store.StoredBuild{
+			Build: registry.Build{
+				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker", Status: registry.BuildRunning,
+			},
+			Labels: map[string]string{}, CreatedAt: at.Add(2 * time.Second),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	completed := *build
+	completed.Status = registry.BuildDone
+	completed.MetadataSeen = true
+	if _, err := repository.UpdateBuild(
+		ctx, tenant, bucket.Name, version.Fingerprint, completed, at.Add(3*time.Second),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateChannel(ctx, tenant, store.Channel{
+		ID: registry.NewID(at.Add(4 * time.Second)), BucketName: bucket.Name,
+		Name: "production", CreatedAt: at.Add(4 * time.Second),
+	}, version.Fingerprint, "publisher"); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot, err := repository.GetBagDropBucketSnapshot(ctx, orgA, projectA, bucket.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Versions) != 1 || snapshot.Versions[0].Fingerprint != version.Fingerprint {
+		t.Fatalf("completed versions snapshot = %#v", snapshot.Versions)
+	}
+	if len(snapshot.Channels) != 1 || snapshot.Channels[0].Name != "production" ||
+		snapshot.Channels[0].AssignedVersionFingerprint == nil ||
+		*snapshot.Channels[0].AssignedVersionFingerprint != version.Fingerprint {
+		t.Fatalf("ordinary channel snapshot = %#v; managed latest must be absent", snapshot.Channels)
 	}
 }
 

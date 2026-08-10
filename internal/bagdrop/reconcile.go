@@ -293,12 +293,12 @@ func (r *Reconciler) reconcileBucket(
 		return err
 	}
 	if !exists {
-		if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.create", "bucket", bucket.Name,
+		if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.create", "bucket", bucket.Name, "",
 			func() error { return run.CreateBucket(ctx, bucket) }); err != nil {
 			return err
 		}
 	} else if remote.Description != bucket.Description {
-		if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.update", "bucket", bucket.Name,
+		if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.update", "bucket", bucket.Name, "",
 			func() error { return run.UpdateBucket(ctx, bucket) }); err != nil {
 			return err
 		}
@@ -309,7 +309,7 @@ func (r *Reconciler) reconcileBucket(
 			return err
 		}
 		if !exists {
-			if err := r.mutate(ctx, project, destination, "bagdrop.sync.version.create", "version", version.Fingerprint,
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.version.create", "version", version.Fingerprint, "",
 				func() error { return run.CreateVersion(ctx, bucket.Name, version) }); err != nil {
 				return err
 			}
@@ -329,7 +329,7 @@ func (r *Reconciler) reconcileBucket(
 			if remoteBuild == nil {
 				var buildID string
 				if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.create", "build",
-					version.Fingerprint+"/"+build.ComponentType, func() error {
+					version.Fingerprint+"/"+build.ComponentType, "", func() error {
 						var createErr error
 						buildID, createErr = run.CreateBuild(ctx, bucket.Name, version.Fingerprint, build)
 						return createErr
@@ -350,13 +350,81 @@ func (r *Reconciler) reconcileBucket(
 				remoteBuild = &RemoteBuild{ID: buildID, ComponentType: build.ComponentType}
 			}
 			if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.update", "build",
-				version.Fingerprint+"/"+build.ComponentType,
+				version.Fingerprint+"/"+build.ComponentType, "",
 				func() error { return run.UpdateBuild(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID, build) }); err != nil {
 				return err
 			}
 		}
 	}
+	// Channel assignments can only reference complete local versions. Because
+	// the snapshot is transactional and versions/builds converge above, every
+	// assignment target exists remotely before its pointer is set here.
+	return r.reconcileChannels(ctx, project, destination, run, bucket)
+}
+
+func (r *Reconciler) reconcileChannels(
+	ctx context.Context, project Project, destination Destination, run ReconcileRun, bucket BucketSnapshot,
+) error {
+	remoteChannels, err := run.ListChannels(ctx, bucket.Name)
+	if err != nil {
+		return err
+	}
+	ordinaryRemote := make(map[string]RemoteChannel, len(remoteChannels))
+	for _, channel := range remoteChannels {
+		if !channel.Managed {
+			ordinaryRemote[channel.Name] = channel
+		}
+	}
+	for _, channel := range bucket.Channels {
+		remoteChannel, exists := ordinaryRemote[channel.Name]
+		if !exists {
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.create", "channel", channel.Name, "",
+				func() error { return run.CreateChannel(ctx, bucket.Name, channel.Name) }); err != nil {
+				return err
+			}
+			// Re-observe after create so a 409/code-6 adoption converges the
+			// existing pointer rather than assuming a newly empty channel.
+			listed, err := run.ListChannels(ctx, bucket.Name)
+			if err != nil {
+				return err
+			}
+			remoteChannel = RemoteChannel{Name: channel.Name}
+			found := false
+			for _, candidate := range listed {
+				if candidate.Name == channel.Name && !candidate.Managed {
+					remoteChannel = candidate
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.New("created destination channel was not returned by ListChannels")
+			}
+		}
+		if sameFingerprint(channel.AssignedVersionFingerprint, remoteChannel.AssignedVersionFingerprint) {
+			continue
+		}
+		detail := "clear assignment"
+		if channel.AssignedVersionFingerprint != nil {
+			detail = "assign version fingerprint " + *channel.AssignedVersionFingerprint
+		}
+		if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.update", "channel", channel.Name, detail,
+			func() error {
+				return run.UpdateChannelAssignment(
+					ctx, bucket.Name, channel.Name, channel.AssignedVersionFingerprint,
+				)
+			}); err != nil {
+			return err
+		}
+	}
 	return nil
+}
+
+func sameFingerprint(left, right *string) bool {
+	if left == nil || right == nil {
+		return left == nil && right == nil
+	}
+	return *left == *right
 }
 
 func findRemoteBuild(builds []RemoteBuild, componentType string) *RemoteBuild {
@@ -370,10 +438,10 @@ func findRemoteBuild(builds []RemoteBuild, componentType string) *RemoteBuild {
 
 func (r *Reconciler) mutate(
 	ctx context.Context, project Project, destination Destination,
-	operation identity.AuditOperation, targetType, targetID string, mutation func() error,
+	operation identity.AuditOperation, targetType, targetID, detail string, mutation func() error,
 ) error {
 	event := audit.SystemEvent{
-		Operation: operation, TargetType: targetType, TargetID: targetID,
+		Operation: operation, TargetType: targetType, TargetID: targetID, Detail: detail,
 		Scope:          identity.AuditScopeProject,
 		OrganizationID: project.OrganizationID, ProjectID: project.ProjectID,
 		DestinationOrganizationID: destination.OrganizationID,

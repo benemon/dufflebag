@@ -455,6 +455,23 @@ func (r *Repository) ListChannels(
 	if _, err := q.GetBucketByName(ctx, bucketName); err != nil {
 		return nil, mapNotFound("get bucket for channels", err)
 	}
+	channels, err := r.listChannels(ctx, tx, q, tenant, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit list channels: %w", err)
+	}
+	return channels, nil
+}
+
+func (r *Repository) listChannels(
+	ctx context.Context,
+	tx *sql.Tx,
+	q *postgresdb.Queries,
+	tenant Tenant,
+	bucketName string,
+) ([]Channel, error) {
 	rows, err := tx.QueryContext(ctx, channelSelect+`
 		WHERE buckets.name = $1
 		ORDER BY channels.name
@@ -485,9 +502,6 @@ func (r *Repository) ListChannels(
 			return nil, err
 		}
 		channels = append(channels, *channel)
-	}
-	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit list channels: %w", err)
 	}
 	return channels, nil
 }

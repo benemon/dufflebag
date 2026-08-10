@@ -151,6 +151,12 @@ type BucketSnapshot struct {
 	Name        string
 	Description string
 	Versions    []VersionSnapshot
+	Channels    []ChannelSnapshot
+}
+
+type ChannelSnapshot struct {
+	Name                       string
+	AssignedVersionFingerprint *string
 }
 
 type VersionSnapshot struct {
@@ -183,6 +189,12 @@ type RemoteBuild struct {
 	ID            string `json:"id"`
 	ComponentType string `json:"component_type"`
 	Status        string `json:"status"`
+}
+
+type RemoteChannel struct {
+	Name                       string
+	Managed                    bool
+	AssignedVersionFingerprint *string
 }
 
 func render(record *Record) *Config {

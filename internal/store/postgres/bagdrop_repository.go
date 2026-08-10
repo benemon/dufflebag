@@ -451,6 +451,21 @@ func (r *Repository) GetBagDropBucketSnapshot(
 		}
 		snapshot.Versions = append(snapshot.Versions, versionSnapshot)
 	}
+	channels, err := r.listChannels(ctx, tx, q, tenant, bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("list Bag Drop snapshot channels: %w", err)
+	}
+	for _, channel := range channels {
+		if channel.Managed {
+			continue
+		}
+		channelSnapshot := bagdrop.ChannelSnapshot{Name: channel.Name}
+		if channel.Version != nil {
+			fingerprint := channel.Version.Fingerprint
+			channelSnapshot.AssignedVersionFingerprint = &fingerprint
+		}
+		snapshot.Channels = append(snapshot.Channels, channelSnapshot)
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit Bag Drop bucket snapshot: %w", err)
 	}
