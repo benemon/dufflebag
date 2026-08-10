@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/benemon/dufflebag/internal/audit"
+	"github.com/benemon/dufflebag/internal/bagdrop"
 	"github.com/benemon/dufflebag/internal/compat/hcp2023"
 	"github.com/benemon/dufflebag/internal/compat/hcpauth"
 	"github.com/benemon/dufflebag/internal/compat/rm2019"
@@ -40,6 +41,8 @@ const (
 	// 32 bytes is the HMAC-SHA256 block size; shorter keys weaken the signature
 	// without any warning that they have.
 	minSigningKeyBytes = 32
+	bagDropAuthBase    = "https://auth.idp.hashicorp.com"
+	bagDropAPIBase     = "https://api.cloud.hashicorp.com"
 )
 
 var (
@@ -84,7 +87,10 @@ func main() {
 	// would be a second source of truth, so it is refused rather than ignored.
 	signingKey := os.Getenv("DFBG_TOKEN_SIGNING_KEY")
 	if os.Getenv(keyring.ProviderEnv) != "" {
-		for _, variable := range []string{"DFBG_TOKEN_SIGNING_KEY", "DFBG_AUDIT_HMAC_KEY", "DFBG_AUDIT_HMAC_KEY_VERSION"} {
+		for _, variable := range []string{
+			"DFBG_TOKEN_SIGNING_KEY", "DFBG_AUDIT_HMAC_KEY", "DFBG_AUDIT_HMAC_KEY_VERSION",
+			bagdrop.CredentialKeyEnv,
+		} {
 			if os.Getenv(variable) != "" {
 				log.Fatalf("%s must not be set when %s is configured: on an encrypted deployment this key lives in the wrapped keyring", variable, keyring.ProviderEnv)
 			}
@@ -239,9 +245,16 @@ func main() {
 	if scannerService != nil {
 		platformScanner = scannerService
 	}
+	bagDropService := bagdrop.NewService(
+		repository,
+		bagdrop.NewCredentialSealer(ring, os.Getenv(bagdrop.CredentialKeyEnv)),
+		bagdrop.Registry{
+			bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(bagDropAuthBase, bagDropAPIBase),
+		},
+	)
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, build,
+		encryptionService, platformScanner, bagDropService, build,
 	)
 	applicationHandler := composeHandler(
 		broker,

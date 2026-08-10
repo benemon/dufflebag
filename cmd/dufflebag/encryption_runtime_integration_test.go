@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benemon/dufflebag/internal/bagdrop"
 	"github.com/google/uuid"
 	tc "github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -205,6 +206,20 @@ func TestEnvironmentKeysAreRefusedAlongsideAKeyProvider(t *testing.T) {
 		"VAULT_ADDR":        "http://127.0.0.1:1",
 	})
 	assertStartupRefusal(t, command, "DFBG_TOKEN_SIGNING_KEY must not be set when DFBG_KEY_PROVIDER is configured")
+}
+
+func TestBagDropEnvironmentKeyIsRefusedAlongsideAKeyProvider(t *testing.T) {
+	database := newRuntimeDatabase(t)
+	command := runtimeCommand(database.appURL, reserveAddress(t), map[string]string{
+		"DFBG_KEY_PROVIDER":      "vault",
+		"VAULT_ADDR":             "http://127.0.0.1:1",
+		"DFBG_TOKEN_SIGNING_KEY": "",
+		bagdrop.CredentialKeyEnv: "0123456789abcdef0123456789abcdef",
+	})
+	assertStartupRefusal(
+		t, command,
+		bagdrop.CredentialKeyEnv+" must not be set when DFBG_KEY_PROVIDER is configured",
+	)
 }
 
 // The write-side headline of ADR-0024, against the real binary: on an

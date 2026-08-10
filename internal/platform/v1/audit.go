@@ -50,6 +50,12 @@ var operationDescriptors = map[string]operationDescriptor{
 	"ListPins":              {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/pins", Descriptor: audit.Descriptor{Operation: "pin.list", TargetType: "pin_collection"}},
 	"SetPin":                {method: http.MethodPut, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", Descriptor: audit.Descriptor{Operation: "pin.set", TargetType: "pin", TargetIDParam: "bucketName"}},
 	"DeletePin":             {method: http.MethodDelete, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", Descriptor: audit.Descriptor{Operation: "pin.delete", TargetType: "pin", TargetIDParam: "bucketName"}},
+	"GetBagDropConfig":      {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", Descriptor: audit.Descriptor{Operation: "bagdrop.config.read", TargetType: "bagdrop_config"}},
+	"PutBagDropConfig":      {method: http.MethodPut, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", Descriptor: audit.Descriptor{Operation: "bagdrop.config.write", TargetType: "bagdrop_config"}},
+	"DeleteBagDropConfig":   {method: http.MethodDelete, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", Descriptor: audit.Descriptor{Operation: "bagdrop.config.delete", TargetType: "bagdrop_config"}},
+	"VerifyBagDrop":         {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify", Descriptor: audit.Descriptor{Operation: "bagdrop.verify", TargetType: "bagdrop_config"}},
+	"EnableBagDrop":         {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable", Descriptor: audit.Descriptor{Operation: "bagdrop.enable", TargetType: "bagdrop_config"}},
+	"DisableBagDrop":        {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable", Descriptor: audit.Descriptor{Operation: "bagdrop.disable", TargetType: "bagdrop_config"}},
 }
 
 type resolvedHandler struct {

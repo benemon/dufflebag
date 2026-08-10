@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/benemon/dufflebag/internal/audit"
+	"github.com/benemon/dufflebag/internal/bagdrop"
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/keyring"
@@ -92,6 +93,15 @@ type EncryptionService interface {
 	Rotate(context.Context) ([]keyring.Entry, error)
 }
 
+type BagDropService interface {
+	Get(context.Context, string, string) (*bagdrop.Config, error)
+	Put(context.Context, string, string, bagdrop.Write) (*bagdrop.Config, *bagdrop.VerificationResult, error)
+	Delete(context.Context, string, string) error
+	Verify(context.Context, string, string) (bagdrop.VerificationResult, error)
+	Enable(context.Context, string, string) (*bagdrop.Config, *bagdrop.VerificationResult, error)
+	Disable(context.Context, string, string) (*bagdrop.Config, error)
+}
+
 type auditTargetSink interface {
 	audit.Sink
 }
@@ -112,6 +122,7 @@ type server struct {
 	auditTargets AuditTargetRepository
 	auditBroker  AuditTargetBroker
 	encryption   EncryptionService
+	bagDrop      BagDropService
 	// scanner is nil on deployments with no adapter configured, which is the
 	// ordinary posture rather than a fault.
 	scanner       Scanner
@@ -125,11 +136,11 @@ func NewHandler(
 	repository PlatformRepository, instance InstanceRepository,
 	auth Authenticator, principals Principals, logger *slog.Logger,
 	auditTargets AuditTargetRepository, auditBroker AuditTargetBroker,
-	encryption EncryptionService, scanner Scanner, build BuildInfo,
+	encryption EncryptionService, scanner Scanner, bagDrop BagDropService, build BuildInfo,
 ) http.Handler {
-	return newHandlerWithBuildAndAudit(
+	return newHandlerWithServices(
 		repository, instance, auth, principals, logger,
-		auditTargets, auditBroker, encryption, scanner, build, time.Now,
+		auditTargets, auditBroker, encryption, scanner, bagDrop, build, time.Now,
 	)
 }
 
@@ -174,6 +185,36 @@ func newHandlerWithBuildAndAudit(
 	build BuildInfo,
 	now func() time.Time,
 ) http.Handler {
+	return newHandlerWithServices(
+		repository, instance, auth, principals, logger, auditTargets, auditBroker,
+		encryption, scanner, nil, build, now,
+	)
+}
+
+func newHandlerWithBagDrop(
+	repository PlatformRepository, instance InstanceRepository,
+	auth Authenticator, principals Principals, logger *slog.Logger,
+	bagDrop BagDropService, now func() time.Time,
+) http.Handler {
+	return newHandlerWithServices(
+		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, BuildInfo{}, now,
+	)
+}
+
+func newHandlerWithServices(
+	repository PlatformRepository,
+	instance InstanceRepository,
+	auth Authenticator,
+	principals Principals,
+	logger *slog.Logger,
+	auditTargets AuditTargetRepository,
+	auditBroker AuditTargetBroker,
+	encryption EncryptionService,
+	scanner Scanner,
+	bagDrop BagDropService,
+	build BuildInfo,
+	now func() time.Time,
+) http.Handler {
 	s := &server{
 		repository:   repository,
 		instance:     instance,
@@ -185,6 +226,7 @@ func newHandlerWithBuildAndAudit(
 		auditBroker:  auditBroker,
 		encryption:   encryption,
 		scanner:      scanner,
+		bagDrop:      bagDrop,
 		build: BuildInfo{
 			Version: build.Version, Commit: build.Commit,
 			APIVersions: append([]string(nil), build.APIVersions...),

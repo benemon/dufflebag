@@ -30,6 +30,19 @@ type AuditTarget struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type BagdropConfig struct {
+	OrganizationID   uuid.UUID       `json:"organization_id"`
+	ProjectID        uuid.UUID       `json:"project_id"`
+	Adapter          string          `json:"adapter"`
+	Destination      json.RawMessage `json:"destination"`
+	SealedSecret     []byte          `json:"sealed_secret"`
+	Enabled          bool            `json:"enabled"`
+	LastVerification []byte          `json:"last_verification"`
+	LastVerifiedAt   sql.NullTime    `json:"last_verified_at"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
 type Bucket struct {
 	OrganizationID uuid.UUID       `json:"organization_id"`
 	ProjectID      uuid.UUID       `json:"project_id"`

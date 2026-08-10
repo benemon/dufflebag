@@ -410,6 +410,7 @@ func runtimeCommand(databaseURL, address string, extra map[string]string) *exec.
 		key := strings.SplitN(entry, "=", 2)[0]
 		if _, replaced := values[key]; !replaced && key != "DFBG_AUDIT_HMAC_KEY" &&
 			key != "DFBG_AUDIT_HMAC_KEY_VERSION" && key != "DFBG_SHUTDOWN_GRACE_PERIOD" &&
+			key != "DFBG_BAGDROP_CREDENTIAL_KEY" &&
 			!strings.HasPrefix(key, "DFBG_OBJECT_STORAGE_") {
 			environment = append(environment, entry)
 		}

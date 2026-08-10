@@ -489,6 +489,18 @@ func (q *Queries) DeleteAuditTarget(ctx context.Context, id uuid.UUID) (int64, e
 	return result.RowsAffected()
 }
 
+const deleteBagDropConfig = `-- name: DeleteBagDropConfig :execrows
+DELETE FROM bagdrop_configs
+`
+
+func (q *Queries) DeleteBagDropConfig(ctx context.Context) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteBagDropConfig)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteBucketByName = `-- name: DeleteBucketByName :one
 DELETE FROM buckets WHERE name = $1
 RETURNING id
@@ -603,6 +615,82 @@ func (q *Queries) DeleteProject(ctx context.Context, arg DeleteProjectParams) (s
 	var result string
 	err := row.Scan(&result)
 	return result, err
+}
+
+const disableBagDrop = `-- name: DisableBagDrop :one
+UPDATE bagdrop_configs
+SET enabled = false, updated_at = $1
+RETURNING organization_id, project_id, adapter, destination, sealed_secret, enabled, last_verification, last_verified_at, created_at, updated_at
+`
+
+func (q *Queries) DisableBagDrop(ctx context.Context, updatedAt time.Time) (BagdropConfig, error) {
+	row := q.db.QueryRowContext(ctx, disableBagDrop, updatedAt)
+	var i BagdropConfig
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.Adapter,
+		&i.Destination,
+		&i.SealedSecret,
+		&i.Enabled,
+		&i.LastVerification,
+		&i.LastVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const enableBagDrop = `-- name: EnableBagDrop :one
+UPDATE bagdrop_configs
+SET enabled = true, last_verification = $1, last_verified_at = $2, updated_at = $2
+RETURNING organization_id, project_id, adapter, destination, sealed_secret, enabled, last_verification, last_verified_at, created_at, updated_at
+`
+
+type EnableBagDropParams struct {
+	LastVerification []byte       `json:"last_verification"`
+	LastVerifiedAt   sql.NullTime `json:"last_verified_at"`
+}
+
+func (q *Queries) EnableBagDrop(ctx context.Context, arg EnableBagDropParams) (BagdropConfig, error) {
+	row := q.db.QueryRowContext(ctx, enableBagDrop, arg.LastVerification, arg.LastVerifiedAt)
+	var i BagdropConfig
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.Adapter,
+		&i.Destination,
+		&i.SealedSecret,
+		&i.Enabled,
+		&i.LastVerification,
+		&i.LastVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getBagDropConfig = `-- name: GetBagDropConfig :one
+SELECT organization_id, project_id, adapter, destination, sealed_secret, enabled, last_verification, last_verified_at, created_at, updated_at
+FROM bagdrop_configs
+`
+
+func (q *Queries) GetBagDropConfig(ctx context.Context) (BagdropConfig, error) {
+	row := q.db.QueryRowContext(ctx, getBagDropConfig)
+	var i BagdropConfig
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.Adapter,
+		&i.Destination,
+		&i.SealedSecret,
+		&i.Enabled,
+		&i.LastVerification,
+		&i.LastVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getBucketByName = `-- name: GetBucketByName :one
@@ -1603,6 +1691,35 @@ func (q *Queries) NextVersionSequence(ctx context.Context, bucketID string) (int
 	return column_1, err
 }
 
+const recordBagDropVerification = `-- name: RecordBagDropVerification :one
+UPDATE bagdrop_configs
+SET last_verification = $1, last_verified_at = $2, updated_at = $2
+RETURNING organization_id, project_id, adapter, destination, sealed_secret, enabled, last_verification, last_verified_at, created_at, updated_at
+`
+
+type RecordBagDropVerificationParams struct {
+	LastVerification []byte       `json:"last_verification"`
+	LastVerifiedAt   sql.NullTime `json:"last_verified_at"`
+}
+
+func (q *Queries) RecordBagDropVerification(ctx context.Context, arg RecordBagDropVerificationParams) (BagdropConfig, error) {
+	row := q.db.QueryRowContext(ctx, recordBagDropVerification, arg.LastVerification, arg.LastVerifiedAt)
+	var i BagdropConfig
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.Adapter,
+		&i.Destination,
+		&i.SealedSecret,
+		&i.Enabled,
+		&i.LastVerification,
+		&i.LastVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const recordEncryptionMode = `-- name: RecordEncryptionMode :execrows
 INSERT INTO encryption_mode (id, encrypted, recorded_at)
 VALUES (true, $1, $2)
@@ -1909,6 +2026,65 @@ func (q *Queries) UpdateBuild(ctx context.Context, arg UpdateBuildParams) (Build
 		&i.ParentChannelID,
 		&i.Metadata,
 		&i.IntegrityMac,
+	)
+	return i, err
+}
+
+const upsertBagDropConfig = `-- name: UpsertBagDropConfig :one
+INSERT INTO bagdrop_configs (
+    organization_id, project_id, adapter, destination, sealed_secret, enabled,
+    last_verification, last_verified_at, created_at, updated_at
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+ON CONFLICT (organization_id, project_id) DO UPDATE SET
+    adapter = EXCLUDED.adapter,
+    destination = EXCLUDED.destination,
+    sealed_secret = EXCLUDED.sealed_secret,
+    enabled = EXCLUDED.enabled,
+    last_verification = EXCLUDED.last_verification,
+    last_verified_at = EXCLUDED.last_verified_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING organization_id, project_id, adapter, destination, sealed_secret, enabled, last_verification, last_verified_at, created_at, updated_at
+`
+
+type UpsertBagDropConfigParams struct {
+	OrganizationID   uuid.UUID       `json:"organization_id"`
+	ProjectID        uuid.UUID       `json:"project_id"`
+	Adapter          string          `json:"adapter"`
+	Destination      json.RawMessage `json:"destination"`
+	SealedSecret     []byte          `json:"sealed_secret"`
+	Enabled          bool            `json:"enabled"`
+	LastVerification []byte          `json:"last_verification"`
+	LastVerifiedAt   sql.NullTime    `json:"last_verified_at"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+}
+
+func (q *Queries) UpsertBagDropConfig(ctx context.Context, arg UpsertBagDropConfigParams) (BagdropConfig, error) {
+	row := q.db.QueryRowContext(ctx, upsertBagDropConfig,
+		arg.OrganizationID,
+		arg.ProjectID,
+		arg.Adapter,
+		arg.Destination,
+		arg.SealedSecret,
+		arg.Enabled,
+		arg.LastVerification,
+		arg.LastVerifiedAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i BagdropConfig
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.Adapter,
+		&i.Destination,
+		&i.SealedSecret,
+		&i.Enabled,
+		&i.LastVerification,
+		&i.LastVerifiedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
