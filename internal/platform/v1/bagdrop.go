@@ -34,6 +34,25 @@ func (s *server) admitBagDrop(
 	return caller, refused, nil
 }
 
+func (s *server) admitBagDropStatus(
+	ctx context.Context, organizationID, projectID string,
+) (*identity.Principal, refusal, error) {
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleReader, organizationID, projectID,
+	)
+	if refused != permitted {
+		return nil, refused, nil
+	}
+	if _, err := s.repository.GetProject(ctx, organizationID, projectID); err != nil {
+		if errors.Is(err, registry.ErrNotFound) {
+			audit.FromContext(ctx).Enrich(audit.Enrichment{Reason: refusedTenancy.reason()})
+			return nil, refusedTenancy, nil
+		}
+		return nil, permitted, err
+	}
+	return caller, permitted, nil
+}
+
 func (s *server) GetBagDropConfig(
 	ctx context.Context, request GetBagDropConfigRequestObject,
 ) (GetBagDropConfigResponseObject, error) {
@@ -146,6 +165,11 @@ func (s *server) DeleteBagDropConfig(
 		return DeleteBagDropConfig409JSONResponse{
 			Message: "Bag Drop is enabled; disable it first",
 		}, nil
+	case errors.Is(err, bagdrop.ErrCleanupPending):
+		audited.refused("cleanup_pending")
+		return DeleteBagDropConfig409JSONResponse{
+			Message: "Bag Drop destination cleanup is pending",
+		}, nil
 	case errors.Is(err, bagdrop.ErrNotFound):
 		audited.refused("not_found")
 		return DeleteBagDropConfig404JSONResponse{
@@ -157,6 +181,150 @@ func (s *server) DeleteBagDropConfig(
 	}
 	audited.succeeded("", "")
 	return DeleteBagDropConfig204Response{}, nil
+}
+
+func (s *server) ListBagDropAssociations(
+	ctx context.Context, request ListBagDropAssociationsRequestObject,
+) (ListBagDropAssociationsResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
+	caller, refused, err := s.admitBagDrop(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	associations, err := s.bagDrop.ListAssociations(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	response := ListBagDropAssociations200JSONResponse{
+		Associations: make([]BagDropAssociation, 0, len(associations)),
+	}
+	for _, association := range associations {
+		response.Associations = append(response.Associations, renderBagDropAssociation(association))
+	}
+	audited.succeeded("", "")
+	return response, nil
+}
+
+func (s *server) SetBagDropAssociation(
+	ctx context.Context, request SetBagDropAssociationRequestObject,
+) (SetBagDropAssociationResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	audited.event.TargetID = request.BucketName
+	defer func() { audited.log(ctx) }()
+	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
+	caller, refused, err := s.admitBagDrop(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	association, err := s.bagDrop.Associate(ctx, organizationID, projectID, request.BucketName)
+	switch {
+	case errors.Is(err, bagdrop.ErrNotFound):
+		audited.refused("not_configured")
+		return SetBagDropAssociation404JSONResponse{Message: "Bag Drop is not configured"}, nil
+	case errors.Is(err, bagdrop.ErrBucketNotFound):
+		audited.refused("not_found")
+		return SetBagDropAssociation404JSONResponse{Message: "bucket not found"}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(request.BucketName, "")
+	return SetBagDropAssociation200JSONResponse(renderBagDropAssociation(*association)), nil
+}
+
+func (s *server) DeleteBagDropAssociation(
+	ctx context.Context, request DeleteBagDropAssociationRequestObject,
+) (DeleteBagDropAssociationResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	audited.event.TargetID = request.BucketName
+	defer func() { audited.log(ctx) }()
+	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
+	caller, refused, err := s.admitBagDrop(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	outcome, err := s.bagDrop.Unassociate(ctx, organizationID, projectID, request.BucketName)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(request.BucketName, string(outcome))
+	return DeleteBagDropAssociation204Response{}, nil
+}
+
+func (s *server) GetBagDropStatus(
+	ctx context.Context, request GetBagDropStatusRequestObject,
+) (GetBagDropStatusResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
+	caller, refused, err := s.admitBagDropStatus(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	status, err := s.bagDrop.Status(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded("", "")
+	return GetBagDropStatus200JSONResponse(renderBagDropStatus(status)), nil
+}
+
+func renderBagDropAssociation(association bagdrop.Association) BagDropAssociation {
+	return BagDropAssociation{
+		BucketName:       association.BucketName,
+		State:            BagDropAssociationState(association.State),
+		FirstAttemptedAt: association.FirstAttemptedAt,
+		LastSyncedAt:     association.LastSyncedAt,
+		CreatedAt:        association.CreatedAt,
+		UpdatedAt:        association.UpdatedAt,
+		SyncStatus:       BagDropSyncStatus(association.SyncStatus()),
+	}
+}
+
+func renderBagDropStatus(status *bagdrop.Status) BagDropStatus {
+	response := BagDropStatus{
+		Configured:   status.Configured,
+		Associations: make([]BagDropAssociation, 0, len(status.Associations)),
+	}
+	for _, association := range status.Associations {
+		response.Associations = append(response.Associations, renderBagDropAssociation(association))
+	}
+	if status.Config != nil {
+		adapter := BagDropAdapter(status.Config.Adapter)
+		response.Adapter = &adapter
+		response.Enabled = &status.Config.Enabled
+		response.LastVerification = renderBagDropConfig(status.Config).LastVerification
+	}
+	return response
 }
 
 func (s *server) VerifyBagDrop(

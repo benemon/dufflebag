@@ -100,6 +100,10 @@ type BagDropService interface {
 	Verify(context.Context, string, string) (bagdrop.VerificationResult, error)
 	Enable(context.Context, string, string) (*bagdrop.Config, *bagdrop.VerificationResult, error)
 	Disable(context.Context, string, string) (*bagdrop.Config, error)
+	ListAssociations(context.Context, string, string) ([]bagdrop.Association, error)
+	Associate(context.Context, string, string, string) (*bagdrop.Association, error)
+	Unassociate(context.Context, string, string, string) (bagdrop.RemovalOutcome, error)
+	Status(context.Context, string, string) (*bagdrop.Status, error)
 }
 
 type auditTargetSink interface {

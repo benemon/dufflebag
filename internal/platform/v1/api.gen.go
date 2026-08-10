@@ -111,6 +111,45 @@ func (e BagDropAdapter) Valid() bool {
 	}
 }
 
+// Defines values for BagDropAssociationState.
+const (
+	Active         BagDropAssociationState = "active"
+	PendingRemoval BagDropAssociationState = "pending_removal"
+)
+
+// Valid indicates whether the value is a known member of the BagDropAssociationState enum.
+func (e BagDropAssociationState) Valid() bool {
+	switch e {
+	case Active:
+		return true
+	case PendingRemoval:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for BagDropSyncStatus.
+const (
+	Pending  BagDropSyncStatus = "pending"
+	Removing BagDropSyncStatus = "removing"
+	Synced   BagDropSyncStatus = "synced"
+)
+
+// Valid indicates whether the value is a known member of the BagDropSyncStatus enum.
+func (e BagDropSyncStatus) Valid() bool {
+	switch e {
+	case Pending:
+		return true
+	case Removing:
+		return true
+	case Synced:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BagDropVerificationOutcome.
 const (
 	Failed   BagDropVerificationOutcome = "failed"
@@ -463,6 +502,20 @@ type AuditTargetOpenErrorReason string
 // BagDropAdapter defines model for BagDropAdapter.
 type BagDropAdapter string
 
+// BagDropAssociation defines model for BagDropAssociation.
+type BagDropAssociation struct {
+	BucketName       string                  `json:"bucket_name"`
+	CreatedAt        time.Time               `json:"created_at"`
+	FirstAttemptedAt *time.Time              `json:"first_attempted_at"`
+	LastSyncedAt     *time.Time              `json:"last_synced_at"`
+	State            BagDropAssociationState `json:"state"`
+	SyncStatus       BagDropSyncStatus       `json:"sync_status"`
+	UpdatedAt        time.Time               `json:"updated_at"`
+}
+
+// BagDropAssociationState defines model for BagDropAssociationState.
+type BagDropAssociationState string
+
 // BagDropConfig defines model for BagDropConfig.
 type BagDropConfig struct {
 	Adapter          BagDropAdapter           `json:"adapter"`
@@ -512,6 +565,18 @@ type BagDropLastVerification struct {
 	Reason     *BagDropVerificationReason `json:"reason,omitempty"`
 	VerifiedAt time.Time                  `json:"verified_at"`
 }
+
+// BagDropStatus defines model for BagDropStatus.
+type BagDropStatus struct {
+	Adapter          *BagDropAdapter          `json:"adapter,omitempty"`
+	Associations     []BagDropAssociation     `json:"associations"`
+	Configured       bool                     `json:"configured"`
+	Enabled          *bool                    `json:"enabled,omitempty"`
+	LastVerification *BagDropLastVerification `json:"last_verification,omitempty"`
+}
+
+// BagDropSyncStatus defines model for BagDropSyncStatus.
+type BagDropSyncStatus string
 
 // BagDropVerificationOutcome defines model for BagDropVerificationOutcome.
 type BagDropVerificationOutcome string
@@ -1342,7 +1407,9 @@ type ClientInterface interface {
 
 	// DeleteBagDropConfig Remove a project's Bag Drop destination configuration
 	//
-	// Refuses while enabled; disable the configuration first.
+	// Refuses while enabled or while destination cleanup is outstanding.
+	// Clean associations which have never been attempted cascade with the
+	// configuration.
 	//
 	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
 	DeleteBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1389,6 +1456,31 @@ type ClientInterface interface {
 	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
 	PutBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListBagDropAssociations List buckets selected for Bag Drop
+	//
+	// Requires maintainer on this project.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets (the `ListBagDropAssociations` operationId).
+	ListBagDropAssociations(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteBagDropAssociation Stop mirroring a bucket through Bag Drop
+	//
+	// This is the consent boundary for destination-side deletion. An
+	// association never attempted is removed immediately; otherwise it is
+	// retained as pending removal for the reconciler. Requires maintainer.
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `DeleteBagDropAssociation` operationId).
+	DeleteBagDropAssociation(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetBagDropAssociation Select a bucket for Bag Drop
+	//
+	// Idempotently associates an existing local bucket. Re-associating a
+	// pending removal reactivates it. Requires maintainer on this project and
+	// an existing Bag Drop configuration.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `SetBagDropAssociation` operationId).
+	SetBagDropAssociation(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DisableBagDrop Disable the configured destination without contacting it
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
@@ -1402,6 +1494,15 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 	EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetBagDropStatus Read Bag Drop dashboard status
+	//
+	// Returns configured false with an empty association list when no Bag
+	// Drop configuration exists. This is the reader-visible Bag Drop surface
+	// and never returns credential material.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status (the `GetBagDropStatus` operationId).
+	GetBagDropStatus(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// VerifyBagDrop Resolve the configured destination and record the result
 	//
@@ -2133,7 +2234,9 @@ func (c *Client) GetProject(ctx context.Context, organizationId OrganizationId, 
 
 // DeleteBagDropConfig Remove a project's Bag Drop destination configuration
 //
-// Refuses while enabled; disable the configuration first.
+// Refuses while enabled or while destination cleanup is outstanding.
+// Clean associations which have never been attempted cascade with the
+// configuration.
 //
 // Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `DeleteBagDropConfig` operationId).
 func (c *Client) DeleteBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2220,6 +2323,61 @@ func (c *Client) PutBagDropConfig(ctx context.Context, organizationId Organizati
 	return c.Client.Do(req)
 }
 
+// ListBagDropAssociations List buckets selected for Bag Drop
+//
+// Requires maintainer on this project.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets (the `ListBagDropAssociations` operationId).
+func (c *Client) ListBagDropAssociations(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListBagDropAssociationsRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteBagDropAssociation Stop mirroring a bucket through Bag Drop
+//
+// This is the consent boundary for destination-side deletion. An
+// association never attempted is removed immediately; otherwise it is
+// retained as pending removal for the reconciler. Requires maintainer.
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `DeleteBagDropAssociation` operationId).
+func (c *Client) DeleteBagDropAssociation(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteBagDropAssociationRequest(c.Server, organizationId, projectId, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetBagDropAssociation Select a bucket for Bag Drop
+//
+// Idempotently associates an existing local bucket. Re-associating a
+// pending removal reactivates it. Requires maintainer on this project and
+// an existing Bag Drop configuration.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `SetBagDropAssociation` operationId).
+func (c *Client) SetBagDropAssociation(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetBagDropAssociationRequest(c.Server, organizationId, projectId, bucketName)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // DisableBagDrop Disable the configured destination without contacting it
 //
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
@@ -2244,6 +2402,25 @@ func (c *Client) DisableBagDrop(ctx context.Context, organizationId Organization
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 func (c *Client) EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnableBagDropRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetBagDropStatus Read Bag Drop dashboard status
+//
+// Returns configured false with an empty association list when no Bag
+// Drop configuration exists. This is the reader-visible Bag Drop surface
+// and never returns credential material.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status (the `GetBagDropStatus` operationId).
+func (c *Client) GetBagDropStatus(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetBagDropStatusRequest(c.Server, organizationId, projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -3524,6 +3701,143 @@ func NewPutBagDropConfigRequestWithBody(server string, organizationId Organizati
 	return req, nil
 }
 
+// NewListBagDropAssociationsRequest constructs an http.Request for the ListBagDropAssociations method
+func NewListBagDropAssociationsRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/buckets", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDeleteBagDropAssociationRequest constructs an http.Request for the DeleteBagDropAssociation method
+func NewDeleteBagDropAssociationRequest(server string, organizationId OrganizationId, projectId ProjectId, bucketName string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "bucketName", bucketName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/buckets/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetBagDropAssociationRequest constructs an http.Request for the SetBagDropAssociation method
+func NewSetBagDropAssociationRequest(server string, organizationId OrganizationId, projectId ProjectId, bucketName string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "bucketName", bucketName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/buckets/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewDisableBagDropRequest constructs an http.Request for the DisableBagDrop method
 func NewDisableBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
 	var err error
@@ -3599,6 +3913,47 @@ func NewEnableBagDropRequest(server string, organizationId OrganizationId, proje
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetBagDropStatusRequest constructs an http.Request for the GetBagDropStatus method
+func NewGetBagDropStatusRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/status", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -4556,7 +4911,9 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteBagDropConfigWithResponse Remove a project's Bag Drop destination configuration
 	//
-	// Refuses while enabled; disable the configuration first.
+	// Refuses while enabled or while destination cleanup is outstanding.
+	// Clean associations which have never been attempted cascade with the
+	// configuration.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -4607,6 +4964,37 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
 	PutBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error)
 
+	// ListBagDropAssociationsWithResponse List buckets selected for Bag Drop
+	//
+	// Requires maintainer on this project.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets (the `ListBagDropAssociations` operationId).
+	ListBagDropAssociationsWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*ListBagDropAssociationsResponse, error)
+
+	// DeleteBagDropAssociationWithResponse Stop mirroring a bucket through Bag Drop
+	//
+	// This is the consent boundary for destination-side deletion. An
+	// association never attempted is removed immediately; otherwise it is
+	// retained as pending removal for the reconciler. Requires maintainer.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `DeleteBagDropAssociation` operationId).
+	DeleteBagDropAssociationWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*DeleteBagDropAssociationResponse, error)
+
+	// SetBagDropAssociationWithResponse Select a bucket for Bag Drop
+	//
+	// Idempotently associates an existing local bucket. Re-associating a
+	// pending removal reactivates it. Requires maintainer on this project and
+	// an existing Bag Drop configuration.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `SetBagDropAssociation` operationId).
+	SetBagDropAssociationWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*SetBagDropAssociationResponse, error)
+
 	// DisableBagDropWithResponse Disable the configured destination without contacting it
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -4624,6 +5012,17 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 	EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
+
+	// GetBagDropStatusWithResponse Read Bag Drop dashboard status
+	//
+	// Returns configured false with an empty association list when no Bag
+	// Drop configuration exists. This is the reader-visible Bag Drop surface
+	// and never returns credential material.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status (the `GetBagDropStatus` operationId).
+	GetBagDropStatusWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetBagDropStatusResponse, error)
 
 	// VerifyBagDropWithResponse Resolve the configured destination and record the result
 	//
@@ -6174,6 +6573,189 @@ func (r PutBagDropConfigResponse) ContentType() string {
 	return ""
 }
 
+type ListBagDropAssociationsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Associations []BagDropAssociation `json:"associations"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListBagDropAssociationsResponse) GetJSON200() *struct {
+	Associations []BagDropAssociation `json:"associations"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListBagDropAssociationsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListBagDropAssociationsResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListBagDropAssociationsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r ListBagDropAssociationsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListBagDropAssociationsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListBagDropAssociationsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListBagDropAssociationsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteBagDropAssociationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeleteBagDropAssociationResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeleteBagDropAssociationResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteBagDropAssociationResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteBagDropAssociationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteBagDropAssociationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteBagDropAssociationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteBagDropAssociationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetBagDropAssociationResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropAssociation
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetBagDropAssociationResponse) GetJSON200() *BagDropAssociation {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SetBagDropAssociationResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SetBagDropAssociationResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SetBagDropAssociationResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r SetBagDropAssociationResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetBagDropAssociationResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetBagDropAssociationResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetBagDropAssociationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type DisableBagDropResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -6299,6 +6881,68 @@ func (r EnableBagDropResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r EnableBagDropResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetBagDropStatusResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *BagDropStatus
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetBagDropStatusResponse) GetJSON200() *BagDropStatus {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetBagDropStatusResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetBagDropStatusResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetBagDropStatusResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetBagDropStatusResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetBagDropStatusResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetBagDropStatusResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetBagDropStatusResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -7698,7 +8342,9 @@ func (c *ClientWithResponses) GetProjectWithResponse(ctx context.Context, organi
 
 // DeleteBagDropConfigWithResponse Remove a project's Bag Drop destination configuration
 //
-// Refuses while enabled; disable the configuration first.
+// Refuses while enabled or while destination cleanup is outstanding.
+// Clean associations which have never been attempted cascade with the
+// configuration.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -7773,6 +8419,55 @@ func (c *ClientWithResponses) PutBagDropConfigWithResponse(ctx context.Context, 
 	return ParsePutBagDropConfigResponse(rsp)
 }
 
+// ListBagDropAssociationsWithResponse List buckets selected for Bag Drop
+//
+// Requires maintainer on this project.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets (the `ListBagDropAssociations` operationId).
+func (c *ClientWithResponses) ListBagDropAssociationsWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*ListBagDropAssociationsResponse, error) {
+	rsp, err := c.ListBagDropAssociations(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListBagDropAssociationsResponse(rsp)
+}
+
+// DeleteBagDropAssociationWithResponse Stop mirroring a bucket through Bag Drop
+//
+// This is the consent boundary for destination-side deletion. An
+// association never attempted is removed immediately; otherwise it is
+// retained as pending removal for the reconciler. Requires maintainer.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `DeleteBagDropAssociation` operationId).
+func (c *ClientWithResponses) DeleteBagDropAssociationWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*DeleteBagDropAssociationResponse, error) {
+	rsp, err := c.DeleteBagDropAssociation(ctx, organizationId, projectId, bucketName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteBagDropAssociationResponse(rsp)
+}
+
+// SetBagDropAssociationWithResponse Select a bucket for Bag Drop
+//
+// Idempotently associates an existing local bucket. Re-associating a
+// pending removal reactivates it. Requires maintainer on this project and
+// an existing Bag Drop configuration.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName} (the `SetBagDropAssociation` operationId).
+func (c *ClientWithResponses) SetBagDropAssociationWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, reqEditors ...RequestEditorFn) (*SetBagDropAssociationResponse, error) {
+	rsp, err := c.SetBagDropAssociation(ctx, organizationId, projectId, bucketName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetBagDropAssociationResponse(rsp)
+}
+
 // DisableBagDropWithResponse Disable the configured destination without contacting it
 //
 // Returns a wrapper object for the known response body format(s).
@@ -7801,6 +8496,23 @@ func (c *ClientWithResponses) EnableBagDropWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseEnableBagDropResponse(rsp)
+}
+
+// GetBagDropStatusWithResponse Read Bag Drop dashboard status
+//
+// Returns configured false with an empty association list when no Bag
+// Drop configuration exists. This is the reader-visible Bag Drop surface
+// and never returns credential material.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status (the `GetBagDropStatus` operationId).
+func (c *ClientWithResponses) GetBagDropStatusWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetBagDropStatusResponse, error) {
+	rsp, err := c.GetBagDropStatus(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetBagDropStatusResponse(rsp)
 }
 
 // VerifyBagDropWithResponse Resolve the configured destination and record the result
@@ -9225,6 +9937,145 @@ func ParsePutBagDropConfigResponse(rsp *http.Response) (*PutBagDropConfigRespons
 	return response, nil
 }
 
+// ParseListBagDropAssociationsResponse parses an HTTP response from a ListBagDropAssociationsWithResponse call
+func ParseListBagDropAssociationsResponse(rsp *http.Response) (*ListBagDropAssociationsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListBagDropAssociationsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Associations []BagDropAssociation `json:"associations"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteBagDropAssociationResponse parses an HTTP response from a DeleteBagDropAssociationWithResponse call
+func ParseDeleteBagDropAssociationResponse(rsp *http.Response) (*DeleteBagDropAssociationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteBagDropAssociationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetBagDropAssociationResponse parses an HTTP response from a SetBagDropAssociationWithResponse call
+func ParseSetBagDropAssociationResponse(rsp *http.Response) (*SetBagDropAssociationResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetBagDropAssociationResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropAssociation
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseDisableBagDropResponse parses an HTTP response from a DisableBagDropWithResponse call
 func ParseDisableBagDropResponse(rsp *http.Response) (*DisableBagDropResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -9320,6 +10171,53 @@ func ParseEnableBagDropResponse(rsp *http.Response) (*EnableBagDropResponse, err
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetBagDropStatusResponse parses an HTTP response from a GetBagDropStatusWithResponse call
+func ParseGetBagDropStatusResponse(rsp *http.Response) (*GetBagDropStatusResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetBagDropStatusResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest BagDropStatus
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
@@ -10217,12 +11115,24 @@ type ServerInterface interface {
 	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
 	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
 	PutBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// ListBagDropAssociations List buckets selected for Bag Drop
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets)
+	ListBagDropAssociations(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// DeleteBagDropAssociation Stop mirroring a bucket through Bag Drop
+	// (DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName})
+	DeleteBagDropAssociation(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string)
+	// SetBagDropAssociation Select a bucket for Bag Drop
+	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName})
+	SetBagDropAssociation(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string)
 	// DisableBagDrop Disable the configured destination without contacting it
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable)
 	DisableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
 	// EnableBagDrop Verify and enable the configured destination
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
 	EnableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// GetBagDropStatus Read Bag Drop dashboard status
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status)
+	GetBagDropStatus(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
 	// VerifyBagDrop Resolve the configured destination and record the result
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
 	VerifyBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
@@ -10708,6 +11618,129 @@ func (siw *ServerInterfaceWrapper) PutBagDropConfig(w http.ResponseWriter, r *ht
 	handler.ServeHTTP(w, r)
 }
 
+// ListBagDropAssociations operation middleware
+func (siw *ServerInterfaceWrapper) ListBagDropAssociations(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListBagDropAssociations(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteBagDropAssociation operation middleware
+func (siw *ServerInterfaceWrapper) DeleteBagDropAssociation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "bucketName" -------------
+	var bucketName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "bucketName", r.PathValue("bucketName"), &bucketName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "bucketName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteBagDropAssociation(w, r, organizationId, projectId, bucketName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetBagDropAssociation operation middleware
+func (siw *ServerInterfaceWrapper) SetBagDropAssociation(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "bucketName" -------------
+	var bucketName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "bucketName", r.PathValue("bucketName"), &bucketName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "bucketName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetBagDropAssociation(w, r, organizationId, projectId, bucketName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DisableBagDrop operation middleware
 func (siw *ServerInterfaceWrapper) DisableBagDrop(w http.ResponseWriter, r *http.Request) {
 
@@ -10769,6 +11802,41 @@ func (siw *ServerInterfaceWrapper) EnableBagDrop(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.EnableBagDrop(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetBagDropStatus operation middleware
+func (siw *ServerInterfaceWrapper) GetBagDropStatus(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetBagDropStatus(w, r, organizationId, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -11421,6 +12489,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.DeleteBagDropConfig)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.GetBagDropConfig)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.PutBagDropConfig)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets", wrapper.ListBagDropAssociations)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", wrapper.DeleteBagDropAssociation)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", wrapper.SetBagDropAssociation)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status", wrapper.GetBagDropStatus)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify", wrapper.VerifyBagDrop)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable", wrapper.EnableBagDrop)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable", wrapper.DisableBagDrop)
@@ -12613,6 +13685,199 @@ func (response PutBagDropConfig409JSONResponse) VisitPutBagDropConfigResponse(w 
 	return err
 }
 
+type ListBagDropAssociationsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type ListBagDropAssociationsResponseObject interface {
+	VisitListBagDropAssociationsResponse(w http.ResponseWriter) error
+}
+
+type ListBagDropAssociations200JSONResponse struct {
+	Associations []BagDropAssociation `json:"associations"`
+}
+
+func (response ListBagDropAssociations200JSONResponse) VisitListBagDropAssociationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBagDropAssociations401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListBagDropAssociations401JSONResponse) VisitListBagDropAssociationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBagDropAssociations403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListBagDropAssociations403JSONResponse) VisitListBagDropAssociationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListBagDropAssociations404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListBagDropAssociations404JSONResponse) VisitListBagDropAssociationsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropAssociationRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+	BucketName     string         `json:"bucketName"`
+}
+
+type DeleteBagDropAssociationResponseObject interface {
+	VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error
+}
+
+type DeleteBagDropAssociation204Response struct {
+}
+
+func (response DeleteBagDropAssociation204Response) VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteBagDropAssociation401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteBagDropAssociation401JSONResponse) VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropAssociation403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteBagDropAssociation403JSONResponse) VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteBagDropAssociation404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteBagDropAssociation404JSONResponse) VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBagDropAssociationRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+	BucketName     string         `json:"bucketName"`
+}
+
+type SetBagDropAssociationResponseObject interface {
+	VisitSetBagDropAssociationResponse(w http.ResponseWriter) error
+}
+
+type SetBagDropAssociation200JSONResponse BagDropAssociation
+
+func (response SetBagDropAssociation200JSONResponse) VisitSetBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBagDropAssociation401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SetBagDropAssociation401JSONResponse) VisitSetBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBagDropAssociation403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetBagDropAssociation403JSONResponse) VisitSetBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetBagDropAssociation404JSONResponse Error
+
+func (response SetBagDropAssociation404JSONResponse) VisitSetBagDropAssociationResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DisableBagDropRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
@@ -12753,6 +14018,71 @@ func (response EnableBagDrop409JSONResponse) VisitEnableBagDropResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropStatusRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type GetBagDropStatusResponseObject interface {
+	VisitGetBagDropStatusResponse(w http.ResponseWriter) error
+}
+
+type GetBagDropStatus200JSONResponse BagDropStatus
+
+func (response GetBagDropStatus200JSONResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropStatus401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetBagDropStatus401JSONResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropStatus403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetBagDropStatus403JSONResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetBagDropStatus404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetBagDropStatus404JSONResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -13939,12 +15269,24 @@ type StrictServerInterface interface {
 	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
 	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
 	PutBagDropConfig(ctx context.Context, request PutBagDropConfigRequestObject) (PutBagDropConfigResponseObject, error)
+	// ListBagDropAssociations List buckets selected for Bag Drop
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets)
+	ListBagDropAssociations(ctx context.Context, request ListBagDropAssociationsRequestObject) (ListBagDropAssociationsResponseObject, error)
+	// DeleteBagDropAssociation Stop mirroring a bucket through Bag Drop
+	// (DELETE /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName})
+	DeleteBagDropAssociation(ctx context.Context, request DeleteBagDropAssociationRequestObject) (DeleteBagDropAssociationResponseObject, error)
+	// SetBagDropAssociation Select a bucket for Bag Drop
+	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName})
+	SetBagDropAssociation(ctx context.Context, request SetBagDropAssociationRequestObject) (SetBagDropAssociationResponseObject, error)
 	// DisableBagDrop Disable the configured destination without contacting it
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable)
 	DisableBagDrop(ctx context.Context, request DisableBagDropRequestObject) (DisableBagDropResponseObject, error)
 	// EnableBagDrop Verify and enable the configured destination
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
 	EnableBagDrop(ctx context.Context, request EnableBagDropRequestObject) (EnableBagDropResponseObject, error)
+	// GetBagDropStatus Read Bag Drop dashboard status
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status)
+	GetBagDropStatus(ctx context.Context, request GetBagDropStatusRequestObject) (GetBagDropStatusResponseObject, error)
 	// VerifyBagDrop Resolve the configured destination and record the result
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
 	VerifyBagDrop(ctx context.Context, request VerifyBagDropRequestObject) (VerifyBagDropResponseObject, error)
@@ -14528,6 +15870,89 @@ func (sh *strictHandler) PutBagDropConfig(w http.ResponseWriter, r *http.Request
 	}
 }
 
+// ListBagDropAssociations operation middleware
+func (sh *strictHandler) ListBagDropAssociations(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request ListBagDropAssociationsRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListBagDropAssociations(ctx, request.(ListBagDropAssociationsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListBagDropAssociations")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListBagDropAssociationsResponseObject); ok {
+		if err := validResponse.VisitListBagDropAssociationsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteBagDropAssociation operation middleware
+func (sh *strictHandler) DeleteBagDropAssociation(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string) {
+	var request DeleteBagDropAssociationRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+	request.BucketName = bucketName
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteBagDropAssociation(ctx, request.(DeleteBagDropAssociationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteBagDropAssociation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteBagDropAssociationResponseObject); ok {
+		if err := validResponse.VisitDeleteBagDropAssociationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetBagDropAssociation operation middleware
+func (sh *strictHandler) SetBagDropAssociation(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string) {
+	var request SetBagDropAssociationRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+	request.BucketName = bucketName
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetBagDropAssociation(ctx, request.(SetBagDropAssociationRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetBagDropAssociation")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetBagDropAssociationResponseObject); ok {
+		if err := validResponse.VisitSetBagDropAssociationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // DisableBagDrop operation middleware
 func (sh *strictHandler) DisableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
 	var request DisableBagDropRequestObject
@@ -14575,6 +16000,33 @@ func (sh *strictHandler) EnableBagDrop(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnableBagDropResponseObject); ok {
 		if err := validResponse.VisitEnableBagDropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetBagDropStatus operation middleware
+func (sh *strictHandler) GetBagDropStatus(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request GetBagDropStatusRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetBagDropStatus(ctx, request.(GetBagDropStatusRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetBagDropStatus")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetBagDropStatusResponseObject); ok {
+		if err := validResponse.VisitGetBagDropStatusResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

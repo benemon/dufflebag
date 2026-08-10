@@ -170,6 +170,157 @@ func (r *Repository) SetBagDropEnabled(
 	return stored, nil
 }
 
+func (r *Repository) ListBagDropAssociations(
+	ctx context.Context, organizationID, projectID string,
+) ([]bagdrop.Association, error) {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := q.ListBagDropAssociations(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("list Bag Drop associations: %w", err)
+	}
+	associations := make([]bagdrop.Association, 0, len(rows))
+	for _, row := range rows {
+		association, restoreErr := restoreBagDropAssociation(row)
+		if restoreErr != nil {
+			return nil, restoreErr
+		}
+		associations = append(associations, *association)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit list Bag Drop associations: %w", err)
+	}
+	return associations, nil
+}
+
+func (r *Repository) PutBagDropAssociation(
+	ctx context.Context, association bagdrop.Association,
+) (*bagdrop.Association, error) {
+	tenant := ParseTenant(association.OrganizationID, association.ProjectID)
+	tx, q, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	row, err := q.UpsertBagDropAssociation(ctx, postgresdb.UpsertBagDropAssociationParams{
+		OrganizationID:   tenant.OrganizationID,
+		ProjectID:        tenant.ProjectID,
+		BucketName:       association.BucketName,
+		State:            string(association.State),
+		FirstAttemptedAt: nullableTime(association.FirstAttemptedAt),
+		LastSyncedAt:     nullableTime(association.LastSyncedAt),
+		CreatedAt:        association.CreatedAt,
+		UpdatedAt:        association.UpdatedAt,
+	})
+	var postgresError *pgconn.PgError
+	if errors.As(err, &postgresError) && postgresError.Code == "23503" {
+		return nil, fmt.Errorf("put Bag Drop association: %w", bagdrop.ErrNotFound)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("put Bag Drop association: %w", err)
+	}
+	stored, err := restoreBagDropAssociation(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit put Bag Drop association: %w", err)
+	}
+	return stored, nil
+}
+
+func (r *Repository) RemoveBagDropAssociation(
+	ctx context.Context, organizationID, projectID, bucketName string, at time.Time,
+) (bagdrop.RemovalOutcome, error) {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = tx.Rollback() }()
+	outcome, err := q.RemoveBagDropAssociation(ctx, postgresdb.RemoveBagDropAssociationParams{
+		BucketName: bucketName, UpdatedAt: at,
+	})
+	if err != nil {
+		return "", fmt.Errorf("remove Bag Drop association: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("commit remove Bag Drop association: %w", err)
+	}
+	return bagdrop.RemovalOutcome(outcome), nil
+}
+
+func (r *Repository) BagDropBucketExists(
+	ctx context.Context, organizationID, projectID, bucketName string,
+) (bool, error) {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	exists, err := q.BagDropBucketExists(ctx, bucketName)
+	if err != nil {
+		return false, fmt.Errorf("check Bag Drop bucket: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit check Bag Drop bucket: %w", err)
+	}
+	return exists, nil
+}
+
+func (r *Repository) HasBlockingBagDropAssociations(
+	ctx context.Context, organizationID, projectID string,
+) (bool, error) {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	blocked, err := q.HasBlockingBagDropAssociations(ctx)
+	if err != nil {
+		return false, fmt.Errorf("check blocking Bag Drop associations: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return false, fmt.Errorf("commit check blocking Bag Drop associations: %w", err)
+	}
+	return blocked, nil
+}
+
+func restoreBagDropAssociation(
+	row postgresdb.BagdropAssociation,
+) (*bagdrop.Association, error) {
+	state := bagdrop.AssociationState(row.State)
+	if state != bagdrop.AssociationActive && state != bagdrop.AssociationPendingRemoval {
+		return nil, fmt.Errorf("restore Bag Drop association: invalid state %q", row.State)
+	}
+	return &bagdrop.Association{
+		OrganizationID:   row.OrganizationID.String(),
+		ProjectID:        row.ProjectID.String(),
+		BucketName:       row.BucketName,
+		State:            state,
+		FirstAttemptedAt: timePointer(row.FirstAttemptedAt),
+		LastSyncedAt:     timePointer(row.LastSyncedAt),
+		CreatedAt:        row.CreatedAt,
+		UpdatedAt:        row.UpdatedAt,
+	}, nil
+}
+
+func nullableTime(value *time.Time) sql.NullTime {
+	if value == nil {
+		return sql.NullTime{}
+	}
+	return sql.NullTime{Time: *value, Valid: true}
+}
+
+func timePointer(value sql.NullTime) *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	return &value.Time
+}
+
 func restoreBagDropConfig(row postgresdb.BagdropConfig) (*bagdrop.Record, error) {
 	var destination bagdrop.HCPPackerConfig
 	if err := json.Unmarshal(row.Destination, &destination); err != nil {

@@ -174,6 +174,127 @@ func TestUpdateWithoutSecretKeepsOldSecretWorking(t *testing.T) {
 	}
 }
 
+func TestAssociationLifecycleAndReactivation(t *testing.T) {
+	repository := &memoryRepository{
+		record: &Record{}, bucketExists: true, associations: map[string]Association{},
+	}
+	service := NewService(repository, NewCredentialSealer(nil, testKey), nil)
+	first := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	service.now = func() time.Time { return first }
+	associated, err := service.Associate(context.Background(), testOrganization, testProject, "images")
+	if err != nil || associated.State != AssociationActive || associated.SyncStatus() != SyncPending {
+		t.Fatalf("associate = %#v, %v", associated, err)
+	}
+	service.now = func() time.Time { return first.Add(time.Minute) }
+	idempotent, err := service.Associate(context.Background(), testOrganization, testProject, "images")
+	if err != nil || !idempotent.UpdatedAt.Equal(first) {
+		t.Fatalf("idempotent associate = %#v, %v", idempotent, err)
+	}
+	pending := repository.associations["images"]
+	pending.State = AssociationPendingRemoval
+	pending.FirstAttemptedAt = &first
+	repository.associations["images"] = pending
+	reactivated, err := service.Associate(context.Background(), testOrganization, testProject, "images")
+	if err != nil || reactivated.State != AssociationActive ||
+		!reactivated.UpdatedAt.Equal(first.Add(time.Minute)) {
+		t.Fatalf("reactivate = %#v, %v", reactivated, err)
+	}
+	listed, err := service.ListAssociations(context.Background(), testOrganization, testProject)
+	if err != nil || len(listed) != 1 || listed[0].BucketName != "images" {
+		t.Fatalf("list = %#v, %v", listed, err)
+	}
+}
+
+func TestAssociateRefusals(t *testing.T) {
+	withoutConfig := NewService(&memoryRepository{bucketExists: true}, NewCredentialSealer(nil, testKey), nil)
+	if _, err := withoutConfig.Associate(
+		context.Background(), testOrganization, testProject, "images",
+	); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("without config = %v", err)
+	}
+	withoutBucket := NewService(&memoryRepository{record: &Record{}}, NewCredentialSealer(nil, testKey), nil)
+	if _, err := withoutBucket.Associate(
+		context.Background(), testOrganization, testProject, "typo",
+	); !errors.Is(err, ErrBucketNotFound) {
+		t.Fatalf("without bucket = %v", err)
+	}
+}
+
+func TestUnassociateHardDeletesNeverAttemptedAndTombstonesAttempted(t *testing.T) {
+	attemptedAt := time.Date(2026, 8, 10, 12, 0, 0, 0, time.UTC)
+	repository := &memoryRepository{associations: map[string]Association{
+		"clean": {BucketName: "clean", State: AssociationActive},
+		"attempted": {
+			BucketName: "attempted", State: AssociationActive, FirstAttemptedAt: &attemptedAt,
+		},
+	}}
+	service := NewService(repository, NewCredentialSealer(nil, testKey), nil)
+	outcome, err := service.Unassociate(context.Background(), testOrganization, testProject, "clean")
+	if err != nil || outcome != RemovedClean {
+		t.Fatalf("clean unassociate = %q, %v", outcome, err)
+	}
+	if _, ok := repository.associations["clean"]; ok {
+		t.Fatal("clean association was not hard-deleted")
+	}
+	outcome, err = service.Unassociate(context.Background(), testOrganization, testProject, "attempted")
+	if err != nil || outcome != RemovalPending {
+		t.Fatalf("attempted unassociate = %q, %v", outcome, err)
+	}
+	if association := repository.associations["attempted"]; association.State != AssociationPendingRemoval {
+		t.Fatalf("attempted association = %#v", association)
+	}
+}
+
+func TestDeleteGuardBlocksAttemptedOrPendingAndAllowsCleanCascade(t *testing.T) {
+	attemptedAt := time.Now().UTC()
+	for _, association := range []Association{
+		{BucketName: "pending", State: AssociationPendingRemoval},
+		{BucketName: "attempted", State: AssociationActive, FirstAttemptedAt: &attemptedAt},
+	} {
+		repository := &memoryRepository{
+			record: &Record{}, associations: map[string]Association{association.BucketName: association},
+		}
+		service := NewService(repository, NewCredentialSealer(nil, testKey), nil)
+		if err := service.Delete(context.Background(), testOrganization, testProject); !errors.Is(err, ErrCleanupPending) {
+			t.Fatalf("delete with %#v = %v", association, err)
+		}
+		if repository.deleteCalls != 0 {
+			t.Fatal("guarded delete reached repository")
+		}
+	}
+	repository := &memoryRepository{
+		record: &Record{}, associations: map[string]Association{
+			"clean": {BucketName: "clean", State: AssociationActive},
+		},
+	}
+	service := NewService(repository, NewCredentialSealer(nil, testKey), nil)
+	if err := service.Delete(context.Background(), testOrganization, testProject); err != nil {
+		t.Fatalf("delete clean: %v", err)
+	}
+	if repository.record != nil || len(repository.associations) != 0 {
+		t.Fatalf("clean delete did not cascade: %#v", repository)
+	}
+}
+
+func TestStatusWithAndWithoutConfig(t *testing.T) {
+	without, err := NewService(&memoryRepository{}, NewCredentialSealer(nil, testKey), nil).Status(
+		context.Background(), testOrganization, testProject,
+	)
+	if err != nil || without.Configured || without.Config != nil || len(without.Associations) != 0 {
+		t.Fatalf("without config = %#v, %v", without, err)
+	}
+	repository := &memoryRepository{
+		record:       &Record{Enabled: true},
+		associations: map[string]Association{"images": {BucketName: "images", State: AssociationActive}},
+	}
+	with, err := NewService(repository, NewCredentialSealer(nil, testKey), nil).Status(
+		context.Background(), testOrganization, testProject,
+	)
+	if err != nil || !with.Configured || with.Config == nil || !with.Config.Enabled || len(with.Associations) != 1 {
+		t.Fatalf("with config = %#v, %v", with, err)
+	}
+}
+
 func testWrite(secret string) Write {
 	return Write{
 		Adapter: AdapterHCPPacker,
@@ -197,9 +318,11 @@ func (a *fakeAdapter) Resolve(_ context.Context, destination Destination) Verifi
 }
 
 type memoryRepository struct {
-	record      *Record
-	enableCalls int
-	deleteCalls int
+	record       *Record
+	associations map[string]Association
+	bucketExists bool
+	enableCalls  int
+	deleteCalls  int
 }
 
 func (r *memoryRepository) GetBagDropConfig(context.Context, string, string) (*Record, error) {
@@ -221,6 +344,7 @@ func (r *memoryRepository) PutBagDropConfig(_ context.Context, record *Record) (
 func (r *memoryRepository) DeleteBagDropConfig(context.Context, string, string) error {
 	r.deleteCalls++
 	r.record = nil
+	r.associations = nil
 	return nil
 }
 
@@ -245,4 +369,63 @@ func (r *memoryRepository) SetBagDropEnabled(
 		r.record.LastVerification = &LastVerification{VerificationResult: *result, VerifiedAt: at}
 	}
 	return r.GetBagDropConfig(context.Background(), r.record.OrganizationID, r.record.ProjectID)
+}
+
+func (r *memoryRepository) ListBagDropAssociations(
+	context.Context, string, string,
+) ([]Association, error) {
+	associations := make([]Association, 0, len(r.associations))
+	for _, association := range r.associations {
+		associations = append(associations, association)
+	}
+	return associations, nil
+}
+
+func (r *memoryRepository) PutBagDropAssociation(
+	_ context.Context, association Association,
+) (*Association, error) {
+	if r.associations == nil {
+		r.associations = map[string]Association{}
+	}
+	if existing, ok := r.associations[association.BucketName]; ok {
+		association.CreatedAt = existing.CreatedAt
+		association.FirstAttemptedAt = existing.FirstAttemptedAt
+		association.LastSyncedAt = existing.LastSyncedAt
+		if existing.State == association.State {
+			association.UpdatedAt = existing.UpdatedAt
+		}
+	}
+	r.associations[association.BucketName] = association
+	return &association, nil
+}
+
+func (r *memoryRepository) RemoveBagDropAssociation(
+	_ context.Context, _, _, bucketName string, at time.Time,
+) (RemovalOutcome, error) {
+	association, ok := r.associations[bucketName]
+	if !ok || association.FirstAttemptedAt == nil {
+		delete(r.associations, bucketName)
+		return RemovedClean, nil
+	}
+	association.State = AssociationPendingRemoval
+	association.UpdatedAt = at
+	r.associations[bucketName] = association
+	return RemovalPending, nil
+}
+
+func (r *memoryRepository) BagDropBucketExists(
+	context.Context, string, string, string,
+) (bool, error) {
+	return r.bucketExists, nil
+}
+
+func (r *memoryRepository) HasBlockingBagDropAssociations(
+	context.Context, string, string,
+) (bool, error) {
+	for _, association := range r.associations {
+		if association.State == AssociationPendingRemoval || association.FirstAttemptedAt != nil {
+			return true, nil
+		}
+	}
+	return false, nil
 }

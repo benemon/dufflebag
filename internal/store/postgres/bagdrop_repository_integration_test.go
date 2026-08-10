@@ -119,6 +119,118 @@ func TestBagDropServiceAgainstPostgres(t *testing.T) {
 	}
 }
 
+func TestBagDropAssociationRepositoryLifecycleAndBucketIndependence(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 10, 13, 0, 0, 0, time.UTC)
+	config := integrationBagDropRecord(createdAt)
+	if _, err := repository.PutBagDropConfig(ctx, config); err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	insertPinBucket(t, repository, "images")
+	association := bagdrop.Association{
+		OrganizationID: orgA, ProjectID: projectA, BucketName: "images",
+		State: bagdrop.AssociationActive, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}
+	stored, err := repository.PutBagDropAssociation(ctx, association)
+	if err != nil || stored.State != bagdrop.AssociationActive {
+		t.Fatalf("put association = %#v, %v", stored, err)
+	}
+	idempotent := association
+	idempotent.UpdatedAt = createdAt.Add(time.Minute)
+	stored, err = repository.PutBagDropAssociation(ctx, idempotent)
+	if err != nil || !stored.UpdatedAt.Equal(createdAt) {
+		t.Fatalf("idempotent association = %#v, %v", stored, err)
+	}
+	if err := repository.DeleteBucket(ctx, store.ParseTenant(orgA, projectA), "images"); err != nil {
+		t.Fatalf("delete local bucket: %v", err)
+	}
+	listed, err := repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 1 || listed[0].BucketName != "images" {
+		t.Fatalf("association after bucket delete = %#v, %v", listed, err)
+	}
+	outcome, err := repository.RemoveBagDropAssociation(
+		ctx, orgA, projectA, "images", createdAt.Add(2*time.Minute),
+	)
+	if err != nil || outcome != bagdrop.RemovedClean {
+		t.Fatalf("remove clean = %q, %v", outcome, err)
+	}
+	listed, err = repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("after clean remove = %#v, %v", listed, err)
+	}
+}
+
+func TestBagDropAttemptedAssociationTombstoneAndDeleteGuard(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 10, 14, 0, 0, 0, time.UTC)
+	if _, err := repository.PutBagDropConfig(ctx, integrationBagDropRecord(createdAt)); err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	attemptedAt := createdAt.Add(time.Minute)
+	if _, err := repository.PutBagDropAssociation(ctx, bagdrop.Association{
+		OrganizationID: orgA, ProjectID: projectA, BucketName: "images",
+		State: bagdrop.AssociationActive, FirstAttemptedAt: &attemptedAt,
+		CreatedAt: createdAt, UpdatedAt: attemptedAt,
+	}); err != nil {
+		t.Fatalf("seed attempted association through repository: %v", err)
+	}
+	outcome, err := repository.RemoveBagDropAssociation(
+		ctx, orgA, projectA, "images", attemptedAt.Add(time.Minute),
+	)
+	if err != nil || outcome != bagdrop.RemovalPending {
+		t.Fatalf("remove attempted = %q, %v", outcome, err)
+	}
+	listed, err := repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 1 || listed[0].State != bagdrop.AssociationPendingRemoval {
+		t.Fatalf("tombstone = %#v, %v", listed, err)
+	}
+	service := bagdrop.NewService(repository, bagdrop.NewCredentialSealer(nil, ""), nil)
+	if err := service.Delete(ctx, orgA, projectA); !errors.Is(err, bagdrop.ErrCleanupPending) {
+		t.Fatalf("delete with tombstone = %v", err)
+	}
+}
+
+func TestBagDropCleanAssociationsCascadeWithConfig(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 10, 15, 0, 0, 0, time.UTC)
+	if _, err := repository.PutBagDropConfig(ctx, integrationBagDropRecord(createdAt)); err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	if _, err := repository.PutBagDropAssociation(ctx, bagdrop.Association{
+		OrganizationID: orgA, ProjectID: projectA, BucketName: "images",
+		State: bagdrop.AssociationActive, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("put clean association: %v", err)
+	}
+	service := bagdrop.NewService(repository, bagdrop.NewCredentialSealer(nil, ""), nil)
+	if err := service.Delete(ctx, orgA, projectA); err != nil {
+		t.Fatalf("delete clean config: %v", err)
+	}
+	listed, err := repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 0 {
+		t.Fatalf("associations after cascade = %#v, %v", listed, err)
+	}
+}
+
+func integrationBagDropRecord(at time.Time) *bagdrop.Record {
+	return &bagdrop.Record{
+		OrganizationID: orgA, ProjectID: projectA, Adapter: bagdrop.AdapterHCPPacker,
+		HCPPacker: bagdrop.HCPPackerConfig{
+			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
+		},
+		SealedSecret: []byte("opaque-envelope"), CreatedAt: at, UpdatedAt: at,
+	}
+}
+
 type integrationBagDropAdapter struct{ secret string }
 
 func (a *integrationBagDropAdapter) Resolve(

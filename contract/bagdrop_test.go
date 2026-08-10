@@ -20,10 +20,16 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable:",
+		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets:",
+		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}:",
+		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status:",
 		"operationId: getBagDropConfig", "operationId: putBagDropConfig",
 		"operationId: deleteBagDropConfig", "operationId: verifyBagDrop",
 		"operationId: enableBagDrop", "operationId: disableBagDrop",
+		"operationId: listBagDropAssociations", "operationId: setBagDropAssociation",
+		"operationId: deleteBagDropAssociation", "operationId: getBagDropStatus",
 		"enum: [hcp-packer]", "enum: [resolved, failed]",
+		"enum: [active, pending_removal]", "enum: [pending, synced, removing]",
 		"enum: [credential_refused, project_not_found, unreachable, tls_failure]",
 	} {
 		if !strings.Contains(spec, required) {
@@ -62,15 +68,22 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 	if !structFields["BagDropHCPPackerWrite"]["ClientSecret"] {
 		t.Fatal("generated write shape has no ClientSecret")
 	}
-	for _, readType := range []string{"BagDropConfig", "BagDropHCPPacker", "BagDropLastVerification"} {
-		if structFields[readType]["ClientSecret"] {
-			t.Fatalf("generated read type %s exposes ClientSecret", readType)
+	for _, readType := range []string{
+		"BagDropConfig", "BagDropHCPPacker", "BagDropLastVerification",
+		"BagDropAssociation", "BagDropStatus",
+	} {
+		for _, secretField := range []string{"ClientSecret", "SealedSecret"} {
+			if structFields[readType][secretField] {
+				t.Fatalf("generated read type %s exposes %s", readType, secretField)
+			}
 		}
 	}
 	for _, response := range []string{
 		"GetBagDropConfig200JSONResponse", "PutBagDropConfig200JSONResponse",
 		"DeleteBagDropConfig409JSONResponse", "VerifyBagDrop200JSONResponse",
 		"EnableBagDrop409JSONResponse", "DisableBagDrop200JSONResponse",
+		"ListBagDropAssociations200JSONResponse", "SetBagDropAssociation200JSONResponse",
+		"DeleteBagDropAssociation204Response", "GetBagDropStatus200JSONResponse",
 	} {
 		if !strings.Contains(generated, "type "+response) {
 			t.Errorf("generated contract lacks %s", response)

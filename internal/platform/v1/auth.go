@@ -403,6 +403,18 @@ func (response refusalResponse) VisitEnableBagDropResponse(w http.ResponseWriter
 func (response refusalResponse) VisitDisableBagDropResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitListBagDropAssociationsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitSetBagDropAssociationResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDeleteBagDropAssociationResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListAuditTargetsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
