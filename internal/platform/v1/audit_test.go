@@ -63,6 +63,7 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"SetBagDropAssociation":    {"bagdrop.association.set", "bagdrop_association", "bucketName"},
 		"DeleteBagDropAssociation": {"bagdrop.association.delete", "bagdrop_association", "bucketName"},
 		"GetBagDropStatus":         {"bagdrop.status.read", "bagdrop_status", ""},
+		"ReconcileBagDrop":         {"bagdrop.reconcile", "bagdrop_config", ""},
 	}
 	generated := generatedOperationIDs(t)
 	described := make([]string, 0, len(operationDescriptors))

@@ -415,6 +415,9 @@ func (response refusalResponse) VisitDeleteBagDropAssociationResponse(w http.Res
 func (response refusalResponse) VisitGetBagDropStatusResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListAuditTargetsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

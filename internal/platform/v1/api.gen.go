@@ -507,6 +507,8 @@ type BagDropAssociation struct {
 	BucketName       string                  `json:"bucket_name"`
 	CreatedAt        time.Time               `json:"created_at"`
 	FirstAttemptedAt *time.Time              `json:"first_attempted_at"`
+	LastAttemptAt    *time.Time              `json:"last_attempt_at"`
+	LastSyncError    *string                 `json:"last_sync_error"`
 	LastSyncedAt     *time.Time              `json:"last_synced_at"`
 	State            BagDropAssociationState `json:"state"`
 	SyncStatus       BagDropSyncStatus       `json:"sync_status"`
@@ -1495,6 +1497,14 @@ type ClientInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 	EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ReconcileBagDrop Request prompt reconciliation of a project's Bag Drop associations
+	//
+	// Signals the reconciler running in this process. Requires maintainer on
+	// this project. Returns 503 when this process has no running reconciler.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile (the `ReconcileBagDrop` operationId).
+	ReconcileBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// GetBagDropStatus Read Bag Drop dashboard status
 	//
 	// Returns configured false with an empty association list when no Bag
@@ -2402,6 +2412,24 @@ func (c *Client) DisableBagDrop(ctx context.Context, organizationId Organization
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 func (c *Client) EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewEnableBagDropRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ReconcileBagDrop Request prompt reconciliation of a project's Bag Drop associations
+//
+// Signals the reconciler running in this process. Requires maintainer on
+// this project. Returns 503 when this process has no running reconciler.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile (the `ReconcileBagDrop` operationId).
+func (c *Client) ReconcileBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewReconcileBagDropRequest(c.Server, organizationId, projectId)
 	if err != nil {
 		return nil, err
 	}
@@ -3920,6 +3948,47 @@ func NewEnableBagDropRequest(server string, organizationId OrganizationId, proje
 	return req, nil
 }
 
+// NewReconcileBagDropRequest constructs an http.Request for the ReconcileBagDrop method
+func NewReconcileBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop/reconcile", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewGetBagDropStatusRequest constructs an http.Request for the GetBagDropStatus method
 func NewGetBagDropStatusRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
 	var err error
@@ -5012,6 +5081,16 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
 	EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
+
+	// ReconcileBagDropWithResponse Request prompt reconciliation of a project's Bag Drop associations
+	//
+	// Signals the reconciler running in this process. Requires maintainer on
+	// this project. Returns 503 when this process has no running reconciler.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile (the `ReconcileBagDrop` operationId).
+	ReconcileBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*ReconcileBagDropResponse, error)
 
 	// GetBagDropStatusWithResponse Read Bag Drop dashboard status
 	//
@@ -6887,6 +6966,79 @@ func (r EnableBagDropResponse) ContentType() string {
 	return ""
 }
 
+type ReconcileBagDropResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *struct {
+		Message string `json:"message"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON503 the response for an HTTP 503 `application/json` response
+	JSON503 *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ReconcileBagDropResponse) GetJSON202() *struct {
+	Message string `json:"message"`
+} {
+	return r.JSON202
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ReconcileBagDropResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ReconcileBagDropResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ReconcileBagDropResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON503 returns the response for an HTTP 503 `application/json` response
+func (r ReconcileBagDropResponse) GetJSON503() *Error {
+	return r.JSON503
+}
+
+// GetBody returns the raw response body bytes
+func (r ReconcileBagDropResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ReconcileBagDropResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ReconcileBagDropResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ReconcileBagDropResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type GetBagDropStatusResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8496,6 +8648,22 @@ func (c *ClientWithResponses) EnableBagDropWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseEnableBagDropResponse(rsp)
+}
+
+// ReconcileBagDropWithResponse Request prompt reconciliation of a project's Bag Drop associations
+//
+// Signals the reconciler running in this process. Requires maintainer on
+// this project. Returns 503 when this process has no running reconciler.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile (the `ReconcileBagDrop` operationId).
+func (c *ClientWithResponses) ReconcileBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*ReconcileBagDropResponse, error) {
+	rsp, err := c.ReconcileBagDrop(ctx, organizationId, projectId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseReconcileBagDropResponse(rsp)
 }
 
 // GetBagDropStatusWithResponse Read Bag Drop dashboard status
@@ -10177,6 +10345,62 @@ func ParseEnableBagDropResponse(rsp *http.Response) (*EnableBagDropResponse, err
 	return response, nil
 }
 
+// ParseReconcileBagDropResponse parses an HTTP response from a ReconcileBagDropWithResponse call
+func ParseReconcileBagDropResponse(rsp *http.Response) (*ReconcileBagDropResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ReconcileBagDropResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest struct {
+			Message string `json:"message"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 503:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseGetBagDropStatusResponse parses an HTTP response from a GetBagDropStatusWithResponse call
 func ParseGetBagDropStatusResponse(rsp *http.Response) (*GetBagDropStatusResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11130,6 +11354,9 @@ type ServerInterface interface {
 	// EnableBagDrop Verify and enable the configured destination
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
 	EnableBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// ReconcileBagDrop Request prompt reconciliation of a project's Bag Drop associations
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile)
+	ReconcileBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
 	// GetBagDropStatus Read Bag Drop dashboard status
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status)
 	GetBagDropStatus(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
@@ -11802,6 +12029,41 @@ func (siw *ServerInterfaceWrapper) EnableBagDrop(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.EnableBagDrop(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ReconcileBagDrop operation middleware
+func (siw *ServerInterfaceWrapper) ReconcileBagDrop(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ReconcileBagDrop(w, r, organizationId, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -12496,6 +12758,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify", wrapper.VerifyBagDrop)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable", wrapper.EnableBagDrop)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable", wrapper.DisableBagDrop)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile", wrapper.ReconcileBagDrop)
 
 	return m
 }
@@ -14022,6 +14285,87 @@ func (response EnableBagDrop409JSONResponse) VisitEnableBagDropResponse(w http.R
 	return err
 }
 
+type ReconcileBagDropRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+}
+
+type ReconcileBagDropResponseObject interface {
+	VisitReconcileBagDropResponse(w http.ResponseWriter) error
+}
+
+type ReconcileBagDrop202JSONResponse struct {
+	Message string `json:"message"`
+}
+
+func (response ReconcileBagDrop202JSONResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileBagDrop401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ReconcileBagDrop401JSONResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileBagDrop403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ReconcileBagDrop403JSONResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileBagDrop404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ReconcileBagDrop404JSONResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ReconcileBagDrop503JSONResponse Error
+
+func (response ReconcileBagDrop503JSONResponse) VisitReconcileBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type GetBagDropStatusRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
@@ -15284,6 +15628,9 @@ type StrictServerInterface interface {
 	// EnableBagDrop Verify and enable the configured destination
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable)
 	EnableBagDrop(ctx context.Context, request EnableBagDropRequestObject) (EnableBagDropResponseObject, error)
+	// ReconcileBagDrop Request prompt reconciliation of a project's Bag Drop associations
+	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile)
+	ReconcileBagDrop(ctx context.Context, request ReconcileBagDropRequestObject) (ReconcileBagDropResponseObject, error)
 	// GetBagDropStatus Read Bag Drop dashboard status
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status)
 	GetBagDropStatus(ctx context.Context, request GetBagDropStatusRequestObject) (GetBagDropStatusResponseObject, error)
@@ -16000,6 +16347,33 @@ func (sh *strictHandler) EnableBagDrop(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(EnableBagDropResponseObject); ok {
 		if err := validResponse.VisitEnableBagDropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ReconcileBagDrop operation middleware
+func (sh *strictHandler) ReconcileBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
+	var request ReconcileBagDropRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ReconcileBagDrop(ctx, request.(ReconcileBagDropRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ReconcileBagDrop")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ReconcileBagDropResponseObject); ok {
+		if err := validResponse.VisitReconcileBagDropResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

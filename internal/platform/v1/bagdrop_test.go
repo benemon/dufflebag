@@ -282,6 +282,60 @@ func TestBagDropConfigDeleteCleanupGuardResponse(t *testing.T) {
 	}
 }
 
+func TestBagDropReconcileTriggerAvailabilityAndRole(t *testing.T) {
+	runtime := &fakeBagDropRuntime{fakeBagDropService: &fakeBagDropService{}}
+	handler, trail := auditedPlatform(t, bagDropHandler(identity.RoleMaintainer, runtime))
+	response := call(t, handler, http.MethodPost, bagDropPath("reconcile"), nil, testToken)
+	if response.Code != http.StatusAccepted || runtime.calls != 1 {
+		t.Fatalf("running trigger = %d calls=%d: %s", response.Code, runtime.calls, response.Body)
+	}
+	if event := trail.response(t); event["operation"] != "bagdrop.reconcile" || event["outcome"] != "success" {
+		t.Fatalf("trigger audit = %#v", event)
+	}
+
+	response = call(t, bagDropHandler(identity.RoleMaintainer, &fakeBagDropService{}),
+		http.MethodPost, bagDropPath("reconcile"), nil, testToken)
+	if response.Code != http.StatusServiceUnavailable || !strings.Contains(response.Body.String(), "not running") {
+		t.Fatalf("absent reconciler = %d: %s", response.Code, response.Body)
+	}
+
+	response = call(t, bagDropHandler(identity.RolePublisher, runtime),
+		http.MethodPost, bagDropPath("reconcile"), nil, testToken)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("publisher trigger = %d, want 403: %s", response.Code, response.Body)
+	}
+}
+
+func TestBagDropReconcileTriggerConcealsForeignProject(t *testing.T) {
+	foreign := pinIdentity{
+		id: "foreign", role: identity.RoleMaintainer,
+		scope: identity.Scope{OrganizationID: uuid.New(), ProjectID: uuid.New()},
+	}
+	runtime := &fakeBagDropRuntime{fakeBagDropService: &fakeBagDropService{}}
+	handler := newHandlerWithBagDrop(
+		bagDropProjectRepository(), &fakeInstanceRepository{}, foreign, foreign,
+		testLogger(), runtime, time.Now,
+	)
+	response := call(t, handler, http.MethodPost, bagDropPath("reconcile"), nil, testToken)
+	if response.Code != http.StatusNotFound || runtime.calls != 0 {
+		t.Fatalf("foreign trigger = %d calls=%d: %s", response.Code, runtime.calls, response.Body)
+	}
+}
+
+func TestBagDropAssociationRendersReconcileStatusFields(t *testing.T) {
+	attemptedAt := initTestTime.Add(time.Minute)
+	syncedAt := initTestTime.Add(2 * time.Minute)
+	failure := "HTTP 500: destination failed"
+	rendered := renderBagDropAssociation(bagdrop.Association{
+		BucketName: "images", State: bagdrop.AssociationActive,
+		LastAttemptAt: &attemptedAt, LastSyncedAt: &syncedAt, LastSyncError: &failure,
+	})
+	if rendered.LastAttemptAt == nil || rendered.LastSyncError == nil || *rendered.LastSyncError != failure ||
+		rendered.SyncStatus != Pending {
+		t.Fatalf("rendered association = %#v", rendered)
+	}
+}
+
 type bagDropOperation struct {
 	name, method, path, audit string
 	body                      any
@@ -347,6 +401,17 @@ type fakeBagDropService struct {
 	deleteErr      error
 	removalOutcome bagdrop.RemovalOutcome
 	status         *bagdrop.Status
+}
+
+type fakeBagDropRuntime struct {
+	*fakeBagDropService
+	triggerErr error
+	calls      int
+}
+
+func (r *fakeBagDropRuntime) Trigger(context.Context, string, string) error {
+	r.calls++
+	return r.triggerErr
 }
 
 func (*fakeBagDropService) config() *bagdrop.Config {
@@ -429,6 +494,12 @@ type handlerBagDropAdapter struct {
 func (a *handlerBagDropAdapter) Resolve(context.Context, bagdrop.Destination) bagdrop.VerificationResult {
 	a.calls++
 	return a.result
+}
+
+func (*handlerBagDropAdapter) BeginReconcile(
+	context.Context, bagdrop.Destination,
+) (bagdrop.ReconcileRun, error) {
+	panic("BeginReconcile is not used by platform handler tests")
 }
 
 type handlerBagDropRepository struct {

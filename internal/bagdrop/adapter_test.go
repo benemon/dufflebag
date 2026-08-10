@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -17,6 +18,10 @@ const invalidClientFixture = `{"error":"invalid_client","error_description":"cli
 
 // Source: internal/compat/hcp2023/handler.go ListBuckets response producer.
 const bucketsFixture = `{"buckets":[],"pagination":{}}`
+
+// Source: internal/compat/hcp2023/handler.go writeRPCError and
+// docs/compatibility.md §5.1 AlreadyExists handling.
+const alreadyExistsFixture = `{"code":6,"message":"already exists","details":[]}`
 
 func TestHCPPackerResolveUsesCompatibilityRequestShapes(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -132,6 +137,71 @@ func TestHCPPackerResolveClassifiesConnectionRefusedAsUnreachable(t *testing.T) 
 	)
 	if result.Outcome != OutcomeFailed || result.Reason != ReasonUnreachable {
 		t.Fatalf("Resolve = %#v", result)
+	}
+}
+
+func TestHCPPackerReconcileRefreshesTokenOn401Once(t *testing.T) {
+	grants := 0
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		grants++
+		_, _ = w.Write([]byte(`{"access_token":"token-` + strconv.Itoa(grants) + `"}`))
+	}))
+	defer auth.Close()
+	requests := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests == 1 {
+			if r.Header.Get("Authorization") != "Bearer token-1" {
+				t.Errorf("first Authorization = %q", r.Header.Get("Authorization"))
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("Authorization") != "Bearer token-2" {
+			t.Errorf("refreshed Authorization = %q", r.Header.Get("Authorization"))
+		}
+		_, _ = w.Write([]byte(`{"bucket":{"description":"fixture"}}`))
+	}))
+	defer api.Close()
+
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, exists, err := run.GetBucket(context.Background(), "images"); err != nil || !exists {
+		t.Fatalf("GetBucket exists=%v, err=%v", exists, err)
+	}
+	if grants != 2 || requests != 2 {
+		t.Fatalf("grants=%d requests=%d, want initial+one refresh", grants, requests)
+	}
+}
+
+func TestHCPPackerReconcileToleratesAlreadyExistsCreates(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("method = %s, want POST", r.Method)
+		}
+		w.WriteHeader(http.StatusConflict)
+		_, _ = w.Write([]byte(alreadyExistsFixture))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.CreateVersion(context.Background(), "images", VersionSnapshot{
+		Fingerprint: "fp-1", TemplateType: "HCL2",
+	}); err != nil {
+		t.Fatalf("CreateVersion 409/code-6 = %v", err)
+	}
+	if _, err := run.CreateBuild(context.Background(), "images", "fp-1", BuildSnapshot{
+		ComponentType: "amazon-ebs", PackerRunUUID: "run-uuid",
+	}); err != nil {
+		t.Fatalf("CreateBuild 409/code-6 = %v", err)
 	}
 }
 

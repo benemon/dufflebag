@@ -1256,6 +1256,36 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    post:
+      tags: [bagdrop]
+      operationId: reconcileBagDrop
+      summary: Request prompt reconciliation of a project's Bag Drop associations
+      description: |
+        Signals the reconciler running in this process. Requires maintainer on
+        this project. Returns 503 when this process has no running reconciler.
+      responses:
+        "202":
+          description: Reconciliation requested.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                required: [message]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "503":
+          description: No Bag Drop reconciler is running in this process.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1874,8 +1904,15 @@ components:
           type: string
           format: date-time
           nullable: true
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_sync_error:
+          type: string
+          nullable: true
         sync_status: { $ref: "#/components/schemas/BagDropSyncStatus" }
-      required: [bucket_name, state, created_at, updated_at, first_attempted_at, last_synced_at, sync_status]
+      required: [bucket_name, state, created_at, updated_at, first_attempted_at, last_attempt_at, last_synced_at, last_sync_error, sync_status]
 
     BagDropStatus:
       type: object

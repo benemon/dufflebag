@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/bagdrop"
+	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
 	"github.com/jackc/pgx/v5/pgconn"
 )
@@ -211,7 +213,9 @@ func (r *Repository) PutBagDropAssociation(
 		BucketName:       association.BucketName,
 		State:            string(association.State),
 		FirstAttemptedAt: nullableTime(association.FirstAttemptedAt),
+		LastAttemptAt:    nullableTime(association.LastAttemptAt),
 		LastSyncedAt:     nullableTime(association.LastSyncedAt),
+		LastSyncError:    nullableString(association.LastSyncError),
 		CreatedAt:        association.CreatedAt,
 		UpdatedAt:        association.UpdatedAt,
 	})
@@ -301,7 +305,9 @@ func restoreBagDropAssociation(
 		BucketName:       row.BucketName,
 		State:            state,
 		FirstAttemptedAt: timePointer(row.FirstAttemptedAt),
+		LastAttemptAt:    timePointer(row.LastAttemptAt),
 		LastSyncedAt:     timePointer(row.LastSyncedAt),
+		LastSyncError:    stringPointer(row.LastSyncError),
 		CreatedAt:        row.CreatedAt,
 		UpdatedAt:        row.UpdatedAt,
 	}, nil
@@ -314,11 +320,189 @@ func nullableTime(value *time.Time) sql.NullTime {
 	return sql.NullTime{Time: *value, Valid: true}
 }
 
+func nullableString(value *string) sql.NullString {
+	if value == nil {
+		return sql.NullString{}
+	}
+	return sql.NullString{String: *value, Valid: true}
+}
+
 func timePointer(value sql.NullTime) *time.Time {
 	if !value.Valid {
 		return nil
 	}
 	return &value.Time
+}
+
+func stringPointer(value sql.NullString) *string {
+	if !value.Valid {
+		return nil
+	}
+	return &value.String
+}
+
+// ListBagDropProjects follows the scanner's privileged enumeration pattern:
+// projects are globally enumerable system data, then each Bag Drop config is
+// read through a tenant-scoped repository operation.
+func (r *Repository) ListBagDropProjects(ctx context.Context) ([]bagdrop.Project, error) {
+	rows, err := r.db.QueryContext(ctx, `SELECT organization_id::text, id::text FROM projects ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list Bag Drop projects: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var candidates []bagdrop.Project
+	for rows.Next() {
+		var project bagdrop.Project
+		if err := rows.Scan(&project.OrganizationID, &project.ProjectID); err != nil {
+			return nil, fmt.Errorf("scan Bag Drop project: %w", err)
+		}
+		candidates = append(candidates, project)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close Bag Drop project rows: %w", err)
+	}
+
+	var projects []bagdrop.Project
+	for _, project := range candidates {
+		record, err := r.GetBagDropConfig(ctx, project.OrganizationID, project.ProjectID)
+		if errors.Is(err, bagdrop.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if record.Enabled {
+			projects = append(projects, project)
+		}
+	}
+	return projects, nil
+}
+
+func (r *Repository) GetBagDropBucketSnapshot(
+	ctx context.Context, organizationID, projectID, bucketName string,
+) (*bagdrop.BucketSnapshot, error) {
+	tenant := ParseTenant(organizationID, projectID)
+	tx, q, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	bucketRow, err := q.GetBucketByName(ctx, bucketName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("get Bag Drop bucket snapshot: %w", err)
+	}
+	bucket, err := restoreBucket(bucketRow)
+	if err != nil {
+		return nil, err
+	}
+	versionRows, err := q.ListVersionsByBucket(ctx, bucketName)
+	if err != nil {
+		return nil, fmt.Errorf("list Bag Drop snapshot versions: %w", err)
+	}
+	completed := make([]postgresdb.ListVersionsByBucketRow, 0, len(versionRows))
+	for _, row := range versionRows {
+		if row.Complete && row.Sequence.Valid {
+			completed = append(completed, row)
+		}
+	}
+	sort.Slice(completed, func(i, j int) bool { return completed[i].Sequence.Int32 < completed[j].Sequence.Int32 })
+	snapshot := &bagdrop.BucketSnapshot{Name: bucket.Name, Description: bucket.Description}
+	for _, row := range completed {
+		versionRow := postgresdb.GetVersionByFingerprintRow(row)
+		if err := r.verifyRowMAC("version "+row.ID, row.IntegrityMac, versionMACMessage(postgresdb.Version{
+			OrganizationID: row.OrganizationID, ProjectID: row.ProjectID, ID: row.ID,
+			BucketID: row.BucketID, Fingerprint: row.Fingerprint, TemplateType: row.TemplateType,
+			Complete: row.Complete, Sequence: row.Sequence, AuthorID: row.AuthorID,
+			RevokeAt: row.RevokeAt, RevocationAuthor: row.RevocationAuthor,
+			RevocationInheritedFromID: row.RevocationInheritedFromID,
+		})); err != nil {
+			return nil, err
+		}
+		builds, err := r.listBuilds(ctx, q, tenant, bucketName, row.Fingerprint)
+		if err != nil {
+			return nil, err
+		}
+		versionSnapshot := bagdrop.VersionSnapshot{
+			Fingerprint: versionRow.Fingerprint, TemplateType: versionRow.TemplateType,
+		}
+		for _, build := range builds {
+			if build.Status != registry.BuildDone {
+				continue
+			}
+			buildSnapshot := bagdrop.BuildSnapshot{
+				ID: build.ID.String(), ComponentType: build.ComponentType,
+				PackerRunUUID: build.PackerRunUUID, Platform: build.Platform,
+				Labels: build.Labels, SourceExternalIdentifier: build.SourceExternalIdentifier,
+				Metadata: append([]byte(nil), build.Metadata...),
+			}
+			for _, artifact := range build.Artifacts {
+				buildSnapshot.Artifacts = append(buildSnapshot.Artifacts, bagdrop.ArtifactSnapshot{
+					ExternalIdentifier: artifact.ExternalIdentifier, Region: artifact.Region,
+				})
+			}
+			versionSnapshot.Builds = append(versionSnapshot.Builds, buildSnapshot)
+		}
+		snapshot.Versions = append(snapshot.Versions, versionSnapshot)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit Bag Drop bucket snapshot: %w", err)
+	}
+	return snapshot, nil
+}
+
+func (r *Repository) MarkBagDropAssociationAttempt(
+	ctx context.Context, organizationID, projectID, bucketName string, at time.Time,
+) error {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := q.MarkBagDropAssociationAttempt(ctx, postgresdb.MarkBagDropAssociationAttemptParams{
+		BucketName: bucketName, LastAttemptAt: sql.NullTime{Time: at, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("mark Bag Drop association attempt: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) RecordBagDropAssociationSuccess(
+	ctx context.Context, organizationID, projectID, bucketName string, at time.Time,
+) error {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := q.RecordBagDropAssociationSuccess(ctx, postgresdb.RecordBagDropAssociationSuccessParams{
+		BucketName: bucketName, LastSyncedAt: sql.NullTime{Time: at, Valid: true},
+	}); err != nil {
+		return fmt.Errorf("record Bag Drop association success: %w", err)
+	}
+	return tx.Commit()
+}
+
+func (r *Repository) RecordBagDropAssociationFailure(
+	ctx context.Context, organizationID, projectID, bucketName, summary string, at time.Time,
+) error {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := q.RecordBagDropAssociationFailure(ctx, postgresdb.RecordBagDropAssociationFailureParams{
+		BucketName: bucketName, LastSyncError: sql.NullString{String: summary, Valid: true}, UpdatedAt: at,
+	}); err != nil {
+		return fmt.Errorf("record Bag Drop association failure: %w", err)
+	}
+	return tx.Commit()
 }
 
 func restoreBagDropConfig(row postgresdb.BagdropConfig) (*bagdrop.Record, error) {

@@ -144,9 +144,9 @@ ORDER BY created_at, bucket_name;
 -- name: UpsertBagDropAssociation :one
 INSERT INTO bagdrop_associations (
     organization_id, project_id, bucket_name, state, first_attempted_at,
-    last_synced_at, created_at, updated_at
+    last_attempt_at, last_synced_at, last_sync_error, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (organization_id, project_id, bucket_name) DO UPDATE SET
     state = EXCLUDED.state,
     first_attempted_at = COALESCE(
@@ -155,10 +155,37 @@ ON CONFLICT (organization_id, project_id, bucket_name) DO UPDATE SET
     last_synced_at = COALESCE(
         bagdrop_associations.last_synced_at, EXCLUDED.last_synced_at
     ),
+    last_attempt_at = COALESCE(
+        EXCLUDED.last_attempt_at, bagdrop_associations.last_attempt_at
+    ),
+    last_sync_error = EXCLUDED.last_sync_error,
     updated_at = CASE
         WHEN bagdrop_associations.state <> EXCLUDED.state THEN EXCLUDED.updated_at
         ELSE bagdrop_associations.updated_at
     END
+RETURNING *;
+
+-- name: MarkBagDropAssociationAttempt :one
+UPDATE bagdrop_associations
+SET first_attempted_at = COALESCE(first_attempted_at, $2),
+    last_attempt_at = $2,
+    updated_at = $2
+WHERE bucket_name = $1 AND state = 'active'
+RETURNING *;
+
+-- name: RecordBagDropAssociationSuccess :one
+UPDATE bagdrop_associations
+SET last_synced_at = $2,
+    last_sync_error = NULL,
+    updated_at = $2
+WHERE bucket_name = $1 AND state = 'active'
+RETURNING *;
+
+-- name: RecordBagDropAssociationFailure :one
+UPDATE bagdrop_associations
+SET last_sync_error = $2,
+    updated_at = $3
+WHERE bucket_name = $1 AND state = 'active'
 RETURNING *;
 
 -- name: BagDropBucketExists :one

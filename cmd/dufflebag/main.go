@@ -126,6 +126,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	bagDropReconcileInterval, err := configuredBagDropReconcileInterval()
+	if err != nil {
+		log.Fatal(err)
+	}
 	db, err := sql.Open("pgx", databaseURL)
 	if err != nil {
 		log.Fatalf("open database: %v", err)
@@ -245,16 +249,29 @@ func main() {
 	if scannerService != nil {
 		platformScanner = scannerService
 	}
-	bagDropService := bagdrop.NewService(
-		repository,
-		bagdrop.NewCredentialSealer(ring, os.Getenv(bagdrop.CredentialKeyEnv)),
-		bagdrop.Registry{
-			bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(bagDropAuthBase, bagDropAPIBase),
-		},
+	bagDropSealer := bagdrop.NewCredentialSealer(ring, os.Getenv(bagdrop.CredentialKeyEnv))
+	bagDropAdapters := bagdrop.Registry{
+		bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(bagDropAuthBase, bagDropAPIBase),
+	}
+	bagDropService := bagdrop.NewService(repository, bagDropSealer, bagDropAdapters)
+	bagDropReconciler, err := bagdrop.NewReconciler(
+		repository, bagDropSealer, bagDropAdapters, broker, bagDropReconcileInterval, logger,
 	)
+	if err != nil {
+		log.Fatalf("Bag Drop reconciler initialization: %v", err)
+	}
+	bagDropRuntime := &bagdrop.Runtime{Service: bagDropService, Reconciler: bagDropReconciler}
+	bagDropCtx, cancelBagDrop := context.WithCancel(context.Background())
+	defer cancelBagDrop()
+	bagDropDone := make(chan struct{})
+	go func() {
+		defer close(bagDropDone)
+		bagDropReconciler.Run(bagDropCtx)
+	}()
+	<-bagDropReconciler.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropService, build,
+		encryptionService, platformScanner, bagDropRuntime, build,
 	)
 	applicationHandler := composeHandler(
 		broker,
@@ -323,8 +340,14 @@ func main() {
 		case <-shutdownSignal:
 			cancelProvider()
 			cancelScanner()
+			cancelBagDrop()
 			cancelHeartbeat()
 			deadline := time.Now().Add(shutdownGracePeriod)
+			select {
+			case <-bagDropDone:
+			case <-time.After(time.Until(deadline)):
+				logger.Warn("Bag Drop reconciler did not stop before the shutdown deadline")
+			}
 			if err := shutdown(server, metricsServer, broker, deadline); err != nil {
 				logger.Warn("shutdown did not fully drain", "error", err)
 			}
@@ -451,6 +474,10 @@ func scannerDuration(name string, fallback time.Duration) (time.Duration, error)
 		return 0, fmt.Errorf("%s must be a positive duration", name)
 	}
 	return parsed, nil
+}
+
+func configuredBagDropReconcileInterval() (time.Duration, error) {
+	return scannerDuration("DFBG_BAGDROP_RECONCILE_INTERVAL", 5*time.Minute)
 }
 
 func scannerHTTPClient(config scannerRuntimeConfig) (*http.Client, error) {

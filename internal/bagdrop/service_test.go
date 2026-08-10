@@ -317,6 +317,10 @@ func (a *fakeAdapter) Resolve(_ context.Context, destination Destination) Verifi
 	return a.result
 }
 
+func (*fakeAdapter) BeginReconcile(context.Context, Destination) (ReconcileRun, error) {
+	panic("BeginReconcile is not used by configuration service tests")
+}
+
 type memoryRepository struct {
 	record       *Record
 	associations map[string]Association

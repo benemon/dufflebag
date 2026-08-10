@@ -3,6 +3,7 @@
 package bagdrop
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -49,6 +50,7 @@ type SyncStatus string
 
 const (
 	SyncPending  SyncStatus = "pending"
+	SyncSynced   SyncStatus = "synced"
 	SyncRemoving SyncStatus = "removing"
 )
 
@@ -117,7 +119,9 @@ type Association struct {
 	BucketName       string
 	State            AssociationState
 	FirstAttemptedAt *time.Time
+	LastAttemptAt    *time.Time
 	LastSyncedAt     *time.Time
+	LastSyncError    *string
 	CreatedAt        time.Time
 	UpdatedAt        time.Time
 }
@@ -126,6 +130,9 @@ func (a Association) SyncStatus() SyncStatus {
 	if a.State == AssociationPendingRemoval {
 		return SyncRemoving
 	}
+	if a.LastSyncedAt != nil && a.LastSyncError == nil {
+		return SyncSynced
+	}
 	return SyncPending
 }
 
@@ -133,6 +140,49 @@ type Status struct {
 	Configured   bool
 	Config       *Config
 	Associations []Association
+}
+
+type Project struct {
+	OrganizationID string
+	ProjectID      string
+}
+
+type BucketSnapshot struct {
+	Name        string
+	Description string
+	Versions    []VersionSnapshot
+}
+
+type VersionSnapshot struct {
+	Fingerprint  string
+	TemplateType string
+	Builds       []BuildSnapshot
+}
+
+type BuildSnapshot struct {
+	ID                       string
+	ComponentType            string
+	PackerRunUUID            string
+	Platform                 string
+	Labels                   map[string]string
+	SourceExternalIdentifier string
+	Metadata                 json.RawMessage
+	Artifacts                []ArtifactSnapshot
+}
+
+type ArtifactSnapshot struct {
+	ExternalIdentifier string
+	Region             string
+}
+
+type RemoteBucket struct {
+	Description string `json:"description"`
+}
+
+type RemoteBuild struct {
+	ID            string `json:"id"`
+	ComponentType string `json:"component_type"`
+	Status        string `json:"status"`
 }
 
 func render(record *Record) *Config {

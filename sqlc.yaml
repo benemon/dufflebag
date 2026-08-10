@@ -19,6 +19,7 @@ sql:
       - internal/store/postgres/migrations/000022_pins.up.sql
       - internal/store/postgres/migrations/000023_bagdrop_configs.up.sql
       - internal/store/postgres/migrations/000024_bagdrop_associations.up.sql
+      - internal/store/postgres/migrations/000025_bagdrop_reconcile_status.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:
