@@ -1155,7 +1155,7 @@ func (q *Queries) ListAuditTargets(ctx context.Context) ([]AuditTarget, error) {
 }
 
 const listBagDropAssociations = `-- name: ListBagDropAssociations :many
-SELECT organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at
+SELECT organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
 FROM bagdrop_associations
 ORDER BY created_at, bucket_name
 `
@@ -1178,6 +1178,8 @@ func (q *Queries) ListBagDropAssociations(ctx context.Context) ([]BagdropAssocia
 			&i.LastSyncedAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LastAttemptAt,
+			&i.LastSyncError,
 		); err != nil {
 			return nil, err
 		}
@@ -1745,6 +1747,38 @@ func (q *Queries) LockRootPrincipalDeletion(ctx context.Context) error {
 	return err
 }
 
+const markBagDropAssociationAttempt = `-- name: MarkBagDropAssociationAttempt :one
+UPDATE bagdrop_associations
+SET first_attempted_at = COALESCE(first_attempted_at, $2),
+    last_attempt_at = $2,
+    updated_at = $2
+WHERE bucket_name = $1 AND state = 'active'
+RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
+`
+
+type MarkBagDropAssociationAttemptParams struct {
+	BucketName    string       `json:"bucket_name"`
+	LastAttemptAt sql.NullTime `json:"last_attempt_at"`
+}
+
+func (q *Queries) MarkBagDropAssociationAttempt(ctx context.Context, arg MarkBagDropAssociationAttemptParams) (BagdropAssociation, error) {
+	row := q.db.QueryRowContext(ctx, markBagDropAssociationAttempt, arg.BucketName, arg.LastAttemptAt)
+	var i BagdropAssociation
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.BucketName,
+		&i.State,
+		&i.FirstAttemptedAt,
+		&i.LastSyncedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastAttemptAt,
+		&i.LastSyncError,
+	)
+	return i, err
+}
+
 const nextVersionSequence = `-- name: NextVersionSequence :one
 SELECT coalesce(max(sequence), 0)::integer + 1
 FROM versions
@@ -1756,6 +1790,70 @@ func (q *Queries) NextVersionSequence(ctx context.Context, bucketID string) (int
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const recordBagDropAssociationFailure = `-- name: RecordBagDropAssociationFailure :one
+UPDATE bagdrop_associations
+SET last_sync_error = $2,
+    updated_at = $3
+WHERE bucket_name = $1 AND state = 'active'
+RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
+`
+
+type RecordBagDropAssociationFailureParams struct {
+	BucketName    string         `json:"bucket_name"`
+	LastSyncError sql.NullString `json:"last_sync_error"`
+	UpdatedAt     time.Time      `json:"updated_at"`
+}
+
+func (q *Queries) RecordBagDropAssociationFailure(ctx context.Context, arg RecordBagDropAssociationFailureParams) (BagdropAssociation, error) {
+	row := q.db.QueryRowContext(ctx, recordBagDropAssociationFailure, arg.BucketName, arg.LastSyncError, arg.UpdatedAt)
+	var i BagdropAssociation
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.BucketName,
+		&i.State,
+		&i.FirstAttemptedAt,
+		&i.LastSyncedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastAttemptAt,
+		&i.LastSyncError,
+	)
+	return i, err
+}
+
+const recordBagDropAssociationSuccess = `-- name: RecordBagDropAssociationSuccess :one
+UPDATE bagdrop_associations
+SET last_synced_at = $2,
+    last_sync_error = NULL,
+    updated_at = $2
+WHERE bucket_name = $1 AND state = 'active'
+RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
+`
+
+type RecordBagDropAssociationSuccessParams struct {
+	BucketName   string       `json:"bucket_name"`
+	LastSyncedAt sql.NullTime `json:"last_synced_at"`
+}
+
+func (q *Queries) RecordBagDropAssociationSuccess(ctx context.Context, arg RecordBagDropAssociationSuccessParams) (BagdropAssociation, error) {
+	row := q.db.QueryRowContext(ctx, recordBagDropAssociationSuccess, arg.BucketName, arg.LastSyncedAt)
+	var i BagdropAssociation
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.BucketName,
+		&i.State,
+		&i.FirstAttemptedAt,
+		&i.LastSyncedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LastAttemptAt,
+		&i.LastSyncError,
+	)
+	return i, err
 }
 
 const recordBagDropVerification = `-- name: RecordBagDropVerification :one
@@ -2131,9 +2229,9 @@ func (q *Queries) UpdateBuild(ctx context.Context, arg UpdateBuildParams) (Build
 const upsertBagDropAssociation = `-- name: UpsertBagDropAssociation :one
 INSERT INTO bagdrop_associations (
     organization_id, project_id, bucket_name, state, first_attempted_at,
-    last_synced_at, created_at, updated_at
+    last_attempt_at, last_synced_at, last_sync_error, created_at, updated_at
 )
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 ON CONFLICT (organization_id, project_id, bucket_name) DO UPDATE SET
     state = EXCLUDED.state,
     first_attempted_at = COALESCE(
@@ -2142,22 +2240,28 @@ ON CONFLICT (organization_id, project_id, bucket_name) DO UPDATE SET
     last_synced_at = COALESCE(
         bagdrop_associations.last_synced_at, EXCLUDED.last_synced_at
     ),
+    last_attempt_at = COALESCE(
+        EXCLUDED.last_attempt_at, bagdrop_associations.last_attempt_at
+    ),
+    last_sync_error = EXCLUDED.last_sync_error,
     updated_at = CASE
         WHEN bagdrop_associations.state <> EXCLUDED.state THEN EXCLUDED.updated_at
         ELSE bagdrop_associations.updated_at
     END
-RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at
+RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
 `
 
 type UpsertBagDropAssociationParams struct {
-	OrganizationID   uuid.UUID    `json:"organization_id"`
-	ProjectID        uuid.UUID    `json:"project_id"`
-	BucketName       string       `json:"bucket_name"`
-	State            string       `json:"state"`
-	FirstAttemptedAt sql.NullTime `json:"first_attempted_at"`
-	LastSyncedAt     sql.NullTime `json:"last_synced_at"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	OrganizationID   uuid.UUID      `json:"organization_id"`
+	ProjectID        uuid.UUID      `json:"project_id"`
+	BucketName       string         `json:"bucket_name"`
+	State            string         `json:"state"`
+	FirstAttemptedAt sql.NullTime   `json:"first_attempted_at"`
+	LastAttemptAt    sql.NullTime   `json:"last_attempt_at"`
+	LastSyncedAt     sql.NullTime   `json:"last_synced_at"`
+	LastSyncError    sql.NullString `json:"last_sync_error"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
 }
 
 func (q *Queries) UpsertBagDropAssociation(ctx context.Context, arg UpsertBagDropAssociationParams) (BagdropAssociation, error) {
@@ -2167,7 +2271,9 @@ func (q *Queries) UpsertBagDropAssociation(ctx context.Context, arg UpsertBagDro
 		arg.BucketName,
 		arg.State,
 		arg.FirstAttemptedAt,
+		arg.LastAttemptAt,
 		arg.LastSyncedAt,
+		arg.LastSyncError,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -2181,6 +2287,8 @@ func (q *Queries) UpsertBagDropAssociation(ctx context.Context, arg UpsertBagDro
 		&i.LastSyncedAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LastAttemptAt,
+		&i.LastSyncError,
 	)
 	return i, err
 }

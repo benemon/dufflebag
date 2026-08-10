@@ -60,6 +60,7 @@ var operationDescriptors = map[string]operationDescriptor{
 	"SetBagDropAssociation":    {method: http.MethodPut, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", Descriptor: audit.Descriptor{Operation: "bagdrop.association.set", TargetType: "bagdrop_association", TargetIDParam: "bucketName"}},
 	"DeleteBagDropAssociation": {method: http.MethodDelete, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", Descriptor: audit.Descriptor{Operation: "bagdrop.association.delete", TargetType: "bagdrop_association", TargetIDParam: "bucketName"}},
 	"GetBagDropStatus":         {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status", Descriptor: audit.Descriptor{Operation: "bagdrop.status.read", TargetType: "bagdrop_status"}},
+	"ReconcileBagDrop":         {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile", Descriptor: audit.Descriptor{Operation: "bagdrop.reconcile", TargetType: "bagdrop_config"}},
 }
 
 type resolvedHandler struct {

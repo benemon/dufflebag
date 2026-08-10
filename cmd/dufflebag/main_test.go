@@ -76,6 +76,22 @@ func TestTrustedProxiesConfiguration(t *testing.T) {
 	})
 }
 
+func TestBagDropReconcileIntervalConfiguration(t *testing.T) {
+	t.Setenv("DFBG_BAGDROP_RECONCILE_INTERVAL", "")
+	if got, err := configuredBagDropReconcileInterval(); err != nil || got != 5*time.Minute {
+		t.Fatalf("default interval = %s, %v", got, err)
+	}
+	t.Setenv("DFBG_BAGDROP_RECONCILE_INTERVAL", "45s")
+	if got, err := configuredBagDropReconcileInterval(); err != nil || got != 45*time.Second {
+		t.Fatalf("configured interval = %s, %v", got, err)
+	}
+	t.Setenv("DFBG_BAGDROP_RECONCILE_INTERVAL", "not-a-duration")
+	if _, err := configuredBagDropReconcileInterval(); err == nil ||
+		!strings.Contains(err.Error(), "DFBG_BAGDROP_RECONCILE_INTERVAL") {
+		t.Fatalf("invalid interval error = %v", err)
+	}
+}
+
 func TestObjectStorageConfigurationRequiresOperatorEnvironment(t *testing.T) {
 	for _, name := range objectStorageEnvironment {
 		t.Setenv(name, "")

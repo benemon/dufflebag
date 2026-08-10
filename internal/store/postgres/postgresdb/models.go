@@ -31,14 +31,16 @@ type AuditTarget struct {
 }
 
 type BagdropAssociation struct {
-	OrganizationID   uuid.UUID    `json:"organization_id"`
-	ProjectID        uuid.UUID    `json:"project_id"`
-	BucketName       string       `json:"bucket_name"`
-	State            string       `json:"state"`
-	FirstAttemptedAt sql.NullTime `json:"first_attempted_at"`
-	LastSyncedAt     sql.NullTime `json:"last_synced_at"`
-	CreatedAt        time.Time    `json:"created_at"`
-	UpdatedAt        time.Time    `json:"updated_at"`
+	OrganizationID   uuid.UUID      `json:"organization_id"`
+	ProjectID        uuid.UUID      `json:"project_id"`
+	BucketName       string         `json:"bucket_name"`
+	State            string         `json:"state"`
+	FirstAttemptedAt sql.NullTime   `json:"first_attempted_at"`
+	LastSyncedAt     sql.NullTime   `json:"last_synced_at"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	LastAttemptAt    sql.NullTime   `json:"last_attempt_at"`
+	LastSyncError    sql.NullString `json:"last_sync_error"`
 }
 
 type BagdropConfig struct {

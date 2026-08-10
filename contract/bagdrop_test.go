@@ -23,11 +23,13 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status:",
+		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile:",
 		"operationId: getBagDropConfig", "operationId: putBagDropConfig",
 		"operationId: deleteBagDropConfig", "operationId: verifyBagDrop",
 		"operationId: enableBagDrop", "operationId: disableBagDrop",
 		"operationId: listBagDropAssociations", "operationId: setBagDropAssociation",
 		"operationId: deleteBagDropAssociation", "operationId: getBagDropStatus",
+		"operationId: reconcileBagDrop",
 		"enum: [hcp-packer]", "enum: [resolved, failed]",
 		"enum: [active, pending_removal]", "enum: [pending, synced, removing]",
 		"enum: [credential_refused, project_not_found, unreachable, tls_failure]",
@@ -78,12 +80,18 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 			}
 		}
 	}
+	for _, field := range []string{"LastAttemptAt", "LastSyncError"} {
+		if !structFields["BagDropAssociation"][field] {
+			t.Errorf("generated BagDropAssociation lacks %s", field)
+		}
+	}
 	for _, response := range []string{
 		"GetBagDropConfig200JSONResponse", "PutBagDropConfig200JSONResponse",
 		"DeleteBagDropConfig409JSONResponse", "VerifyBagDrop200JSONResponse",
 		"EnableBagDrop409JSONResponse", "DisableBagDrop200JSONResponse",
 		"ListBagDropAssociations200JSONResponse", "SetBagDropAssociation200JSONResponse",
 		"DeleteBagDropAssociation204Response", "GetBagDropStatus200JSONResponse",
+		"ReconcileBagDrop202JSONResponse", "ReconcileBagDrop503JSONResponse",
 	} {
 		if !strings.Contains(generated, "type "+response) {
 			t.Errorf("generated contract lacks %s", response)

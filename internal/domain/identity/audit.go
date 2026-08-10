@@ -7,7 +7,10 @@ import (
 // IdentityKind says how the actor proved, or failed to prove, its identity.
 type IdentityKind string
 
-const SystemScannerPrincipalID = "system:scanner"
+const (
+	SystemScannerPrincipalID = "system:scanner"
+	SystemBagDropPrincipalID = "system:bagdrop"
+)
 
 const (
 	IdentityKindAnonymous        IdentityKind = "anonymous"

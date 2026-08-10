@@ -9,25 +9,38 @@ import (
 	"github.com/google/uuid"
 )
 
-// SystemEvent is the semantic context shared by a scanner request/response
+// SystemEvent is the semantic context shared by a system request/response
 // pair. It uses the same record fields and schema version as the HTTP seam.
 type SystemEvent struct {
-	Operation      identity.AuditOperation
-	TargetType     string
-	TargetID       string
-	Scope          identity.AuditScope
-	OrganizationID string
-	ProjectID      string
+	Operation                 identity.AuditOperation
+	TargetType                string
+	TargetID                  string
+	Scope                     identity.AuditScope
+	OrganizationID            string
+	ProjectID                 string
+	DestinationOrganizationID string
+	DestinationProjectID      string
 }
 
-// SystemEmitter writes audit pairs for scanner work outside an HTTP request.
+// SystemEmitter writes audit pairs for work outside an HTTP request.
 type SystemEmitter struct {
-	writer Writer
-	now    func() time.Time
+	writer      Writer
+	now         func() time.Time
+	principalID string
+	path        string
+	routeID     string
 }
 
 func NewSystemEmitter(writer Writer) *SystemEmitter {
-	return &SystemEmitter{writer: writer, now: time.Now}
+	return newSystemEmitter(writer, identity.SystemScannerPrincipalID, "/scanner", "system.scanner")
+}
+
+func NewBagDropEmitter(writer Writer) *SystemEmitter {
+	return newSystemEmitter(writer, identity.SystemBagDropPrincipalID, "/bagdrop/reconcile", "system.bagdrop")
+}
+
+func newSystemEmitter(writer Writer, principalID, path, routeID string) *SystemEmitter {
+	return &SystemEmitter{writer: writer, now: time.Now, principalID: principalID, path: path, routeID: routeID}
 }
 
 // Request writes the fail-closed half of a pair and returns its correlation.
@@ -35,11 +48,13 @@ func (e *SystemEmitter) Request(event SystemEvent) (string, error) {
 	correlationID := uuid.NewString()
 	err := e.write(requestRecord{
 		SchemaVersion: 2, Kind: eventKindRequest, CorrelationID: correlationID,
-		OccurredAt: e.now().UTC(), Method: "SYSTEM", Path: "/scanner",
+		OccurredAt: e.now().UTC(), Method: "SYSTEM", Path: e.path,
 		IdentityKind: identity.IdentityKindSystem, Operation: event.Operation,
 		TargetType: event.TargetType, TargetID: event.TargetID,
-		PrincipalID: identity.SystemScannerPrincipalID, PrincipalName: identity.SystemScannerPrincipalID,
+		PrincipalID: e.principalID, PrincipalName: e.principalID,
 		Scope: event.Scope, OrganizationID: event.OrganizationID, ProjectID: event.ProjectID,
+		DestinationOrganizationID: event.DestinationOrganizationID,
+		DestinationProjectID:      event.DestinationProjectID,
 	})
 	return correlationID, err
 }
@@ -54,12 +69,14 @@ func (e *SystemEmitter) Response(
 	}
 	return e.write(responseRecord{
 		SchemaVersion: 2, Kind: eventKindResponse, CorrelationID: correlationID,
-		OccurredAt: e.now().UTC(), RouteID: "system.scanner", Status: status,
+		OccurredAt: e.now().UTC(), RouteID: e.routeID, Status: status,
 		Outcome: outcome, Reason: reason, Operation: event.Operation,
 		TargetType: event.TargetType, TargetID: event.TargetID,
-		PrincipalID: identity.SystemScannerPrincipalID, PrincipalName: identity.SystemScannerPrincipalID,
+		PrincipalID: e.principalID, PrincipalName: e.principalID,
 		IdentityKind: identity.IdentityKindSystem, Scope: event.Scope,
 		OrganizationID: event.OrganizationID, ProjectID: event.ProjectID,
+		DestinationOrganizationID: event.DestinationOrganizationID,
+		DestinationProjectID:      event.DestinationProjectID,
 	})
 }
 

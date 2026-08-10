@@ -303,7 +303,9 @@ func renderBagDropAssociation(association bagdrop.Association) BagDropAssociatio
 		BucketName:       association.BucketName,
 		State:            BagDropAssociationState(association.State),
 		FirstAttemptedAt: association.FirstAttemptedAt,
+		LastAttemptAt:    association.LastAttemptAt,
 		LastSyncedAt:     association.LastSyncedAt,
+		LastSyncError:    association.LastSyncError,
 		CreatedAt:        association.CreatedAt,
 		UpdatedAt:        association.UpdatedAt,
 		SyncStatus:       BagDropSyncStatus(association.SyncStatus()),
@@ -430,6 +432,39 @@ func (s *server) DisableBagDrop(
 	}
 	audited.succeeded("", "")
 	return DisableBagDrop200JSONResponse(renderBagDropConfig(config)), nil
+}
+
+func (s *server) ReconcileBagDrop(
+	ctx context.Context, request ReconcileBagDropRequestObject,
+) (ReconcileBagDropResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
+	caller, refused, err := s.admitBagDrop(ctx, organizationID, projectID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	reconciler, ok := s.bagDrop.(BagDropReconciler)
+	if !ok {
+		audited.failed("reconciler_unavailable")
+		return ReconcileBagDrop503JSONResponse{Message: bagdrop.ErrReconcilerNotRunning.Error()}, nil
+	}
+	if err := reconciler.Trigger(ctx, organizationID, projectID); err != nil {
+		if errors.Is(err, bagdrop.ErrReconcilerNotRunning) {
+			audited.failed("reconciler_unavailable")
+			return ReconcileBagDrop503JSONResponse{Message: err.Error()}, nil
+		}
+		audited.failed("trigger_failed")
+		return nil, err
+	}
+	audited.succeeded("", "")
+	return ReconcileBagDrop202JSONResponse{Message: "Bag Drop reconciliation requested"}, nil
 }
 
 func renderBagDropConfig(config *bagdrop.Config) BagDropConfig {

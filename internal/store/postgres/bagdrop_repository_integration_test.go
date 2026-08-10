@@ -5,11 +5,19 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"io"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/bagdrop"
+	"github.com/benemon/dufflebag/internal/domain/identity"
+	platform "github.com/benemon/dufflebag/internal/platform/v1"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/google/uuid"
 )
 
 func TestBagDropRepositoryLifecycle(t *testing.T) {
@@ -196,6 +204,124 @@ func TestBagDropAttemptedAssociationTombstoneAndDeleteGuard(t *testing.T) {
 	}
 }
 
+func TestBagDropAssociationReconcileStatusLifecycle(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	createdAt := time.Date(2026, 8, 10, 14, 30, 0, 0, time.UTC)
+	if _, err := repository.PutBagDropConfig(ctx, integrationBagDropRecord(createdAt)); err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	if _, err := repository.PutBagDropAssociation(ctx, bagdrop.Association{
+		OrganizationID: orgA, ProjectID: projectA, BucketName: "images",
+		State: bagdrop.AssociationActive, CreatedAt: createdAt, UpdatedAt: createdAt,
+	}); err != nil {
+		t.Fatalf("put association: %v", err)
+	}
+	attemptedAt := createdAt.Add(time.Minute)
+	if err := repository.MarkBagDropAssociationAttempt(ctx, orgA, projectA, "images", attemptedAt); err != nil {
+		t.Fatalf("mark attempt: %v", err)
+	}
+	if err := repository.RecordBagDropAssociationFailure(
+		ctx, orgA, projectA, "images", "HTTP 500: destination failed", attemptedAt,
+	); err != nil {
+		t.Fatalf("record failure: %v", err)
+	}
+	listed, err := repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 1 || listed[0].FirstAttemptedAt == nil ||
+		listed[0].LastAttemptAt == nil || listed[0].LastSyncError == nil ||
+		listed[0].SyncStatus() != bagdrop.SyncPending {
+		t.Fatalf("failed status = %#v, %v", listed, err)
+	}
+	syncedAt := attemptedAt.Add(time.Minute)
+	if err := repository.RecordBagDropAssociationSuccess(ctx, orgA, projectA, "images", syncedAt); err != nil {
+		t.Fatalf("record success: %v", err)
+	}
+	listed, err = repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 1 || listed[0].LastSyncedAt == nil ||
+		listed[0].LastSyncError != nil || listed[0].SyncStatus() != bagdrop.SyncSynced {
+		t.Fatalf("successful status = %#v, %v", listed, err)
+	}
+}
+
+func TestBagDropReconcileTriggerIntegration(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broker, err := audit.NewBroker(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sealer := bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef")
+	adapter := &integrationBagDropAdapter{}
+	adapters := bagdrop.Registry{bagdrop.AdapterHCPPacker: adapter}
+	service := bagdrop.NewService(repository, sealer, adapters)
+	reconciler, err := bagdrop.NewReconciler(repository, sealer, adapters, broker, time.Hour, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bagDropRuntime := &bagdrop.Runtime{Service: service, Reconciler: reconciler}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		reconciler.Run(ctx)
+	}()
+	<-reconciler.Started()
+	defer func() {
+		cancel()
+		<-done
+	}()
+
+	principal, err := identity.NewPrincipal(
+		"maintainer", "maintainer", "maintainer-client",
+		identity.Scope{OrganizationID: uuid.MustParse(orgA), ProjectID: uuid.MustParse(projectA)},
+		identity.RoleMaintainer, time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secretID := "maintainer-secret"
+	if _, err := principal.IssueSecret(secretID, nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	handler := platform.NewHandler(
+		repository, repository, auditAPIAuthenticator{principalID: principal.ID, secretID: secretID},
+		auditAPIPrincipals{principal: principal}, logger, repository, broker,
+		nil, nil, bagDropRuntime, platform.BuildInfo{},
+	)
+	call := func(project string) *httptest.ResponseRecorder {
+		request := httptest.NewRequest(http.MethodPost,
+			"/api/v1/organizations/"+orgA+"/projects/"+project+"/bagdrop/reconcile", nil)
+		request.Header.Set("Authorization", "Bearer integration-token")
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		return response
+	}
+	if response := call(projectA); response.Code != http.StatusAccepted {
+		t.Fatalf("running trigger = %d: %s", response.Code, response.Body)
+	}
+	if response := call(projectB); response.Code != http.StatusNotFound {
+		t.Fatalf("foreign trigger = %d: %s", response.Code, response.Body)
+	}
+
+	unavailable := platform.NewHandler(
+		repository, repository, auditAPIAuthenticator{principalID: principal.ID, secretID: secretID},
+		auditAPIPrincipals{principal: principal}, logger, repository, broker,
+		nil, nil, service, platform.BuildInfo{},
+	)
+	request := httptest.NewRequest(http.MethodPost,
+		"/api/v1/organizations/"+orgA+"/projects/"+projectA+"/bagdrop/reconcile", nil)
+	request.Header.Set("Authorization", "Bearer integration-token")
+	response := httptest.NewRecorder()
+	unavailable.ServeHTTP(response, request)
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("absent reconciler = %d: %s", response.Code, response.Body)
+	}
+}
+
 func TestBagDropCleanAssociationsCascadeWithConfig(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -238,4 +364,10 @@ func (a *integrationBagDropAdapter) Resolve(
 ) bagdrop.VerificationResult {
 	a.secret = destination.ClientSecret
 	return bagdrop.VerificationResult{Outcome: bagdrop.OutcomeResolved}
+}
+
+func (*integrationBagDropAdapter) BeginReconcile(
+	context.Context, bagdrop.Destination,
+) (bagdrop.ReconcileRun, error) {
+	panic("BeginReconcile is not used by configuration service integration tests")
 }

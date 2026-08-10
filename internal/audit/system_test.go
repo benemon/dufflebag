@@ -59,3 +59,32 @@ func TestSystemEmitterRequestFailureIsReturned(t *testing.T) {
 		t.Fatalf("request error = %v", err)
 	}
 }
+
+func TestBagDropEmitterCarriesDestinationAndSystemIdentity(t *testing.T) {
+	writer := &systemTestWriter{}
+	emitter := NewBagDropEmitter(writer)
+	event := SystemEvent{
+		Operation: "bagdrop.sync.build.update", TargetType: "build", TargetID: "fp-1/amazon-ebs",
+		Scope: identity.AuditScopeProject, OrganizationID: "local-org", ProjectID: "local-project",
+		DestinationOrganizationID: "hcp-org", DestinationProjectID: "hcp-project",
+	}
+	correlation, err := emitter.Request(event)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := emitter.Response(correlation, event, identity.AuditOutcomeFailure, "HTTP 500: failed"); err != nil {
+		t.Fatal(err)
+	}
+	for _, encoded := range writer.records {
+		var record map[string]any
+		if err := json.Unmarshal(encoded, &record); err != nil {
+			t.Fatal(err)
+		}
+		if record["principal_id"] != identity.SystemBagDropPrincipalID ||
+			record["destination_organization_id"] != "hcp-org" ||
+			record["destination_project_id"] != "hcp-project" ||
+			record["target_id"] != "fp-1/amazon-ebs" {
+			t.Fatalf("Bag Drop audit record = %#v", record)
+		}
+	}
+}

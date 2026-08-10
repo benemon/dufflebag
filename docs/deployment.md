@@ -130,14 +130,27 @@ responses on an internal Docker network instead.
 
 Configuring or verifying an HCP Packer Bag Drop destination makes outbound
 HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
-`api.cloud.hashicorp.com` for the scoped project read. Permit egress to both
-hosts. No background mirroring runs in this release; the enabled flag is only
-configuration state until the later reconciler slice arrives.
+`api.cloud.hashicorp.com` for scoped reads and destination writes. Permit egress
+to both hosts. Once an enabled configuration has active associations, the
+background reconciler creates and converges destination buckets, completed
+versions, completed builds and their artifacts. It never deletes destination
+data in this slice.
 
-Bag Drop associations select which project buckets will mirror. Removing an
-association is the consent boundary for deleting its destination-side copy
-once syncing exists; this release records that intent without contacting the
-destination.
+`DFBG_BAGDROP_RECONCILE_INTERVAL` controls the level-reconcile cadence as a Go
+duration and defaults to `5m`; an invalid or non-positive value refuses
+startup. Per-project failures back off in memory at `interval * 2^failures`,
+capped at one hour, and a successful run resets the count. A `Retry-After`
+header, if a destination ever supplies one, is honoured when it asks for a
+longer delay.
+
+Destination mutations are audit fail-closed. If no configured audit sink can
+accept the pre-mutation or outcome record, Bag Drop sync pauses until the next
+cadence tick; the ordinary API and compatibility serving paths remain
+available because reconciliation runs outside them.
+
+Bag Drop associations select which project buckets mirror. Removing an
+association is the consent boundary for deleting its destination-side copy;
+this slice records the pending removal but does not execute remote deletion.
 
 The destination client secret is always stored in an AES-256-GCM envelope. On
 an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32

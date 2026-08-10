@@ -106,6 +106,10 @@ type BagDropService interface {
 	Status(context.Context, string, string) (*bagdrop.Status, error)
 }
 
+type BagDropReconciler interface {
+	Trigger(context.Context, string, string) error
+}
+
 type auditTargetSink interface {
 	audit.Sink
 }
