@@ -94,6 +94,7 @@ type EncryptionService interface {
 }
 
 type BagDropService interface {
+	CredentialProtection() string
 	Get(context.Context, string, string) (*bagdrop.Config, error)
 	Put(context.Context, string, string, bagdrop.Write) (*bagdrop.Config, *bagdrop.VerificationResult, error)
 	Delete(context.Context, string, string) error

@@ -26,7 +26,7 @@ after(async () => {
   await vite.close()
 })
 
-const labels = ['Buckets', 'Principals', 'Audit', 'Encryption', 'Instance']
+const labels = ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Instance']
 
 const view = (role) => renderToStaticMarkup(React.createElement(
   MemoryRouter,
@@ -39,11 +39,11 @@ const view = (role) => renderToStaticMarkup(React.createElement(
 
 test('the shell renders only navigation the caller can use', () => {
   for (const [role, expected] of [
-    [null, ['Buckets', 'Instance']],
-    ['reader', ['Buckets', 'Instance']],
-    ['builder', ['Buckets', 'Instance']],
-    ['publisher', ['Buckets', 'Instance']],
-    ['maintainer', ['Buckets', 'Principals', 'Instance']],
+    [null, ['Buckets', 'Bag Drop', 'Instance']],
+    ['reader', ['Buckets', 'Bag Drop', 'Instance']],
+    ['builder', ['Buckets', 'Bag Drop', 'Instance']],
+    ['publisher', ['Buckets', 'Bag Drop', 'Instance']],
+    ['maintainer', ['Buckets', 'Principals', 'Bag Drop', 'Instance']],
     ['root', labels],
   ]) {
     const markup = view(role)

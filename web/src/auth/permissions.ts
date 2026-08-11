@@ -10,6 +10,8 @@ export const ACTION_REQUIREMENTS = {
   manageEncryption: 'root',
   // internal/platform/v1/handler.go checks RoleMaintainer for principal and secret lifecycle.
   managePrincipals: 'maintainer',
+  // internal/platform/v1/bagdrop.go:16's admitBagDrop authorizes RoleMaintainer.
+  configureBagDrop: 'maintainer',
 } as const satisfies Record<string, Role>
 
 export type ConsoleAction = keyof typeof ACTION_REQUIREMENTS
@@ -23,6 +25,8 @@ export const NAV_REQUIREMENTS = {
   audit: 'root',
   // internal/platform/v1/encryption.go:15 authorizes GetEncryption at root.
   encryption: 'root',
+  // internal/platform/v1/bagdrop.go:37's admitBagDropStatus authorizes RoleReader.
+  bagdrop: 'reader',
   // internal/platform/v1/handler.go:1214 authorizes GetInstance at reader.
   instance: 'reader',
 } as const satisfies Record<string, Role>

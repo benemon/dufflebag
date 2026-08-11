@@ -28,6 +28,7 @@ const NAV: readonly NavGroupModel[] = [
     { key: 'principals', to: '/principals', label: 'Principals' },
     { key: 'audit', to: '/audit', label: 'Audit' },
     { key: 'encryption', to: '/encryption', label: 'Encryption' },
+    { key: 'bagdrop', to: '/bagdrop', label: 'Bag Drop' },
     { key: 'instance', to: '/instance', label: 'Instance' },
   ]},
 ]
