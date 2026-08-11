@@ -252,6 +252,7 @@ func main() {
 	bagDropSealer := bagdrop.NewCredentialSealer(ring, os.Getenv(bagdrop.CredentialKeyEnv))
 	bagDropAdapters := bagdrop.Registry{
 		bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(bagDropAuthBase, bagDropAPIBase),
+		bagdrop.AdapterDufflebag: bagdrop.NewDufflebagAdapterFactory(),
 	}
 	bagDropService := bagdrop.NewService(repository, bagDropSealer, bagDropAdapters)
 	bagDropReconciler, err := bagdrop.NewReconciler(

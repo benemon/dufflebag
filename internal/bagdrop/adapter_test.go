@@ -3,8 +3,17 @@ package bagdrop
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/tls"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"io"
+	"math/big"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -28,6 +37,115 @@ const bucketsFixture = `{"buckets":[],"pagination":{}}`
 // Source: internal/compat/hcp2023/handler.go writeRPCError and
 // docs/compatibility.md §5.1 AlreadyExists handling.
 const alreadyExistsFixture = `{"code":6,"message":"already exists","details":[]}`
+
+func TestDufflebagSuppliedCAChainTrustsTokenAndRead(t *testing.T) {
+	var calls []string
+	server, caChain := newGeneratedCATLSServer(t, http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		calls = append(calls, request.Method+" "+request.URL.RequestURI())
+		switch request.URL.Path {
+		case "/oauth2/token":
+			// Fixture source: internal/compat/hcpauth/handler.go tokenResponse.
+			_, _ = w.Write([]byte(tokenSuccessFixture))
+		case "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets":
+			// Fixture source: internal/compat/hcp2023/handler.go ListBuckets response producer.
+			_, _ = w.Write([]byte(bucketsFixture))
+		default:
+			t.Errorf("unexpected request %s %s", request.Method, request.URL.RequestURI())
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	adapter, err := NewDufflebagAdapter(server.URL, caChain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := adapter.Resolve(context.Background(), adapterDestination())
+	if result.Outcome != OutcomeResolved {
+		t.Fatalf("Resolve = %#v", result)
+	}
+	want := []string{
+		"POST /oauth2/token",
+		"GET /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets?pagination.page_size=1",
+	}
+	if strings.Join(calls, ",") != strings.Join(want, ",") {
+		t.Fatalf("calls = %v, want %v", calls, want)
+	}
+}
+
+func TestDufflebagUntrustedServerClassifiesTLSFailure(t *testing.T) {
+	server, _ := newGeneratedCATLSServer(t, http.NotFoundHandler())
+	defer server.Close()
+	adapter, err := NewDufflebagAdapter(server.URL, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := adapter.Resolve(context.Background(), adapterDestination())
+	if result.Outcome != OutcomeFailed || result.Reason != ReasonTLSFailure {
+		t.Fatalf("Resolve = %#v, want tls_failure", result)
+	}
+}
+
+func TestDufflebagWrongCAChainClassifiesTLSFailure(t *testing.T) {
+	server, _ := newGeneratedCATLSServer(t, http.NotFoundHandler())
+	defer server.Close()
+	wrongCA, wrongChain := newGeneratedCATLSServer(t, http.NotFoundHandler())
+	defer wrongCA.Close()
+	adapter, err := NewDufflebagAdapter(server.URL, wrongChain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := adapter.Resolve(context.Background(), adapterDestination())
+	if result.Outcome != OutcomeFailed || result.Reason != ReasonTLSFailure {
+		t.Fatalf("Resolve = %#v, want tls_failure", result)
+	}
+}
+
+func newGeneratedCATLSServer(t *testing.T, handler http.Handler) (*httptest.Server, string) {
+	t.Helper()
+	// Fixture source: generated here with crypto/x509. Both the throwaway CA
+	// and its localhost leaf exist only for this test process.
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	caTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(1), Subject: pkix.Name{CommonName: "dufflebag test CA"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		IsCA: true, BasicConstraintsValid: true,
+		KeyUsage: x509.KeyUsageCertSign | x509.KeyUsageDigitalSignature,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := x509.ParseCertificate(caDER)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafTemplate := &x509.Certificate{
+		SerialNumber: big.NewInt(2), Subject: pkix.Name{CommonName: "localhost"},
+		NotBefore: now.Add(-time.Minute), NotAfter: now.Add(time.Hour),
+		KeyUsage:    x509.KeyUsageDigitalSignature,
+		ExtKeyUsage: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+		DNSNames:    []string{"localhost"}, IPAddresses: []net.IP{net.ParseIP("127.0.0.1")},
+	}
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTemplate, ca, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewUnstartedServer(handler)
+	server.TLS = &tls.Config{Certificates: []tls.Certificate{{
+		Certificate: [][]byte{leafDER, caDER}, PrivateKey: leafKey,
+	}}}
+	server.StartTLS()
+	return server, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}))
+}
 
 func TestHCPPackerResolveUsesCompatibilityRequestShapes(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -610,5 +728,33 @@ func adapterDestination() Destination {
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client-id",
 		},
 		ClientSecret: "client-secret",
+	}
+}
+
+// A dufflebag destination currently renders a never-revoked version's
+// revoke_at as the zero time where live HCP renders null (duf-mhaw). The
+// adapter must normalise zero time to not-revoked so the engine never
+// attempts a restore against a version that was never revoked.
+func TestGetVersionNormalisesZeroRevokeAtToNotRevoked(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		// Fixture source: a dufflebag compat-plane GetVersion rendering,
+		// captured during the duf-bq2w live proof (zero-time revoke_at).
+		_, _ = w.Write([]byte(`{"version":{"fingerprint":"fp-1","status":"VERSION_ACTIVE","revoke_at":"0001-01-01T00:00:00.000Z"}}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, exists, err := run.GetVersion(context.Background(), "images", "fp-1")
+	if err != nil || !exists {
+		t.Fatalf("GetVersion = %v exists=%v", err, exists)
+	}
+	if version.RevokeAt != nil {
+		t.Fatalf("zero-time revoke_at must normalise to not-revoked, got %v", version.RevokeAt)
 	}
 }

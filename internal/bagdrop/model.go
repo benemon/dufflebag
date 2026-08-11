@@ -11,7 +11,10 @@ import (
 
 type AdapterKind string
 
-const AdapterHCPPacker AdapterKind = "hcp-packer"
+const (
+	AdapterHCPPacker AdapterKind = "hcp-packer"
+	AdapterDufflebag AdapterKind = "dufflebag"
+)
 
 type VerificationOutcome string
 
@@ -67,8 +70,17 @@ type HCPPackerConfig struct {
 	ClientID       string `json:"client_id"`
 }
 
+type DufflebagConfig struct {
+	Endpoint       string `json:"endpoint"`
+	CAChain        string `json:"ca_chain,omitempty"`
+	OrganizationID string `json:"organization_id"`
+	ProjectID      string `json:"project_id"`
+	ClientID       string `json:"client_id"`
+}
+
 type Destination struct {
 	HCPPackerConfig
+	Dufflebag    DufflebagConfig
 	ClientSecret string
 }
 
@@ -90,6 +102,7 @@ type Record struct {
 	ProjectID        string
 	Adapter          AdapterKind
 	HCPPacker        HCPPackerConfig
+	Dufflebag        DufflebagConfig
 	SealedSecret     []byte
 	Enabled          bool
 	LastVerification *LastVerification
@@ -100,6 +113,7 @@ type Record struct {
 type Config struct {
 	Adapter          AdapterKind
 	HCPPacker        HCPPackerConfig
+	Dufflebag        DufflebagConfig
 	SecretSet        bool
 	Enabled          bool
 	LastVerification *LastVerification
@@ -109,7 +123,8 @@ type Config struct {
 
 type Write struct {
 	Adapter      AdapterKind
-	HCPPacker    HCPPackerConfig
+	HCPPacker    *HCPPackerConfig
+	Dufflebag    *DufflebagConfig
 	ClientSecret *string
 }
 
@@ -220,7 +235,7 @@ type RemoteChannel struct {
 
 func render(record *Record) *Config {
 	return &Config{
-		Adapter: record.Adapter, HCPPacker: record.HCPPacker,
+		Adapter: record.Adapter, HCPPacker: record.HCPPacker, Dufflebag: record.Dufflebag,
 		SecretSet: len(record.SealedSecret) != 0, Enabled: record.Enabled,
 		LastVerification: record.LastVerification,
 		CreatedAt:        record.CreatedAt, UpdatedAt: record.UpdatedAt,
@@ -230,12 +245,20 @@ func render(record *Record) *Config {
 // ValidateRecord keeps the adapter enum and destination requirements in the
 // domain layer even when a row is restored from storage.
 func ValidateRecord(record *Record) error {
-	if record.Adapter != AdapterHCPPacker {
+	switch record.Adapter {
+	case AdapterHCPPacker:
+		if record.Dufflebag != (DufflebagConfig{}) || record.HCPPacker.OrganizationID == "" ||
+			record.HCPPacker.ProjectID == "" || record.HCPPacker.ClientID == "" || len(record.SealedSecret) == 0 {
+			return fmt.Errorf("%w: incomplete or mismatched stored hcp-packer configuration", ErrInvalid)
+		}
+	case AdapterDufflebag:
+		if record.HCPPacker != (HCPPackerConfig{}) || record.Dufflebag.Endpoint == "" ||
+			record.Dufflebag.OrganizationID == "" || record.Dufflebag.ProjectID == "" ||
+			record.Dufflebag.ClientID == "" || len(record.SealedSecret) == 0 {
+			return fmt.Errorf("%w: incomplete or mismatched stored dufflebag configuration", ErrInvalid)
+		}
+	default:
 		return fmt.Errorf("%w: unsupported stored adapter %q", ErrInvalid, record.Adapter)
-	}
-	if record.HCPPacker.OrganizationID == "" || record.HCPPacker.ProjectID == "" ||
-		record.HCPPacker.ClientID == "" || len(record.SealedSecret) == 0 {
-		return fmt.Errorf("%w: incomplete stored hcp-packer configuration", ErrInvalid)
 	}
 	return nil
 }

@@ -66,14 +66,21 @@ func (s *Service) Put(
 	now := s.now().UTC()
 	record := &Record{
 		OrganizationID: organizationID, ProjectID: projectID,
-		Adapter: write.Adapter, HCPPacker: write.HCPPacker, SealedSecret: sealed,
+		Adapter: write.Adapter, SealedSecret: sealed,
 		CreatedAt: now, UpdatedAt: now,
+	}
+	if write.HCPPacker != nil {
+		record.HCPPacker = *write.HCPPacker
+	}
+	if write.Dufflebag != nil {
+		record.Dufflebag = *write.Dufflebag
 	}
 	changed := true
 	if existing != nil {
 		record.Enabled = existing.Enabled
 		record.CreatedAt = existing.CreatedAt
-		changed = write.ClientSecret != nil || existing.Adapter != write.Adapter || existing.HCPPacker != write.HCPPacker
+		changed = write.ClientSecret != nil || existing.Adapter != write.Adapter ||
+			existing.HCPPacker != record.HCPPacker || existing.Dufflebag != record.Dufflebag
 		if !changed {
 			record.LastVerification = existing.LastVerification
 		}
@@ -222,18 +229,41 @@ func (s *Service) resolve(ctx context.Context, record *Record) (VerificationResu
 	if err != nil {
 		return VerificationResult{}, err
 	}
-	return adapter.Resolve(ctx, Destination{HCPPackerConfig: record.HCPPacker, ClientSecret: secret}), nil
+	return adapter.Resolve(ctx, destinationForRecord(record, secret)), nil
 }
 
 func validateWrite(write Write) error {
-	if write.Adapter != AdapterHCPPacker {
-		return fmt.Errorf("%w: adapter must be %q", ErrInvalid, AdapterHCPPacker)
-	}
-	if write.HCPPacker.OrganizationID == "" || write.HCPPacker.ProjectID == "" || write.HCPPacker.ClientID == "" {
-		return fmt.Errorf("%w: hcp_packer organization_id, project_id and client_id are required", ErrInvalid)
+	switch write.Adapter {
+	case AdapterHCPPacker:
+		if write.HCPPacker == nil || write.Dufflebag != nil {
+			return fmt.Errorf("%w: adapter %q requires exactly the hcp_packer connection block", ErrInvalid, write.Adapter)
+		}
+		if write.HCPPacker.OrganizationID == "" || write.HCPPacker.ProjectID == "" || write.HCPPacker.ClientID == "" {
+			return fmt.Errorf("%w: hcp_packer organization_id, project_id and client_id are required", ErrInvalid)
+		}
+	case AdapterDufflebag:
+		if write.Dufflebag == nil || write.HCPPacker != nil {
+			return fmt.Errorf("%w: adapter %q requires exactly the dufflebag connection block", ErrInvalid, write.Adapter)
+		}
+		if write.Dufflebag.OrganizationID == "" || write.Dufflebag.ProjectID == "" || write.Dufflebag.ClientID == "" {
+			return fmt.Errorf("%w: dufflebag organization_id, project_id and client_id are required", ErrInvalid)
+		}
+		if _, err := NewDufflebagAdapter(write.Dufflebag.Endpoint, write.Dufflebag.CAChain); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalid, err)
+		}
+	default:
+		return fmt.Errorf("%w: unsupported adapter %q", ErrInvalid, write.Adapter)
 	}
 	if write.ClientSecret != nil && *write.ClientSecret == "" {
 		return fmt.Errorf("%w: client_secret must not be empty", ErrInvalid)
 	}
 	return nil
+}
+
+func destinationForRecord(record *Record, secret string) Destination {
+	return Destination{
+		HCPPackerConfig: record.HCPPacker,
+		Dufflebag:       record.Dufflebag,
+		ClientSecret:    secret,
+	}
 }

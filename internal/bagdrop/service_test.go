@@ -61,6 +61,42 @@ func TestPutRefusesWithoutBagDropCredentialKey(t *testing.T) {
 	}
 }
 
+func TestPutDufflebagInvalidPEMRefusedAndNamed(t *testing.T) {
+	secret := "secret"
+	service := NewService(&memoryRepository{}, NewCredentialSealer(nil, testKey), Registry{})
+	_, _, err := service.Put(context.Background(), testOrganization, testProject, Write{
+		Adapter: AdapterDufflebag,
+		Dufflebag: &DufflebagConfig{
+			Endpoint: "https://dufflebag.example.com", CAChain: "not a PEM chain",
+			OrganizationID: "destination-org", ProjectID: "destination-project", ClientID: "client",
+		},
+		ClientSecret: &secret,
+	})
+	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "ca_chain") ||
+		!strings.Contains(err.Error(), "parseable PEM") {
+		t.Fatalf("Put error = %v, want invalid ca_chain refusal", err)
+	}
+}
+
+func TestPutRefusesAdapterConnectionBlockMismatch(t *testing.T) {
+	secret := "secret"
+	hcp := &HCPPackerConfig{OrganizationID: "org", ProjectID: "project", ClientID: "client"}
+	dufflebag := &DufflebagConfig{
+		Endpoint:       "https://dufflebag.example.com",
+		OrganizationID: "org", ProjectID: "project", ClientID: "client",
+	}
+	service := NewService(&memoryRepository{}, NewCredentialSealer(nil, testKey), Registry{})
+	for _, write := range []Write{
+		{Adapter: AdapterDufflebag, HCPPacker: hcp, ClientSecret: &secret},
+		{Adapter: AdapterHCPPacker, Dufflebag: dufflebag, ClientSecret: &secret},
+		{Adapter: AdapterDufflebag, HCPPacker: hcp, Dufflebag: dufflebag, ClientSecret: &secret},
+	} {
+		if _, _, err := service.Put(context.Background(), testOrganization, testProject, write); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Put(%#v) error = %v, want adapter/connection mismatch refusal", write, err)
+		}
+	}
+}
+
 func TestReadAndDeleteDoNotRequireBagDropCredentialKey(t *testing.T) {
 	repository := &memoryRepository{record: &Record{
 		OrganizationID: testOrganization, ProjectID: testProject, Adapter: AdapterHCPPacker,
@@ -298,7 +334,7 @@ func TestStatusWithAndWithoutConfig(t *testing.T) {
 func testWrite(secret string) Write {
 	return Write{
 		Adapter: AdapterHCPPacker,
-		HCPPacker: HCPPackerConfig{
+		HCPPacker: &HCPPackerConfig{
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
 		},
 		ClientSecret: &secret,

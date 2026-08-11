@@ -4,6 +4,7 @@ package postgres_test
 
 import (
 	"context"
+	"encoding/pem"
 	"errors"
 	"io"
 	"log/slog"
@@ -69,6 +70,35 @@ func TestBagDropRepositoryLifecycle(t *testing.T) {
 	}
 }
 
+func TestBagDropRepositoryDufflebagConnectionRoundTrip(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	tlsFixture := httptest.NewTLSServer(http.NotFoundHandler())
+	defer tlsFixture.Close()
+	// Fixture source: net/http/httptest.NewTLSServer's in-process certificate.
+	caChain := string(pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: tlsFixture.Certificate().Raw,
+	}))
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	record := &bagdrop.Record{
+		OrganizationID: orgA, ProjectID: projectA, Adapter: bagdrop.AdapterDufflebag,
+		Dufflebag: bagdrop.DufflebagConfig{
+			Endpoint: "https://dufflebag.example.com", CAChain: caChain,
+			OrganizationID: "destination-org", ProjectID: "destination-project", ClientID: "client",
+		},
+		SealedSecret: []byte("sealed-credential"), CreatedAt: at, UpdatedAt: at,
+	}
+	stored, err := repository.PutBagDropConfig(context.Background(), record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stored.Adapter != bagdrop.AdapterDufflebag || stored.Dufflebag != record.Dufflebag ||
+		stored.HCPPacker != (bagdrop.HCPPackerConfig{}) || string(stored.SealedSecret) != "sealed-credential" {
+		t.Fatalf("stored = %#v", stored)
+	}
+}
+
 func TestBagDropRepositoryRLSConcealsOtherProject(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -101,7 +131,7 @@ func TestBagDropServiceAgainstPostgres(t *testing.T) {
 	secret := "postgres-destination-secret"
 	config, verification, err := service.Put(context.Background(), orgA, projectA, bagdrop.Write{
 		Adapter: bagdrop.AdapterHCPPacker,
-		HCPPacker: bagdrop.HCPPackerConfig{
+		HCPPacker: &bagdrop.HCPPackerConfig{
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
 		},
 		ClientSecret: &secret,
@@ -265,7 +295,7 @@ func TestBagDropConsumedTombstoneUnblocksConfigDelete(t *testing.T) {
 	secret := "destination-secret"
 	if _, _, err := service.Put(ctx, orgA, projectA, bagdrop.Write{
 		Adapter: bagdrop.AdapterHCPPacker,
-		HCPPacker: bagdrop.HCPPackerConfig{
+		HCPPacker: &bagdrop.HCPPackerConfig{
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
 		},
 		ClientSecret: &secret,

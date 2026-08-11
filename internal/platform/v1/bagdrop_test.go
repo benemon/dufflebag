@@ -144,12 +144,15 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 	handler := bagDropHandler(identity.RoleMaintainer, service)
 	body := bagDropWriteBody()
 	body["hcp_packer"].(map[string]any)["client_secret"] = secret
+	dufflebagBody := bagDropDufflebagWriteBody()
+	dufflebagBody["dufflebag"].(map[string]any)["client_secret"] = secret
 	requests := []struct {
 		method string
 		path   string
 		body   any
 	}{
 		{http.MethodPut, bagDropPath(""), body},
+		{http.MethodPut, bagDropPath(""), dufflebagBody},
 		{http.MethodGet, bagDropPath(""), nil},
 		{http.MethodPost, bagDropPath("verify"), nil},
 		{http.MethodPost, bagDropPath("enable"), nil},
@@ -185,6 +188,56 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 	if bytes.Contains(encoded, []byte(secret)) || bytes.Contains(encoded, []byte("client_secret")) ||
 		bytes.Contains(encoded, []byte("sealed_secret")) {
 		t.Fatalf("generated BagDropStatus read shape exposed secret material: %s", encoded)
+	}
+}
+
+func TestBagDropHandlerRefusesAdapterConnectionBlockMismatch(t *testing.T) {
+	service := bagdrop.NewService(
+		&handlerBagDropRepository{},
+		bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef"),
+		bagdrop.Registry{},
+	)
+	handler := bagDropHandler(identity.RoleMaintainer, service)
+	for _, body := range []map[string]any{
+		{
+			"adapter": "dufflebag",
+			"hcp_packer": map[string]any{
+				"organization_id": "org", "project_id": "project",
+				"client_id": "client", "client_secret": "secret",
+			},
+		},
+		{
+			"adapter": "hcp-packer",
+			"dufflebag": map[string]any{
+				"endpoint":        "https://dufflebag.example.com",
+				"organization_id": "org", "project_id": "project",
+				"client_id": "client", "client_secret": "secret",
+			},
+		},
+	} {
+		response := call(t, handler, http.MethodPut, bagDropPath(""), body, testToken)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "requires exactly") {
+			t.Fatalf("mismatch response = %d: %s", response.Code, response.Body)
+		}
+	}
+}
+
+func TestBagDropDufflebagCAChainRoundTripsOnRead(t *testing.T) {
+	const caChain = "-----BEGIN CERTIFICATE-----\npublic trust material\n-----END CERTIFICATE-----\n"
+	service := &fakeBagDropService{configValue: &bagdrop.Config{
+		Adapter: bagdrop.AdapterDufflebag,
+		Dufflebag: bagdrop.DufflebagConfig{
+			Endpoint: "https://dufflebag.example.com", CAChain: caChain,
+			OrganizationID: "destination-org", ProjectID: "destination-project", ClientID: "client",
+		},
+		SecretSet: true, CreatedAt: initTestTime, UpdatedAt: initTestTime,
+	}}
+	response := call(
+		t, bagDropHandler(identity.RoleMaintainer, service), http.MethodGet, bagDropPath(""), nil, testToken,
+	)
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ca_chain":"-----BEGIN CERTIFICATE-----\npublic trust material`) ||
+		strings.Contains(response.Body.String(), "client_secret") || strings.Contains(response.Body.String(), "hcp_packer") {
+		t.Fatalf("dufflebag read = %d: %s", response.Code, response.Body)
 	}
 }
 
@@ -379,6 +432,17 @@ func bagDropWriteBody() map[string]any {
 	}
 }
 
+func bagDropDufflebagWriteBody() map[string]any {
+	return map[string]any{
+		"adapter": "dufflebag",
+		"dufflebag": map[string]any{
+			"endpoint": "https://dufflebag.example.com", "ca_chain": "",
+			"organization_id": "destination-org", "project_id": "destination-project",
+			"client_id": "dufflebag-client", "client_secret": "secret",
+		},
+	}
+}
+
 func bagDropProjectRepository() *fakeTenancyRepository {
 	return &fakeTenancyRepository{projects: []store.Project{{
 		ID: testProjID, OrganizationID: testOrgID, Name: "project", CreatedAt: initTestTime,
@@ -401,6 +465,7 @@ type fakeBagDropService struct {
 	deleteErr      error
 	removalOutcome bagdrop.RemovalOutcome
 	status         *bagdrop.Status
+	configValue    *bagdrop.Config
 }
 
 type fakeBagDropRuntime struct {
@@ -414,7 +479,10 @@ func (r *fakeBagDropRuntime) Trigger(context.Context, string, string) error {
 	return r.triggerErr
 }
 
-func (*fakeBagDropService) config() *bagdrop.Config {
+func (s *fakeBagDropService) config() *bagdrop.Config {
+	if s.configValue != nil {
+		return s.configValue
+	}
 	return &bagdrop.Config{
 		Adapter: bagdrop.AdapterHCPPacker,
 		HCPPacker: bagdrop.HCPPackerConfig{

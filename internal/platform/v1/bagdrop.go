@@ -93,8 +93,15 @@ func (s *server) PutBagDropConfig(
 		audited.refused("invalid_request")
 		return PutBagDropConfig400JSONResponse{Message: "Bag Drop configuration is required"}, nil
 	}
-	if request.Body.HcpPacker.ClientSecret != nil {
-		audit.FromContext(ctx).ClientSecret(*request.Body.HcpPacker.ClientSecret)
+	var clientSecret *string
+	if request.Body.HcpPacker != nil {
+		clientSecret = request.Body.HcpPacker.ClientSecret
+	}
+	if request.Body.Dufflebag != nil {
+		clientSecret = request.Body.Dufflebag.ClientSecret
+	}
+	if clientSecret != nil {
+		audit.FromContext(ctx).ClientSecret(*clientSecret)
 	}
 	organizationID, projectID := request.OrganizationId.String(), request.ProjectId.String()
 	caller, refused, err := s.admitBagDrop(ctx, organizationID, projectID)
@@ -107,15 +114,27 @@ func (s *server) PutBagDropConfig(
 		return newRefusal(refused), nil
 	}
 	audited.actor(caller)
-	config, verification, err := s.bagDrop.Put(ctx, organizationID, projectID, bagdrop.Write{
-		Adapter: bagdrop.AdapterKind(request.Body.Adapter),
-		HCPPacker: bagdrop.HCPPackerConfig{
+	write := bagdrop.Write{Adapter: bagdrop.AdapterKind(request.Body.Adapter), ClientSecret: clientSecret}
+	if request.Body.HcpPacker != nil {
+		write.HCPPacker = &bagdrop.HCPPackerConfig{
 			OrganizationID: request.Body.HcpPacker.OrganizationId,
 			ProjectID:      request.Body.HcpPacker.ProjectId,
 			ClientID:       request.Body.HcpPacker.ClientId,
-		},
-		ClientSecret: request.Body.HcpPacker.ClientSecret,
-	})
+		}
+	}
+	if request.Body.Dufflebag != nil {
+		caChain := ""
+		if request.Body.Dufflebag.CaChain != nil {
+			caChain = *request.Body.Dufflebag.CaChain
+		}
+		write.Dufflebag = &bagdrop.DufflebagConfig{
+			Endpoint: request.Body.Dufflebag.Endpoint, CAChain: caChain,
+			OrganizationID: request.Body.Dufflebag.OrganizationId,
+			ProjectID:      request.Body.Dufflebag.ProjectId,
+			ClientID:       request.Body.Dufflebag.ClientId,
+		}
+	}
+	config, verification, err := s.bagDrop.Put(ctx, organizationID, projectID, write)
 	switch {
 	case errors.Is(err, bagdrop.ErrInvalid):
 		audited.refused("invalid_request")
@@ -469,14 +488,27 @@ func (s *server) ReconcileBagDrop(
 
 func renderBagDropConfig(config *bagdrop.Config) BagDropConfig {
 	response := BagDropConfig{
-		Adapter: BagDropAdapter(config.Adapter),
-		HcpPacker: BagDropHCPPacker{
+		Adapter:   BagDropAdapter(config.Adapter),
+		SecretSet: config.SecretSet, Enabled: config.Enabled,
+		CreatedAt: config.CreatedAt, UpdatedAt: config.UpdatedAt,
+	}
+	if config.Adapter == bagdrop.AdapterHCPPacker {
+		response.HcpPacker = &BagDropHCPPacker{
 			OrganizationId: config.HCPPacker.OrganizationID,
 			ProjectId:      config.HCPPacker.ProjectID,
 			ClientId:       config.HCPPacker.ClientID,
-		},
-		SecretSet: config.SecretSet, Enabled: config.Enabled,
-		CreatedAt: config.CreatedAt, UpdatedAt: config.UpdatedAt,
+		}
+	}
+	if config.Adapter == bagdrop.AdapterDufflebag {
+		response.Dufflebag = &BagDropDufflebag{
+			Endpoint:       config.Dufflebag.Endpoint,
+			OrganizationId: config.Dufflebag.OrganizationID,
+			ProjectId:      config.Dufflebag.ProjectID,
+			ClientId:       config.Dufflebag.ClientID,
+		}
+		if config.Dufflebag.CAChain != "" {
+			response.Dufflebag.CaChain = &config.Dufflebag.CAChain
+		}
 	}
 	if config.LastVerification != nil {
 		verification := renderBagDropVerification(config.LastVerification.VerificationResult)
