@@ -809,13 +809,14 @@ func composeHandler(
 			next:       route.handler,
 		})
 	}
-	// Recovery shares the token endpoint's per-caller buckets: both are
-	// anonymous surfaces whose refusals must stay outside the audit seam
+	// Recovery and cookie-session renewal share the token endpoint's per-caller
+	// buckets: these anonymous minting surfaces must stay outside the audit seam
 	// (ADR-0024; ADR-0020's amplification coupling).
 	return &composedHandler{
 		Handler: token.Admit(
 			audit.NewHTTPHandler(broker, router, router, hmacKey),
 			platform.RecoveryPath,
+			http.MethodGet+" "+platform.SessionPath,
 		),
 		resolver: router,
 	}

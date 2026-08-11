@@ -15,6 +15,8 @@ let TenantSwitcher
 let applyOrganizationRefresh
 let selectionAfterOrganizationRefresh
 let startOrganizationRefresh
+let scheduleSessionRenewal
+let renewConsoleSession
 let refreshOrganizationsOnPickerOpen
 let grantableRoles
 let PrincipalsView
@@ -33,7 +35,7 @@ before(async () => {
   ;({ platformTenancyGap, organizationRows } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({
     AuthContext, applyOrganizationRefresh, selectionAfterOrganizationRefresh,
-    startOrganizationRefresh,
+    startOrganizationRefresh, scheduleSessionRenewal, renewConsoleSession,
   } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
   ;({
     TenantSwitcher, refreshOrganizationsOnPickerOpen,
@@ -84,6 +86,57 @@ function platformToken(exp = inFifteenMinutes()) {
     grants: [],
   })
 }
+
+test('session renewal schedules one minute before expiry and reschedules after success', async () => {
+  const now = Date.now
+  const realNow = now()
+  Date.now = () => realNow
+  try {
+    const scheduled = []
+    const schedule = (callback, delay) => {
+      const timer = { callback, delay, cleared: false }
+      scheduled.push(timer)
+      return timer
+    }
+    const firstClaims = { expiresAt: new Date(realNow + 10 * 60_000) }
+    scheduleSessionRenewal(firstClaims, async () => {
+      await renewConsoleSession(
+        async () => platformToken(Math.floor((realNow + 20 * 60_000) / 1000)),
+        (_token, claims) => scheduleSessionRenewal(claims, () => {}, schedule),
+        () => assert.fail('a successful renewal must not expire the session'),
+      )
+    }, schedule)
+    assert.equal(scheduled[0].delay, 9 * 60_000)
+    await scheduled[0].callback()
+    assert.equal(scheduled.length, 2)
+    assert.equal(
+      scheduled[1].delay,
+      Math.floor((realNow + 20 * 60_000) / 1000) * 1000 - realNow - 60_000,
+    )
+  } finally {
+    Date.now = now
+  }
+})
+
+test('session renewal signs out as expired when the cookie session is gone', async () => {
+  let reason = null
+  await renewConsoleSession(async () => null, () => assert.fail('no session must not be entered'), () => {
+    reason = 'expired'
+  })
+  assert.equal(reason, 'expired')
+})
+
+test('session renewal timer cleanup clears the scheduled timer on sign-out or unmount', () => {
+  let cleared = null
+  const cancel = scheduleSessionRenewal(
+    { expiresAt: new Date(Date.now() + 120_000) },
+    () => {},
+    () => ({ id: 'renewal' }),
+    (timer) => { cleared = timer },
+  )
+  cancel()
+  assert.deepEqual(cleared, { id: 'renewal' })
+})
 
 test('the token Issue emits for a platform principal decodes as platform scope', () => {
   const claims = decodeClaims(platformToken())

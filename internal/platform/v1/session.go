@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"net/http"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/domain/identity"
@@ -20,6 +21,11 @@ const SessionPath = "/sys/session"
 // other route ever receives it. The token in memory remains the credential the
 // console actually uses; this cookie only lets a reload get it back (duf-1cn).
 const sessionCookieName = "dufflebag_session"
+
+const (
+	sessionReissueWindow = 2 * time.Minute
+	sessionAbsoluteCap   = 8 * time.Hour
+)
 
 type sessionRequestKey struct{}
 
@@ -41,8 +47,8 @@ func sessionRequestFrom(ctx context.Context) sessionRequest {
 }
 
 // A session cookie in the browser-lifetime sense: no MaxAge, so it survives
-// reload and dies with the browser. Expiry is enforced by verification on read,
-// not by cookie lifetime — the token inside is the thing that expires.
+// reload and dies with the browser. The token inside is renewed shortly before
+// expiry, subject to credential revocation and the absolute session cap.
 func liveSessionCookie(token string, secure bool) *http.Cookie {
 	return &http.Cookie{
 		Name:     sessionCookieName,
@@ -79,6 +85,16 @@ func (response readSessionCleared) VisitReadSessionResponse(w http.ResponseWrite
 	return ReadSession204Response{}.VisitReadSessionResponse(w)
 }
 
+type readSessionRenewed struct {
+	token  string
+	secure bool
+}
+
+func (response readSessionRenewed) VisitReadSessionResponse(w http.ResponseWriter) error {
+	http.SetCookie(w, liveSessionCookie(response.token, response.secure))
+	return ReadSession200JSONResponse{AccessToken: response.token}.VisitReadSessionResponse(w)
+}
+
 type deleteSessionDone struct{ secure bool }
 
 func (response deleteSessionDone) VisitDeleteSessionResponse(w http.ResponseWriter) error {
@@ -110,10 +126,10 @@ func (s *server) CreateSession(
 	return createSessionSucceeded{token: request.bearer, secure: request.secure}, nil
 }
 
-// ReadSession exchanges the cookie for the token it holds. An expired or
-// invalid cookie is cleared and answers 204, not 401: no credential was
-// presented wrongly, there is simply nothing to resume — which is also why the
-// console can tell "your session ended" apart from a failed sign-in.
+// ReadSession exchanges the cookie for a live token. A token nearing expiry is
+// renewed behind the cookie while its principal and originating secret remain
+// active and the absolute session cap has not elapsed. An invalid or
+// non-renewable cookie is cleared and answers 204, not 401.
 func (s *server) ReadSession(
 	ctx context.Context, _ ReadSessionRequestObject,
 ) (ReadSessionResponseObject, error) {
@@ -121,14 +137,43 @@ func (s *server) ReadSession(
 	if request.cookie == "" {
 		return ReadSession204Response{}, nil
 	}
-	if _, err := s.auth.Verify(request.cookie); err != nil {
-		// Mirrors the middleware's posture: only refusals are audited, and the
-		// common case here is nothing more sinister than a token aging out.
-		s.auditSession(ctx, nil, identity.AuditOutcomeRefused, "invalid_token")
+	now := s.now().UTC()
+	verified, err := s.auth.Verify(request.cookie)
+	if err == nil && verified.ExpiresAt.Sub(now) >= sessionReissueWindow {
+		audit.FromContext(ctx).AccessToken(request.cookie)
+		return ReadSession200JSONResponse{AccessToken: request.cookie}, nil
+	}
+	if err != nil {
+		verified, err = s.auth.VerifyExpired(request.cookie)
+		if err != nil {
+			s.auditSessionRenew(ctx, nil, identity.AuditOutcomeRefused, "invalid_signature")
+			return readSessionCleared{secure: request.secure}, nil
+		}
+	}
+	principal, err := s.principals.GetPrincipalByID(ctx, verified.PrincipalID)
+	if err != nil {
+		s.auditSessionRenew(ctx, &verified, identity.AuditOutcomeRefused, "principal_unresolvable")
 		return readSessionCleared{secure: request.secure}, nil
 	}
-	audit.FromContext(ctx).AccessToken(request.cookie)
-	return ReadSession200JSONResponse{AccessToken: request.cookie}, nil
+	if !principal.HasActiveSecret(verified.SecretID, now) {
+		s.auditSessionRenew(ctx, &verified, identity.AuditOutcomeRefused, "revoked_secret")
+		return readSessionCleared{secure: request.secure}, nil
+	}
+	if verified.AuthTime.IsZero() || now.Sub(verified.AuthTime) > sessionAbsoluteCap {
+		s.auditSessionRenew(ctx, &verified, identity.AuditOutcomeRefused, "cap_exceeded")
+		return readSessionCleared{secure: request.secure}, nil
+	}
+	renewed, err := s.auth.Reissue(principal, verified.SecretID, verified.AuthTime)
+	if err != nil {
+		s.auditSessionRenew(ctx, &verified, identity.AuditOutcomeFailure, "token_reissue_failed")
+		return readSessionCleared{secure: request.secure}, nil
+	}
+	if err := s.principals.TouchSecretLastUsed(ctx, verified.SecretID, now); err != nil {
+		s.logger.Warn("record principal secret use", "error", err)
+	}
+	s.auditSessionRenew(ctx, &verified, identity.AuditOutcomeSuccess, "session_renewed")
+	audit.FromContext(ctx).AccessToken(renewed)
+	return readSessionRenewed{token: renewed, secure: request.secure}, nil
 }
 
 // DeleteSession clears the cookie. It works for a caller whose token has
@@ -181,4 +226,12 @@ func (s *server) auditSession(
 		}
 	}
 	audit.FromContext(ctx).Enrich(event)
+}
+
+func (s *server) auditSessionRenew(
+	ctx context.Context, verified *identity.Verified,
+	outcome identity.AuditOutcome, reason string,
+) {
+	s.auditSession(ctx, verified, outcome, reason)
+	audit.FromContext(ctx).Enrich(audit.Enrichment{Operation: sessionRenewDescriptor.Operation})
 }

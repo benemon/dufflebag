@@ -32,6 +32,7 @@ const (
 	// The console's cookie session (duf-1cn): a credential materializing into
 	// or leaving the browser's cookie jar is a lifecycle event like issuance.
 	AuditOperationSessionCreate AuditOperation = "session.create"
+	AuditOperationSessionRenew  AuditOperation = "session.renew"
 	AuditOperationSessionDelete AuditOperation = "session.delete"
 
 	// The principal and credential lifecycle. ADR-0019 makes audit a

@@ -218,8 +218,9 @@ paths:
         survive reload: the verified bearer token is set as an httpOnly,
         SameSite=Strict cookie scoped to this path, which script cannot read.
 
-        The session still ends when the token does — GET refuses and clears an
-        expired cookie rather than renewing it.
+        GET renews a token shortly before expiry while the originating secret
+        remains active, bounded by an eight-hour absolute session cap. The
+        Packer token lifetime is unchanged.
 
         CSRF: a cross-site form cannot set the Authorization header this
         operation requires, and SameSite=Strict keeps the cookie off cross-site
@@ -238,6 +239,12 @@ paths:
       operationId: readSession
       security: []          # the cookie IS the credential; there is no bearer yet
       summary: Exchange the session cookie for the access token it holds
+      description: |
+        Returns a live token unchanged when it has at least two minutes left.
+        An expired, validly signed token (or one nearing expiry) is renewed only
+        while its principal and originating secret remain active and its
+        preserved auth_time is within the eight-hour absolute session cap.
+        A refused renewal clears the browser-session cookie and returns 204.
       responses:
         "200":
           description: A live session.
@@ -245,9 +252,8 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/SessionResponse" }
         "204":
-          description: No session, or one whose token has expired — the cookie
-            is cleared. Not a 401, because no credential was presented wrongly;
-            there is simply nothing to resume.
+          description: No session, or one that cannot be renewed — the cookie is
+            cleared. Not a 401, because there is simply nothing to resume.
     delete:
       tags: [session]
       operationId: deleteSession

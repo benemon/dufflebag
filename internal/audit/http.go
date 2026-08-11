@@ -75,9 +75,11 @@ type disabledSystemWriter interface {
 }
 
 // Enrichment is response information learned while a handler executes. It
-// deliberately cannot carry an operation or target type: those come only from
-// the pre-authentication route descriptor.
+// The operation normally comes from the pre-authentication route descriptor.
+// Operation is the narrow exception for a route whose handler performs a
+// distinct security operation, such as GET /sys/session renewing a token.
 type Enrichment struct {
+	Operation      identity.AuditOperation
 	PrincipalID    string
 	PrincipalName  string
 	IdentityKind   identity.IdentityKind
@@ -157,6 +159,9 @@ func (h *Handle) Enrich(refinement Enrichment) {
 	}
 	if refinement.PrincipalID != "" {
 		h.enrichment.PrincipalID = refinement.PrincipalID
+	}
+	if refinement.Operation != "" {
+		h.enrichment.Operation = refinement.Operation
 	}
 	if refinement.PrincipalName != "" {
 		h.enrichment.PrincipalName = refinement.PrincipalName
@@ -403,6 +408,10 @@ func (h *HTTPHandler) writeResponse(
 	if targetID == "" {
 		targetID = descriptor.TargetID
 	}
+	operation := descriptor.Operation
+	if requestHandle.enrichment.Operation != "" {
+		operation = requestHandle.enrichment.Operation
+	}
 	recoveryShareHMACs := make([]string, 0, len(requestHandle.recoveryShares))
 	for _, share := range requestHandle.recoveryShares {
 		if digest := requestHandle.digest(share); digest != "" {
@@ -420,7 +429,7 @@ func (h *HTTPHandler) writeResponse(
 		Bytes:               observed.bytes,
 		Outcome:             outcome,
 		Reason:              reason,
-		Operation:           descriptor.Operation,
+		Operation:           operation,
 		TargetType:          descriptor.TargetType,
 		TargetID:            targetID,
 		PrincipalID:         requestHandle.enrichment.PrincipalID,

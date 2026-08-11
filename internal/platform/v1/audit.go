@@ -13,6 +13,12 @@ type operationDescriptor struct {
 	audit.Descriptor
 }
 
+var sessionRenewDescriptor = audit.Descriptor{
+	Operation:  identity.AuditOperationSessionRenew,
+	TargetType: "session",
+	TargetID:   SessionPath,
+}
+
 // operationDescriptors is keyed by the operation ID emitted by the generated
 // strict middleware. The HTTP seam resolves from the method/path fields before
 // authentication; the operation ID is only an independent test cross-check.

@@ -14,7 +14,9 @@ const TokenAudience = "https://api.hashicorp.cloud"
 // carrying the resulting principal scope.
 type TokenIssuer interface {
 	Issue(principal *Principal, credential string) (token string, secretID string, err error)
+	Reissue(principal *Principal, secretID string, authTime time.Time) (string, error)
 	Verify(token string) (Verified, error)
+	VerifyExpired(token string) (Verified, error)
 }
 
 // Verified is the authenticated identity a token carries.
@@ -29,7 +31,9 @@ type Verified struct {
 	// SecretID names the credential that minted this token, so a caller
 	// resolving the principal can refuse a token whose credential has since
 	// been revoked (review finding 14).
-	SecretID string
+	SecretID  string
+	AuthTime  time.Time
+	ExpiresAt time.Time
 }
 
 // Grant is a resource-scoped set of actions carried by a token.
@@ -41,6 +45,7 @@ type Grant struct {
 // Claims is the JWT contract shared by every issuance path.
 type Claims struct {
 	jwt.RegisteredClaims
+	AuthTime *jwt.NumericDate `json:"auth_time,omitempty"`
 
 	OrganizationID string `json:"organization_id,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
@@ -109,6 +114,23 @@ func (i *BasicAuthIssuer) Issue(principal *Principal, credential string) (string
 		return "", "", ErrInvalid
 	}
 
+	signed, err := i.sign(principal, secretID, now, now)
+	if err != nil {
+		return "", "", err
+	}
+	return signed, secretID, nil
+}
+
+func (i *BasicAuthIssuer) Reissue(principal *Principal, secretID string, authTime time.Time) (string, error) {
+	if principal == nil || principal.ID == "" || secretID == "" || authTime.IsZero() {
+		return "", ErrInvalid
+	}
+	return i.sign(principal, secretID, authTime.UTC(), time.Now().UTC())
+}
+
+func (i *BasicAuthIssuer) sign(
+	principal *Principal, secretID string, authTime, now time.Time,
+) (string, error) {
 	claims := Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    i.issuer,
@@ -117,6 +139,7 @@ func (i *BasicAuthIssuer) Issue(principal *Principal, credential string) (string
 			ExpiresAt: jwt.NewNumericDate(now.Add(i.ttl)),
 			IssuedAt:  jwt.NewNumericDate(now),
 		},
+		AuthTime: jwt.NewNumericDate(authTime),
 		Scope:    []string{},
 		Grants:   []Grant{},
 		SecretID: secretID,
@@ -133,16 +156,27 @@ func (i *BasicAuthIssuer) Issue(principal *Principal, credential string) (string
 
 	keys := i.keys()
 	if len(keys) == 0 {
-		return "", "", ErrInvalid
+		return "", ErrInvalid
 	}
 	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(keys[0])
 	if err != nil {
-		return "", "", fmt.Errorf("sign token: %w", err)
+		return "", fmt.Errorf("sign token: %w", err)
 	}
-	return signed, secretID, nil
+	return signed, nil
 }
 
 func (i *BasicAuthIssuer) Verify(signed string) (Verified, error) {
+	return i.verify(signed, false)
+}
+
+// VerifyExpired performs the same signature and claim checks as Verify while
+// tolerating an expired exp claim. It exists only for the cookie-session
+// renewal path; bearer middleware must continue to call Verify.
+func (i *BasicAuthIssuer) VerifyExpired(signed string) (Verified, error) {
+	return i.verify(signed, true)
+}
+
+func (i *BasicAuthIssuer) verify(signed string, allowExpired bool) (Verified, error) {
 	var claims Claims
 	valid := false
 	for _, key := range i.keys() {
@@ -176,7 +210,8 @@ func (i *BasicAuthIssuer) Verify(signed string) (Verified, error) {
 		claims.Issuer != i.issuer ||
 		claims.IssuedAt == nil ||
 		claims.ExpiresAt == nil ||
-		!now.Before(claims.ExpiresAt.Time) ||
+		claims.AuthTime == nil ||
+		(!allowExpired && !now.Before(claims.ExpiresAt.Time)) ||
 		len(claims.Audience) != 1 ||
 		claims.Audience[0] != TokenAudience {
 		return Verified{}, ErrInvalid
@@ -221,6 +256,8 @@ func (i *BasicAuthIssuer) Verify(signed string) (Verified, error) {
 		PrincipalID: claims.Subject,
 		Scope:       Scope{OrganizationID: organizationID, ProjectID: projectID},
 		SecretID:    claims.SecretID,
+		AuthTime:    claims.AuthTime.Time,
+		ExpiresAt:   claims.ExpiresAt.Time,
 	}, nil
 }
 

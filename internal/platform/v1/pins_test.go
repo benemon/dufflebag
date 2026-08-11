@@ -19,7 +19,15 @@ type pinIdentity struct {
 }
 
 func (p pinIdentity) Verify(string) (identity.Verified, error) {
-	return identity.Verified{PrincipalID: p.id, SecretID: testSecretID}, nil
+	return identity.Verified{
+		PrincipalID: p.id, SecretID: testSecretID,
+		AuthTime: initTestTime, ExpiresAt: initTestTime.Add(5 * time.Minute),
+	}, nil
+}
+
+func (p pinIdentity) VerifyExpired(token string) (identity.Verified, error) { return p.Verify(token) }
+func (pinIdentity) Reissue(*identity.Principal, string, time.Time) (string, error) {
+	return testToken, nil
 }
 
 func (p pinIdentity) GetPrincipalByID(context.Context, string) (*identity.Principal, error) {
@@ -27,6 +35,8 @@ func (p pinIdentity) GetPrincipalByID(context.Context, string) (*identity.Princi
 		p.id, p.id, "client-"+p.id, p.scope, p.role, initTestTime, testSecrets(),
 	)
 }
+
+func (pinIdentity) TouchSecretLastUsed(context.Context, string, time.Time) error { return nil }
 
 func pinPath(bucket string) string {
 	path := "/api/v1/organizations/" + testOrgID + "/projects/" + testProjID + "/pins"

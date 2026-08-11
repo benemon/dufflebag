@@ -20,8 +20,8 @@ import { decodeClaims, isExpired, type TokenClaims } from './token'
  * bearer token in web storage is readable by any script that gets injected. It
  * is held in memory, and a reload gets it back from the server's httpOnly
  * session cookie (/sys/session, duf-1cn) — which script cannot read either.
- * The session still ends when the token does; the cookie only spares the
- * re-authentication a reload used to cost.
+ * The cookie session renews its bearer token shortly before expiry while the
+ * originating secret remains active, bounded by an eight-hour absolute cap.
  *
  * # A platform-scoped session chooses its tenancy
  *
@@ -124,6 +124,37 @@ type AuthContextValue = {
 // constructed session; the app itself always goes through AuthProvider/useAuth.
 export const AuthContext = createContext<AuthContextValue | null>(null)
 
+type RenewalScheduler = (
+  callback: () => void, delay: number,
+) => ReturnType<typeof setTimeout>
+type RenewalClearer = (timer: ReturnType<typeof setTimeout>) => void
+
+export function scheduleSessionRenewal(
+  claims: TokenClaims,
+  renew: () => void,
+  schedule: RenewalScheduler = setTimeout,
+  clear: RenewalClearer = clearTimeout,
+): (() => void) | null {
+  const delay = claims.expiresAt.getTime() - Date.now() - 60_000
+  if (delay <= 0) return null
+  const timer = schedule(renew, delay)
+  return () => clear(timer)
+}
+
+export async function renewConsoleSession(
+  read: () => Promise<string | null>,
+  enter: (token: string, claims: TokenClaims) => void,
+  expire: () => void,
+): Promise<void> {
+  const token = await read()
+  const claims = token ? decodeClaims(token) : null
+  if (!token || !claims || isExpired(claims)) {
+    expire()
+    return
+  }
+  enter(token, claims)
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState | null>(null)
   const [self, setSelf] = useState<ApiSelf | null>(null)
@@ -219,6 +250,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProjectsLoading(false)
     setProjectFailure(null)
   }, [])
+
+  useEffect(() => {
+    if (!state) return
+    const cancel = scheduleSessionRenewal(state.claims, () => {
+      void renewConsoleSession(fetchSession, enterSession, () => signOut('expired')).catch(() => {})
+    })
+    return cancel ?? undefined
+  }, [state, enterSession, signOut])
 
   // Role is deliberately absent from the token. Read the principal the same
   // way the server does, so console affordances follow the stored role.
