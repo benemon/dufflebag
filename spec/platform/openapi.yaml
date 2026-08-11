@@ -1901,6 +1901,10 @@ components:
         secret_set:
           type: boolean
           description: Always true for a stored configuration; the secret itself is never returned.
+        credential_protection:
+          type: string
+          enum: [keyring, env_key]
+          description: How the stored client credential is sealed on this deployment.
         enabled: { type: boolean }
         last_verification:
           allOf:
@@ -1908,7 +1912,7 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-      required: [adapter, secret_set, enabled, last_verification, created_at, updated_at]
+      required: [adapter, secret_set, credential_protection, enabled, last_verification, created_at, updated_at]
 
     BagDropAssociationState:
       type: string

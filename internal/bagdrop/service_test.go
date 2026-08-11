@@ -31,6 +31,12 @@ func TestCredentialSealingRoundTripsBothPosturesAndRefusesAADSwap(t *testing.T) 
 	if err != nil {
 		t.Fatalf("generate keyring: %v", err)
 	}
+	if got := NewCredentialSealer(ring, "").Mode(); got != "keyring" {
+		t.Fatalf("keyring mode = %q", got)
+	}
+	if got := NewCredentialSealer(nil, testKey).Mode(); got != "env_key" {
+		t.Fatalf("environment-key mode = %q", got)
+	}
 	for name, sealer := range map[string]*CredentialSealer{
 		"encrypted keyring": NewCredentialSealer(ring, ""),
 		"unencrypted env":   NewCredentialSealer(nil, testKey),

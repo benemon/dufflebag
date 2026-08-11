@@ -581,6 +581,176 @@ export async function deletePin(token: string, tenant: Tenant, bucketName: strin
   await platformDelete(token, pinsPath(tenant, bucketName))
 }
 
+export type ApiBagDropAdapter = 'hcp-packer' | 'dufflebag'
+export type ApiBagDropCredentialProtection = 'keyring' | 'env_key'
+export type ApiBagDropVerificationOutcome = 'resolved' | 'failed'
+export type ApiBagDropVerificationReason =
+  'credential_refused' | 'project_not_found' | 'unreachable' | 'tls_failure'
+
+export type ApiBagDropVerificationResult = {
+  outcome: ApiBagDropVerificationOutcome
+  reason?: ApiBagDropVerificationReason
+  message?: string
+}
+
+export type ApiBagDropLastVerification = ApiBagDropVerificationResult & {
+  verified_at: string
+}
+
+export type ApiBagDropConfig = {
+  adapter: ApiBagDropAdapter
+  hcp_packer?: {
+    organization_id: string
+    project_id: string
+    client_id: string
+  }
+  dufflebag?: {
+    endpoint: string
+    ca_chain?: string
+    organization_id: string
+    project_id: string
+    client_id: string
+  }
+  secret_set: boolean
+  credential_protection: ApiBagDropCredentialProtection
+  enabled: boolean
+  last_verification: ApiBagDropLastVerification | null
+  created_at: string
+  updated_at: string
+}
+
+export type ApiBagDropConfigWrite = {
+  adapter: ApiBagDropAdapter
+  hcp_packer?: {
+    organization_id: string
+    project_id: string
+    client_id: string
+    client_secret?: string
+  }
+  dufflebag?: {
+    endpoint: string
+    ca_chain?: string
+    organization_id: string
+    project_id: string
+    client_id: string
+    client_secret?: string
+  }
+}
+
+export type ApiBagDropAssociation = {
+  bucket_name: string
+  state: 'active' | 'pending_removal'
+  created_at: string
+  updated_at: string
+  first_attempted_at: string | null
+  last_attempt_at: string | null
+  last_synced_at: string | null
+  last_sync_error: string | null
+  sync_status: 'pending' | 'synced' | 'removing'
+}
+
+export type ApiBagDropStatus = {
+  configured: boolean
+  adapter?: ApiBagDropAdapter
+  enabled?: boolean
+  last_verification?: ApiBagDropLastVerification | null
+  associations: ApiBagDropAssociation[]
+}
+
+function bagDropPath(tenant: Tenant, suffix = ''): string {
+  const path = `/organizations/${encodeURIComponent(tenant.organizationID)}` +
+    `/projects/${encodeURIComponent(tenant.projectID)}/bagdrop`
+  return suffix === '' ? path : `${path}/${suffix}`
+}
+
+export async function getBagDropConfig(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropConfig> {
+  return platformGet<ApiBagDropConfig>(token, bagDropPath(tenant))
+}
+
+export async function putBagDropConfig(
+  token: string, tenant: Tenant, config: ApiBagDropConfigWrite,
+): Promise<ApiBagDropConfig> {
+  return platformPut<ApiBagDropConfig>(token, bagDropPath(tenant), config)
+}
+
+export async function deleteBagDropConfig(token: string, tenant: Tenant): Promise<void> {
+  await platformDelete(token, bagDropPath(tenant))
+}
+
+export async function listBagDropAssociations(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropAssociation[]> {
+  const body = await platformGet<{ associations: ApiBagDropAssociation[] }>(
+    token, bagDropPath(tenant, 'buckets'),
+  )
+  return body.associations
+}
+
+export async function setBagDropAssociation(
+  token: string, tenant: Tenant, bucketName: string,
+): Promise<ApiBagDropAssociation> {
+  return platformPut<ApiBagDropAssociation>(
+    token, bagDropPath(tenant, `buckets/${encodeURIComponent(bucketName)}`),
+  )
+}
+
+export async function deleteBagDropAssociation(
+  token: string, tenant: Tenant, bucketName: string,
+): Promise<void> {
+  await platformDelete(token, bagDropPath(tenant, `buckets/${encodeURIComponent(bucketName)}`))
+}
+
+export async function getBagDropStatus(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropStatus> {
+  return platformGet<ApiBagDropStatus>(token, bagDropPath(tenant, 'status'))
+}
+
+export async function verifyBagDrop(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropVerificationResult> {
+  return platformPost<ApiBagDropVerificationResult>(token, bagDropPath(tenant, 'verify'))
+}
+
+export type ApiBagDropEnableResult =
+  | { kind: 'enabled'; config: ApiBagDropConfig }
+  | { kind: 'refused'; message: string; verification?: ApiBagDropVerificationResult }
+
+export async function enableBagDrop(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropEnableResult> {
+  const path = `${PLATFORM_BASE}${bagDropPath(tenant, 'enable')}`
+  const response = await fetch(path, {
+    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+  })
+  if (response.status === 409) {
+    const conflict = (await response.json()) as {
+      message: string
+      verification?: ApiBagDropVerificationResult
+    }
+    return { kind: 'refused', ...conflict }
+  }
+  if (!response.ok) {
+    const failure = await failureMessage(response, path)
+    throw new ApiError(response.status, failure.message, failure.reason)
+  }
+  return { kind: 'enabled', config: (await response.json()) as ApiBagDropConfig }
+}
+
+export async function disableBagDrop(
+  token: string, tenant: Tenant,
+): Promise<ApiBagDropConfig> {
+  return platformPost<ApiBagDropConfig>(token, bagDropPath(tenant, 'disable'))
+}
+
+export async function reconcileBagDrop(
+  token: string, tenant: Tenant,
+): Promise<{ message: string }> {
+  return platformPost<{ message: string }>(token, bagDropPath(tenant, 'reconcile'))
+}
+
 export type ApiInstance = {
   version: string
   commit: string

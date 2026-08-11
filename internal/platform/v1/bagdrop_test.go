@@ -172,7 +172,7 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 
 	// Marshal the generated read model directly as a second oracle. A field
 	// added to serialization without being populated by a handler still fails.
-	encoded, err := json.Marshal(renderBagDropConfig(service.config()))
+	encoded, err := json.Marshal(renderBagDropConfig(service.config(), service.CredentialProtection()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -181,7 +181,7 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 	}
 	encoded, err = json.Marshal(renderBagDropStatus(&bagdrop.Status{
 		Configured: true, Config: service.config(), Associations: []bagdrop.Association{},
-	}))
+	}, service.CredentialProtection()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -238,6 +238,22 @@ func TestBagDropDufflebagCAChainRoundTripsOnRead(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"ca_chain":"-----BEGIN CERTIFICATE-----\npublic trust material`) ||
 		strings.Contains(response.Body.String(), "client_secret") || strings.Contains(response.Body.String(), "hcp_packer") {
 		t.Fatalf("dufflebag read = %d: %s", response.Code, response.Body)
+	}
+}
+
+func TestBagDropConfigReportsCredentialProtectionPosture(t *testing.T) {
+	for _, posture := range []string{"keyring", "env_key"} {
+		t.Run(posture, func(t *testing.T) {
+			service := &fakeBagDropService{credentialProtection: posture}
+			response := call(
+				t, bagDropHandler(identity.RoleMaintainer, service),
+				http.MethodGet, bagDropPath(""), nil, testToken,
+			)
+			if response.Code != http.StatusOK ||
+				!strings.Contains(response.Body.String(), `"credential_protection":"`+posture+`"`) {
+				t.Fatalf("%s response = %d: %s", posture, response.Code, response.Body)
+			}
+		})
 	}
 }
 
@@ -461,11 +477,19 @@ func bagDropHandler(role identity.Role, service BagDropService) http.Handler {
 }
 
 type fakeBagDropService struct {
-	associateErr   error
-	deleteErr      error
-	removalOutcome bagdrop.RemovalOutcome
-	status         *bagdrop.Status
-	configValue    *bagdrop.Config
+	associateErr         error
+	credentialProtection string
+	deleteErr            error
+	removalOutcome       bagdrop.RemovalOutcome
+	status               *bagdrop.Status
+	configValue          *bagdrop.Config
+}
+
+func (s *fakeBagDropService) CredentialProtection() string {
+	if s.credentialProtection != "" {
+		return s.credentialProtection
+	}
+	return "env_key"
 }
 
 type fakeBagDropRuntime struct {

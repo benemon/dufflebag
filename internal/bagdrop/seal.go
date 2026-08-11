@@ -20,6 +20,14 @@ func NewCredentialSealer(ring *keyring.Keyring, environmentKey string) *Credenti
 	return &CredentialSealer{ring: ring, environmentKey: []byte(environmentKey)}
 }
 
+// Mode reports which deployment key protects Bag Drop credentials.
+func (s *CredentialSealer) Mode() string {
+	if s.ring != nil {
+		return "keyring"
+	}
+	return "env_key"
+}
+
 func credentialAAD(organizationID, projectID string) []byte {
 	return []byte(organizationID + "|" + projectID + "|" + credentialAADKind + "|" + credentialRowID)
 }

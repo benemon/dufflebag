@@ -21,8 +21,10 @@ test('each role gets the nested console action snapshot declared by the server',
   assert.deepEqual(allowedActions('reader'), [])
   assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
   assert.deepEqual(allowedActions('publisher'), ['pinBuckets'])
-  assert.deepEqual(allowedActions('maintainer'), ['pinBuckets', 'managePrincipals'])
-  assert.deepEqual(allowedActions('root'), ['pinBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals'])
+  assert.deepEqual(allowedActions('maintainer'), ['pinBuckets', 'managePrincipals', 'configureBagDrop'])
+  assert.deepEqual(allowedActions('root'), [
+    'pinBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals', 'configureBagDrop',
+  ])
   assert.deepEqual(allowedActions(null), [])
 })
 
@@ -33,12 +35,12 @@ test('pinBuckets permission mapping requires builder', () => {
 
 test('each role gets the navigation snapshot declared by the server', () => {
   for (const [role, expected] of [
-    [null, ['buckets', 'instance']],
-    ['reader', ['buckets', 'instance']],
-    ['builder', ['buckets', 'instance']],
-    ['publisher', ['buckets', 'instance']],
-    ['maintainer', ['buckets', 'principals', 'instance']],
-    ['root', ['buckets', 'principals', 'audit', 'encryption', 'instance']],
+    [null, ['buckets', 'bagdrop', 'instance']],
+    ['reader', ['buckets', 'bagdrop', 'instance']],
+    ['builder', ['buckets', 'bagdrop', 'instance']],
+    ['publisher', ['buckets', 'bagdrop', 'instance']],
+    ['maintainer', ['buckets', 'principals', 'bagdrop', 'instance']],
+    ['root', ['buckets', 'principals', 'audit', 'encryption', 'bagdrop', 'instance']],
   ]) {
     assert.deepEqual(visibleNavItems(role), expected, String(role))
   }

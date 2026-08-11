@@ -732,10 +732,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Sign out')
     assert.doesNotMatch(await bodyText(), /Log in/)
     await until('all root navigation items to appear', async () =>
-      (await globalNavItems()).length === 5)
+      (await globalNavItems()).length === 6)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Instance'],
+      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Instance'],
     )
   })
 
@@ -1913,6 +1913,73 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await assertNoVerdicts()
   })
 
+  await t.test('Bag Drop mirrors a bucket and un-association only acts through its confirmation', async () => {
+    // The console facet of ADR-0025 (duf-d8t7). Standing in acme/widgets as
+    // root: a destination is stored DISABLED without contacting it, the seeded
+    // bucket is associated, and the destructive direction — un-associating,
+    // which deletes the destination copy — acts only through its confirmation
+    // (duf-mq17's severity ruling). This subtest is the named smoke gate for
+    // that confirmation: without the warning step, the waits below never see it.
+    const clickDeepByText = (selector, text) =>
+      until(`deep-clickable "${text}"`, () =>
+        page.$$eval(
+          selector,
+          (elements, needle) => {
+            const matches = elements.filter(
+              (el) => el.innerText && el.innerText.trim().includes(needle) && !el.disabled,
+            )
+            const deepest = matches.find(
+              (el) => !matches.some((other) => other !== el && el.contains(other)),
+            )
+            if (!deepest) return false
+            deepest.click()
+            return true
+          },
+          text,
+        ),
+      )
+    await clickByText('a', 'Bag Drop')
+    await waitForText('Mirror selected buckets to another registry')
+    // Unconfigured is a rendered state, not a blank.
+    await waitForText('Bag Drop is not configured')
+    // Store a destination. Save writes it disabled with no destination
+    // contact, so the credentials only need shape, not validity.
+    await page.type('#bagdrop-organization-id', 'a0000000-0000-4000-8000-000000000001')
+    await page.type('#bagdrop-project-id', 'a0000000-0000-4000-8000-000000000002')
+    await page.type('#bagdrop-client-id', 'smoke-bagdrop-client')
+    await page.type('#bagdrop-client-secret', 'smoke-bagdrop-secret')
+    // Verify resolves the STORED configuration, so it is disabled while dirty.
+    assert.equal(await buttonDisabled('Verify'), true)
+    await clickByText('button', 'Save')
+    await waitForText('Secret set')
+    // This stack seals with the vault keyring, so the env-key warning must
+    // not appear (it belongs to unencrypted deployments only).
+    assert.doesNotMatch(await bodyText(), /sealed with an environment key/)
+    // Associate the seeded bucket through the dual list.
+    await clickDeepByText('#bagdrop-buckets li, #bagdrop-buckets li *', 'smoke-images')
+    await page.click('button[aria-label="Mirror selected bucket"]')
+    await until('the bucket to appear in the mirrored pane', async () =>
+      Boolean(await page.$('#mirrored-smoke-images')))
+    // The destructive direction opens the warning; Cancel changes nothing.
+    await page.click('#mirrored-smoke-images')
+    await page.click('button[aria-label="Stop mirroring selected bucket"]')
+    await waitForText('Stop mirroring smoke-images?')
+    await waitForText('Its copy at the destination will be deleted')
+    await clickByText('button', 'Cancel')
+    assert.ok(await page.$('#mirrored-smoke-images'), 'Cancel must leave the association in place')
+    // Confirming acts: a never-attempted association is removed immediately
+    // and the bucket returns to the local pane.
+    await page.click('#mirrored-smoke-images')
+    await page.click('button[aria-label="Stop mirroring selected bucket"]')
+    await waitForText('Stop mirroring smoke-images?')
+    await clickDeepByText('button', 'Stop mirroring smoke-images')
+    await until('the bucket to return to the local pane', async () =>
+      Boolean(await page.$('#available-smoke-images')))
+    // Leave the world as this subtest found it.
+    await clickByText('button', 'Delete configuration')
+    await waitForText('Bag Drop is not configured')
+  })
+
   let consoleBuilder
   await t.test('a builder principal is minted through the form, where the session stands', async () => {
     // Standing in acme/widgets, the form creates a PROJECT-scoped builder —
@@ -2074,7 +2141,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       const toggle = await page.$eval('#tenant-project', (el) => el.innerText.trim())
       return toggle === 'acme / widgets'
     })
-    assert.deepEqual(await globalNavItems(), ['Buckets', 'Instance'])
+    assert.deepEqual(await globalNavItems(), ['Buckets', 'Bag Drop', 'Instance'])
     // It can read its project's bucket…
     await clickByText('a', 'Buckets')
     await waitForText('smoke-images')

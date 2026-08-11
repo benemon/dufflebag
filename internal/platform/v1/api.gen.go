@@ -132,6 +132,24 @@ func (e BagDropAssociationState) Valid() bool {
 	}
 }
 
+// Defines values for BagDropConfigCredentialProtection.
+const (
+	EnvKey  BagDropConfigCredentialProtection = "env_key"
+	Keyring BagDropConfigCredentialProtection = "keyring"
+)
+
+// Valid indicates whether the value is a known member of the BagDropConfigCredentialProtection enum.
+func (e BagDropConfigCredentialProtection) Valid() bool {
+	switch e {
+	case EnvKey:
+		return true
+	case Keyring:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for BagDropSyncStatus.
 const (
 	Pending  BagDropSyncStatus = "pending"
@@ -523,17 +541,23 @@ type BagDropAssociationState string
 
 // BagDropConfig defines model for BagDropConfig.
 type BagDropConfig struct {
-	Adapter          BagDropAdapter           `json:"adapter"`
-	CreatedAt        time.Time                `json:"created_at"`
-	Dufflebag        *BagDropDufflebag        `json:"dufflebag,omitempty"`
-	Enabled          bool                     `json:"enabled"`
-	HcpPacker        *BagDropHCPPacker        `json:"hcp_packer,omitempty"`
-	LastVerification *BagDropLastVerification `json:"last_verification"`
+	Adapter   BagDropAdapter `json:"adapter"`
+	CreatedAt time.Time      `json:"created_at"`
+
+	// CredentialProtection How the stored client credential is sealed on this deployment.
+	CredentialProtection BagDropConfigCredentialProtection `json:"credential_protection"`
+	Dufflebag            *BagDropDufflebag                 `json:"dufflebag,omitempty"`
+	Enabled              bool                              `json:"enabled"`
+	HcpPacker            *BagDropHCPPacker                 `json:"hcp_packer,omitempty"`
+	LastVerification     *BagDropLastVerification          `json:"last_verification"`
 
 	// SecretSet Always true for a stored configuration; the secret itself is never returned.
 	SecretSet bool      `json:"secret_set"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
+
+// BagDropConfigCredentialProtection How the stored client credential is sealed on this deployment.
+type BagDropConfigCredentialProtection string
 
 // BagDropConfigWrite defines model for BagDropConfigWrite.
 type BagDropConfigWrite struct {

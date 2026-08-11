@@ -31,6 +31,9 @@ func NewService(repository Repository, sealer *CredentialSealer, adapters Regist
 	return &Service{repository: repository, sealer: sealer, adapters: adapters, now: time.Now}
 }
 
+// CredentialProtection reports the sealer posture exposed with configuration responses.
+func (s *Service) CredentialProtection() string { return s.sealer.Mode() }
+
 func (s *Service) Get(ctx context.Context, organizationID, projectID string) (*Config, error) {
 	record, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
 	if err != nil {

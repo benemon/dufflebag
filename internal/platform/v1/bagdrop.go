@@ -81,7 +81,7 @@ func (s *server) GetBagDropConfig(
 		return nil, err
 	}
 	audited.succeeded("", "")
-	return GetBagDropConfig200JSONResponse(renderBagDropConfig(config)), nil
+	return GetBagDropConfig200JSONResponse(renderBagDropConfig(config, s.bagDrop.CredentialProtection())), nil
 }
 
 func (s *server) PutBagDropConfig(
@@ -158,7 +158,7 @@ func (s *server) PutBagDropConfig(
 		return nil, err
 	}
 	audited.succeeded("", "")
-	return PutBagDropConfig200JSONResponse(renderBagDropConfig(config)), nil
+	return PutBagDropConfig200JSONResponse(renderBagDropConfig(config, s.bagDrop.CredentialProtection())), nil
 }
 
 func (s *server) DeleteBagDropConfig(
@@ -314,7 +314,7 @@ func (s *server) GetBagDropStatus(
 		return nil, err
 	}
 	audited.succeeded("", "")
-	return GetBagDropStatus200JSONResponse(renderBagDropStatus(status)), nil
+	return GetBagDropStatus200JSONResponse(renderBagDropStatus(status, s.bagDrop.CredentialProtection())), nil
 }
 
 func renderBagDropAssociation(association bagdrop.Association) BagDropAssociation {
@@ -331,7 +331,7 @@ func renderBagDropAssociation(association bagdrop.Association) BagDropAssociatio
 	}
 }
 
-func renderBagDropStatus(status *bagdrop.Status) BagDropStatus {
+func renderBagDropStatus(status *bagdrop.Status, credentialProtection string) BagDropStatus {
 	response := BagDropStatus{
 		Configured:   status.Configured,
 		Associations: make([]BagDropAssociation, 0, len(status.Associations)),
@@ -343,7 +343,7 @@ func renderBagDropStatus(status *bagdrop.Status) BagDropStatus {
 		adapter := BagDropAdapter(status.Config.Adapter)
 		response.Adapter = &adapter
 		response.Enabled = &status.Config.Enabled
-		response.LastVerification = renderBagDropConfig(status.Config).LastVerification
+		response.LastVerification = renderBagDropConfig(status.Config, credentialProtection).LastVerification
 	}
 	return response
 }
@@ -419,7 +419,7 @@ func (s *server) EnableBagDrop(
 		return nil, err
 	}
 	audited.succeeded("", "")
-	return EnableBagDrop200JSONResponse(renderBagDropConfig(config)), nil
+	return EnableBagDrop200JSONResponse(renderBagDropConfig(config, s.bagDrop.CredentialProtection())), nil
 }
 
 func (s *server) DisableBagDrop(
@@ -450,7 +450,7 @@ func (s *server) DisableBagDrop(
 		return nil, err
 	}
 	audited.succeeded("", "")
-	return DisableBagDrop200JSONResponse(renderBagDropConfig(config)), nil
+	return DisableBagDrop200JSONResponse(renderBagDropConfig(config, s.bagDrop.CredentialProtection())), nil
 }
 
 func (s *server) ReconcileBagDrop(
@@ -486,10 +486,11 @@ func (s *server) ReconcileBagDrop(
 	return ReconcileBagDrop202JSONResponse{Message: "Bag Drop reconciliation requested"}, nil
 }
 
-func renderBagDropConfig(config *bagdrop.Config) BagDropConfig {
+func renderBagDropConfig(config *bagdrop.Config, credentialProtection string) BagDropConfig {
 	response := BagDropConfig{
-		Adapter:   BagDropAdapter(config.Adapter),
-		SecretSet: config.SecretSet, Enabled: config.Enabled,
+		Adapter:              BagDropAdapter(config.Adapter),
+		CredentialProtection: BagDropConfigCredentialProtection(credentialProtection),
+		SecretSet:            config.SecretSet, Enabled: config.Enabled,
 		CreatedAt: config.CreatedAt, UpdatedAt: config.UpdatedAt,
 	}
 	if config.Adapter == bagdrop.AdapterHCPPacker {
