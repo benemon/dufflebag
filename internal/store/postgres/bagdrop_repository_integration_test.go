@@ -404,12 +404,21 @@ func TestBagDropSnapshotExcludesManagedLatestTripwire(t *testing.T) {
 	}, version.Fingerprint, "publisher"); err != nil {
 		t.Fatal(err)
 	}
+	revokeAt := at.Add(5 * time.Second)
+	if _, err := repository.RevokeVersion(ctx, tenant, bucket.Name, version.Fingerprint,
+		store.RevocationRequest{RevokeAt: revokeAt, Message: "superseded", Author: "publisher", SkipDescendants: true},
+		func(*registry.Version) string { return "v1" }, revokeAt,
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	snapshot, err := repository.GetBagDropBucketSnapshot(ctx, orgA, projectA, bucket.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(snapshot.Versions) != 1 || snapshot.Versions[0].Fingerprint != version.Fingerprint {
+	if len(snapshot.Versions) != 1 || snapshot.Versions[0].Fingerprint != version.Fingerprint ||
+		snapshot.Versions[0].RevokeAt == nil || !snapshot.Versions[0].RevokeAt.Equal(revokeAt) ||
+		snapshot.Versions[0].RevocationMessage != "superseded" {
 		t.Fatalf("completed versions snapshot = %#v", snapshot.Versions)
 	}
 	if len(snapshot.Channels) != 1 || snapshot.Channels[0].Name != "production" ||

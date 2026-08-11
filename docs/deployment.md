@@ -140,6 +140,20 @@ assignments mirror as pointers; the managed `latest` channel is never touched.
 The association set is the reconciler's entire authority to delete: nothing
 outside an associated bucket is ever touched.
 
+SBOMs mirror by name during the build's mirrored running window. SBOMs added
+after a destination build has completed surface as permanent drift rather than
+causing the build to be deleted or recreated. Dufflebag reads each local
+document through the same object download and decryption path used by the
+compatibility proxy, then sends the vendored zstd `compressed_sbom` upload
+shape. A destination size refusal (the observed bare gateway 504, HTTP 413, or
+another size-shaped refusal) skips that SBOM, records the refusal in the
+association's `last_sync_error`, and does not prevent its remaining work or
+another association from converging. The destination API can list and read
+SBOMs but cannot delete one, so a remote-only SBOM is likewise recorded as
+non-removable drift. Version revocation state mirrors in both directions: local
+revocation schedules and messages are pushed, while a remotely revoked version
+whose local source is active is restored.
+
 `DFBG_BAGDROP_RECONCILE_INTERVAL` controls the level-reconcile cadence as a Go
 duration and defaults to `5m`; an invalid or non-positive value refuses
 startup. Per-project failures back off in memory at `interval * 2^failures`,

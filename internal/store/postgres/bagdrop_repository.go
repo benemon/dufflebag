@@ -453,6 +453,11 @@ func (r *Repository) GetBagDropBucketSnapshot(
 		versionSnapshot := bagdrop.VersionSnapshot{
 			Fingerprint: versionRow.Fingerprint, TemplateType: versionRow.TemplateType,
 		}
+		if row.RevokeAt.Valid {
+			revokeAt := row.RevokeAt.Time.UTC()
+			versionSnapshot.RevokeAt = &revokeAt
+			versionSnapshot.RevocationMessage = row.RevocationMessage.String
+		}
 		for _, build := range builds {
 			if build.Status != registry.BuildDone {
 				continue
@@ -489,6 +494,31 @@ func (r *Repository) GetBagDropBucketSnapshot(
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit Bag Drop bucket snapshot: %w", err)
+	}
+	// SBOM payloads deliberately travel through DownloadSbom after the
+	// structural snapshot commits. That is the download-proxy path which reads
+	// object storage, authenticates AES-GCM AAD on encrypted deployments, and
+	// returns the opened document; Bag Drop must never read raw object bytes.
+	for versionIndex := range snapshot.Versions {
+		version := &snapshot.Versions[versionIndex]
+		for buildIndex := range version.Builds {
+			build := &version.Builds[buildIndex]
+			sboms, err := r.ListSboms(ctx, tenant, bucketName, version.Fingerprint, build.ID)
+			if err != nil {
+				return nil, err
+			}
+			for _, sbom := range sboms {
+				document, err := r.DownloadSbom(
+					ctx, tenant, bucketName, version.Fingerprint, build.ID, sbom.Name,
+				)
+				if err != nil {
+					return nil, err
+				}
+				build.Sboms = append(build.Sboms, bagdrop.SbomSnapshot{
+					Name: sbom.Name, Format: sbom.Format, Document: document,
+				})
+			}
+		}
 	}
 	return snapshot, nil
 }

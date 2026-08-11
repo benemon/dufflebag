@@ -160,9 +160,11 @@ type ChannelSnapshot struct {
 }
 
 type VersionSnapshot struct {
-	Fingerprint  string
-	TemplateType string
-	Builds       []BuildSnapshot
+	Fingerprint       string
+	TemplateType      string
+	RevokeAt          *time.Time
+	RevocationMessage string
+	Builds            []BuildSnapshot
 }
 
 type BuildSnapshot struct {
@@ -174,6 +176,13 @@ type BuildSnapshot struct {
 	SourceExternalIdentifier string
 	Metadata                 json.RawMessage
 	Artifacts                []ArtifactSnapshot
+	Sboms                    []SbomSnapshot
+}
+
+type SbomSnapshot struct {
+	Name     string
+	Format   string
+	Document []byte
 }
 
 type ArtifactSnapshot struct {
@@ -187,13 +196,20 @@ type RemoteBucket struct {
 }
 
 type RemoteVersion struct {
-	Fingerprint string `json:"fingerprint"`
+	Fingerprint       string     `json:"fingerprint"`
+	RevokeAt          *time.Time `json:"revoke_at,omitempty"`
+	RevocationMessage string     `json:"revocation_message,omitempty"`
 }
 
 type RemoteBuild struct {
 	ID            string `json:"id"`
 	ComponentType string `json:"component_type"`
 	Status        string `json:"status"`
+}
+
+type RemoteSbom struct {
+	Name   string `json:"name"`
+	Format string `json:"format"`
 }
 
 type RemoteChannel struct {
