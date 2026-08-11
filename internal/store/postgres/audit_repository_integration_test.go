@@ -33,10 +33,22 @@ func (a auditAPIAuthenticator) Verify(string) (identity.Verified, error) {
 	return identity.Verified{PrincipalID: a.principalID, SecretID: a.secretID}, nil
 }
 
+func (a auditAPIAuthenticator) VerifyExpired(string) (identity.Verified, error) {
+	return identity.Verified{}, identity.ErrInvalid
+}
+
+func (a auditAPIAuthenticator) Reissue(*identity.Principal, string, time.Time) (string, error) {
+	return "", identity.ErrInvalid
+}
+
 type auditAPIPrincipals struct{ principal *identity.Principal }
 
 func (p auditAPIPrincipals) GetPrincipalByID(context.Context, string) (*identity.Principal, error) {
 	return p.principal, nil
+}
+
+func (p auditAPIPrincipals) TouchSecretLastUsed(context.Context, string, time.Time) error {
+	return nil
 }
 
 func TestAuditAttributionSurvivesPrincipalDeletion(t *testing.T) {

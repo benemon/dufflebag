@@ -52,6 +52,9 @@ func TestIssueAndVerifyReturnsPrincipalScope(t *testing.T) {
 			if got.PrincipalID != principal.ID {
 				t.Fatalf("Verify principal = %q, want %q", got.PrincipalID, principal.ID)
 			}
+			if got.AuthTime.IsZero() {
+				t.Fatal("Issue emitted no auth_time")
+			}
 		})
 	}
 }
@@ -98,10 +101,12 @@ func TestVerifyFailsClosed(t *testing.T) {
 				ExpiresAt: jwt.NewNumericDate(now.Add(time.Minute)),
 				IssuedAt:  jwt.NewNumericDate(now),
 			},
+			AuthTime:       jwt.NewNumericDate(now),
 			OrganizationID: orgA.String(),
 			ProjectID:      projA.String(),
 			Scope:          []string{},
 			Grants:         []Grant{},
+			SecretID:       "s-1",
 		}
 	}
 	sign := func(t *testing.T, method jwt.SigningMethod, claims Claims, key any) string {
@@ -217,6 +222,7 @@ func TestVerifyAcceptsATokenWithoutAuthorizationClaims(t *testing.T) {
 		"sub":             "p-1",
 		"aud":             []string{TokenAudience},
 		"iat":             now.Unix(),
+		"auth_time":       now.Unix(),
 		"exp":             now.Add(time.Minute).Unix(),
 		"organization_id": orgA.String(),
 		"sid":             "s-1",
@@ -238,6 +244,71 @@ func TestVerifyAcceptsATokenWithoutAuthorizationClaims(t *testing.T) {
 	}
 	if verified.Scope.Permits(orgB, projA) {
 		t.Fatal("absent claims must not widen scope")
+	}
+}
+
+func TestReissuePreservesAuthenticationTimeWithoutCredential(t *testing.T) {
+	issuer := newTestIssuer(t)
+	principal, plaintext := newTestPrincipal(t, Scope{OrganizationID: orgA})
+	_, secretID, err := issuer.Issue(principal, plaintext)
+	if err != nil {
+		t.Fatalf("Issue: %v", err)
+	}
+	authTime := time.Now().UTC().Add(-4 * time.Hour).Truncate(time.Second)
+	reissued, err := issuer.Reissue(principal, secretID, authTime)
+	if err != nil {
+		t.Fatalf("Reissue without plaintext credential: %v", err)
+	}
+	verified, err := issuer.Verify(reissued)
+	if err != nil {
+		t.Fatalf("Verify reissued token: %v", err)
+	}
+	if !verified.AuthTime.Equal(authTime) {
+		t.Fatalf("auth_time = %s, want preserved %s", verified.AuthTime, authTime)
+	}
+	if verified.SecretID != secretID {
+		t.Fatalf("sid = %q, want %q", verified.SecretID, secretID)
+	}
+	if _, err := issuer.Reissue(principal, secretID, time.Time{}); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("Reissue without auth_time = %v, want ErrInvalid", err)
+	}
+}
+
+func TestVerifyExpiredAcceptsOnlyValidlySignedCredentialTokens(t *testing.T) {
+	issuer := newTestIssuer(t)
+	now := time.Now().UTC().Truncate(time.Second)
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: testIssuer, Subject: "p-1",
+			Audience:  jwt.ClaimStrings{TokenAudience},
+			IssuedAt:  jwt.NewNumericDate(now.Add(-10 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(now.Add(-5 * time.Minute)),
+		},
+		AuthTime: jwt.NewNumericDate(now.Add(-time.Hour)),
+		SecretID: "s-1", Scope: []string{}, Grants: []Grant{},
+	}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(testSigningKey)
+	if err != nil {
+		t.Fatalf("sign expired token: %v", err)
+	}
+	if _, err := issuer.VerifyExpired(signed); err != nil {
+		t.Fatalf("VerifyExpired: %v", err)
+	}
+	if _, err := issuer.Verify(signed); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("ordinary Verify of expired token = %v, want ErrInvalid", err)
+	}
+	parts := strings.Split(signed, ".")
+	parts[2] = "invalid-signature"
+	if _, err := issuer.VerifyExpired(strings.Join(parts, ".")); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("VerifyExpired bad signature = %v, want ErrInvalid", err)
+	}
+	claims.SecretID = ""
+	missingSID, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(testSigningKey)
+	if err != nil {
+		t.Fatalf("sign missing-sid token: %v", err)
+	}
+	if _, err := issuer.VerifyExpired(missingSID); !errors.Is(err, ErrInvalid) {
+		t.Fatalf("VerifyExpired missing sid = %v, want ErrInvalid", err)
 	}
 }
 

@@ -42,6 +42,16 @@ func platformServerWithRepository(
 	)
 }
 
+func TestExpiredBearerStillReturnsUnauthorizedOnAnAPIRequest(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, _, _ := realSessionHandler(t, now, 300*time.Second)
+	expired := signedSessionToken(t, now, now.Add(-time.Minute), now.Add(-time.Hour), testSecretID)
+	response := call(t, handler, http.MethodGet, "/api/v1/instance", nil, expired)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expired bearer status = %d, want 401: %s", response.Code, response.Body)
+	}
+}
+
 func call(t *testing.T, handler http.Handler, method, path string, body any, token string) *httptest.ResponseRecorder {
 	t.Helper()
 	var encoded []byte

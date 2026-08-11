@@ -302,7 +302,26 @@ func (testAuth) Verify(token string) (identity.Verified, error) {
 	if token != testToken {
 		return identity.Verified{}, identity.ErrInvalid
 	}
-	return identity.Verified{PrincipalID: testPrincID, SecretID: testSecretID}, nil
+	now := time.Now().UTC()
+	return identity.Verified{
+		PrincipalID: testPrincID, SecretID: testSecretID,
+		AuthTime: now.Add(-time.Hour), ExpiresAt: now.Add(5 * time.Minute),
+	}, nil
+}
+
+func (testAuth) VerifyExpired(token string) (identity.Verified, error) {
+	if token != "expired-token" {
+		return identity.Verified{}, identity.ErrInvalid
+	}
+	now := time.Now().UTC()
+	return identity.Verified{
+		PrincipalID: testPrincID, SecretID: testSecretID,
+		AuthTime: now.Add(-time.Hour), ExpiresAt: now.Add(-time.Minute),
+	}, nil
+}
+
+func (testAuth) Reissue(*identity.Principal, string, time.Time) (string, error) {
+	return "renewed-token", nil
 }
 
 // testRoles resolves the caller's authority. Root by default, because most
@@ -324,6 +343,8 @@ func (r testRoles) GetPrincipalByID(_ context.Context, id string) (*identity.Pri
 	}
 	return identity.RestorePrincipal(id, "test", "client", r.scope, role, initTestTime, testSecrets())
 }
+
+func (testRoles) TouchSecretLastUsed(context.Context, string, time.Time) error { return nil }
 
 func authenticated(r *http.Request) *http.Request {
 	r.Header.Set("Authorization", "Bearer "+testToken)

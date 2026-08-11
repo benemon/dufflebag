@@ -111,8 +111,9 @@ func (h *handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // Admit keeps anonymous request volume outside the audit seam. The marker
 // prevents the token handler from charging the same request a second time.
 //
-// limited names further anonymous POST surfaces sharing this endpoint's
-// per-caller buckets — /sys/recovery (ADR-0024): one anonymous caller gets one
+// limited names further anonymous POST paths, or explicit "METHOD /path"
+// surfaces, sharing this endpoint's per-caller buckets. Recovery is a POST;
+// session renewal is explicitly a GET.
 // budget across both, and the audit-amplification bound the buckets exist for
 // (ADR-0020) holds for the pair rather than doubling. Refusals on those paths
 // carry the platform plane's error shape, not OAuth's.
@@ -126,7 +127,9 @@ func (h *handler) Admit(next http.Handler, limited ...string) http.Handler {
 			}
 			r = r.WithContext(context.WithValue(r.Context(), admittedKey{}, true))
 		}
-		if r.Method == http.MethodPost && slices.Contains(limited, r.URL.Path) {
+		limitedRequest := r.Method == http.MethodPost && slices.Contains(limited, r.URL.Path)
+		limitedRequest = limitedRequest || slices.Contains(limited, r.Method+" "+r.URL.Path)
+		if limitedRequest {
 			if !h.throttle.allow(key) {
 				w.Header().Set("Retry-After", "1")
 				w.Header().Set("Content-Type", "application/json")

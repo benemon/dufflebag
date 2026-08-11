@@ -1937,6 +1937,12 @@ type ClientInterface interface {
 
 	// ReadSession Exchange the session cookie for the access token it holds
 	//
+	// Returns a live token unchanged when it has at least two minutes left.
+	// An expired, validly signed token (or one nearing expiry) is renewed only
+	// while its principal and originating secret remain active and its
+	// preserved auth_time is within the eight-hour absolute session cap.
+	// A refused renewal clears the browser-session cookie and returns 204.
+	//
 	// Corresponds with GET /sys/session (the `ReadSession` operationId).
 	ReadSession(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
 
@@ -1948,8 +1954,9 @@ type ClientInterface interface {
 	// survive reload: the verified bearer token is set as an httpOnly,
 	// SameSite=Strict cookie scoped to this path, which script cannot read.
 	//
-	// The session still ends when the token does — GET refuses and clears an
-	// expired cookie rather than renewing it.
+	// GET renews a token shortly before expiry while the originating secret
+	// remains active, bounded by an eight-hour absolute session cap. The
+	// Packer token lifetime is unchanged.
 	//
 	// CSRF: a cross-site form cannot set the Authorization header this
 	// operation requires, and SameSite=Strict keeps the cookie off cross-site
@@ -3092,6 +3099,12 @@ func (c *Client) DeleteSession(ctx context.Context, reqEditors ...RequestEditorF
 
 // ReadSession Exchange the session cookie for the access token it holds
 //
+// Returns a live token unchanged when it has at least two minutes left.
+// An expired, validly signed token (or one nearing expiry) is renewed only
+// while its principal and originating secret remain active and its
+// preserved auth_time is within the eight-hour absolute session cap.
+// A refused renewal clears the browser-session cookie and returns 204.
+//
 // Corresponds with GET /sys/session (the `ReadSession` operationId).
 func (c *Client) ReadSession(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewReadSessionRequest(c.Server)
@@ -3113,8 +3126,9 @@ func (c *Client) ReadSession(ctx context.Context, reqEditors ...RequestEditorFn)
 // survive reload: the verified bearer token is set as an httpOnly,
 // SameSite=Strict cookie scoped to this path, which script cannot read.
 //
-// The session still ends when the token does — GET refuses and clears an
-// expired cookie rather than renewing it.
+// GET renews a token shortly before expiry while the originating secret
+// remains active, bounded by an eight-hour absolute session cap. The
+// Packer token lifetime is unchanged.
 //
 // CSRF: a cross-site form cannot set the Authorization header this
 // operation requires, and SameSite=Strict keeps the cookie off cross-site
@@ -5552,6 +5566,12 @@ type ClientWithResponsesInterface interface {
 
 	// ReadSessionWithResponse Exchange the session cookie for the access token it holds
 	//
+	// Returns a live token unchanged when it has at least two minutes left.
+	// An expired, validly signed token (or one nearing expiry) is renewed only
+	// while its principal and originating secret remain active and its
+	// preserved auth_time is within the eight-hour absolute session cap.
+	// A refused renewal clears the browser-session cookie and returns 204.
+	//
 	// Returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with GET /sys/session (the `ReadSession` operationId).
@@ -5565,8 +5585,9 @@ type ClientWithResponsesInterface interface {
 	// survive reload: the verified bearer token is set as an httpOnly,
 	// SameSite=Strict cookie scoped to this path, which script cannot read.
 	//
-	// The session still ends when the token does — GET refuses and clears an
-	// expired cookie rather than renewing it.
+	// GET renews a token shortly before expiry while the originating secret
+	// remains active, bounded by an eight-hour absolute session cap. The
+	// Packer token lifetime is unchanged.
 	//
 	// CSRF: a cross-site form cannot set the Authorization header this
 	// operation requires, and SameSite=Strict keeps the cookie off cross-site
@@ -9258,6 +9279,12 @@ func (c *ClientWithResponses) DeleteSessionWithResponse(ctx context.Context, req
 
 // ReadSessionWithResponse Exchange the session cookie for the access token it holds
 //
+// Returns a live token unchanged when it has at least two minutes left.
+// An expired, validly signed token (or one nearing expiry) is renewed only
+// while its principal and originating secret remain active and its
+// preserved auth_time is within the eight-hour absolute session cap.
+// A refused renewal clears the browser-session cookie and returns 204.
+//
 // Returns a wrapper object for the known response body format(s).
 //
 // Corresponds with GET /sys/session (the `ReadSession` operationId).
@@ -9277,8 +9304,9 @@ func (c *ClientWithResponses) ReadSessionWithResponse(ctx context.Context, reqEd
 // survive reload: the verified bearer token is set as an httpOnly,
 // SameSite=Strict cookie scoped to this path, which script cannot read.
 //
-// The session still ends when the token does — GET refuses and clears an
-// expired cookie rather than renewing it.
+// GET renews a token shortly before expiry while the originating secret
+// remains active, bounded by an eight-hour absolute session cap. The
+// Packer token lifetime is unchanged.
 //
 // CSRF: a cross-site form cannot set the Authorization header this
 // operation requires, and SameSite=Strict keeps the cookie off cross-site

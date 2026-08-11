@@ -517,3 +517,26 @@ func TestRecoveryPathSharesTheTokenCallerBudget(t *testing.T) {
 		t.Fatalf("GET was refused by the admission layer = %d: %s", response.Code, response.Body)
 	}
 }
+
+func TestSessionGETSharesTheTokenCallerBudget(t *testing.T) {
+	at := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	h, _ := testHandler(t, func() time.Time { return at })
+	admitted := h.Admit(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}), "GET /sys/session")
+	for i := range callerBurst {
+		request := httptest.NewRequest(http.MethodGet, "/sys/session", nil)
+		request.RemoteAddr = "192.0.2.1:1000"
+		response := httptest.NewRecorder()
+		admitted.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("session read %d within burst = %d", i+1, response.Code)
+		}
+	}
+	request := tokenRequest("192.0.2.1:2000")
+	response := httptest.NewRecorder()
+	admitted.ServeHTTP(response, request)
+	if response.Code != http.StatusTooManyRequests {
+		t.Fatalf("token after session burst = %d, want 429: %s", response.Code, response.Body)
+	}
+}

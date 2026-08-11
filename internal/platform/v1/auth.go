@@ -12,15 +12,18 @@ import (
 	"github.com/google/uuid"
 )
 
-// Authenticator verifies a bearer token and reports who presented it.
+// Authenticator verifies bearer tokens and owns the session-only renewal seam.
 type Authenticator interface {
 	Verify(token string) (identity.Verified, error)
+	VerifyExpired(token string) (identity.Verified, error)
+	Reissue(principal *identity.Principal, secretID string, authTime time.Time) (string, error)
 }
 
 // Principals resolves an authenticated caller's authority, per request rather
 // than from the token (ADR-0019).
 type Principals interface {
 	GetPrincipalByID(ctx context.Context, id string) (*identity.Principal, error)
+	TouchSecretLastUsed(ctx context.Context, secretID string, at time.Time) error
 }
 
 type principalKey struct{}

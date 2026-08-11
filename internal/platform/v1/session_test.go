@@ -1,12 +1,82 @@
 package v1
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/benemon/dufflebag/internal/domain/identity"
+	"github.com/golang-jwt/jwt/v5"
 )
+
+const realSessionIssuer = "https://session.test"
+
+var realSessionKey = []byte("session-test-signing-key-32-bytes!")
+
+type sessionPrincipals struct {
+	principal *identity.Principal
+	touches   int
+}
+
+func (p *sessionPrincipals) GetPrincipalByID(_ context.Context, id string) (*identity.Principal, error) {
+	if p.principal == nil || p.principal.ID != id {
+		return nil, identity.ErrNotFound
+	}
+	return p.principal, nil
+}
+
+func (p *sessionPrincipals) TouchSecretLastUsed(_ context.Context, secretID string, _ time.Time) error {
+	if secretID == testSecretID {
+		p.touches++
+	}
+	return nil
+}
+
+func realSessionHandler(
+	t *testing.T, now time.Time, ttl time.Duration,
+) (http.Handler, *identity.BasicAuthIssuer, *sessionPrincipals) {
+	t.Helper()
+	principal, err := identity.RestorePrincipal(
+		testPrincID, "test", "client", identity.Scope{}, identity.RoleRoot,
+		initTestTime, testSecrets(),
+	)
+	if err != nil {
+		t.Fatalf("RestorePrincipal: %v", err)
+	}
+	issuer, err := identity.NewBasicAuthIssuer(realSessionIssuer, realSessionKey, ttl)
+	if err != nil {
+		t.Fatalf("NewBasicAuthIssuer: %v", err)
+	}
+	principals := &sessionPrincipals{principal: principal}
+	return newHandler(
+		&fakeTenancyRepository{}, &fakeInstanceRepository{}, issuer, principals,
+		testLogger(), func() time.Time { return now },
+	), issuer, principals
+}
+
+func signedSessionToken(
+	t *testing.T, now, expiresAt, authTime time.Time, secretID string,
+) string {
+	t.Helper()
+	claims := identity.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer: realSessionIssuer, Subject: testPrincID,
+			Audience:  jwt.ClaimStrings{identity.TokenAudience},
+			IssuedAt:  jwt.NewNumericDate(now.Add(-5 * time.Minute)),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
+		AuthTime: jwt.NewNumericDate(authTime), SecretID: secretID,
+		Scope: []string{}, Grants: []identity.Grant{},
+	}
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(realSessionKey)
+	if err != nil {
+		t.Fatalf("sign session token: %v", err)
+	}
+	return token
+}
 
 func sessionHandler(t *testing.T) http.Handler {
 	t.Helper()
@@ -118,7 +188,10 @@ func TestReadSessionExchangesTheCookieForItsToken(t *testing.T) {
 	if body := recorder.Body.String(); !strings.Contains(body, testToken) {
 		t.Errorf("body %q does not carry the token", body)
 	}
-	if record := trail.response(t); record["access_token_hmac"] == nil {
+	if cookie := sessionCookieFrom(t, recorder.Result()); cookie != nil {
+		t.Fatal("a live token outside the renewal window unexpectedly set a new cookie")
+	}
+	if record := trail.response(t); record["access_token_hmac"] == nil || record["operation"] != "session.read" {
 		t.Fatalf("session read did not HMAC the returned access token: %#v", record)
 	}
 	if strings.Contains(string(trail.raw), testToken) {
@@ -141,24 +214,110 @@ func TestReadSessionWithoutACookieIsEmpty(t *testing.T) {
 	}
 }
 
-// The session ends when the token does: a cookie holding a token the
-// authenticator now refuses is cleared, never returned.
-func TestReadSessionClearsAnExpiredCookie(t *testing.T) {
-	handler := sessionHandler(t)
+func TestReadSessionRenewsAnExpiredValidCookie(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, _, principals := realSessionHandler(t, now, 300*time.Second)
+	handler, trail := auditedPlatform(t, handler)
+	expired := signedSessionToken(t, now, now.Add(-time.Minute), now.Add(-time.Hour), testSecretID)
 	request := httptest.NewRequest(http.MethodGet, SessionPath, nil)
-	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "expired-token"})
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: expired})
 	recorder := httptest.NewRecorder()
 	handler.ServeHTTP(recorder, request)
 
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if body := recorder.Body.String(); !strings.Contains(body, "access_token") || strings.Contains(body, expired) {
+		t.Fatalf("renewal body = %q, want a new token", body)
+	}
+	cookie := sessionCookieFrom(t, recorder.Result())
+	if cookie == nil || cookie.Value == expired || cookie.MaxAge != 0 {
+		t.Fatal("the renewed token was not set as a browser-session cookie")
+	}
+	if principals.touches != 1 {
+		t.Fatalf("secret touches = %d, want 1", principals.touches)
+	}
+	record := trail.response(t)
+	if record["operation"] != "session.renew" || record["outcome"] != "success" || record["access_token_hmac"] == nil {
+		t.Fatalf("renewal audit = %#v", record)
+	}
+	if strings.Contains(string(trail.raw), expired) || strings.Contains(string(trail.raw), cookie.Value) {
+		t.Fatalf("renewal wrote a raw token to audit: %s", trail.raw)
+	}
+}
+
+func TestReadSessionRenewsANearExpiryLiveToken(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, _, _ := realSessionHandler(t, now, 300*time.Second)
+	near := signedSessionToken(t, now, now.Add(time.Minute), now.Add(-time.Hour), testSecretID)
+	request := httptest.NewRequest(http.MethodGet, SessionPath, nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: near})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", recorder.Code)
+	}
+	if cookie := sessionCookieFrom(t, recorder.Result()); cookie == nil || cookie.Value == near {
+		t.Fatal("near-expiry token was not renewed")
+	}
+}
+
+func TestReadSessionRefusesARevokedSecretRenewal(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, _, _ := realSessionHandler(t, now, 300*time.Second)
+	handler, trail := auditedPlatform(t, handler)
+	token := signedSessionToken(t, now, now.Add(-time.Minute), now.Add(-time.Hour), "revoked-secret")
+	request := httptest.NewRequest(http.MethodGet, SessionPath, nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusNoContent {
 		t.Fatalf("status = %d, want 204", recorder.Code)
 	}
-	if body := recorder.Body.String(); strings.Contains(body, "expired-token") {
-		t.Error("the refused token was echoed back")
+	if cookie := sessionCookieFrom(t, recorder.Result()); cookie == nil || cookie.MaxAge >= 0 {
+		t.Fatal("revoked-secret cookie was not cleared")
 	}
-	cookie := sessionCookieFrom(t, recorder.Result())
-	if cookie == nil || cookie.MaxAge >= 0 {
-		t.Error("the dead cookie was not cleared")
+	record := trail.response(t)
+	if record["operation"] != "session.renew" || record["outcome"] != "refused" || record["reason"] != "revoked_secret" {
+		t.Fatalf("revoked renewal audit = %#v", record)
+	}
+}
+
+func TestReadSessionRefusesAReissuedTokenPastTheAbsoluteCap(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, issuer, principals := realSessionHandler(t, now, time.Minute)
+	token, err := issuer.Reissue(principals.principal, testSecretID, now.Add(-9*time.Hour))
+	if err != nil {
+		t.Fatalf("Reissue test token: %v", err)
+	}
+	handler, trail := auditedPlatform(t, handler)
+	request := httptest.NewRequest(http.MethodGet, SessionPath, nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: token})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", recorder.Code)
+	}
+	record := trail.response(t)
+	if record["reason"] != "cap_exceeded" || record["operation"] != "session.renew" {
+		t.Fatalf("cap refusal audit = %#v", record)
+	}
+}
+
+func TestReadSessionClearsABadSignature(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	handler, _, _ := realSessionHandler(t, now, 300*time.Second)
+	handler, trail := auditedPlatform(t, handler)
+	request := httptest.NewRequest(http.MethodGet, SessionPath, nil)
+	request.AddCookie(&http.Cookie{Name: sessionCookieName, Value: "not-a-signed-token"})
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", recorder.Code)
+	}
+	record := trail.response(t)
+	if record["reason"] != "invalid_signature" || record["operation"] != "session.renew" {
+		t.Fatalf("signature refusal audit = %#v", record)
 	}
 }
 
