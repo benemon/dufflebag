@@ -19,9 +19,9 @@ One domain, two very different contracts:
 - **The platform plane** (`internal/platform/v1`, serving `/api/v1/...` plus
   the unversioned `/sys/*` surfaces — init, recovery, health, session) is
   dufflebag's own OpenAPI 3 contract for tenancy, identity, audit, console
-  sessions, encryption control, scanning and bucket pins. It is free to
-  evolve; its server interface is generated from `spec/platform/openapi.yaml`
-  (`make generate-platform`).
+  sessions, encryption control, scanning, bucket pins and Bag Drop outbound
+  sync. It is free to evolve; its server interface is generated from
+  `spec/platform/openapi.yaml` (`make generate-platform`).
 
 If a capability exists in the compatibility plane, every client uses it —
 including our own console. The platform plane never grows a nicer variant of
@@ -115,6 +115,63 @@ attempt never erases findings. Scanner activity is audited as
 compatibility plane projects stored findings into the frozen vulnerability
 shapes, with coverage and provenance carried in `Dufflebag-Scan-*` response
 headers because the frozen JSON has no fields for them.
+
+## Bag Drop: the outbound mirror
+
+Bag Drop pushes a project's registry data to a destination registry — real
+HCP Packer, or another dufflebag instance. It is one-way: the local registry
+is the source of truth for everything it mirrors, and nothing observed at the
+destination is ever written back. Configuration is a platform-plane resource
+family per project (`.../bagdrop` and its `buckets`, `verify`, `status` and
+`reconcile` surfaces): a destination is configured and verified, then
+enabled, and each bucket that mirrors is an explicit association. Verify and
+enable share one resolution check — a token grant plus one scoped read,
+composed entirely of calls the destination already serves as ordinary client
+traffic; no destination needs to know it is being tested.
+
+The engine is a level-based reconciler, not a queue. On a cadence (or the
+audited on-demand trigger) it snapshots the project's completed local state
+in one transaction — row integrity MACs verified before anything leaves, so
+tampered provenance cannot propagate — observes the destination, and
+converges the difference with idempotent upserts in dependency order: bucket,
+versions by fingerprint in local sequence, builds with artifacts and
+metadata, SBOMs during the build's mirrored running window, then ordinary
+channels. Nothing about the work is persisted; a crashed pass loses nothing
+because the next pass re-derives the remaining difference. Reconciliation
+runs entirely outside the serving paths — a Packer build succeeds with the
+destination down — and per-project failures back off without blocking other
+projects.
+
+Three authority boundaries hold everywhere. The association set is the
+reconciler's **entire** authority to delete: inside an associated bucket the
+source is authoritative in both directions — remote drift is removed, local
+deletions propagate, and un-associating deletes the destination copy (the
+tombstone consumed only after the remote delete succeeds) — while nothing
+outside an associated bucket is ever touched. The managed `latest` channel
+is never referenced on either side; completion drives it, as the live
+service's own behaviour dictates. And channel assignments mirror as
+*pointers*, never replayed history: each registry's assignment history is its
+own provenance record, and the sequence of what dufflebag pushed lives in
+its audit trail — every remote mutation emits one `system:bagdrop` audit
+event, fail-closed before the mutation executes, pausing sync (never
+serving) when audit cannot be written.
+
+The destination adapter seam carries connection mechanics only, never
+semantics — a parity test enforces that the engine cannot tell destinations
+apart. The HCP adapter has fixed endpoints; the dufflebag adapter takes an
+HTTPS endpoint and optional CA chain per configuration, and both share one
+wire client speaking the same contract the compatibility plane serves. The
+destination credential is the one secret dufflebag must present rather than
+verify: sealed in an AES-256-GCM envelope (keyring on encrypted deployments,
+an environment key otherwise), write-only at the API, HMAC'd in audit.
+
+What deliberately does not mirror: destination-assigned IDs, timestamps and
+authorship (correlation keys are bucket names and version fingerprints —
+destination version *names* may diverge when local history has gaps),
+channel assignment history, bucket IAM, and SBOMs appearing after a
+destination build completed (the upload window has closed; they surface as
+permanent drift). See [deployment.md](deployment.md) for the operational
+surface — egress, cadence, credential keys and their honest limits.
 
 ## Deployment shape
 

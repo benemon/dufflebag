@@ -126,7 +126,11 @@ The repository's long-lived `make demo-up` stack deliberately selects this
 live endpoint and therefore requires internet egress. CI uses recorded
 responses on an internal Docker network instead.
 
-## Bag Drop destination credentials
+## Bag Drop
+
+Bag Drop mirrors a project's registry data to a destination registry; the
+[architecture document](architecture.md#bag-drop-the-outbound-mirror) covers
+the design. Operationally:
 
 Configuring or verifying an HCP Packer Bag Drop destination makes outbound
 HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
@@ -140,7 +144,8 @@ Once an enabled configuration has active associations, the
 background reconciler creates and converges destination buckets, completed
 versions, completed builds and their artifacts. Mirror semantics are complete:
 drift inside associated buckets is removed, local bucket deletions propagate,
-and un-associating deletes the destination copy. Ordinary channels and their
+and un-associating deletes the destination copy — a pending removal is
+retained and retried until that deletion succeeds. Ordinary channels and their
 assignments mirror as pointers; the managed `latest` channel is never touched.
 The association set is the reconciler's entire authority to delete: nothing
 outside an associated bucket is ever touched.
@@ -170,10 +175,6 @@ Destination mutations are audit fail-closed. If no configured audit sink can
 accept the pre-mutation or outcome record, Bag Drop sync pauses until the next
 cadence tick; the ordinary API and compatibility serving paths remain
 available because reconciliation runs outside them.
-
-Bag Drop associations select which project buckets mirror. Removing an
-association is the consent boundary for deleting its destination-side copy;
-the pending removal is retained and retried until that deletion succeeds.
 
 The destination client secret is always stored in an AES-256-GCM envelope. On
 an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32
