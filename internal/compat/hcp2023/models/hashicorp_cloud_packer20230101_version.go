@@ -68,7 +68,7 @@ type HashicorpCloudPacker20230101Version struct {
 
 	// Datetime from when the version is revoked an no longer trusted to be secure.
 	// Format: date-time
-	RevokeAt strfmt.DateTime `json:"revoke_at,omitempty"`
+	RevokeAt *strfmt.DateTime `json:"revoke_at"`
 
 	// Current state of the version.
 	Status *HashicorpCloudPacker20230101VersionStatus `json:"status,omitempty"`

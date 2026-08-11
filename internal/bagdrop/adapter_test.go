@@ -731,10 +731,10 @@ func adapterDestination() Destination {
 	}
 }
 
-// A dufflebag destination currently renders a never-revoked version's
-// revoke_at as the zero time where live HCP renders null (duf-mhaw). The
-// adapter must normalise zero time to not-revoked so the engine never
-// attempts a restore against a version that was never revoked.
+// Older dufflebag destinations rendered a never-revoked version's revoke_at as
+// the zero time. Rendering is now fixed at the source, but the adapter keeps
+// normalising old destinations so the engine never attempts a restore against
+// a version that was never revoked.
 func TestGetVersionNormalisesZeroRevokeAtToNotRevoked(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(tokenSuccessFixture))

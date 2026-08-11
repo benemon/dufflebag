@@ -368,8 +368,19 @@ func TestScannerHubIntegration(t *testing.T) {
 
 	t.Run("SBOM upload alone does not enqueue", func(t *testing.T) {
 		seed := seedScannerBuild(t, db, "sbom-only", false, false)
+		tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE builds SET status = 'running' WHERE id = $1`, seed.buildID); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
 		data := compressIntegrationSBOM(t, `{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[]}`)
-		_, err := repository.UploadSbom(ctx, tenant, seed.bucketName, seed.fingerprint, seed.buildID, store.Sbom{
+		_, err = repository.UploadSbom(ctx, tenant, seed.bucketName, seed.fingerprint, seed.buildID, store.Sbom{
 			ID: registry.NewID(time.Now()), Name: "uploaded", Format: "SPDX", CompressedData: data, CreatedAt: time.Now(),
 		})
 		if err != nil {

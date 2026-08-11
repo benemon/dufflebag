@@ -1400,20 +1400,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         plugins: [{ name: 'docker', version: '1.1.4' }],
       },
     }
-    await api(builderToken, 'PATCH', `${completedBuildsPath}/${build.id}`, {
-      status: 'BUILD_DONE',
-      platform: 'docker',
-      artifacts: [{ external_identifier: 'sha256:smoke-artifact', region: 'local' }],
-      labels: { ImageDigest: 'sha256:smoke-label' },
-      metadata: packerMetadata,
-    })
-    await api(builderToken, 'PATCH', `${completedBuildsPath}/${emptyBuild.id}`, {
-      status: 'BUILD_DONE', platform: 'docker', artifacts: [], metadata: packerMetadata,
-    })
-    await api(builderToken, 'PATCH', `${completedBuildsPath}/${brokenBuild.id}`, {
-      status: 'BUILD_DONE', platform: 'docker', artifacts: [], metadata: packerMetadata,
-    })
-
+    // SBOMs upload during the running window, as real Packer does — the compat
+    // plane now reproduces live HCP's refusal for non-running builds (A.11).
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${build.id}`, { status: 'BUILD_RUNNING' })
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${brokenBuild.id}`, { status: 'BUILD_RUNNING' })
     const inventory = zstdCompressSync(Buffer.from(JSON.stringify({
       bomFormat: 'CycloneDX',
       components: [{
@@ -1428,6 +1418,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await api(builderToken, 'PUT', `${completedBuildsPath}/${brokenBuild.id}/sboms`, {
       compressed_sbom: brokenInventory, format: 'CYCLONEDX', name: 'broken-client-report',
     })
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${build.id}`, {
+      status: 'BUILD_DONE',
+      platform: 'docker',
+      artifacts: [{ external_identifier: 'sha256:smoke-artifact', region: 'local' }],
+      labels: { ImageDigest: 'sha256:smoke-label' },
+      metadata: packerMetadata,
+    })
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${emptyBuild.id}`, {
+      status: 'BUILD_DONE', platform: 'docker', artifacts: [], metadata: packerMetadata,
+    })
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${brokenBuild.id}`, {
+      status: 'BUILD_DONE', platform: 'docker', artifacts: [], metadata: packerMetadata,
+    })
+
     // A second version left exactly as Packer leaves an unfinished run.
     await api(builderToken, 'POST', versionsPath, {
       fingerprint: 'smoke-wip', template_type: 'HCL2',
@@ -1707,6 +1711,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         component_type: `docker.${bucket}`, packer_run_uuid: `run-${fingerprint}`, artifacts: [],
       })
       if (components.length > 0) {
+        // Running window first: the compat plane refuses SBOM uploads on
+        // non-running builds, matching live HCP (A.11).
+        await api(rootToken, 'PATCH', `${versionsPath}/${fingerprint}/builds/${build.id}`, {
+          status: 'BUILD_RUNNING',
+        })
         const compressed = zstdCompressSync(Buffer.from(JSON.stringify({
           bomFormat: 'CycloneDX', specVersion: '1.6', components,
         }))).toString('base64')

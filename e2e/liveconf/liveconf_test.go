@@ -204,8 +204,8 @@ func TestLiveHCPConformance(t *testing.T) {
 		// The documented wire order (§6) uploads the SBOM while the build RUNS,
 		// step 7 before the terminal update — and live HCP enforces it: this
 		// suite's first run uploaded after BUILD_DONE and was refused 400/code 3
-		// "This build's status isn't Running" (pinned in §5.6; dufflebag-side
-		// divergence filed as duf-4h25).
+		// "This build's status isn't Running" (pinned in §5.6 and Appendix
+		// A.11; reproduced by the dufflebag compatibility plane in duf-4h25).
 		running := request(t, client, http.MethodPatch, versionPath+"/builds/"+url.PathEscape(buildID), map[string]any{
 			"status":          "BUILD_RUNNING",
 			"packer_run_uuid": "00000000-0000-4000-8000-000000000001",
@@ -343,8 +343,8 @@ func TestLiveHCPConformance(t *testing.T) {
 		sbomsPath := versionPath + "/builds/" + url.PathEscape(buildID) + "/sboms"
 
 		// Observed live on this suite's first run, now pinned: an upload
-		// against a build that is no longer running is refused. dufflebag
-		// diverges today (no status guard) — duf-4h25.
+		// against a build that is no longer running is refused. Appendix A.11
+		// pins the exact response reproduced by dufflebag (duf-4h25).
 		var lateCompressed bytes.Buffer
 		lateWriter, err := zstd.NewWriter(&lateCompressed)
 		if err != nil {
