@@ -98,12 +98,15 @@ func (e AuditTargetOpenErrorReason) Valid() bool {
 
 // Defines values for BagDropAdapter.
 const (
+	Dufflebag BagDropAdapter = "dufflebag"
 	HcpPacker BagDropAdapter = "hcp-packer"
 )
 
 // Valid indicates whether the value is a known member of the BagDropAdapter enum.
 func (e BagDropAdapter) Valid() bool {
 	switch e {
+	case Dufflebag:
+		return true
 	case HcpPacker:
 		return true
 	default:
@@ -522,8 +525,9 @@ type BagDropAssociationState string
 type BagDropConfig struct {
 	Adapter          BagDropAdapter           `json:"adapter"`
 	CreatedAt        time.Time                `json:"created_at"`
+	Dufflebag        *BagDropDufflebag        `json:"dufflebag,omitempty"`
 	Enabled          bool                     `json:"enabled"`
-	HcpPacker        BagDropHCPPacker         `json:"hcp_packer"`
+	HcpPacker        *BagDropHCPPacker        `json:"hcp_packer,omitempty"`
 	LastVerification *BagDropLastVerification `json:"last_verification"`
 
 	// SecretSet Always true for a stored configuration; the secret itself is never returned.
@@ -533,14 +537,38 @@ type BagDropConfig struct {
 
 // BagDropConfigWrite defines model for BagDropConfigWrite.
 type BagDropConfigWrite struct {
-	Adapter   BagDropAdapter        `json:"adapter"`
-	HcpPacker BagDropHCPPackerWrite `json:"hcp_packer"`
+	Adapter   BagDropAdapter         `json:"adapter"`
+	Dufflebag *BagDropDufflebagWrite `json:"dufflebag,omitempty"`
+	HcpPacker *BagDropHCPPackerWrite `json:"hcp_packer,omitempty"`
 }
 
 // BagDropConflict defines model for BagDropConflict.
 type BagDropConflict struct {
 	Message      string                     `json:"message"`
 	Verification *BagDropVerificationResult `json:"verification,omitempty"`
+}
+
+// BagDropDufflebag defines model for BagDropDufflebag.
+type BagDropDufflebag struct {
+	// CaChain PEM-encoded public trust material, when configured.
+	CaChain        *string `json:"ca_chain,omitempty"`
+	ClientId       string  `json:"client_id"`
+	Endpoint       string  `json:"endpoint"`
+	OrganizationId string  `json:"organization_id"`
+	ProjectId      string  `json:"project_id"`
+}
+
+// BagDropDufflebagWrite defines model for BagDropDufflebagWrite.
+type BagDropDufflebagWrite struct {
+	// CaChain Optional PEM-encoded CA chain used in addition to the system trust pool.
+	CaChain  *string `json:"ca_chain,omitempty"`
+	ClientId string  `json:"client_id"`
+
+	// ClientSecret Write-only. Required on create; omit on update to keep the existing sealed secret.
+	ClientSecret   *string `json:"client_secret,omitempty"`
+	Endpoint       string  `json:"endpoint"`
+	OrganizationId string  `json:"organization_id"`
+	ProjectId      string  `json:"project_id"`
 }
 
 // BagDropHCPPacker defines model for BagDropHCPPacker.

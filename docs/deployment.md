@@ -131,7 +131,12 @@ responses on an internal Docker network instead.
 Configuring or verifying an HCP Packer Bag Drop destination makes outbound
 HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
 `api.cloud.hashicorp.com` for scoped reads and destination writes. Permit egress
-to both hosts. Once an enabled configuration has active associations, the
+to both hosts. A destination may instead be another dufflebag instance,
+configured with its HTTPS endpoint and an optional PEM CA chain. The supplied
+chain augments system trust and is stored as public configuration data, not as
+a path or secret. Dufflebag destinations use the same token and Packer API wire
+contract, and their mirror lifecycle semantics are identical to HCP destinations.
+Once an enabled configuration has active associations, the
 background reconciler creates and converges destination buckets, completed
 versions, completed builds and their artifacts. Mirror semantics are complete:
 drift inside associated buckets is removed, local bucket deletions propagate,

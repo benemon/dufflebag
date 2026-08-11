@@ -71,6 +71,92 @@ func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	}
 }
 
+func TestReconcileStandardConvergenceParityHCPAndDufflebag(t *testing.T) {
+	type outcome struct {
+		events []string
+		calls  []string
+	}
+	run := func(t *testing.T, kind AdapterKind) outcome {
+		t.Helper()
+		versionExists := false
+		var calls []string
+		handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+			calls = append(calls, request.Method+" "+request.URL.Path)
+			path := request.URL.Path
+			switch {
+			case path == "/oauth2/token":
+				// Fixture source: internal/compat/hcpauth/handler.go tokenResponse.
+				_, _ = w.Write([]byte(tokenSuccessFixture))
+			case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images"):
+				// Fixture source: internal/compat/hcp2023 writeBucketNotFound.
+				w.WriteHeader(http.StatusNotFound)
+				_, _ = w.Write([]byte(`{"code":5,"message":"bucket not found","details":[]}`))
+			case request.Method == http.MethodPut && strings.HasSuffix(path, "/buckets"):
+				_, _ = w.Write([]byte(`{"bucket":{"name":"images"}}`))
+			case request.Method == http.MethodGet && strings.HasSuffix(path, "/versions/fp-1"):
+				if !versionExists {
+					// Fixture source: internal/compat/hcp2023 writeVersionNotFound.
+					w.WriteHeader(http.StatusConflict)
+					_, _ = w.Write([]byte(`{"code":10,"message":"version not found","details":[]}`))
+					return
+				}
+				_, _ = w.Write([]byte(`{"version":{"fingerprint":"fp-1"}}`))
+			case request.Method == http.MethodPost && strings.HasSuffix(path, "/versions"):
+				versionExists = true
+				_, _ = w.Write([]byte(`{"version":{"fingerprint":"fp-1"}}`))
+			case request.Method == http.MethodGet && strings.HasSuffix(path, "/versions/fp-1/builds"):
+				// Fixture source: vendored PackerService_ListBuilds response.
+				_, _ = w.Write([]byte(`{"builds":[],"pagination":{}}`))
+			case request.Method == http.MethodPost && strings.HasSuffix(path, "/versions/fp-1/builds"):
+				_, _ = w.Write([]byte(`{"build":{"id":"remote-build","component_type":"amazon-ebs","status":"BUILD_PENDING"}}`))
+			case request.Method == http.MethodPatch && strings.HasSuffix(path, "/builds/remote-build"):
+				_, _ = w.Write([]byte(`{"build":{"id":"remote-build","status":"BUILD_DONE"}}`))
+			case request.Method == http.MethodGet && strings.HasSuffix(path, "/builds/remote-build/sboms"):
+				// Fixture source: vendored PackerService_ListSboms response.
+				_, _ = w.Write([]byte(`{"sboms":[],"pagination":{}}`))
+			case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images/channels"):
+				// Fixture source: vendored PackerService_ListChannels response.
+				_, _ = w.Write([]byte(`{"channels":[],"pagination":{}}`))
+			default:
+				t.Errorf("unexpected destination request %s %s", request.Method, path)
+				w.WriteHeader(http.StatusNotFound)
+			}
+		})
+
+		reconciler, repository, _, _ := newTestReconciler(t, "secret")
+		var server *httptest.Server
+		if kind == AdapterDufflebag {
+			var caChain string
+			server, caChain = newGeneratedCATLSServer(t, handler)
+			repository.record.Adapter = AdapterDufflebag
+			repository.record.HCPPacker = HCPPackerConfig{}
+			repository.record.Dufflebag = DufflebagConfig{
+				Endpoint: server.URL, CAChain: caChain,
+				OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
+			}
+			reconciler.adapters = Registry{AdapterDufflebag: NewDufflebagAdapterFactory()}
+		} else {
+			server = httptest.NewServer(handler)
+			reconciler.adapters = Registry{AdapterHCPPacker: NewHCPPackerAdapter(server.URL, server.URL)}
+		}
+		defer server.Close()
+		repository.associations = []Association{testAssociation("images")}
+		repository.snapshots["images"] = testSnapshot("images")
+		if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+			t.Fatal(err)
+		}
+		return outcome{events: append([]string(nil), repository.events...), calls: calls}
+	}
+
+	hcp := run(t, AdapterHCPPacker)
+	dufflebag := run(t, AdapterDufflebag)
+	if strings.Join(dufflebag.events, ",") != strings.Join(hcp.events, ",") ||
+		strings.Join(dufflebag.calls, ",") != strings.Join(hcp.calls, ",") {
+		t.Fatalf("adapter semantics diverged:\nHCP events=%v calls=%v\ndufflebag events=%v calls=%v",
+			hcp.events, hcp.calls, dufflebag.events, dufflebag.calls)
+	}
+}
+
 func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Fixture source: internal/compat/hcpauth/handler.go tokenResponse.

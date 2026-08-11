@@ -1812,7 +1812,7 @@ components:
 
     BagDropAdapter:
       type: string
-      enum: [hcp-packer]
+      enum: [hcp-packer, dufflebag]
 
     BagDropHCPPackerWrite:
       type: object
@@ -1833,12 +1833,40 @@ components:
         client_id: { type: string }
       required: [organization_id, project_id, client_id]
 
+    BagDropDufflebagWrite:
+      type: object
+      properties:
+        endpoint: { type: string, format: uri, pattern: "^https://" }
+        ca_chain:
+          type: string
+          description: Optional PEM-encoded CA chain used in addition to the system trust pool.
+        organization_id: { type: string }
+        project_id: { type: string }
+        client_id: { type: string }
+        client_secret:
+          type: string
+          description: Write-only. Required on create; omit on update to keep the existing sealed secret.
+      required: [endpoint, organization_id, project_id, client_id]
+
+    BagDropDufflebag:
+      type: object
+      properties:
+        endpoint: { type: string, format: uri, pattern: "^https://" }
+        ca_chain:
+          type: string
+          description: PEM-encoded public trust material, when configured.
+        organization_id: { type: string }
+        project_id: { type: string }
+        client_id: { type: string }
+      required: [endpoint, organization_id, project_id, client_id]
+
     BagDropConfigWrite:
       type: object
       properties:
         adapter: { $ref: "#/components/schemas/BagDropAdapter" }
         hcp_packer: { $ref: "#/components/schemas/BagDropHCPPackerWrite" }
-      required: [adapter, hcp_packer]
+        dufflebag: { $ref: "#/components/schemas/BagDropDufflebagWrite" }
+      required: [adapter]
 
     BagDropVerificationOutcome:
       type: string
@@ -1869,6 +1897,7 @@ components:
       properties:
         adapter: { $ref: "#/components/schemas/BagDropAdapter" }
         hcp_packer: { $ref: "#/components/schemas/BagDropHCPPacker" }
+        dufflebag: { $ref: "#/components/schemas/BagDropDufflebag" }
         secret_set:
           type: boolean
           description: Always true for a stored configuration; the secret itself is never returned.
@@ -1879,7 +1908,7 @@ components:
           nullable: true
         created_at: { type: string, format: date-time }
         updated_at: { type: string, format: date-time }
-      required: [adapter, hcp_packer, secret_set, enabled, last_verification, created_at, updated_at]
+      required: [adapter, secret_set, enabled, last_verification, created_at, updated_at]
 
     BagDropAssociationState:
       type: string

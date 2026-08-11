@@ -51,14 +51,14 @@ type ReconcileRun interface {
 
 type Registry map[AdapterKind]Adapter
 
-type hcpPackerAdapter struct {
+type destinationAdapter struct {
 	authBase string
 	apiBase  string
 	client   *http.Client
 }
 
-type hcpReconcileRun struct {
-	adapter     *hcpPackerAdapter
+type destinationReconcileRun struct {
+	adapter     *destinationAdapter
 	destination Destination
 	token       string
 	refreshed   bool
@@ -81,14 +81,81 @@ func (e *AdapterError) Error() string {
 // NewHCPPackerAdapter takes bases rather than reading configuration so tests
 // exercise the exact production request shapes against httptest servers.
 func NewHCPPackerAdapter(authBase, apiBase string) Adapter {
-	return &hcpPackerAdapter{
+	return newDestinationAdapter(authBase, apiBase, &http.Client{})
+}
+
+// NewDufflebagAdapter uses one dufflebag listener for both the token grant and
+// Packer-compatible API. caChainPEM augments, rather than replaces, system
+// trust roots.
+func NewDufflebagAdapter(endpoint, caChainPEM string) (Adapter, error) {
+	parsed, err := url.Parse(endpoint)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" || parsed.User != nil {
+		return nil, errors.New("dufflebag endpoint must be a valid https URL")
+	}
+	roots, err := x509.SystemCertPool()
+	if err != nil {
+		return nil, fmt.Errorf("load system CA pool: %w", err)
+	}
+	if roots == nil {
+		roots = x509.NewCertPool()
+	}
+	if strings.TrimSpace(caChainPEM) != "" && !roots.AppendCertsFromPEM([]byte(caChainPEM)) {
+		return nil, errors.New("dufflebag ca_chain contains no parseable PEM certificates")
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.TLSClientConfig = &tls.Config{RootCAs: roots}
+	return newDestinationAdapter(endpoint, endpoint, &http.Client{Transport: transport}), nil
+}
+
+func newDestinationAdapter(authBase, apiBase string, client *http.Client) Adapter {
+	return &destinationAdapter{
 		authBase: strings.TrimRight(authBase, "/"),
 		apiBase:  strings.TrimRight(apiBase, "/"),
-		client:   &http.Client{},
+		client:   client,
 	}
 }
 
-func (a *hcpPackerAdapter) Resolve(ctx context.Context, destination Destination) VerificationResult {
+// NewDufflebagAdapterFactory is the registry entry used by the process. It
+// binds endpoint and trust configuration from each destination at use time.
+func NewDufflebagAdapterFactory() Adapter { return dufflebagAdapterFactory{} }
+
+type dufflebagAdapterFactory struct{}
+
+func (dufflebagAdapterFactory) Resolve(ctx context.Context, destination Destination) VerificationResult {
+	adapter, normalized, err := configuredDufflebagAdapter(destination)
+	if err != nil {
+		return failed(err.Error())
+	}
+	return adapter.Resolve(ctx, normalized)
+}
+
+func (dufflebagAdapterFactory) BeginReconcile(
+	ctx context.Context, destination Destination,
+) (ReconcileRun, error) {
+	adapter, normalized, err := configuredDufflebagAdapter(destination)
+	if err != nil {
+		return nil, err
+	}
+	return adapter.BeginReconcile(ctx, normalized)
+}
+
+func configuredDufflebagAdapter(destination Destination) (Adapter, Destination, error) {
+	config := destination.Dufflebag
+	adapter, err := NewDufflebagAdapter(config.Endpoint, config.CAChain)
+	if err != nil {
+		return nil, Destination{}, err
+	}
+	return adapter, Destination{
+		HCPPackerConfig: HCPPackerConfig{
+			OrganizationID: config.OrganizationID,
+			ProjectID:      config.ProjectID,
+			ClientID:       config.ClientID,
+		},
+		ClientSecret: destination.ClientSecret,
+	}, nil
+}
+
+func (a *destinationAdapter) Resolve(ctx context.Context, destination Destination) VerificationResult {
 	token, result := a.token(ctx, destination)
 	if result.Outcome != OutcomeResolved {
 		return result
@@ -119,15 +186,15 @@ func (a *hcpPackerAdapter) Resolve(ctx context.Context, destination Destination)
 	return VerificationResult{Outcome: OutcomeResolved}
 }
 
-func (a *hcpPackerAdapter) BeginReconcile(ctx context.Context, destination Destination) (ReconcileRun, error) {
+func (a *destinationAdapter) BeginReconcile(ctx context.Context, destination Destination) (ReconcileRun, error) {
 	token, result := a.token(ctx, destination)
 	if result.Outcome != OutcomeResolved {
 		return nil, verificationError(result)
 	}
-	return &hcpReconcileRun{adapter: a, destination: destination, token: token}, nil
+	return &destinationReconcileRun{adapter: a, destination: destination, token: token}, nil
 }
 
-func (a *hcpPackerAdapter) token(ctx context.Context, destination Destination) (string, VerificationResult) {
+func (a *destinationAdapter) token(ctx context.Context, destination Destination) (string, VerificationResult) {
 	callCtx, cancel := context.WithTimeout(ctx, adapterCallTimeout)
 	defer cancel()
 	form := url.Values{"grant_type": {"client_credentials"}, "audience": {hcpAPIAudience}}
@@ -165,12 +232,12 @@ func (a *hcpPackerAdapter) token(ctx context.Context, destination Destination) (
 	return token.AccessToken, VerificationResult{Outcome: OutcomeResolved}
 }
 
-func (r *hcpReconcileRun) basePath() string {
+func (r *destinationReconcileRun) basePath() string {
 	return "/packer/2023-01-01/organizations/" + url.PathEscape(r.destination.OrganizationID) +
 		"/projects/" + url.PathEscape(r.destination.ProjectID)
 }
 
-func (r *hcpReconcileRun) GetBucket(ctx context.Context, name string) (*RemoteBucket, bool, error) {
+func (r *destinationReconcileRun) GetBucket(ctx context.Context, name string) (*RemoteBucket, bool, error) {
 	var response struct {
 		Bucket *RemoteBucket `json:"bucket"`
 	}
@@ -192,23 +259,23 @@ func (r *hcpReconcileRun) GetBucket(ctx context.Context, name string) (*RemoteBu
 	return response.Bucket, true, nil
 }
 
-func (r *hcpReconcileRun) CreateBucket(ctx context.Context, bucket BucketSnapshot) error {
+func (r *destinationReconcileRun) CreateBucket(ctx context.Context, bucket BucketSnapshot) error {
 	return r.do(ctx, http.MethodPut, r.basePath()+"/buckets", map[string]any{
 		"name": bucket.Name, "description": bucket.Description,
 	}, nil)
 }
 
-func (r *hcpReconcileRun) UpdateBucket(ctx context.Context, bucket BucketSnapshot) error {
+func (r *destinationReconcileRun) UpdateBucket(ctx context.Context, bucket BucketSnapshot) error {
 	return r.do(ctx, http.MethodPatch, r.basePath()+"/buckets/"+url.PathEscape(bucket.Name), map[string]any{
 		"description": bucket.Description,
 	}, nil)
 }
 
-func (r *hcpReconcileRun) DeleteBucket(ctx context.Context, bucket string) error {
+func (r *destinationReconcileRun) DeleteBucket(ctx context.Context, bucket string) error {
 	return r.delete(ctx, r.basePath()+"/buckets/"+url.PathEscape(bucket))
 }
 
-func (r *hcpReconcileRun) GetVersion(
+func (r *destinationReconcileRun) GetVersion(
 	ctx context.Context, bucket, fingerprint string,
 ) (*RemoteVersion, bool, error) {
 	var response struct {
@@ -224,10 +291,17 @@ func (r *hcpReconcileRun) GetVersion(
 	if response.Version == nil {
 		return nil, false, errors.New("destination version response omitted version")
 	}
+	// A zero revoke_at is not a revocation. Live HCP renders null for a
+	// never-revoked version, but a dufflebag destination currently renders the
+	// zero time (duf-mhaw); treating it as revoked made the engine attempt a
+	// restore against nothing. Zero time is not-revoked on any destination.
+	if response.Version.RevokeAt != nil && response.Version.RevokeAt.IsZero() {
+		response.Version.RevokeAt = nil
+	}
 	return response.Version, true, nil
 }
 
-func (r *hcpReconcileRun) CreateVersion(ctx context.Context, bucket string, version VersionSnapshot) error {
+func (r *destinationReconcileRun) CreateVersion(ctx context.Context, bucket string, version VersionSnapshot) error {
 	err := r.do(ctx, http.MethodPost, r.basePath()+"/buckets/"+url.PathEscape(bucket)+"/versions", map[string]any{
 		"fingerprint": version.Fingerprint, "template_type": version.TemplateType,
 	}, nil)
@@ -237,7 +311,7 @@ func (r *hcpReconcileRun) CreateVersion(ctx context.Context, bucket string, vers
 	return err
 }
 
-func (r *hcpReconcileRun) RevokeVersion(
+func (r *destinationReconcileRun) RevokeVersion(
 	ctx context.Context, bucket, fingerprint string, revokeAt time.Time, message string,
 ) error {
 	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint), map[string]any{
@@ -246,17 +320,17 @@ func (r *hcpReconcileRun) RevokeVersion(
 	}, nil)
 }
 
-func (r *hcpReconcileRun) RestoreVersion(ctx context.Context, bucket, fingerprint string) error {
+func (r *destinationReconcileRun) RestoreVersion(ctx context.Context, bucket, fingerprint string) error {
 	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint), map[string]any{
 		"restore": true,
 	}, nil)
 }
 
-func (r *hcpReconcileRun) DeleteVersion(ctx context.Context, bucket, fingerprint string) error {
+func (r *destinationReconcileRun) DeleteVersion(ctx context.Context, bucket, fingerprint string) error {
 	return r.delete(ctx, r.versionPath(bucket, fingerprint))
 }
 
-func (r *hcpReconcileRun) listVersions(ctx context.Context, bucket string) ([]RemoteVersion, error) {
+func (r *destinationReconcileRun) listVersions(ctx context.Context, bucket string) ([]RemoteVersion, error) {
 	path := r.basePath() + "/buckets/" + url.PathEscape(bucket) + "/versions"
 	var versions []RemoteVersion
 	pageToken := ""
@@ -282,7 +356,7 @@ func (r *hcpReconcileRun) listVersions(ctx context.Context, bucket string) ([]Re
 	}
 }
 
-func (r *hcpReconcileRun) ListBuilds(ctx context.Context, bucket, fingerprint string) ([]RemoteBuild, error) {
+func (r *destinationReconcileRun) ListBuilds(ctx context.Context, bucket, fingerprint string) ([]RemoteBuild, error) {
 	path := r.versionPath(bucket, fingerprint) + "/builds"
 	var builds []RemoteBuild
 	pageToken := ""
@@ -308,7 +382,7 @@ func (r *hcpReconcileRun) ListBuilds(ctx context.Context, bucket, fingerprint st
 	}
 }
 
-func (r *hcpReconcileRun) CreateBuild(
+func (r *destinationReconcileRun) CreateBuild(
 	ctx context.Context, bucket, fingerprint string, build BuildSnapshot,
 ) (string, error) {
 	status := "BUILD_PENDING"
@@ -329,7 +403,7 @@ func (r *hcpReconcileRun) CreateBuild(
 	return response.Build.ID, nil
 }
 
-func (r *hcpReconcileRun) UpdateBuildRunning(
+func (r *destinationReconcileRun) UpdateBuildRunning(
 	ctx context.Context, bucket, fingerprint, buildID string,
 ) error {
 	// Live HCP accepts SBOM uploads only while the build is BUILD_RUNNING.
@@ -339,7 +413,7 @@ func (r *hcpReconcileRun) UpdateBuildRunning(
 		map[string]any{"status": "BUILD_RUNNING"}, nil)
 }
 
-func (r *hcpReconcileRun) UpdateBuild(
+func (r *destinationReconcileRun) UpdateBuild(
 	ctx context.Context, bucket, fingerprint, buildID string, build BuildSnapshot,
 ) error {
 	artifacts := make([]map[string]string, 0, len(build.Artifacts))
@@ -363,11 +437,11 @@ func (r *hcpReconcileRun) UpdateBuild(
 	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID), body, nil)
 }
 
-func (r *hcpReconcileRun) DeleteBuild(ctx context.Context, bucket, fingerprint, buildID string) error {
+func (r *destinationReconcileRun) DeleteBuild(ctx context.Context, bucket, fingerprint, buildID string) error {
 	return r.delete(ctx, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID))
 }
 
-func (r *hcpReconcileRun) ListSboms(
+func (r *destinationReconcileRun) ListSboms(
 	ctx context.Context, bucket, fingerprint, buildID string,
 ) ([]RemoteSbom, error) {
 	path := r.versionPath(bucket, fingerprint) + "/builds/" + url.PathEscape(buildID) + "/sboms"
@@ -395,7 +469,7 @@ func (r *hcpReconcileRun) ListSboms(
 	}
 }
 
-func (r *hcpReconcileRun) UploadSbom(
+func (r *destinationReconcileRun) UploadSbom(
 	ctx context.Context, bucket, fingerprint, buildID string, sbom SbomSnapshot,
 ) error {
 	encoder, err := zstd.NewWriter(nil)
@@ -411,7 +485,7 @@ func (r *hcpReconcileRun) UploadSbom(
 		map[string]any{"compressed_sbom": compressed, "format": sbom.Format, "name": sbom.Name}, nil)
 }
 
-func (r *hcpReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
+func (r *destinationReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
 	var response struct {
 		Channels []struct {
 			Name    string `json:"name"`
@@ -434,7 +508,7 @@ func (r *hcpReconcileRun) ListChannels(ctx context.Context, bucket string) ([]Re
 	return channels, err
 }
 
-func (r *hcpReconcileRun) CreateChannel(ctx context.Context, bucket, name string) error {
+func (r *destinationReconcileRun) CreateChannel(ctx context.Context, bucket, name string) error {
 	err := r.do(ctx, http.MethodPost, r.channelPath(bucket), map[string]any{"name": name}, nil)
 	if remoteError(err, http.StatusConflict, 6) {
 		return nil
@@ -442,7 +516,7 @@ func (r *hcpReconcileRun) CreateChannel(ctx context.Context, bucket, name string
 	return err
 }
 
-func (r *hcpReconcileRun) UpdateChannelAssignment(
+func (r *destinationReconcileRun) UpdateChannelAssignment(
 	ctx context.Context, bucket, name string, fingerprint *string,
 ) error {
 	value := ""
@@ -455,11 +529,11 @@ func (r *hcpReconcileRun) UpdateChannelAssignment(
 	}, nil)
 }
 
-func (r *hcpReconcileRun) DeleteChannel(ctx context.Context, bucket, name string) error {
+func (r *destinationReconcileRun) DeleteChannel(ctx context.Context, bucket, name string) error {
 	return r.delete(ctx, r.channelPath(bucket)+"/"+url.PathEscape(name))
 }
 
-func (r *hcpReconcileRun) delete(ctx context.Context, path string) error {
+func (r *destinationReconcileRun) delete(ctx context.Context, path string) error {
 	err := r.do(ctx, http.MethodDelete, path, nil, nil)
 	if remoteError(err, http.StatusNotFound, 5) {
 		return nil
@@ -467,15 +541,15 @@ func (r *hcpReconcileRun) delete(ctx context.Context, path string) error {
 	return err
 }
 
-func (r *hcpReconcileRun) channelPath(bucket string) string {
+func (r *destinationReconcileRun) channelPath(bucket string) string {
 	return r.basePath() + "/buckets/" + url.PathEscape(bucket) + "/channels"
 }
 
-func (r *hcpReconcileRun) versionPath(bucket, fingerprint string) string {
+func (r *destinationReconcileRun) versionPath(bucket, fingerprint string) string {
 	return r.basePath() + "/buckets/" + url.PathEscape(bucket) + "/versions/" + url.PathEscape(fingerprint)
 }
 
-func (r *hcpReconcileRun) do(ctx context.Context, method, path string, body, output any) error {
+func (r *destinationReconcileRun) do(ctx context.Context, method, path string, body, output any) error {
 	for attempt := 0; attempt < 2; attempt++ {
 		var encoded io.Reader
 		if body != nil {

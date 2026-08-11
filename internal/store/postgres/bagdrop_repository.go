@@ -49,7 +49,14 @@ func (r *Repository) PutBagDropConfig(
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	destination, err := json.Marshal(record.HCPPacker)
+	var connection any
+	switch record.Adapter {
+	case bagdrop.AdapterHCPPacker:
+		connection = record.HCPPacker
+	case bagdrop.AdapterDufflebag:
+		connection = record.Dufflebag
+	}
+	destination, err := json.Marshal(connection)
 	if err != nil {
 		return nil, fmt.Errorf("marshal Bag Drop destination: %w", err)
 	}
@@ -572,9 +579,20 @@ func (r *Repository) RecordBagDropAssociationFailure(
 }
 
 func restoreBagDropConfig(row postgresdb.BagdropConfig) (*bagdrop.Record, error) {
-	var destination bagdrop.HCPPackerConfig
-	if err := json.Unmarshal(row.Destination, &destination); err != nil {
-		return nil, fmt.Errorf("unmarshal Bag Drop destination: %w", err)
+	adapter := bagdrop.AdapterKind(row.Adapter)
+	var hcpPacker bagdrop.HCPPackerConfig
+	var dufflebag bagdrop.DufflebagConfig
+	switch adapter {
+	case bagdrop.AdapterHCPPacker:
+		if err := json.Unmarshal(row.Destination, &hcpPacker); err != nil {
+			return nil, fmt.Errorf("unmarshal Bag Drop destination: %w", err)
+		}
+	case bagdrop.AdapterDufflebag:
+		if err := json.Unmarshal(row.Destination, &dufflebag); err != nil {
+			return nil, fmt.Errorf("unmarshal Bag Drop destination: %w", err)
+		}
+	default:
+		return nil, fmt.Errorf("restore Bag Drop configuration: %w: unsupported stored adapter %q", bagdrop.ErrInvalid, adapter)
 	}
 	var verification *bagdrop.LastVerification
 	if len(row.LastVerification) != 0 {
@@ -591,7 +609,7 @@ func restoreBagDropConfig(row postgresdb.BagdropConfig) (*bagdrop.Record, error)
 	}
 	record := &bagdrop.Record{
 		OrganizationID: row.OrganizationID.String(), ProjectID: row.ProjectID.String(),
-		Adapter: bagdrop.AdapterKind(row.Adapter), HCPPacker: destination,
+		Adapter: adapter, HCPPacker: hcpPacker, Dufflebag: dufflebag,
 		SealedSecret: append([]byte(nil), row.SealedSecret...), Enabled: row.Enabled,
 		LastVerification: verification, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
 	}

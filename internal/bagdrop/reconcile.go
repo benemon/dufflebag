@@ -233,7 +233,7 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 	if err != nil {
 		return err
 	}
-	destination := Destination{HCPPackerConfig: record.HCPPacker, ClientSecret: secret}
+	destination := destinationForRecord(record, secret)
 	associations, err := r.repository.ListBagDropAssociations(ctx, project.OrganizationID, project.ProjectID)
 	if err != nil {
 		return err
