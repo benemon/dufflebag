@@ -30,7 +30,7 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		"operationId: listBagDropAssociations", "operationId: setBagDropAssociation",
 		"operationId: deleteBagDropAssociation", "operationId: getBagDropStatus",
 		"operationId: reconcileBagDrop",
-		"enum: [hcp-packer]", "enum: [resolved, failed]",
+		"enum: [hcp-packer, dufflebag]", "enum: [resolved, failed]",
 		"enum: [active, pending_removal]", "enum: [pending, synced, removing]",
 		"enum: [credential_refused, project_not_found, unreachable, tls_failure]",
 	} {
