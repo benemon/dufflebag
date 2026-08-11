@@ -996,15 +996,31 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 			WithFingerprint("fingerprint").
 			WithBody(body)
 	}
-	// Unsupported capabilities are refused with code 3, never silently ignored.
+	// Restore on a valid version is a state refusal, with the live message
+	// byte-for-byte including its trailing space.
 	_, err = client.PackerServiceUpdateVersion(
 		updateVersionParams(&sdkmodels.HashicorpCloudPacker20230101UpdateVersionBody{Restore: true}),
 		contractAuth,
 	)
 	var updateVersionRefusal *packer_service.PackerServiceUpdateVersionDefault
 	if !errors.As(err, &updateVersionRefusal) || !updateVersionRefusal.IsCode(http.StatusBadRequest) ||
+		updateVersionRefusal.Payload.Code != 9 ||
+		updateVersionRefusal.Payload.Message !=
+			"Restoring does not apply. This version is valid and it is not scheduled to be revoked. " {
+		t.Fatalf("generated UpdateVersion restore active = %#v, %v; want the exact parsed 400 code 9",
+			updateVersionRefusal, err)
+	}
+
+	// Restore cannot be combined with either scheduling form.
+	_, err = client.PackerServiceUpdateVersion(
+		updateVersionParams(&sdkmodels.HashicorpCloudPacker20230101UpdateVersionBody{
+			Restore: true, RevokeAt: strfmt.DateTime(time.Now().UTC()),
+		}),
+		contractAuth,
+	)
+	if !errors.As(err, &updateVersionRefusal) || !updateVersionRefusal.IsCode(http.StatusBadRequest) ||
 		updateVersionRefusal.Payload.Code != 3 {
-		t.Fatalf("generated UpdateVersion restore = %v, want a parsed 400 code 3", err)
+		t.Fatalf("generated UpdateVersion restore+revoke_at = %v, want a parsed 400 code 3", err)
 	}
 
 	revokedResponse, err := client.PackerServiceUpdateVersion(
@@ -1076,6 +1092,64 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 	if !errors.As(err, &updateVersionRefusal) || !updateVersionRefusal.IsCode(http.StatusBadRequest) ||
 		updateVersionRefusal.Payload.Code != 9 {
 		t.Fatalf("generated re-revoke = %v, want a parsed 400 code 9", err)
+	}
+
+	restoredResponse, err := client.PackerServiceUpdateVersion(
+		updateVersionParams(&sdkmodels.HashicorpCloudPacker20230101UpdateVersionBody{Restore: true}),
+		contractAuth,
+	)
+	if err != nil {
+		t.Fatalf("generated UpdateVersion restore: %v", err)
+	}
+	restoredVersion := restoredResponse.Payload.Version
+	if restoredVersion.Status == nil ||
+		*restoredVersion.Status != sdkmodels.HashicorpCloudPacker20230101VersionStatusVERSIONACTIVE ||
+		!time.Time(restoredVersion.RevokeAt).IsZero() || restoredVersion.RevocationMessage != "" ||
+		restoredVersion.RevocationAuthor != "" || restoredVersion.RevocationType != nil ||
+		restoredVersion.RevocationInheritedFrom != nil {
+		t.Fatalf("generated restored fields = %#v, want active with revocation cleared", restoredVersion)
+	}
+
+	restoredRead, err := client.PackerServiceGetVersion(
+		packer_service.NewPackerServiceGetVersionParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("images").
+			WithFingerprint("fingerprint"),
+		contractAuth,
+	)
+	if err != nil || restoredRead.Payload.Version.Status == nil ||
+		*restoredRead.Payload.Version.Status != sdkmodels.HashicorpCloudPacker20230101VersionStatusVERSIONACTIVE ||
+		!time.Time(restoredRead.Payload.Version.RevokeAt).IsZero() {
+		t.Fatalf("generated GetVersion after restore = %#v, %v; want ACTIVE and cleared",
+			restoredRead, err)
+	}
+	latestRead, err = client.PackerServiceGetChannel(
+		packer_service.NewPackerServiceGetChannelParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("images").
+			WithChannelName("latest"),
+		contractAuth,
+	)
+	if err != nil || latestRead.Payload.Channel == nil || latestRead.Payload.Channel.Version == nil ||
+		latestRead.Payload.Channel.Version.Status == nil ||
+		*latestRead.Payload.Channel.Version.Status != sdkmodels.HashicorpCloudPacker20230101VersionStatusVERSIONACTIVE {
+		t.Fatalf("generated GetChannel latest after restore = %#v, %v; want an ACTIVE nested version",
+			latestRead, err)
+	}
+	restoredInherited, err := client.PackerServiceGetVersion(
+		packer_service.NewPackerServiceGetVersionParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithFingerprint("derived-1"),
+		contractAuth,
+	)
+	if err != nil || restoredInherited.Payload.Version.RevocationType != nil ||
+		restoredInherited.Payload.Version.RevocationInheritedFrom != nil {
+		t.Fatalf("generated descendant after restore = %#v, %v; want inherited revocation cleared",
+			restoredInherited, err)
 	}
 
 	// The provider's channel destroy calls DeleteChannel directly.
@@ -2028,6 +2102,32 @@ func (r *contractRepository) RevokeVersion(
 				frontier = append(frontier, descendant.ID.String())
 				break
 			}
+		}
+	}
+	return version, nil
+}
+
+func (r *contractRepository) RestoreRevokedVersion(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint string,
+	at time.Time,
+) (*registry.Version, error) {
+	version, ok := r.versions[bucket+"/"+fingerprint]
+	if !ok {
+		return nil, registry.ErrNotFound
+	}
+	if err := version.Restore(at); err != nil {
+		return nil, err
+	}
+	for _, descendant := range r.versions {
+		revocation := descendant.Revocation()
+		if revocation == nil || revocation.InheritedFrom == nil ||
+			revocation.InheritedFrom.VersionID != version.ID {
+			continue
+		}
+		if err := descendant.Restore(at); err != nil {
+			return nil, err
 		}
 	}
 	return version, nil

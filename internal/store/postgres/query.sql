@@ -391,6 +391,25 @@ SET revoke_at = $2, revocation_message = $3, revocation_author = $4,
 WHERE id = $1 AND revoke_at IS NULL
 RETURNING *;
 
+-- name: UnrevokeVersion :one
+UPDATE versions
+SET revoke_at = NULL, revocation_message = NULL, revocation_author = NULL,
+    revocation_inherited_from_id = NULL, revocation_inherited_from_bucket = NULL,
+    revocation_inherited_from_fingerprint = NULL, revocation_inherited_from_name = NULL,
+    updated_at = $2
+WHERE id = $1 AND revoke_at IS NOT NULL
+RETURNING *;
+
+-- name: UnrevokeInheritedVersion :one
+UPDATE versions
+SET revoke_at = NULL, revocation_message = NULL, revocation_author = NULL,
+    revocation_inherited_from_id = NULL, revocation_inherited_from_bucket = NULL,
+    revocation_inherited_from_fingerprint = NULL, revocation_inherited_from_name = NULL,
+    updated_at = sqlc.arg(updated_at)
+WHERE id = sqlc.arg(id)
+  AND revocation_inherited_from_id = CAST(sqlc.arg(restored_id) AS text)
+RETURNING *;
+
 -- name: ListVersionDescendants :many
 WITH RECURSIVE descendants(id) AS (
     SELECT builds.version_id FROM builds

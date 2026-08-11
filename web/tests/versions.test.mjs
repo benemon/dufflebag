@@ -205,6 +205,28 @@ test('a revoked version projects and renders its revocation state, not incomplet
   assert.doesNotMatch(markup, />incomplete</)
 })
 
+test('a restored version projects and renders as active again', async () => {
+	const restoredVersion = {
+		...completeVersion,
+		fingerprint: 'fp-restored',
+		status: 'VERSION_ACTIVE',
+		revoke_at: null,
+	}
+	const versions = await withFetch(
+		{
+			'/versions': () => json({ versions: [restoredVersion] }),
+			'/channels': () => json({ channels: [] }),
+		},
+		() => loadVersions('token', { organizationID: 'org', projectID: 'project' }, 'images'),
+	)
+	assert.deepEqual(versions.map(({ name, state }) => ({ name, state })), [
+		{ name: 'v1', state: 'complete' },
+	])
+	const markup = listMarkup(versions)
+	assert.match(markup, />complete</)
+	assert.doesNotMatch(markup, />revoked</)
+})
+
 test('an incomplete version renders as incomplete, not as broken', async () => {
   const versions = await withFetch(
     {

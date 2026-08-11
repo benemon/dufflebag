@@ -845,6 +845,93 @@ func (r *Repository) RevokeVersion(
 	return version, nil
 }
 
+// RestoreRevokedVersion clears a version's revocation and every inherited
+// descendant revocation that names it, in one transaction.
+func (r *Repository) RestoreRevokedVersion(
+	ctx context.Context,
+	tenant Tenant,
+	bucketName, fingerprint string,
+	at time.Time,
+) (*registry.Version, error) {
+	tx, q, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	row, err := q.GetVersionByFingerprint(ctx, postgresdb.GetVersionByFingerprintParams{
+		Name:        bucketName,
+		Fingerprint: fingerprint,
+	})
+	if err != nil {
+		return nil, mapNotFound("get version for restore", err)
+	}
+	version, err := r.restoreVersion(ctx, q, tenant, row)
+	if err != nil {
+		return nil, err
+	}
+	if err := version.Restore(at); err != nil {
+		return nil, err
+	}
+	if err := r.unrevokeRow(ctx, q, version.ID.String(), "", at); err != nil {
+		return nil, err
+	}
+
+	descendants, err := q.ListVersionDescendants(ctx, version.ID.String())
+	if err != nil {
+		return nil, fmt.Errorf("list version descendants: %w", err)
+	}
+	for _, descendant := range descendants {
+		if err := r.unrevokeRow(ctx, q, descendant.ID, version.ID.String(), at); err != nil {
+			return nil, err
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit restore version: %w", err)
+	}
+	return version, nil
+}
+
+// unrevokeRow clears one revocation and re-seals its integrity MAC. An empty
+// inheritedFrom restores the directly requested version; a non-empty value
+// clears only a descendant whose inherited ancestor still matches.
+func (r *Repository) unrevokeRow(
+	ctx context.Context,
+	q *postgresdb.Queries,
+	id, inheritedFrom string,
+	at time.Time,
+) error {
+	var restored postgresdb.Version
+	var err error
+	if inheritedFrom == "" {
+		restored, err = q.UnrevokeVersion(ctx, postgresdb.UnrevokeVersionParams{
+			ID: id, UpdatedAt: at,
+		})
+	} else {
+		restored, err = q.UnrevokeInheritedVersion(ctx, postgresdb.UnrevokeInheritedVersionParams{
+			ID: id, RestoredID: inheritedFrom, UpdatedAt: at,
+		})
+	}
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			if inheritedFrom != "" {
+				return nil
+			}
+			return fmt.Errorf("%w: version %s is not revoked", registry.ErrConflict, id)
+		}
+		return fmt.Errorf("restore version %s: %w", id, err)
+	}
+	if r.ring != nil {
+		if err := q.SetVersionIntegrityMAC(ctx, postgresdb.SetVersionIntegrityMACParams{
+			ID: restored.ID, IntegrityMac: r.rowMAC(versionMACMessage(restored)),
+		}); err != nil {
+			return fmt.Errorf("seal restored version row: %w", err)
+		}
+	}
+	return nil
+}
+
 // revokeRow persists one version's revocation and re-seals its integrity MAC.
 func (r *Repository) revokeRow(
 	ctx context.Context,

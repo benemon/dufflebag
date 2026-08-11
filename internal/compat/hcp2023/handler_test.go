@@ -1354,6 +1354,43 @@ func TestNeverRevokedVersionRendersNullRevokeAtLikeLiveContract(t *testing.T) {
 	}
 }
 
+func TestRestoredVersionRendersLikeNeverRevokedVersion(t *testing.T) {
+	version, err := registry.RestoreVersion(registry.Version{
+		ID:           registry.NewID(testTime),
+		BucketName:   "images",
+		Fingerprint:  "fp-restored",
+		TemplateType: registry.TemplateHCL2,
+		CreatedAt:    testTime,
+		UpdatedAt:    testTime,
+	}, true, 1, &registry.Revocation{
+		RevokeAt: testTime.Add(time.Hour), Message: "scheduled", Author: "ops",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := version.Restore(testTime.Add(2 * time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	wire, err := renderVersion(store.ParseTenant(testOrg, testProject), version, nil, testTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(encoded, []byte(`"revoke_at":null`)) ||
+		bytes.Contains(encoded, []byte(`"revocation_message"`)) ||
+		bytes.Contains(encoded, []byte(`"revocation_author"`)) ||
+		bytes.Contains(encoded, []byte(`"revocation_type"`)) ||
+		bytes.Contains(encoded, []byte(`"revocation_inherited_from"`)) {
+		t.Fatalf("restored version = %s, want the never-revoked revocation shape", encoded)
+	}
+	if wire.Status == nil || *wire.Status != models.HashicorpCloudPacker20230101VersionStatusVERSIONACTIVE {
+		t.Fatalf("restored status = %v, want VERSION_ACTIVE", wire.Status)
+	}
+}
+
 func TestVersionRevocationRendersStatusAndFields(t *testing.T) {
 	tenant := store.ParseTenant(testOrg, testProject)
 	base := registry.Version{
@@ -1441,10 +1478,11 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 	request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp-1", "template_type": "HCL2"})
 
-	// Unsupported body fields are refused loudly, never silently ignored.
+	// Unsupported or mutually exclusive body fields are refused loudly.
 	for name, body := range map[string]map[string]any{
 		"complete":              {"complete": true},
-		"restore":               {"restore": true},
+		"restore and revoke_at": {"restore": true, "revoke_at": testTime.Format(time.RFC3339)},
+		"restore and revoke_in": {"restore": true, "revoke_in": "1h"},
 		"both revoke fields":    {"revoke_at": testTime.Format(time.RFC3339), "revoke_in": "1h"},
 		"neither revoke field":  {},
 		"unparseable revoke_in": {"revoke_in": "5w"},
@@ -1458,9 +1496,22 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 		}
 	}
 
+	response := request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-1",
+		map[string]any{"restore": true})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("restore active: status = %d, want 400; body %s", response.Code, response.Body.String())
+	}
+	var refusal models.GoogleRPCStatus
+	decodeResponse(t, response, &refusal)
+	wantRestoreRefusal := "Restoring does not apply. This version is valid and it is not scheduled to be revoked. "
+	if refusal.Code != 9 || refusal.Message != wantRestoreRefusal {
+		t.Fatalf("restore active = code %d message %q; want code 9 message %q",
+			refusal.Code, refusal.Message, wantRestoreRefusal)
+	}
+
 	request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp-opt-out", "template_type": "HCL2"})
-	response := request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-opt-out",
+	response = request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-opt-out",
 		map[string]any{"disable_rollback_channels": true, "revoke_in": "0s"})
 	if response.Code != http.StatusOK {
 		t.Fatalf("disable rollback: status = %d; body %s", response.Code, response.Body.String())
@@ -1501,6 +1552,23 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 		t.Fatalf("re-revoke: status %d body %s; want 400 code 9", response.Code, response.Body.String())
 	}
 
+	response = request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-1",
+		map[string]any{"restore": true})
+	if response.Code != http.StatusOK {
+		t.Fatalf("restore revoked: status = %d; body %s", response.Code, response.Body.String())
+	}
+	updated = models.HashicorpCloudPacker20230101UpdateVersionResponse{}
+	decodeResponse(t, response, &updated)
+	if updated.Version.Status == nil ||
+		*updated.Version.Status != models.HashicorpCloudPacker20230101VersionStatusVERSIONRUNNING {
+		t.Fatalf("restored status = %v; want running for an incomplete version", updated.Version.Status)
+	}
+	if updated.Version.RevokeAt != nil || updated.Version.RevocationMessage != "" ||
+		updated.Version.RevocationAuthor != "" || updated.Version.RevocationType != nil ||
+		updated.Version.RevocationInheritedFrom != nil {
+		t.Fatalf("restored revocation fields = %#v; want cleared", updated.Version)
+	}
+
 	// The version-not-found shape matches GetVersion exactly — 409 with code 10,
 	// the Aborted quirk packer's regex reads.
 	response = request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-unknown",
@@ -1508,6 +1576,48 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), `"code":10`) {
 		t.Fatalf("unknown fingerprint: status %d body %s; want 409 code 10", response.Code, response.Body.String())
 	}
+}
+
+func TestUpdateVersionRestoreAuditsRefusalAndSuccess(t *testing.T) {
+	repository := newFakeRepository()
+	seed := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	request(t, seed, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+	request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
+		map[string]any{"fingerprint": "fp-1", "template_type": "HCL2"})
+
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	trail := &auditTrail{}
+	server = audit.NewHTTPHandler(trail, server.(audit.Resolver), server,
+		audit.StaticHMACKey("test-v1", []byte("test-audit-hmac-key")))
+	response := request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-1",
+		map[string]any{"restore": true})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("restore active status = %d, want 400", response.Code)
+	}
+	version := repository.versions["images/fp-1"]
+	if err := version.Revoke(registry.Revocation{
+		RevokeAt: testTime.Add(time.Hour), Author: "ops",
+	}, testTime); err != nil {
+		t.Fatal(err)
+	}
+	response = request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-1",
+		map[string]any{"restore": true})
+	if response.Code != http.StatusOK {
+		t.Fatalf("restore revoked status = %d, want 200; body %s", response.Code, response.Body)
+	}
+
+	responses := trail.responses(t)
+	if len(responses) != 2 || len(trail.records) != 4 {
+		t.Fatalf("audit records = %#v; want request/response pairs for refusal and success", trail.records)
+	}
+	assertAuditFields(t, responses[0], map[string]any{
+		"operation": "version.update", "target_type": "version", "target_id": "fp-1",
+		"outcome": "refused", "reason": "version_not_revoked",
+	})
+	assertAuditFields(t, responses[1], map[string]any{
+		"operation": "version.update", "target_type": "version", "target_id": "fp-1",
+		"outcome": "success",
+	}, "reason")
 }
 
 func TestParseRevokeIn(t *testing.T) {
@@ -1552,6 +1662,22 @@ func (r *fakeRepository) RevokeVersion(
 	if err := version.Revoke(registry.Revocation{
 		RevokeAt: req.RevokeAt, Message: req.Message, Author: req.Author,
 	}, at); err != nil {
+		return nil, err
+	}
+	return version, nil
+}
+
+func (r *fakeRepository) RestoreRevokedVersion(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint string,
+	at time.Time,
+) (*registry.Version, error) {
+	version, ok := r.versions[bucket+"/"+fingerprint]
+	if !ok {
+		return nil, registry.ErrNotFound
+	}
+	if err := version.Restore(at); err != nil {
 		return nil, err
 	}
 	return version, nil
