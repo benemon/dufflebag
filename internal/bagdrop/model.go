@@ -183,6 +183,11 @@ type ArtifactSnapshot struct {
 
 type RemoteBucket struct {
 	Description string `json:"description"`
+	Versions    []RemoteVersion
+}
+
+type RemoteVersion struct {
+	Fingerprint string `json:"fingerprint"`
 }
 
 type RemoteBuild struct {

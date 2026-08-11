@@ -133,10 +133,12 @@ HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
 `api.cloud.hashicorp.com` for scoped reads and destination writes. Permit egress
 to both hosts. Once an enabled configuration has active associations, the
 background reconciler creates and converges destination buckets, completed
-versions, completed builds and their artifacts. It never deletes destination
-data in this slice.
-Ordinary channels and their assignments mirror as pointers; the managed
-`latest` channel is never touched, and channel deletion is not yet propagated.
+versions, completed builds and their artifacts. Mirror semantics are complete:
+drift inside associated buckets is removed, local bucket deletions propagate,
+and un-associating deletes the destination copy. Ordinary channels and their
+assignments mirror as pointers; the managed `latest` channel is never touched.
+The association set is the reconciler's entire authority to delete: nothing
+outside an associated bucket is ever touched.
 
 `DFBG_BAGDROP_RECONCILE_INTERVAL` controls the level-reconcile cadence as a Go
 duration and defaults to `5m`; an invalid or non-positive value refuses
@@ -152,7 +154,7 @@ available because reconciliation runs outside them.
 
 Bag Drop associations select which project buckets mirror. Removing an
 association is the consent boundary for deleting its destination-side copy;
-this slice records the pending removal but does not execute remote deletion.
+the pending removal is retained and retried until that deletion succeeds.
 
 The destination client secret is always stored in an AES-256-GCM envelope. On
 an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32

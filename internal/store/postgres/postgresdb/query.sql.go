@@ -500,6 +500,19 @@ func (q *Queries) DeleteAuditTarget(ctx context.Context, id uuid.UUID) (int64, e
 	return result.RowsAffected()
 }
 
+const deleteBagDropAssociation = `-- name: DeleteBagDropAssociation :execrows
+DELETE FROM bagdrop_associations
+WHERE bucket_name = $1
+`
+
+func (q *Queries) DeleteBagDropAssociation(ctx context.Context, bucketName string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteBagDropAssociation, bucketName)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deleteBagDropConfig = `-- name: DeleteBagDropConfig :execrows
 DELETE FROM bagdrop_configs
 WHERE NOT EXISTS (
@@ -1752,7 +1765,7 @@ UPDATE bagdrop_associations
 SET first_attempted_at = COALESCE(first_attempted_at, $2),
     last_attempt_at = $2,
     updated_at = $2
-WHERE bucket_name = $1 AND state = 'active'
+WHERE bucket_name = $1
 RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
 `
 
@@ -1796,7 +1809,7 @@ const recordBagDropAssociationFailure = `-- name: RecordBagDropAssociationFailur
 UPDATE bagdrop_associations
 SET last_sync_error = $2,
     updated_at = $3
-WHERE bucket_name = $1 AND state = 'active'
+WHERE bucket_name = $1
 RETURNING organization_id, project_id, bucket_name, state, first_attempted_at, last_synced_at, created_at, updated_at, last_attempt_at, last_sync_error
 `
 

@@ -170,7 +170,7 @@ UPDATE bagdrop_associations
 SET first_attempted_at = COALESCE(first_attempted_at, $2),
     last_attempt_at = $2,
     updated_at = $2
-WHERE bucket_name = $1 AND state = 'active'
+WHERE bucket_name = $1
 RETURNING *;
 
 -- name: RecordBagDropAssociationSuccess :one
@@ -185,7 +185,7 @@ RETURNING *;
 UPDATE bagdrop_associations
 SET last_sync_error = $2,
     updated_at = $3
-WHERE bucket_name = $1 AND state = 'active'
+WHERE bucket_name = $1
 RETURNING *;
 
 -- name: BagDropBucketExists :one
@@ -208,6 +208,10 @@ SELECT CASE
     WHEN EXISTS (SELECT 1 FROM pending) THEN 'removal_pending'
     ELSE 'removed_clean'
 END AS outcome;
+
+-- name: DeleteBagDropAssociation :execrows
+DELETE FROM bagdrop_associations
+WHERE bucket_name = $1;
 
 -- name: HasBlockingBagDropAssociations :one
 SELECT EXISTS (

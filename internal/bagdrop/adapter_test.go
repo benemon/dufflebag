@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"net/url"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -172,8 +173,139 @@ func TestHCPPackerReconcileRefreshesTokenOn401Once(t *testing.T) {
 	if _, exists, err := run.GetBucket(context.Background(), "images"); err != nil || !exists {
 		t.Fatalf("GetBucket exists=%v, err=%v", exists, err)
 	}
-	if grants != 2 || requests != 2 {
-		t.Fatalf("grants=%d requests=%d, want initial+one refresh", grants, requests)
+	if grants != 2 || requests != 3 {
+		t.Fatalf("grants=%d requests=%d, want initial+refresh and bucket+version reads", grants, requests)
+	}
+}
+
+func TestHCPPackerGetBucketInventoriesAllRemoteVersions(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/buckets/images"):
+			_, _ = w.Write([]byte(`{"bucket":{"description":"fixture"}}`))
+		case strings.HasSuffix(r.URL.Path, "/buckets/images/versions") && r.URL.Query().Get("pagination.next_page_token") == "":
+			_, _ = w.Write([]byte(`{"versions":[{"fingerprint":"fp-2"}],"pagination":{"next_page_token":"next"}}`))
+		case strings.HasSuffix(r.URL.Path, "/buckets/images/versions") && r.URL.Query().Get("pagination.next_page_token") == "next":
+			_, _ = w.Write([]byte(`{"versions":[{"fingerprint":"fp-1"}],"pagination":{}}`))
+		default:
+			t.Fatalf("unexpected request: %s", r.URL.String())
+		}
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bucket, exists, err := run.GetBucket(context.Background(), "images")
+	if err != nil || !exists || len(bucket.Versions) != 2 ||
+		bucket.Versions[0].Fingerprint != "fp-2" || bucket.Versions[1].Fingerprint != "fp-1" {
+		t.Fatalf("GetBucket = %#v, %v, %v", bucket, exists, err)
+	}
+}
+
+func TestHCPPackerListBuildsInventoriesAllRemoteBuilds(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("pagination.next_page_token") == "" {
+			_, _ = w.Write([]byte(`{"builds":[{"id":"build-2","component_type":"googlecompute"}],"pagination":{"next_page_token":"next"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"builds":[{"id":"build-1","component_type":"amazon-ebs"}],"pagination":{}}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	builds, err := run.ListBuilds(context.Background(), "images", "fp-1")
+	if err != nil || len(builds) != 2 || builds[0].ID != "build-2" || builds[1].ID != "build-1" {
+		t.Fatalf("ListBuilds = %#v, %v", builds, err)
+	}
+}
+
+func TestHCPPackerDelete404Code5IsIdempotentSuccess(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete {
+			t.Errorf("method = %s, want DELETE", r.Method)
+		}
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write([]byte(`{"code":5,"message":"already absent","details":[]}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, deleteTarget := range map[string]func() error{
+		"bucket":  func() error { return run.DeleteBucket(context.Background(), "images") },
+		"version": func() error { return run.DeleteVersion(context.Background(), "images", "fp-1") },
+		"build":   func() error { return run.DeleteBuild(context.Background(), "images", "fp-1", "build-1") },
+		"channel": func() error { return run.DeleteChannel(context.Background(), "images", "production") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			if err := deleteTarget(); err != nil {
+				t.Fatalf("404/code-5 = %v", err)
+			}
+		})
+	}
+}
+
+func TestHCPPackerDeletesUseVendoredPathsAndDoNotTolerateConflict(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	var paths []string
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.Method+" "+r.URL.Path)
+		if strings.HasSuffix(r.URL.Path, "/channels/refused") {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write([]byte(alreadyExistsFixture))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.DeleteChannel(context.Background(), "images", "production"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.DeleteVersion(context.Background(), "images", "fp-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.DeleteBuild(context.Background(), "images", "fp-1", "build-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.DeleteBucket(context.Background(), "images"); err != nil {
+		t.Fatal(err)
+	}
+	err = run.DeleteChannel(context.Background(), "images", "refused")
+	if !remoteError(err, http.StatusConflict, 6) {
+		t.Fatalf("delete 409/code-6 = %v, want failure", err)
+	}
+	want := []string{
+		"DELETE /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/channels/production",
+		"DELETE /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1",
+		"DELETE /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1/builds/build-1",
+		"DELETE /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images",
+		"DELETE /packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/channels/refused",
+	}
+	if strings.Join(paths, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("delete paths = %v, want %v", paths, want)
 	}
 }
 
