@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/url"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -3017,5 +3018,162 @@ func TestRevokeVersionSkipsDescendantsWhenAsked(t *testing.T) {
 	}
 	if child.Revocation() != nil {
 		t.Fatalf("child revocation = %+v; skip_descendants_revocation must leave it untouched", child.Revocation())
+	}
+}
+
+func seedRestoreVersionGraph(
+	t *testing.T,
+	repository *store.Repository,
+	tenant store.Tenant,
+	at time.Time,
+	parents map[string][]string,
+) map[string]*registry.Version {
+	t.Helper()
+	versions := make(map[string]*registry.Version)
+	names := make([]string, 0, len(parents))
+	for name := range parents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for i, name := range names {
+		when := at.Add(time.Duration(i) * time.Minute)
+		if _, err := repository.CreateBucket(context.Background(), tenant, store.Bucket{
+			ID: registry.NewID(when), Name: name, Labels: map[string]string{}, CreatedAt: when,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		version, err := registry.RestoreVersion(registry.Version{
+			ID: registry.NewID(when.Add(time.Second)), BucketName: name,
+			Fingerprint: name + "-fp", TemplateType: registry.TemplateHCL2,
+			CreatedAt: when, UpdatedAt: when,
+		}, true, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.CreateVersion(context.Background(), tenant, version); err != nil {
+			t.Fatal(err)
+		}
+		versions[name] = version
+	}
+	for _, name := range names {
+		for i, parent := range parents[name] {
+			when := at.Add(time.Duration(len(names)+i) * time.Minute)
+			if _, err := repository.CreateBuild(context.Background(), tenant, name, name+"-fp",
+				registry.TemplateHCL2, store.StoredBuild{
+					Build: registry.Build{
+						ID: registry.NewID(when), ComponentType: fmt.Sprintf("docker-%d", i),
+						Status: registry.BuildRunning, Platform: "docker",
+					},
+					Labels:          map[string]string{},
+					ParentVersionID: versions[parent].ID.String(),
+					CreatedAt:       when,
+				}); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	return versions
+}
+
+func TestRestoreRevokedVersionClearsMatchingInheritedDescendantsAndAllowsRerevoke(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	seedRestoreVersionGraph(t, repository, tenant, at, map[string][]string{
+		"base": nil, "derived": {"base"}, "leaf": {"derived"},
+	})
+	wireName := func(*registry.Version) string { return "v1" }
+	if _, err := repository.RevokeVersion(ctx, tenant, "base", "base-fp",
+		store.RevocationRequest{RevokeAt: at.Add(time.Hour), Author: "ops"},
+		wireName, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RestoreRevokedVersion(ctx, tenant, "base", "base-fp", at.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"base", "derived", "leaf"} {
+		version, err := repository.GetVersion(ctx, tenant, name, name+"-fp")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version.Revocation() != nil {
+			t.Fatalf("%s revocation = %+v; want cleared", name, version.Revocation())
+		}
+	}
+	if _, err := repository.RevokeVersion(ctx, tenant, "base", "base-fp",
+		store.RevocationRequest{RevokeAt: at.Add(3 * time.Hour), Author: "security"},
+		wireName, at.Add(3*time.Hour)); err != nil {
+		t.Fatalf("revoke after restore: %v", err)
+	}
+}
+
+func TestRestoreRevokedVersionLeavesManualDescendantRevoked(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 11, 10, 0, 0, 0, time.UTC)
+	seedRestoreVersionGraph(t, repository, tenant, at, map[string][]string{
+		"base": nil, "child": {"base"},
+	})
+	wireName := func(*registry.Version) string { return "v1" }
+	if _, err := repository.RevokeVersion(ctx, tenant, "child", "child-fp",
+		store.RevocationRequest{RevokeAt: at.Add(time.Hour), Message: "manual", Author: "security"},
+		wireName, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RevokeVersion(ctx, tenant, "base", "base-fp",
+		store.RevocationRequest{RevokeAt: at.Add(2 * time.Hour), Author: "ops"},
+		wireName, at.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RestoreRevokedVersion(ctx, tenant, "base", "base-fp", at.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	child, err := repository.GetVersion(ctx, tenant, "child", "child-fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev := child.Revocation(); rev == nil || rev.InheritedFrom != nil ||
+		rev.Author != "security" || rev.Message != "manual" {
+		t.Fatalf("child revocation = %+v; manual revocation must stand", rev)
+	}
+}
+
+func TestRestoreRevokedVersionLeavesDescendantInheritedFromDifferentAncestor(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 11, 11, 0, 0, 0, time.UTC)
+	versions := seedRestoreVersionGraph(t, repository, tenant, at, map[string][]string{
+		"base": nil, "other": nil, "child": {"base", "other"},
+	})
+	wireName := func(*registry.Version) string { return "v1" }
+	if _, err := repository.RevokeVersion(ctx, tenant, "other", "other-fp",
+		store.RevocationRequest{RevokeAt: at.Add(time.Hour), Author: "other-owner"},
+		wireName, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RevokeVersion(ctx, tenant, "base", "base-fp",
+		store.RevocationRequest{RevokeAt: at.Add(2 * time.Hour), Author: "ops"},
+		wireName, at.Add(2*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RestoreRevokedVersion(ctx, tenant, "base", "base-fp", at.Add(3*time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	child, err := repository.GetVersion(ctx, tenant, "child", "child-fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rev := child.Revocation(); rev == nil || rev.InheritedFrom == nil ||
+		rev.InheritedFrom.VersionID != versions["other"].ID || rev.Author != "other-owner" {
+		t.Fatalf("child revocation = %+v; different ancestor's inherited revocation must stand", rev)
 	}
 }

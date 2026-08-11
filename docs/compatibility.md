@@ -273,7 +273,7 @@ routed and tested:
 | `AssignChannelVersion` | `POST` | `/buckets/{bucket_name}/channels/assign` | publisher |
 | `DeleteChannel` | `DELETE` | `/buckets/{bucket_name}/channels/{channel_name}` | publisher |
 | `DeleteBucket` | `DELETE` | `/buckets/{bucket_name}` | publisher |
-| `UpdateVersion` (revocation) | `PATCH` | `/buckets/{bucket_name}/versions/{fingerprint}` | publisher |
+| `UpdateVersion` (revocation and restore) | `PATCH` | `/buckets/{bucket_name}/versions/{fingerprint}` | publisher |
 | `ListSboms` | `GET` | `.../builds/{build_id}/sboms` | reader |
 | `GetSbom` | `GET` | `.../builds/{build_id}/sboms/{sbom_name}` | reader |
 | `DownloadSbom` | `GET` | `.../builds/{build_id}/sboms/{sbom_name}/download` | reader |
@@ -295,9 +295,19 @@ transitively down the recorded build ancestry with
 `revocation_type: INHERITED` and a `revocation_inherited_from` naming the
 revoked ancestor; a descendant already revoked keeps its own record. Neither
 Packer nor terraform-provider-hcp ever calls `UpdateVersion`, so the write
-side carries no bug-for-bug pressure; two capabilities are refused with
-code 3 rather than silently ignored, as deliberate divergences: `complete`
-(completion is derived from builds here) and `restore`.
+side carries no bug-for-bug pressure. `complete` remains refused with code 3
+rather than silently ignored because completion is derived from builds here.
+
+**Version restore, served 2026-08-11.** `restore: true` clears a `REVOKED` or
+`REVOCATION_SCHEDULED` version and, in the same transaction, every descendant
+whose inherited revocation names that version. Manual descendant revocations
+and revocations inherited from another ancestor stand. Restoring an active
+version returns code 9 with the live message `Restoring does not apply. This
+version is valid and it is not scheduled to be revoked. ` (including the
+trailing space); combining restore with `revoke_at` or `revoke_in` returns code
+3. Restore does not forward-roll channel assignments. In the recorded diamond
+limit, a descendant also covered by a second still-revoked ancestor becomes
+active because inheritance is computed at revoke time only (duf-1hy6).
 
 Channel rollback matches upstream (duf-h37y, confirmed by a 2026-08-09 live
 probe: revoking a version rolls every channel then pointing at it — user

@@ -365,6 +365,61 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 		t.Fatal("the latest channel's nested version lost its revocation")
 	}
 
+	// A legitimate restore re-seals the cleared row, so both direct and nested
+	// reads continue to verify and project the version as active.
+	if _, err := repository.RestoreRevokedVersion(ctx, tenant, bucketName, fingerprint,
+		build.CreatedAt.Add(3*time.Minute)); err != nil {
+		t.Fatalf("RestoreRevokedVersion under encryption: %v", err)
+	}
+	restored, err := repository.GetVersion(ctx, tenant, bucketName, fingerprint)
+	if err != nil {
+		t.Fatalf("GetVersion after restore: %v", err)
+	}
+	if restored.Revocation() != nil {
+		t.Fatalf("restored revocation = %+v; want cleared", restored.Revocation())
+	}
+	latestChannel, err = repository.GetChannel(ctx, tenant, bucketName, "latest")
+	if err != nil {
+		t.Fatalf("GetChannel latest after restore: %v", err)
+	}
+	if latestChannel.Version == nil || latestChannel.Version.Revocation() != nil {
+		t.Fatal("the latest channel's nested version was not restored")
+	}
+	if _, err := repository.RevokeVersion(ctx, tenant, bucketName, fingerprint,
+		store.RevocationRequest{RevokeAt: build.CreatedAt.Add(4 * time.Minute), Author: "ops"},
+		func(*registry.Version) string { return "v1" }, build.CreatedAt.Add(4*time.Minute)); err != nil {
+		t.Fatalf("RevokeVersion after restore under encryption: %v", err)
+	}
+
+	// Mutation: forge a restore on another sealed row by clearing the seven
+	// revocation columns without recomputing its MAC. The read must refuse it.
+	forgedBucket, forgedFingerprint, forgedBuild := seedEncryptedBuild(t, repository, tenant, "forged-restore")
+	if _, err := repository.RevokeVersion(ctx, tenant, forgedBucket, forgedFingerprint,
+		store.RevocationRequest{RevokeAt: forgedBuild.CreatedAt.Add(time.Minute), Author: "ops"},
+		func(*registry.Version) string { return "v0" }, forgedBuild.CreatedAt.Add(time.Minute)); err != nil {
+		t.Fatalf("revoke forged-restore fixture: %v", err)
+	}
+	forgedRestore, err := store.BeginTenant(ctx, db, orgA, projectA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := forgedRestore.Exec(`
+		UPDATE versions
+		SET revoke_at = NULL, revocation_message = NULL, revocation_author = NULL,
+		    revocation_inherited_from_id = NULL, revocation_inherited_from_bucket = NULL,
+		    revocation_inherited_from_fingerprint = NULL, revocation_inherited_from_name = NULL
+		WHERE fingerprint = $1`, forgedFingerprint); err != nil {
+		t.Fatalf("forge restore: %v", err)
+	}
+	if err := forgedRestore.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetVersion(ctx, tenant, forgedBucket, forgedFingerprint); err == nil {
+		t.Fatal("forged restore was served")
+	} else if !strings.Contains(err.Error(), "integrity verification failed") {
+		t.Fatalf("forged restore error = %v, want integrity failure", err)
+	}
+
 	// Mutation: forge the revocation author. The read must refuse, not serve it.
 	forge, err := store.BeginTenant(ctx, db, orgA, projectA)
 	if err != nil {

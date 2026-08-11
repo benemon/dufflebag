@@ -228,6 +228,38 @@ func TestRevokeRecordsStateAndRefusesASecondRevocation(t *testing.T) {
 	}
 }
 
+func TestRestoreClearsRevocationAndAllowsRerevoke(t *testing.T) {
+	v := newVersion(t)
+	first := Revocation{RevokeAt: epoch.Add(time.Hour), Author: "ops"}
+	if err := v.Revoke(first, epoch); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	restoredAt := epoch.Add(2 * time.Hour)
+	if err := v.Restore(restoredAt); err != nil {
+		t.Fatalf("Restore: %v", err)
+	}
+	if v.Revocation() != nil {
+		t.Fatalf("Revocation() = %+v; want cleared", v.Revocation())
+	}
+	if !v.UpdatedAt.Equal(restoredAt) {
+		t.Fatalf("UpdatedAt = %v; want restore time", v.UpdatedAt)
+	}
+	second := Revocation{RevokeAt: restoredAt.Add(time.Hour), Author: "security"}
+	if err := v.Revoke(second, restoredAt); err != nil {
+		t.Fatalf("Revoke after restore: %v", err)
+	}
+	if got := v.Revocation(); got == nil || got.Author != "security" {
+		t.Fatalf("Revocation() = %+v; want the replacement revocation", got)
+	}
+}
+
+func TestRestoreRefusesValidVersion(t *testing.T) {
+	v := newVersion(t)
+	if err := v.Restore(epoch); !errors.Is(err, ErrConflict) {
+		t.Fatalf("Restore = %v; want ErrConflict", err)
+	}
+}
+
 func TestRevokeRejectsBadInput(t *testing.T) {
 	cases := []struct {
 		name string

@@ -53,6 +53,7 @@ type Repository interface {
 	GetBuild(context.Context, store.Tenant, string, string, string) (*store.StoredBuild, error)
 	UpdateBuild(context.Context, store.Tenant, string, string, store.StoredBuild, time.Time) (*store.StoredBuild, error)
 	RevokeVersion(context.Context, store.Tenant, string, string, store.RevocationRequest, func(*registry.Version) string, time.Time) (*registry.Version, error)
+	RestoreRevokedVersion(context.Context, store.Tenant, string, string, time.Time) (*registry.Version, error)
 	UploadSbom(context.Context, store.Tenant, string, string, string, store.Sbom) (*store.Sbom, error)
 	ListSboms(context.Context, store.Tenant, string, string, string) ([]store.Sbom, error)
 	GetSbom(context.Context, store.Tenant, string, string, string, string) (*store.Sbom, error)
@@ -774,10 +775,10 @@ func (h *handler) createVersion(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &models.HashicorpCloudPacker20230101CreateVersionResponse{Version: wire})
 }
 
-// updateVersion serves the revocation half of PackerService_UpdateVersion.
+// updateVersion serves the revocation capabilities of PackerService_UpdateVersion.
 //
-// The body's other capabilities are refused loudly rather than silently
-// ignored: "complete" (completion is derived from builds here) and "restore".
+// Completion is refused loudly rather than silently ignored because it is
+// derived from builds here.
 func (h *handler) updateVersion(w http.ResponseWriter, r *http.Request) {
 	var body models.HashicorpCloudPacker20230101UpdateVersionBody
 	if !h.decodeBody(w, r, &body) {
@@ -787,37 +788,45 @@ func (h *handler) updateVersion(w http.ResponseWriter, r *http.Request) {
 	case body.Complete:
 		writeRPCError(w, http.StatusBadRequest, 3, "completion is derived from builds; the complete field is not supported")
 		return
-	case body.Restore:
-		writeRPCError(w, http.StatusBadRequest, 3, "restore is not supported")
-		return
 	}
 	hasAt := !time.Time(body.RevokeAt).IsZero()
-	if hasAt == (body.RevokeIn != "") {
-		writeRPCError(w, http.StatusBadRequest, 3, "exactly one of revoke_at and revoke_in must be set")
-		return
-	}
 	at := h.now().UTC()
-	effectAt := time.Time(body.RevokeAt).UTC()
-	if !hasAt {
-		wait, err := parseRevokeIn(body.RevokeIn)
-		if err != nil {
-			writeRPCError(w, http.StatusBadRequest, 3, err.Error())
+	var version *registry.Version
+	var err error
+	if body.Restore {
+		if hasAt || body.RevokeIn != "" {
+			writeRPCError(w, http.StatusBadRequest, 3, "restore is mutually exclusive with revoke_at and revoke_in")
 			return
 		}
-		effectAt = at.Add(wait)
+		version, err = h.repository.RestoreRevokedVersion(
+			r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"), at,
+		)
+	} else {
+		if hasAt == (body.RevokeIn != "") {
+			writeRPCError(w, http.StatusBadRequest, 3, "exactly one of revoke_at and revoke_in must be set")
+			return
+		}
+		effectAt := time.Time(body.RevokeAt).UTC()
+		if !hasAt {
+			wait, parseErr := parseRevokeIn(body.RevokeIn)
+			if parseErr != nil {
+				writeRPCError(w, http.StatusBadRequest, 3, parseErr.Error())
+				return
+			}
+			effectAt = at.Add(wait)
+		}
+		version, err = h.repository.RevokeVersion(
+			r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"),
+			store.RevocationRequest{
+				RevokeAt:                effectAt,
+				Message:                 body.RevocationMessage,
+				Author:                  principalName(r),
+				SkipDescendants:         body.SkipDescendantsRevocation,
+				DisableRollbackChannels: body.DisableRollbackChannels,
+			},
+			versionName, at,
+		)
 	}
-
-	version, err := h.repository.RevokeVersion(
-		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"),
-		store.RevocationRequest{
-			RevokeAt:                effectAt,
-			Message:                 body.RevocationMessage,
-			Author:                  principalName(r),
-			SkipDescendants:         body.SkipDescendantsRevocation,
-			DisableRollbackChannels: body.DisableRollbackChannels,
-		},
-		versionName, at,
-	)
 	if errors.Is(err, registry.ErrNotFound) {
 		audit.FromContext(r.Context()).Enrich(audit.Enrichment{
 			Outcome: identity.AuditOutcomeRefused, Reason: "version_not_found",
@@ -827,6 +836,14 @@ func (h *handler) updateVersion(w http.ResponseWriter, r *http.Request) {
 	}
 	if errors.Is(err, registry.ErrConflict) {
 		// Code 9 pairs with HTTP 400 on live HCP, not 409 (dossier §5.1).
+		if body.Restore {
+			audit.FromContext(r.Context()).Enrich(audit.Enrichment{
+				Outcome: identity.AuditOutcomeRefused, Reason: "version_not_revoked",
+			})
+			writeRPCError(w, http.StatusBadRequest, 9,
+				"Restoring does not apply. This version is valid and it is not scheduled to be revoked. ")
+			return
+		}
 		writeRPCError(w, http.StatusBadRequest, 9, err.Error())
 		return
 	}

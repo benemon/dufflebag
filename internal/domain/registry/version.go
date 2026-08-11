@@ -105,8 +105,8 @@ type Version struct {
 	complete bool
 	sequence int
 
-	// revocation is unexported for the same reason: only Revoke sets it, and
-	// a version cannot be revoked twice.
+	// revocation is unexported for the same reason: only Revoke and Restore
+	// change it, and a version cannot be revoked twice without a restore.
 	revocation *Revocation
 }
 
@@ -150,9 +150,8 @@ func (v *Version) Revocation() *Revocation { return v.revocation }
 // Revoke records a revocation, manual or inherited.
 //
 // An already-revoked version is refused rather than overwritten: a manual
-// revocation must not be silently replaced by an inherited one arriving later,
-// and re-revoking with a different effect time is a restore-then-revoke, which
-// is deliberately not built.
+// revocation must not be silently replaced by an inherited one arriving later.
+// A caller that means to replace a revocation must restore, then revoke again.
 func (v *Version) Revoke(rev Revocation, at time.Time) error {
 	switch {
 	case v.revocation != nil:
@@ -169,6 +168,16 @@ func (v *Version) Revoke(rev Revocation, at time.Time) error {
 	}
 
 	v.revocation = &rev
+	v.UpdatedAt = at
+	return nil
+}
+
+// Restore clears a version's revocation state.
+func (v *Version) Restore(at time.Time) error {
+	if v.revocation == nil {
+		return fmt.Errorf("%w: version %s is not revoked", ErrConflict, v.ID)
+	}
+	v.revocation = nil
 	v.UpdatedAt = at
 	return nil
 }

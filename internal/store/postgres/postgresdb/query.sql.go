@@ -2127,6 +2127,92 @@ func (q *Queries) TouchSecretLastUsed(ctx context.Context, arg TouchSecretLastUs
 	return err
 }
 
+const unrevokeInheritedVersion = `-- name: UnrevokeInheritedVersion :one
+UPDATE versions
+SET revoke_at = NULL, revocation_message = NULL, revocation_author = NULL,
+    revocation_inherited_from_id = NULL, revocation_inherited_from_bucket = NULL,
+    revocation_inherited_from_fingerprint = NULL, revocation_inherited_from_name = NULL,
+    updated_at = $1
+WHERE id = $2
+  AND revocation_inherited_from_id = CAST($3 AS text)
+RETURNING organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at, author_id, integrity_mac, revoke_at, revocation_message, revocation_author, revocation_inherited_from_id, revocation_inherited_from_bucket, revocation_inherited_from_fingerprint, revocation_inherited_from_name
+`
+
+type UnrevokeInheritedVersionParams struct {
+	UpdatedAt  time.Time `json:"updated_at"`
+	ID         string    `json:"id"`
+	RestoredID string    `json:"restored_id"`
+}
+
+func (q *Queries) UnrevokeInheritedVersion(ctx context.Context, arg UnrevokeInheritedVersionParams) (Version, error) {
+	row := q.db.QueryRowContext(ctx, unrevokeInheritedVersion, arg.UpdatedAt, arg.ID, arg.RestoredID)
+	var i Version
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.ID,
+		&i.BucketID,
+		&i.Fingerprint,
+		&i.TemplateType,
+		&i.Complete,
+		&i.Sequence,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuthorID,
+		&i.IntegrityMac,
+		&i.RevokeAt,
+		&i.RevocationMessage,
+		&i.RevocationAuthor,
+		&i.RevocationInheritedFromID,
+		&i.RevocationInheritedFromBucket,
+		&i.RevocationInheritedFromFingerprint,
+		&i.RevocationInheritedFromName,
+	)
+	return i, err
+}
+
+const unrevokeVersion = `-- name: UnrevokeVersion :one
+UPDATE versions
+SET revoke_at = NULL, revocation_message = NULL, revocation_author = NULL,
+    revocation_inherited_from_id = NULL, revocation_inherited_from_bucket = NULL,
+    revocation_inherited_from_fingerprint = NULL, revocation_inherited_from_name = NULL,
+    updated_at = $2
+WHERE id = $1 AND revoke_at IS NOT NULL
+RETURNING organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at, author_id, integrity_mac, revoke_at, revocation_message, revocation_author, revocation_inherited_from_id, revocation_inherited_from_bucket, revocation_inherited_from_fingerprint, revocation_inherited_from_name
+`
+
+type UnrevokeVersionParams struct {
+	ID        string    `json:"id"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (q *Queries) UnrevokeVersion(ctx context.Context, arg UnrevokeVersionParams) (Version, error) {
+	row := q.db.QueryRowContext(ctx, unrevokeVersion, arg.ID, arg.UpdatedAt)
+	var i Version
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.ID,
+		&i.BucketID,
+		&i.Fingerprint,
+		&i.TemplateType,
+		&i.Complete,
+		&i.Sequence,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuthorID,
+		&i.IntegrityMac,
+		&i.RevokeAt,
+		&i.RevocationMessage,
+		&i.RevocationAuthor,
+		&i.RevocationInheritedFromID,
+		&i.RevocationInheritedFromBucket,
+		&i.RevocationInheritedFromFingerprint,
+		&i.RevocationInheritedFromName,
+	)
+	return i, err
+}
+
 const updateBucket = `-- name: UpdateBucket :one
 UPDATE buckets
 SET description = $2, labels = $3, updated_at = $4
