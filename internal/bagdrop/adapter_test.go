@@ -1,8 +1,10 @@
 package bagdrop
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +12,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Source: internal/compat/hcpauth/handler.go tokenResponse and docs/compatibility.md §3.
@@ -227,6 +231,181 @@ func TestHCPPackerListBuildsInventoriesAllRemoteBuilds(t *testing.T) {
 	builds, err := run.ListBuilds(context.Background(), "images", "fp-1")
 	if err != nil || len(builds) != 2 || builds[0].ID != "build-2" || builds[1].ID != "build-1" {
 		t.Fatalf("ListBuilds = %#v, %v", builds, err)
+	}
+}
+
+func TestHCPPackerVersionRevocationRequestsUseVendoredShape(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	revokeAt := time.Date(2026, 8, 11, 12, 0, 0, 123000000, time.UTC)
+	var bodies []map[string]any
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		wantPath := "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1"
+		if request.URL.Path != wantPath {
+			t.Errorf("version path = %s", request.URL.Path)
+		}
+		if request.Method == http.MethodGet {
+			_, _ = w.Write([]byte(`{"version":{"fingerprint":"fp-1","revoke_at":"2026-08-11T12:00:00.123Z","revocation_message":"superseded"}}`))
+			return
+		}
+		if request.Method != http.MethodPatch {
+			t.Errorf("version method = %s", request.Method)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		bodies = append(bodies, body)
+		_, _ = w.Write([]byte(`{"version":{"fingerprint":"fp-1"}}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	remote, exists, err := run.GetVersion(context.Background(), "images", "fp-1")
+	if err != nil || !exists || remote.RevokeAt == nil || remote.RevocationMessage != "superseded" {
+		t.Fatalf("GetVersion = %#v, %v, %v", remote, exists, err)
+	}
+	if err := run.RevokeVersion(context.Background(), "images", "fp-1", revokeAt, "superseded"); err != nil {
+		t.Fatal(err)
+	}
+	if err := run.RestoreVersion(context.Background(), "images", "fp-1"); err != nil {
+		t.Fatal(err)
+	}
+	if len(bodies) != 2 || bodies[0]["revoke_at"] != revokeAt.Format(time.RFC3339Nano) ||
+		bodies[0]["revocation_message"] != "superseded" || bodies[0]["skip_descendants_revocation"] != true {
+		t.Fatalf("revoke body = %#v", bodies)
+	}
+	if len(bodies[1]) != 1 || bodies[1]["restore"] != true {
+		t.Fatalf("restore body = %#v", bodies[1])
+	}
+}
+
+func TestHCPPackerSbomPresenceAndUploadUseVendoredShape(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	document := []byte(`{"bomFormat":"CycloneDX","specVersion":"1.6"}`)
+	uploads := 0
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		wantPath := "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1/builds/build-1/sboms"
+		if request.URL.Path != wantPath {
+			t.Errorf("SBOM path = %s", request.URL.Path)
+		}
+		switch request.Method {
+		case http.MethodGet:
+			if request.URL.Query().Get("pagination.next_page_token") == "" {
+				_, _ = w.Write([]byte(`{"sboms":[{"name":"first","format":"SPDX"}],"pagination":{"next_page_token":"next"}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"sboms":[{"name":"second","format":"CYCLONEDX"}],"pagination":{}}`))
+		case http.MethodPut:
+			uploads++
+			var body struct {
+				CompressedSbom []byte `json:"compressed_sbom"`
+				Format         string `json:"format"`
+				Name           string `json:"name"`
+			}
+			if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+				t.Fatal(err)
+			}
+			reader, err := zstd.NewReader(bytes.NewReader(body.CompressedSbom))
+			if err != nil {
+				t.Fatal(err)
+			}
+			opened, err := io.ReadAll(reader)
+			reader.Close()
+			if err != nil || !bytes.Equal(opened, document) || body.Format != "CYCLONEDX" || body.Name != "manifest" {
+				t.Errorf("upload body format=%q name=%q document=%q err=%v", body.Format, body.Name, opened, err)
+			}
+			_, _ = w.Write([]byte(`{"sbom":{"name":"manifest","format":"CYCLONEDX"}}`))
+		default:
+			t.Errorf("SBOM method = %s", request.Method)
+		}
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sboms, err := run.ListSboms(context.Background(), "images", "fp-1", "build-1")
+	if err != nil || len(sboms) != 2 || sboms[0].Name != "first" || sboms[1].Name != "second" {
+		t.Fatalf("ListSboms = %#v, %v", sboms, err)
+	}
+	if err := run.UploadSbom(context.Background(), "images", "fp-1", "build-1", SbomSnapshot{
+		Name: "manifest", Format: "CYCLONEDX", Document: document,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if uploads != 1 {
+		t.Fatalf("uploads = %d", uploads)
+	}
+}
+
+func TestHCPPackerUpdateBuildRunningUsesMinimalBody(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		wantPath := "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1/builds/build-1"
+		if request.Method != http.MethodPatch || request.URL.Path != wantPath {
+			t.Errorf("running update = %s %s", request.Method, request.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if len(body) != 1 || body["status"] != "BUILD_RUNNING" {
+			t.Errorf("running body = %#v", body)
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := run.UpdateBuildRunning(context.Background(), "images", "fp-1", "build-1"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestHCPPackerSbomSizeRefusalClassificationIncludesBare504(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		status int
+		body   string
+	}{
+		{name: "A.8 bare gateway timeout", status: http.StatusGatewayTimeout},
+		{name: "payload too large", status: http.StatusRequestEntityTooLarge},
+		{name: "size-shaped application refusal", status: http.StatusBadRequest, body: `{"code":3,"message":"compressed SBOM size exceeds maximum limit"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				_, _ = w.Write([]byte(tokenSuccessFixture))
+			}))
+			defer auth.Close()
+			api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				w.WriteHeader(test.status)
+				_, _ = w.Write([]byte(test.body))
+			}))
+			defer api.Close()
+			run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = run.UploadSbom(context.Background(), "images", "fp-1", "build-1", SbomSnapshot{
+				Name: "oversized", Format: "SPDX", Document: []byte("document"),
+			})
+			if !sbomSizeRefusal(err) {
+				t.Fatalf("size refusal = %v", err)
+			}
+		})
 	}
 }
 

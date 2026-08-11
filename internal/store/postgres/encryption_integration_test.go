@@ -274,6 +274,24 @@ func TestEncryptedSbomBytesAreSealedInObjectStorage(t *testing.T) {
 	if !bytes.Equal(downloaded, []byte(documentSource)) {
 		t.Fatal("download proxy did not return the document")
 	}
+
+	completed := *build
+	completed.Status = registry.BuildDone
+	completed.MetadataSeen = true
+	if _, err := repository.UpdateBuild(
+		ctx, tenant, bucketName, fingerprint, completed, build.CreatedAt.Add(2*time.Second),
+	); err != nil {
+		t.Fatalf("complete encrypted build: %v", err)
+	}
+	snapshot, err := repository.GetBagDropBucketSnapshot(ctx, orgA, projectA, bucketName)
+	if err != nil {
+		t.Fatalf("GetBagDropBucketSnapshot: %v", err)
+	}
+	if len(snapshot.Versions) != 1 || len(snapshot.Versions[0].Builds) != 1 ||
+		len(snapshot.Versions[0].Builds[0].Sboms) != 1 ||
+		!bytes.Equal(snapshot.Versions[0].Builds[0].Sboms[0].Document, []byte(documentSource)) {
+		t.Fatalf("Bag Drop snapshot did not use opened SBOM bytes: %#v", snapshot.Versions)
+	}
 }
 
 // The whole encrypted provenance chain in one flow — build completion writes

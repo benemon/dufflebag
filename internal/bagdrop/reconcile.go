@@ -18,6 +18,12 @@ var (
 	ErrAuditUnavailable     = errors.New("bag drop sync audit is unavailable")
 )
 
+type surfacedSyncError struct {
+	messages []string
+}
+
+func (e *surfacedSyncError) Error() string { return strings.Join(e.messages, "; ") }
+
 type ReconcileRepository interface {
 	ListBagDropProjects(context.Context) ([]Project, error)
 	GetBagDropConfig(context.Context, string, string) (*Record, error)
@@ -285,6 +291,10 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 		); err != nil {
 			return err
 		}
+		var surfaced *surfacedSyncError
+		if errors.As(associationErr, &surfaced) {
+			continue
+		}
 		if errors.Is(associationErr, ErrAuditUnavailable) {
 			return associationErr
 		}
@@ -328,8 +338,9 @@ func (r *Reconciler) reconcileBucket(
 		}
 	}
 	remoteBuildsByVersion := make(map[string][]RemoteBuild, len(bucket.Versions))
+	var surfaced []string
 	for _, version := range bucket.Versions {
-		exists, err := run.GetVersion(ctx, bucket.Name, version.Fingerprint)
+		remoteVersion, exists, err := run.GetVersion(ctx, bucket.Name, version.Fingerprint)
 		if err != nil {
 			return err
 		}
@@ -338,6 +349,22 @@ func (r *Reconciler) reconcileBucket(
 				func() error { return run.CreateVersion(ctx, bucket.Name, version) }); err != nil {
 				return err
 			}
+			remoteVersion, exists, err = run.GetVersion(ctx, bucket.Name, version.Fingerprint)
+			if err != nil {
+				return err
+			}
+			if !exists {
+				return errors.New("created destination version was not returned by GetVersion")
+			}
+		}
+		if version.RevokeAt == nil && remoteVersion.RevokeAt != nil {
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.version.restore", "version",
+				version.Fingerprint, "", func() error {
+					return run.RestoreVersion(ctx, bucket.Name, version.Fingerprint)
+				}); err != nil {
+				return err
+			}
+			remoteVersion.RevokeAt = nil
 		}
 		remoteBuilds, err := run.ListBuilds(ctx, bucket.Name, version.Fingerprint)
 		if err != nil {
@@ -346,13 +373,10 @@ func (r *Reconciler) reconcileBucket(
 		remoteBuildsByVersion[version.Fingerprint] = remoteBuilds
 		for _, build := range version.Builds {
 			remoteBuild := findRemoteBuild(remoteBuilds, build.ComponentType)
-			if remoteBuild != nil && remoteBuild.Status == "BUILD_DONE" {
-				continue
-			}
-			if build.PackerRunUUID == "" {
-				return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
-			}
 			if remoteBuild == nil {
+				if build.PackerRunUUID == "" {
+					return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
+				}
 				var buildID string
 				if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.create", "build",
 					version.Fingerprint+"/"+build.ComponentType, "", func() error {
@@ -373,11 +397,88 @@ func (r *Reconciler) reconcileBucket(
 					}
 					buildID = remoteBuild.ID
 				}
-				remoteBuild = &RemoteBuild{ID: buildID, ComponentType: build.ComponentType}
+				remoteBuild = &RemoteBuild{ID: buildID, ComponentType: build.ComponentType, Status: "BUILD_PENDING"}
 			}
-			if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.update", "build",
-				version.Fingerprint+"/"+build.ComponentType, "",
-				func() error { return run.UpdateBuild(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID, build) }); err != nil {
+			if remoteBuild.Status != "BUILD_DONE" && len(build.Sboms) == 0 {
+				if build.PackerRunUUID == "" {
+					return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
+				}
+				if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.update", "build",
+					version.Fingerprint+"/"+build.ComponentType, "",
+					func() error { return run.UpdateBuild(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID, build) }); err != nil {
+					return err
+				}
+				remoteBuild.Status = "BUILD_DONE"
+			}
+			remoteSboms, err := run.ListSboms(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID)
+			if err != nil {
+				return err
+			}
+			remoteSbomNames := make(map[string]bool, len(remoteSboms))
+			for _, sbom := range remoteSboms {
+				remoteSbomNames[sbom.Name] = true
+			}
+			localSbomNames := make(map[string]bool, len(build.Sboms))
+			if remoteBuild.Status != "BUILD_DONE" {
+				if build.PackerRunUUID == "" {
+					return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
+				}
+				if len(build.Sboms) > 0 && remoteBuild.Status != "BUILD_RUNNING" {
+					if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.update", "build",
+						version.Fingerprint+"/"+build.ComponentType, "status BUILD_RUNNING", func() error {
+							return run.UpdateBuildRunning(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID)
+						}); err != nil {
+						return err
+					}
+					remoteBuild.Status = "BUILD_RUNNING"
+				}
+			}
+			for _, sbom := range build.Sboms {
+				localSbomNames[sbom.Name] = true
+				if remoteSbomNames[sbom.Name] {
+					continue
+				}
+				target := version.Fingerprint + "/" + build.ComponentType + "/" + sbom.Name
+				if remoteBuild.Status == "BUILD_DONE" {
+					surfaced = append(surfaced, "SBOM "+target+" cannot be uploaded to a completed destination build")
+					continue
+				}
+				err := r.mutate(ctx, project, destination, "bagdrop.sync.sbom.upload", "sbom", target, "",
+					func() error {
+						return run.UploadSbom(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID, sbom)
+					})
+				if sbomSizeRefusal(err) {
+					surfaced = append(surfaced, "SBOM "+target+" skipped after destination size refusal: "+err.Error())
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				remoteSbomNames[sbom.Name] = true
+			}
+			if remoteBuild.Status != "BUILD_DONE" {
+				if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.update", "build",
+					version.Fingerprint+"/"+build.ComponentType, "",
+					func() error { return run.UpdateBuild(ctx, bucket.Name, version.Fingerprint, remoteBuild.ID, build) }); err != nil {
+					return err
+				}
+				remoteBuild.Status = "BUILD_DONE"
+			}
+			for _, sbom := range remoteSboms {
+				if !localSbomNames[sbom.Name] {
+					surfaced = append(surfaced, "destination SBOM "+version.Fingerprint+"/"+
+						build.ComponentType+"/"+sbom.Name+" has no local source and cannot be deleted")
+				}
+			}
+		}
+		if version.RevokeAt != nil && remoteVersion.RevokeAt == nil {
+			detail := "revoke_at " + version.RevokeAt.UTC().Format(time.RFC3339Nano)
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.version.revoke", "version",
+				version.Fingerprint, detail, func() error {
+					return run.RevokeVersion(
+						ctx, bucket.Name, version.Fingerprint, *version.RevokeAt, version.RevocationMessage,
+					)
+				}); err != nil {
 				return err
 			}
 		}
@@ -419,6 +520,9 @@ func (r *Reconciler) reconcileBucket(
 				return err
 			}
 		}
+	}
+	if len(surfaced) != 0 {
+		return &surfacedSyncError{messages: surfaced}
 	}
 	return nil
 }

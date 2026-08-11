@@ -13,6 +13,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 const hcpAPIAudience = "https://api.hashicorp.cloud"
@@ -29,13 +31,18 @@ type ReconcileRun interface {
 	CreateBucket(context.Context, BucketSnapshot) error
 	UpdateBucket(context.Context, BucketSnapshot) error
 	DeleteBucket(context.Context, string) error
-	GetVersion(context.Context, string, string) (bool, error)
+	GetVersion(context.Context, string, string) (*RemoteVersion, bool, error)
 	CreateVersion(context.Context, string, VersionSnapshot) error
+	RevokeVersion(context.Context, string, string, time.Time, string) error
+	RestoreVersion(context.Context, string, string) error
 	DeleteVersion(context.Context, string, string) error
 	ListBuilds(context.Context, string, string) ([]RemoteBuild, error)
 	CreateBuild(context.Context, string, string, BuildSnapshot) (string, error)
+	UpdateBuildRunning(context.Context, string, string, string) error
 	UpdateBuild(context.Context, string, string, string, BuildSnapshot) error
 	DeleteBuild(context.Context, string, string, string) error
+	ListSboms(context.Context, string, string, string) ([]RemoteSbom, error)
+	UploadSbom(context.Context, string, string, string, SbomSnapshot) error
 	ListChannels(context.Context, string) ([]RemoteChannel, error)
 	CreateChannel(context.Context, string, string) error
 	UpdateChannelAssignment(context.Context, string, string, *string) error
@@ -201,12 +208,23 @@ func (r *hcpReconcileRun) DeleteBucket(ctx context.Context, bucket string) error
 	return r.delete(ctx, r.basePath()+"/buckets/"+url.PathEscape(bucket))
 }
 
-func (r *hcpReconcileRun) GetVersion(ctx context.Context, bucket, fingerprint string) (bool, error) {
-	err := r.do(ctx, http.MethodGet, r.versionPath(bucket, fingerprint), nil, nil)
-	if remoteError(err, http.StatusConflict, 10) {
-		return false, nil
+func (r *hcpReconcileRun) GetVersion(
+	ctx context.Context, bucket, fingerprint string,
+) (*RemoteVersion, bool, error) {
+	var response struct {
+		Version *RemoteVersion `json:"version"`
 	}
-	return err == nil, err
+	err := r.do(ctx, http.MethodGet, r.versionPath(bucket, fingerprint), nil, &response)
+	if remoteError(err, http.StatusConflict, 10) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, err
+	}
+	if response.Version == nil {
+		return nil, false, errors.New("destination version response omitted version")
+	}
+	return response.Version, true, nil
 }
 
 func (r *hcpReconcileRun) CreateVersion(ctx context.Context, bucket string, version VersionSnapshot) error {
@@ -217,6 +235,21 @@ func (r *hcpReconcileRun) CreateVersion(ctx context.Context, bucket string, vers
 		return nil
 	}
 	return err
+}
+
+func (r *hcpReconcileRun) RevokeVersion(
+	ctx context.Context, bucket, fingerprint string, revokeAt time.Time, message string,
+) error {
+	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint), map[string]any{
+		"revoke_at": revokeAt.UTC().Format(time.RFC3339Nano), "revocation_message": message,
+		"skip_descendants_revocation": true,
+	}, nil)
+}
+
+func (r *hcpReconcileRun) RestoreVersion(ctx context.Context, bucket, fingerprint string) error {
+	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint), map[string]any{
+		"restore": true,
+	}, nil)
 }
 
 func (r *hcpReconcileRun) DeleteVersion(ctx context.Context, bucket, fingerprint string) error {
@@ -296,6 +329,16 @@ func (r *hcpReconcileRun) CreateBuild(
 	return response.Build.ID, nil
 }
 
+func (r *hcpReconcileRun) UpdateBuildRunning(
+	ctx context.Context, bucket, fingerprint, buildID string,
+) error {
+	// Live HCP accepts SBOM uploads only while the build is BUILD_RUNNING.
+	// Keep this transition minimal so completion-only fields are not sent early.
+	return r.do(ctx, http.MethodPatch,
+		r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID),
+		map[string]any{"status": "BUILD_RUNNING"}, nil)
+}
+
 func (r *hcpReconcileRun) UpdateBuild(
 	ctx context.Context, bucket, fingerprint, buildID string, build BuildSnapshot,
 ) error {
@@ -322,6 +365,50 @@ func (r *hcpReconcileRun) UpdateBuild(
 
 func (r *hcpReconcileRun) DeleteBuild(ctx context.Context, bucket, fingerprint, buildID string) error {
 	return r.delete(ctx, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID))
+}
+
+func (r *hcpReconcileRun) ListSboms(
+	ctx context.Context, bucket, fingerprint, buildID string,
+) ([]RemoteSbom, error) {
+	path := r.versionPath(bucket, fingerprint) + "/builds/" + url.PathEscape(buildID) + "/sboms"
+	var sboms []RemoteSbom
+	pageToken := ""
+	for {
+		var response struct {
+			Sboms      []RemoteSbom `json:"sboms"`
+			Pagination struct {
+				NextPageToken string `json:"next_page_token"`
+			} `json:"pagination"`
+		}
+		pagePath := path
+		if pageToken != "" {
+			pagePath += "?pagination.next_page_token=" + url.QueryEscape(pageToken)
+		}
+		if err := r.do(ctx, http.MethodGet, pagePath, nil, &response); err != nil {
+			return nil, err
+		}
+		sboms = append(sboms, response.Sboms...)
+		if response.Pagination.NextPageToken == "" {
+			return sboms, nil
+		}
+		pageToken = response.Pagination.NextPageToken
+	}
+}
+
+func (r *hcpReconcileRun) UploadSbom(
+	ctx context.Context, bucket, fingerprint, buildID string, sbom SbomSnapshot,
+) error {
+	encoder, err := zstd.NewWriter(nil)
+	if err != nil {
+		return fmt.Errorf("create SBOM compressor: %w", err)
+	}
+	compressed := encoder.EncodeAll(sbom.Document, nil)
+	if err := encoder.Close(); err != nil {
+		return fmt.Errorf("close SBOM compressor: %w", err)
+	}
+	return r.do(ctx, http.MethodPut,
+		r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID)+"/sboms",
+		map[string]any{"compressed_sbom": compressed, "format": sbom.Format, "name": sbom.Name}, nil)
 }
 
 func (r *hcpReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
@@ -474,6 +561,23 @@ func responseError(response *http.Response, body []byte) error {
 func remoteError(err error, status, code int) bool {
 	var destinationError *AdapterError
 	return errors.As(err, &destinationError) && destinationError.StatusCode == status && destinationError.Code == code
+}
+
+func sbomSizeRefusal(err error) bool {
+	var destinationError *AdapterError
+	if !errors.As(err, &destinationError) {
+		return false
+	}
+	if destinationError.StatusCode == http.StatusRequestEntityTooLarge ||
+		destinationError.StatusCode == http.StatusGatewayTimeout {
+		return true
+	}
+	summary := strings.ToLower(destinationError.Summary)
+	sizeWord := strings.Contains(summary, "size") || strings.Contains(summary, "large") ||
+		strings.Contains(summary, "payload") || strings.Contains(summary, "entity")
+	limitWord := strings.Contains(summary, "limit") || strings.Contains(summary, "maximum") ||
+		strings.Contains(summary, "exceed") || strings.Contains(summary, "too large")
+	return sizeWord && limitWord
 }
 
 func classifyTransport(err error) VerificationResult {

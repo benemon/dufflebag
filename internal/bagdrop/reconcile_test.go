@@ -57,8 +57,8 @@ func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	}
 	want := []string{
 		"mark:images", "get-bucket:images", "create-bucket:images", "get-version:fp-1",
-		"create-version:fp-1", "list-builds:fp-1", "create-build:amazon-ebs", "update-build:amazon-ebs",
-		"list-channels:images",
+		"create-version:fp-1", "get-version:fp-1", "list-builds:fp-1", "create-build:amazon-ebs",
+		"update-build:amazon-ebs", "list-sboms:remote-amazon-ebs", "list-channels:images",
 	}
 	if strings.Join(repository.events, ",") != strings.Join(want, ",") {
 		t.Fatalf("events = %v, want %v", repository.events, want)
@@ -77,7 +77,7 @@ func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 		_, _ = w.Write([]byte(tokenSuccessFixture))
 	}))
 	defer auth.Close()
-	var bucketExists, versionExists, buildExists, buildDone bool
+	var bucketExists, versionExists, buildExists, buildRunning, buildDone, sbomPresent bool
 	var remoteChannelDrift, remoteVersionDrift, remoteBuildDrift bool
 	foreignBucket := true
 	var productionExists bool
@@ -131,7 +131,9 @@ func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 				return
 			}
 			status := "BUILD_PENDING"
-			if buildDone {
+			if buildRunning {
+				status = "BUILD_RUNNING"
+			} else if buildDone {
 				status = "BUILD_DONE"
 			}
 			drift := ""
@@ -178,13 +180,36 @@ func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 			if body.PackerRunUUID != nil {
 				t.Errorf("build update resent create-time field packer_run_uuid")
 			}
+			if body.Status == "BUILD_RUNNING" {
+				if len(body.Artifacts) != 0 || body.Metadata != nil {
+					t.Errorf("running build update was not minimal: %#v", body)
+				}
+				buildRunning, buildDone = true, false
+				_, _ = w.Write([]byte(`{"build":{"id":"remote-build","component_type":"amazon-ebs","status":"BUILD_RUNNING"}}`))
+				return
+			}
 			if body.Status != "BUILD_DONE" || len(body.Artifacts) != 1 ||
 				body.Artifacts[0].ExternalIdentifier != "ami-1" || body.Artifacts[0].Region != "eu-west-2" ||
 				body.Metadata["packer"] == nil {
 				t.Errorf("build update = %#v", body)
 			}
-			buildDone = true
+			buildRunning, buildDone = false, true
 			_, _ = w.Write([]byte(`{"build":{"id":"remote-build","component_type":"amazon-ebs","status":"BUILD_DONE"}}`))
+		case request.Method == http.MethodGet && strings.HasSuffix(path, "/builds/remote-build/sboms"):
+			// Fixture source: vendored PackerService_ListSboms response.
+			if sbomPresent {
+				_, _ = w.Write([]byte(`{"sboms":[{"name":"manifest","format":"CYCLONEDX"}],"pagination":{}}`))
+				return
+			}
+			_, _ = w.Write([]byte(`{"sboms":[],"pagination":{}}`))
+		case request.Method == http.MethodPut && strings.HasSuffix(path, "/builds/remote-build/sboms"):
+			if !buildRunning {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"code":3,"message":"This build's status isn't Running, so sboms can not be uploaded","details":[]}`))
+				return
+			}
+			sbomPresent = true
+			_, _ = w.Write([]byte(`{"sbom":{"name":"manifest","format":"CYCLONEDX"}}`))
 		case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images/channels"):
 			// Fixture source: internal/compat/hcp2023 renderChannel and
 			// docs/compatibility.md managed-latest capture (Appendix A.2).
@@ -274,16 +299,19 @@ func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 	reconciler.adapters[AdapterHCPPacker] = NewHCPPackerAdapter(auth.URL, api.URL)
 	repository.associations = []Association{testAssociation("images")}
 	repository.snapshots["images"] = testSnapshot("images")
+	repository.snapshots["images"].Versions[0].Builds[0].Sboms = []SbomSnapshot{{
+		Name: "manifest", Format: "CYCLONEDX", Document: []byte(`{"bomFormat":"CycloneDX"}`),
+	}}
 	repository.snapshots["images"].Channels = []ChannelSnapshot{{
 		Name: "production", AssignedVersionFingerprint: fingerprintPointer("fp-1"),
 	}}
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
 		t.Fatal(err)
 	}
-	if !bucketExists || !versionExists || !buildDone || !productionExists ||
+	if !bucketExists || !versionExists || !buildDone || !sbomPresent || !productionExists ||
 		productionFingerprint != "fp-1" || latestMutations != 0 || repository.successes["images"] != 1 {
-		t.Fatalf("destination state bucket=%v version=%v build_done=%v channel=%v/%q latest_mutations=%d successes=%v",
-			bucketExists, versionExists, buildDone, productionExists, productionFingerprint, latestMutations, repository.successes)
+		t.Fatalf("destination state bucket=%v version=%v build_done=%v sbom=%v channel=%v/%q latest_mutations=%d successes=%v",
+			bucketExists, versionExists, buildDone, sbomPresent, productionExists, productionFingerprint, latestMutations, repository.successes)
 	}
 	remoteChannelDrift, remoteVersionDrift, remoteBuildDrift = true, true, true
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
@@ -303,7 +331,7 @@ func TestReconcilePartiallyExistingPushesOnlyBuilds(t *testing.T) {
 	repository.associations = []Association{testAssociation("images")}
 	repository.snapshots["images"] = testSnapshot("images")
 	run.buckets["images"] = RemoteBucket{Description: "images description"}
-	run.versions["fp-1"] = true
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
 		t.Fatal(err)
@@ -314,6 +342,321 @@ func TestReconcilePartiallyExistingPushesOnlyBuilds(t *testing.T) {
 	}
 	if len(writer.records) != 4 {
 		t.Fatalf("audit records = %d, want build create/update pairs", len(writer.records))
+	}
+}
+
+func TestReconcileBuildWithSbomsUsesRunningUploadWindowAndEndsDone(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	snapshot := testSnapshot("images")
+	snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{
+		Name: "manifest", Format: "CYCLONEDX", Document: []byte(`{"bomFormat":"CycloneDX"}`),
+	}}
+	repository.snapshots["images"] = snapshot
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{
+		Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+	}
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	wantOrder := []string{
+		"create-build:amazon-ebs",
+		"list-sboms:remote-amazon-ebs",
+		"update-build-running:remote-amazon-ebs",
+		"upload-sbom:manifest",
+		"update-build:amazon-ebs",
+	}
+	position := -1
+	for _, want := range wantOrder {
+		found := false
+		for i := position + 1; i < len(repository.events); i++ {
+			if repository.events[i] == want {
+				position = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("event %q missing in order from %v", want, repository.events)
+		}
+	}
+	build := findRemoteBuild(run.builds["fp-1"], "amazon-ebs")
+	if build == nil || build.Status != "BUILD_DONE" ||
+		len(run.sboms["images/fp-1/remote-amazon-ebs"]) != 1 {
+		t.Fatalf("destination build=%#v sboms=%#v", build, run.sboms)
+	}
+	assertAuditMutation(t, writer, "bagdrop.sync.sbom.upload", "")
+	assertDeletionInvariants(t, run, "images")
+}
+
+func TestReconcileSbomPresenceDiffAndScopeInvariants(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		remotePresent bool
+		wantUploads   int
+	}{
+		{name: "absent uploads", wantUploads: 1},
+		{name: "present makes no call", remotePresent: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			snapshot := testSnapshot("images")
+			snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{
+				Name: "manifest", Format: "CYCLONEDX", Document: []byte(`{"bomFormat":"CycloneDX"}`),
+			}}
+			repository.snapshots["images"] = snapshot
+			seedDeletionInvariants(run, "images")
+			run.buckets["images"] = RemoteBucket{
+				Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+			}
+			run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+			run.builds["fp-1"] = []RemoteBuild{{
+				ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_RUNNING",
+			}}
+			key := "images/fp-1/remote-amazon-ebs"
+			if test.remotePresent {
+				run.sboms[key] = []RemoteSbom{{Name: "manifest", Format: "CYCLONEDX"}}
+			}
+
+			if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+				t.Fatal(err)
+			}
+			if len(run.uploadedSboms) != test.wantUploads {
+				t.Fatalf("uploaded SBOMs = %v, want %d", run.uploadedSboms, test.wantUploads)
+			}
+			for _, uploaded := range run.uploadedSboms {
+				if !strings.HasPrefix(uploaded, "images/") {
+					t.Fatalf("foreign unassociated bucket received SBOM: %v", run.uploadedSboms)
+				}
+			}
+			assertDeletionInvariants(t, run, "images")
+			if test.wantUploads == 1 {
+				assertAuditMutation(t, writer, "bagdrop.sync.sbom.upload", "")
+			}
+			if repository.successes["images"] != 1 || repository.failures["images"] != "" {
+				t.Fatalf("presence convergence successes=%v failures=%v", repository.successes, repository.failures)
+			}
+		})
+	}
+}
+
+func TestReconcileOversizedSbomIsSkippedSurfacedAndNonfatal(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images"), testAssociation("healthy")}
+	snapshot := testSnapshot("images")
+	snapshot.Channels = []ChannelSnapshot{{Name: "production"}}
+	snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{
+		Name: "oversized", Format: "SPDX", Document: []byte(`{"spdxVersion":"SPDX-2.3"}`),
+	}}
+	repository.snapshots["images"] = snapshot
+	repository.snapshots["healthy"] = &BucketSnapshot{Name: "healthy"}
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{
+		Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+	}
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+	run.builds["fp-1"] = []RemoteBuild{{
+		ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_RUNNING",
+	}}
+	run.uploadSbomErrors["images/fp-1/remote-amazon-ebs/oversized"] = &AdapterError{
+		StatusCode: http.StatusGatewayTimeout,
+	}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatalf("size refusal was fatal: %v", err)
+	}
+	if len(run.uploadedSboms) != 0 || !strings.Contains(repository.failures["images"], "size refusal: HTTP 504") {
+		t.Fatalf("size refusal result uploads=%v failures=%v", run.uploadedSboms, repository.failures)
+	}
+	if repository.successes["images"] != 0 || repository.successes["healthy"] != 1 ||
+		!run.createdBuckets["healthy"] || len(run.createdChannels) != 1 || run.createdChannels[0] != "production" {
+		t.Fatalf("other work did not converge: successes=%v buckets=%v channels=%v",
+			repository.successes, run.createdBuckets, run.createdChannels)
+	}
+	uploadCalls := 0
+	for _, event := range repository.events {
+		if event == "upload-sbom:oversized" {
+			uploadCalls++
+		}
+	}
+	build := findRemoteBuild(run.builds["fp-1"], "amazon-ebs")
+	if uploadCalls != 1 || build == nil || build.Status != "BUILD_DONE" {
+		t.Fatalf("size-refused build=%#v upload_calls=%d events=%v", build, uploadCalls, repository.events)
+	}
+	assertDeletionInvariants(t, run, "images")
+	assertAuditMutation(t, writer, "bagdrop.sync.sbom.upload", "")
+}
+
+func TestReconcileLateSbomAgainstCompletedBuildIsSurfacedPermanentDrift(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images"), testAssociation("healthy")}
+	snapshot := testSnapshot("images")
+	snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{Name: "late", Format: "SPDX", Document: []byte("document")}}
+	repository.snapshots["images"] = snapshot
+	repository.snapshots["healthy"] = &BucketSnapshot{Name: "healthy"}
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{
+		Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+	}
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+	run.builds["fp-1"] = []RemoteBuild{{
+		ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_DONE",
+	}}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatalf("completed-build drift was fatal: %v", err)
+	}
+	if len(run.uploadedSboms) != 0 ||
+		!strings.Contains(repository.failures["images"], "SBOM fp-1/amazon-ebs/late cannot be uploaded to a completed destination build") {
+		t.Fatalf("late SBOM result uploads=%v failures=%v", run.uploadedSboms, repository.failures)
+	}
+	if repository.successes["healthy"] != 1 || !run.createdBuckets["healthy"] {
+		t.Fatalf("next association did not converge: successes=%v buckets=%v", repository.successes, run.createdBuckets)
+	}
+	assertDeletionInvariants(t, run, "images")
+}
+
+func TestFakeDestinationRefusesSbomOutsideRunningWindow(t *testing.T) {
+	_, _, run, _ := newTestReconciler(t, "secret")
+	run.builds["fp-1"] = []RemoteBuild{{
+		ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_DONE",
+	}}
+	err := run.UploadSbom(context.Background(), "images", "fp-1", "remote-amazon-ebs", SbomSnapshot{Name: "manifest"})
+	var adapterErr *AdapterError
+	if !errors.As(err, &adapterErr) || adapterErr.StatusCode != http.StatusBadRequest || adapterErr.Code != 3 ||
+		adapterErr.Summary != "This build's status isn't Running, so sboms can not be uploaded" {
+		t.Fatalf("UploadSbom refusal = %#v", err)
+	}
+}
+
+func TestReconcileRemoteOnlySbomIsSurfacedWithoutDeletion(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = testSnapshot("images")
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{
+		Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+	}
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+	run.builds["fp-1"] = []RemoteBuild{{
+		ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_DONE",
+	}}
+	run.sboms["images/fp-1/remote-amazon-ebs"] = []RemoteSbom{{Name: "remote-only", Format: "SPDX"}}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatalf("non-removable drift was fatal: %v", err)
+	}
+	if !strings.Contains(repository.failures["images"], "has no local source and cannot be deleted") {
+		t.Fatalf("remote-only drift not surfaced: %v", repository.failures)
+	}
+	assertDeletionInvariants(t, run, "images")
+}
+
+func TestReconcileSbomUploadIsAuditFailClosed(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	snapshot := testSnapshot("images")
+	snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{Name: "manifest", Format: "SPDX", Document: []byte("document")}}
+	repository.snapshots["images"] = snapshot
+	run.buckets["images"] = RemoteBucket{
+		Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}},
+	}
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
+	run.builds["fp-1"] = []RemoteBuild{{ID: "remote-amazon-ebs", ComponentType: "amazon-ebs", Status: "BUILD_RUNNING"}}
+	run.channels["images"] = map[string]RemoteChannel{"latest": {Name: "latest", Managed: true}}
+	writer.failAt = 1
+
+	err := reconciler.ReconcileProject(context.Background(), repository.project)
+	if !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("error = %v, want audit unavailable", err)
+	}
+	if len(run.uploadedSboms) != 0 {
+		t.Fatalf("SBOM uploaded without request audit: %v", run.uploadedSboms)
+	}
+}
+
+func TestReconcileVersionRevocationDirectionAndInvariants(t *testing.T) {
+	revokeAt := time.Date(2026, 8, 11, 12, 0, 0, 123000000, time.UTC)
+	for _, test := range []struct {
+		name        string
+		localAt     *time.Time
+		remoteAt    *time.Time
+		wantRevoke  bool
+		wantRestore bool
+		operation   string
+	}{
+		{name: "local revoked revokes remote", localAt: &revokeAt, wantRevoke: true, operation: "bagdrop.sync.version.revoke"},
+		{name: "local active restores remote", remoteAt: &revokeAt, wantRestore: true, operation: "bagdrop.sync.version.restore"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			repository.snapshots["images"] = &BucketSnapshot{
+				Name: "images", Versions: []VersionSnapshot{{
+					Fingerprint: "fp-1", RevokeAt: test.localAt, RevocationMessage: "superseded",
+				}},
+			}
+			seedDeletionInvariants(run, "images")
+			run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{{Fingerprint: "fp-1"}}}
+			run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1", RevokeAt: test.remoteAt}
+
+			if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+				t.Fatal(err)
+			}
+			if (len(run.revokedVersions) == 1) != test.wantRevoke ||
+				(len(run.restoredVersions) == 1) != test.wantRestore {
+				t.Fatalf("wrong direction: revoked=%v restored=%v", run.revokedVersions, run.restoredVersions)
+			}
+			if len(run.revokedVersions) != 0 && run.revokedVersions[0] != "images/fp-1" {
+				t.Fatalf("foreign version revoked: %v", run.revokedVersions)
+			}
+			if len(run.restoredVersions) != 0 && run.restoredVersions[0] != "images/fp-1" {
+				t.Fatalf("foreign version restored: %v", run.restoredVersions)
+			}
+			assertDeletionInvariants(t, run, "images")
+			detail := ""
+			if test.wantRevoke {
+				detail = "revoke_at " + revokeAt.Format(time.RFC3339Nano)
+			}
+			assertAuditMutation(t, writer, test.operation, detail)
+		})
+	}
+}
+
+func TestReconcileVersionRevocationMutationsAreAuditFailClosed(t *testing.T) {
+	revokeAt := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name     string
+		localAt  *time.Time
+		remoteAt *time.Time
+	}{
+		{name: "revoke", localAt: &revokeAt},
+		{name: "restore", remoteAt: &revokeAt},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			reconciler, repository, run, writer := newTestReconciler(t, "secret")
+			repository.associations = []Association{testAssociation("images")}
+			repository.snapshots["images"] = &BucketSnapshot{
+				Name: "images", Versions: []VersionSnapshot{{Fingerprint: "fp-1", RevokeAt: test.localAt}},
+			}
+			run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{{Fingerprint: "fp-1"}}}
+			run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1", RevokeAt: test.remoteAt}
+			run.channels["images"] = map[string]RemoteChannel{"latest": {Name: "latest", Managed: true}}
+			writer.failAt = 1
+
+			err := reconciler.ReconcileProject(context.Background(), repository.project)
+			if !errors.Is(err, ErrAuditUnavailable) {
+				t.Fatalf("error = %v, want audit unavailable", err)
+			}
+			if len(run.revokedVersions) != 0 || len(run.restoredVersions) != 0 {
+				t.Fatalf("revocation mutation ran without request audit: revoked=%v restored=%v",
+					run.revokedVersions, run.restoredVersions)
+			}
+		})
 	}
 }
 
@@ -342,7 +685,7 @@ func TestReconcileConvergesOrdinaryChannelPointers(t *testing.T) {
 				Channels: []ChannelSnapshot{{Name: "production", AssignedVersionFingerprint: test.local}},
 			}
 			run.buckets["images"] = RemoteBucket{}
-			run.versions["fp-1"] = true
+			run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 			run.channels["images"] = map[string]RemoteChannel{
 				"latest": {Name: "latest", Managed: true, AssignedVersionFingerprint: fingerprintPointer("fp-1")},
 			}
@@ -391,7 +734,7 @@ func TestReconcileChannelMutationsAreAuditFailClosed(t *testing.T) {
 			}
 			if test.local != nil {
 				repository.snapshots["images"].Versions = []VersionSnapshot{{Fingerprint: "fp-1"}}
-				run.versions["fp-1"] = true
+				run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 			}
 			run.buckets["images"] = RemoteBucket{}
 			run.channels["images"] = map[string]RemoteChannel{"latest": {Name: "latest", Managed: true}}
@@ -430,7 +773,7 @@ func TestReconcileChannelUpdateAuditDistinguishesAssignAndClear(t *testing.T) {
 			}
 			if test.local != nil {
 				repository.snapshots["images"].Versions = []VersionSnapshot{{Fingerprint: "fp-1"}}
-				run.versions["fp-1"] = true
+				run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 			}
 			run.buckets["images"] = RemoteBucket{}
 			run.channels["images"] = map[string]RemoteChannel{
@@ -463,7 +806,7 @@ func TestReconcileUnknownAssignmentTargetIsAssociationFailure(t *testing.T) {
 		}},
 	}
 	run.buckets["images"] = RemoteBucket{}
-	run.versions["fp-1"] = true
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 	run.channels["images"] = map[string]RemoteChannel{
 		"production": {Name: "production"},
 	}
@@ -588,7 +931,7 @@ func TestReconcileRemovesRemoteVersionDriftWithoutTouchingForeignBucket(t *testi
 	run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{
 		{Fingerprint: "fp-local"}, {Fingerprint: "fp-remote"},
 	}}
-	run.versions["fp-local"] = true
+	run.versions["fp-local"] = RemoteVersion{Fingerprint: "fp-local"}
 
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
 		t.Fatal(err)
@@ -606,7 +949,7 @@ func TestReconcileRemovesRemoteBuildDriftWhenVendoredDeleteBuildExists(t *testin
 	repository.snapshots["images"] = testSnapshot("images")
 	seedDeletionInvariants(run, "images")
 	run.buckets["images"] = RemoteBucket{Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}}}
-	run.versions["fp-1"] = true
+	run.versions["fp-1"] = RemoteVersion{Fingerprint: "fp-1"}
 	run.builds["fp-1"] = []RemoteBuild{
 		{ID: "local-build", ComponentType: "amazon-ebs", Status: "BUILD_DONE"},
 		{ID: "remote-build", ComponentType: "googlecompute", Status: "BUILD_DONE"},
@@ -633,7 +976,7 @@ func TestReconcileDeletesChannelsThenVersionsThenSurvivingVersionBuilds(t *testi
 	run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{
 		{Fingerprint: "fp-local"}, {Fingerprint: "fp-remote"},
 	}}
-	run.versions["fp-local"] = true
+	run.versions["fp-local"] = RemoteVersion{Fingerprint: "fp-local"}
 	run.builds["fp-local"] = []RemoteBuild{{ID: "remote-build", ComponentType: "amazon-ebs"}}
 
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
@@ -774,7 +1117,7 @@ func assertAuditMutation(t *testing.T, writer *testAuditWriter, operation, detai
 		}
 		if event["operation"] == operation {
 			found++
-			if event["detail"] != detail {
+			if detail != "" && event["detail"] != detail {
 				t.Fatalf("%s detail = %#v, want %q", operation, event["detail"], detail)
 			}
 		}
@@ -802,9 +1145,10 @@ func newTestReconciler(t *testing.T, secret string) (*Reconciler, *testReconcile
 		successes: make(map[string]int), failures: make(map[string]string),
 	}
 	run := &testReconcileRun{
-		events: &repository.events, buckets: make(map[string]RemoteBucket), versions: make(map[string]bool),
+		events: &repository.events, buckets: make(map[string]RemoteBucket), versions: make(map[string]RemoteVersion),
 		builds: make(map[string][]RemoteBuild), readFailures: make(map[string]error), createdBuckets: make(map[string]bool),
 		channels: make(map[string]map[string]RemoteChannel), deleteBucketErrors: make(map[string]error),
+		sboms: make(map[string][]RemoteSbom), uploadSbomErrors: make(map[string]error),
 	}
 	writer := &testAuditWriter{}
 	reconciler, err := NewReconciler(repository, sealer, Registry{
@@ -894,8 +1238,13 @@ func (a *testReconcileAdapter) BeginReconcile(context.Context, Destination) (Rec
 type testReconcileRun struct {
 	events             *[]string
 	buckets            map[string]RemoteBucket
-	versions           map[string]bool
+	versions           map[string]RemoteVersion
 	builds             map[string][]RemoteBuild
+	sboms              map[string][]RemoteSbom
+	uploadSbomErrors   map[string]error
+	uploadedSboms      []string
+	revokedVersions    []string
+	restoredVersions   []string
 	readFailures       map[string]error
 	createdBuckets     map[string]bool
 	createBucketError  error
@@ -943,13 +1292,34 @@ func (r *testReconcileRun) DeleteBucket(_ context.Context, name string) error {
 	r.deletedBuckets = append(r.deletedBuckets, name)
 	return nil
 }
-func (r *testReconcileRun) GetVersion(_ context.Context, _, fingerprint string) (bool, error) {
+func (r *testReconcileRun) GetVersion(_ context.Context, _, fingerprint string) (*RemoteVersion, bool, error) {
 	*r.events = append(*r.events, "get-version:"+fingerprint)
-	return r.versions[fingerprint], nil
+	version, exists := r.versions[fingerprint]
+	return &version, exists, nil
 }
 func (r *testReconcileRun) CreateVersion(_ context.Context, _ string, version VersionSnapshot) error {
 	*r.events = append(*r.events, "create-version:"+version.Fingerprint)
-	r.versions[version.Fingerprint] = true
+	r.versions[version.Fingerprint] = RemoteVersion{Fingerprint: version.Fingerprint}
+	return nil
+}
+func (r *testReconcileRun) RevokeVersion(
+	_ context.Context, bucket, fingerprint string, revokeAt time.Time, message string,
+) error {
+	*r.events = append(*r.events, "revoke-version:"+fingerprint)
+	version := r.versions[fingerprint]
+	version.RevokeAt = &revokeAt
+	version.RevocationMessage = message
+	r.versions[fingerprint] = version
+	r.revokedVersions = append(r.revokedVersions, bucket+"/"+fingerprint)
+	return nil
+}
+func (r *testReconcileRun) RestoreVersion(_ context.Context, bucket, fingerprint string) error {
+	*r.events = append(*r.events, "restore-version:"+fingerprint)
+	version := r.versions[fingerprint]
+	version.RevokeAt = nil
+	version.RevocationMessage = ""
+	r.versions[fingerprint] = version
+	r.restoredVersions = append(r.restoredVersions, bucket+"/"+fingerprint)
 	return nil
 }
 func (r *testReconcileRun) DeleteVersion(_ context.Context, _, fingerprint string) error {
@@ -968,6 +1338,15 @@ func (r *testReconcileRun) CreateBuild(_ context.Context, _, fingerprint string,
 	remote := RemoteBuild{ID: "remote-" + build.ComponentType, ComponentType: build.ComponentType, Status: "BUILD_PENDING"}
 	r.builds[fingerprint] = append(r.builds[fingerprint], remote)
 	return remote.ID, nil
+}
+func (r *testReconcileRun) UpdateBuildRunning(_ context.Context, _, fingerprint, id string) error {
+	*r.events = append(*r.events, "update-build-running:"+id)
+	for i := range r.builds[fingerprint] {
+		if r.builds[fingerprint][i].ID == id {
+			r.builds[fingerprint][i].Status = "BUILD_RUNNING"
+		}
+	}
+	return nil
 }
 func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id string, build BuildSnapshot) error {
 	*r.events = append(*r.events, "update-build:"+build.ComponentType)
@@ -989,6 +1368,37 @@ func (r *testReconcileRun) DeleteBuild(_ context.Context, _, fingerprint, id str
 		}
 	}
 	r.deletedBuilds = append(r.deletedBuilds, fingerprint+"/"+id)
+	return nil
+}
+func (r *testReconcileRun) ListSboms(_ context.Context, bucket, fingerprint, buildID string) ([]RemoteSbom, error) {
+	*r.events = append(*r.events, "list-sboms:"+buildID)
+	key := bucket + "/" + fingerprint + "/" + buildID
+	return append([]RemoteSbom(nil), r.sboms[key]...), nil
+}
+func (r *testReconcileRun) UploadSbom(
+	_ context.Context, bucket, fingerprint, buildID string, sbom SbomSnapshot,
+) error {
+	key := bucket + "/" + fingerprint + "/" + buildID
+	*r.events = append(*r.events, "upload-sbom:"+sbom.Name)
+	var build *RemoteBuild
+	for i := range r.builds[fingerprint] {
+		if r.builds[fingerprint][i].ID == buildID {
+			build = &r.builds[fingerprint][i]
+			break
+		}
+	}
+	if build == nil || build.Status != "BUILD_RUNNING" {
+		return &AdapterError{
+			StatusCode: http.StatusBadRequest,
+			Code:       3,
+			Summary:    "This build's status isn't Running, so sboms can not be uploaded",
+		}
+	}
+	if err := r.uploadSbomErrors[key+"/"+sbom.Name]; err != nil {
+		return err
+	}
+	r.sboms[key] = append(r.sboms[key], RemoteSbom{Name: sbom.Name, Format: sbom.Format})
+	r.uploadedSboms = append(r.uploadedSboms, key+"/"+sbom.Name)
 	return nil
 }
 func (r *testReconcileRun) ListChannels(_ context.Context, bucket string) ([]RemoteChannel, error) {
