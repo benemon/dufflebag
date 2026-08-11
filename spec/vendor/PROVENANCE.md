@@ -15,6 +15,20 @@ The clean-room position in [CONTRIBUTING.md](../../CONTRIBUTING.md) rests on
 every input being publicly available, so where a specification is published it
 is taken from where it is published.
 
+## Overlays
+
+Vendored specification files remain pristine, checksummed copies of their
+public downloads. Overlays never modify those files: generation copies a
+vendored specification to a temporary path, applies the overlay to that copy,
+and generates models from the copy. `make generate-check` invokes the same
+`make generate` target, so stale generated output or an overlay failure fails
+the check.
+
+Each overlay documents the exact transformation and the external evidence that
+requires it. `spec/overlays/hcp2023-version-revoke-at.py` makes the 2023-01-01
+Version `revoke_at` property nullable and non-omitted based on dossier capture
+A.7 and the S3a live proof.
+
 ## Vendored files
 
 ### cloud-packer-service 2023-01-01

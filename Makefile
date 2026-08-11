@@ -9,6 +9,7 @@ OAPI_VERSION    := v2.8.0
 OAPI            := $(shell go env GOPATH)/bin/oapi-codegen
 SQLC            := $(shell go env GOPATH)/bin/sqlc
 SPECS           := spec/vendor
+HCP2023_SPEC_OVERLAY := spec/overlays/hcp2023-version-revoke-at.py
 PREVIOUS_REF    ?= HEAD
 SCHEMA_COMPAT   ?= $(CURDIR)/.schema-compat
 PACKER_E2E_PACKER    ?= packer
@@ -112,11 +113,15 @@ generate-sql: $(SQLC) ## Regenerate the Postgres query package
 
 .PHONY: generate
 generate: $(SWAGGER) ## Regenerate compat models from the vendored specs
-	@rm -rf internal/compat/hcp2023/models internal/compat/rm2019/models
-	$(SWAGGER) generate model --spec=$(SPECS)/cloud-packer-service/2023-01-01/hcp.swagger.json \
-		--target=internal/compat/hcp2023 --model-package=models --quiet
+	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
+		cp $(SPECS)/cloud-packer-service/2023-01-01/hcp.swagger.json "$$work/hcp.swagger.json"; \
+		python3 $(HCP2023_SPEC_OVERLAY) "$$work/hcp.swagger.json"; \
+		rm -rf internal/compat/hcp2023/models; \
+		$(SWAGGER) generate model --spec="$$work/hcp.swagger.json" \
+			--target=internal/compat/hcp2023 --model-package=models --quiet
 # --skip-validation: HashiCorp's published resource-manager spec fails Swagger 2.0
 # validation on ambiguous paths we do not serve. Models do not depend on paths.
+	@rm -rf internal/compat/rm2019/models
 	$(SWAGGER) generate model --spec=$(SPECS)/cloud-resource-manager/2019-12-10/hcp.swagger.json \
 		--target=internal/compat/rm2019 --model-package=models --skip-validation --quiet
 	go mod tidy

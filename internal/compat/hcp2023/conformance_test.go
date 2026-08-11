@@ -2,9 +2,11 @@ package hcp2023
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -24,7 +26,10 @@ import (
 // "Aborted" or "incomplete". A response can therefore be perfectly conformant
 // and still abort a real packer build. See spec/vendor/PROVENANCE.md.
 
-const specPath = "../../../spec/vendor/cloud-packer-service/2023-01-01/hcp.swagger.json"
+const (
+	specPath    = "../../../spec/vendor/cloud-packer-service/2023-01-01/hcp.swagger.json"
+	overlayPath = "../../../spec/overlays/hcp2023-version-revoke-at.py"
+)
 
 var (
 	specOnce sync.Once
@@ -46,11 +51,48 @@ func definitionSchema(t *testing.T, definition string) *jsonschema.Schema {
 			specErr = err
 			return
 		}
+		// Conformance uses the same generate-time overlay against a temporary
+		// copy. The checksummed vendored specification remains untouched.
+		overlaidSpec := filepath.Join(t.TempDir(), "hcp.swagger.json")
+		if err := os.WriteFile(overlaidSpec, raw, 0o600); err != nil {
+			specErr = err
+			return
+		}
+		if output, err := exec.Command("python3", filepath.Clean(overlayPath), overlaidSpec).CombinedOutput(); err != nil {
+			specErr = fmt.Errorf("apply HCP 2023 spec overlay: %w: %s", err, output)
+			return
+		}
+		raw, err = os.ReadFile(overlaidSpec)
+		if err != nil {
+			specErr = err
+			return
+		}
 		var doc any
 		if err := json.Unmarshal(raw, &doc); err != nil {
 			specErr = err
 			return
 		}
+		// Swagger's x-nullable is not a JSON Schema draft-4 keyword. Preserve
+		// its meaning while compiling the vendored spec for response checks.
+		var applyNullable func(any)
+		applyNullable = func(value any) {
+			switch value := value.(type) {
+			case map[string]any:
+				if nullable, _ := value["x-nullable"].(bool); nullable {
+					if schemaType, ok := value["type"].(string); ok {
+						value["type"] = []any{schemaType, "null"}
+					}
+				}
+				for _, child := range value {
+					applyNullable(child)
+				}
+			case []any:
+				for _, child := range value {
+					applyNullable(child)
+				}
+			}
+		}
+		applyNullable(doc)
 		compiler = jsonschema.NewCompiler()
 		compiler.DefaultDraft(jsonschema.Draft4)
 		specErr = compiler.AddResource("hcp.json", doc)
@@ -90,7 +132,7 @@ func TestResponsesConformToVendoredSpec(t *testing.T) {
 	request(t, handler, http.MethodPost, base+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp-1", "template_type": "HCL2"})
 	seeded := request(t, handler, http.MethodPost, base+"/buckets/images/versions/fp-1/builds",
-		map[string]any{"component_type": "docker.example", "packer_run_uuid": "run-1", "status": "BUILD_UNSET"})
+		map[string]any{"component_type": "docker.example", "packer_run_uuid": "run-1", "status": "BUILD_RUNNING"})
 	var build models.HashicorpCloudPacker20230101CreateBuildResponse
 	decodeResponse(t, seeded, &build)
 

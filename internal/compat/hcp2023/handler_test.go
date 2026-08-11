@@ -1327,6 +1327,33 @@ func (r *fakeRepository) GetVersion(
 	return version, nil
 }
 
+func TestNeverRevokedVersionRendersNullRevokeAtLikeLiveContract(t *testing.T) {
+	version, err := registry.RestoreVersion(registry.Version{
+		ID:           registry.NewID(testTime),
+		BucketName:   "images",
+		Fingerprint:  "fp-1",
+		TemplateType: registry.TemplateHCL2,
+		CreatedAt:    testTime,
+		UpdatedAt:    testTime,
+	}, true, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wire, err := renderVersion(store.ParseTenant(testOrg, testProject), version, nil, testTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := json.Marshal(wire)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture source: Appendix A.7 verbatim capture and the S3a live proof.
+	if !bytes.Contains(encoded, []byte(`"revoke_at":null`)) ||
+		bytes.Contains(encoded, []byte(`"revoke_at":"0001-01-01T00:00:00.000Z"`)) {
+		t.Fatalf("never-revoked version revoke_at = %s, want byte-faithful null", encoded)
+	}
+}
+
 func TestVersionRevocationRendersStatusAndFields(t *testing.T) {
 	tenant := store.ParseTenant(testOrg, testProject)
 	base := registry.Version{
@@ -1359,7 +1386,7 @@ func TestVersionRevocationRendersStatusAndFields(t *testing.T) {
 	if wire.RevocationInheritedFrom != nil {
 		t.Fatal("a manual revocation names no ancestor")
 	}
-	if time.Time(wire.RevokeAt).IsZero() {
+	if wire.RevokeAt == nil || time.Time(*wire.RevokeAt).IsZero() {
 		t.Fatal("revoke_at must be rendered")
 	}
 
@@ -1453,7 +1480,10 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 	if *updated.Version.Status != models.HashicorpCloudPacker20230101VersionStatusVERSIONREVOCATIONSCHEDULED {
 		t.Fatalf("status = %s; want scheduled", *updated.Version.Status)
 	}
-	if got := time.Time(updated.Version.RevokeAt); !got.Equal(testTime.Add(26 * time.Hour)) {
+	if updated.Version.RevokeAt == nil {
+		t.Fatal("revoke_at was not rendered")
+	}
+	if got := time.Time(*updated.Version.RevokeAt); !got.Equal(testTime.Add(26 * time.Hour)) {
 		t.Fatalf("revoke_at = %v; want now+1d2h", got)
 	}
 	// The author is the principal's customer-chosen name, not its ID.
@@ -1692,7 +1722,7 @@ func TestUploadSbomStoresAndNamesTheDocument(t *testing.T) {
 	request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
 	created := request(t, server, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
-		map[string]any{"component_type": "docker"})
+		map[string]any{"component_type": "docker", "status": "BUILD_RUNNING"})
 	var build models.HashicorpCloudPacker20230101CreateBuildResponse
 	decodeResponse(t, created, &build)
 	sbomsPath := testBase + "/buckets/images/versions/fp/builds/" + build.Build.ID + "/sboms"
@@ -1744,6 +1774,30 @@ func TestUploadSbomStoresAndNamesTheDocument(t *testing.T) {
 	}
 }
 
+func TestUploadSbomRefusesNonRunningBuildLikeLiveContract(t *testing.T) {
+	repository := newFakeRepository()
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	request(t, server, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+	request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
+		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
+	created := request(t, server, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
+		map[string]any{"component_type": "docker", "status": "BUILD_DONE"})
+	var build models.HashicorpCloudPacker20230101CreateBuildResponse
+	decodeResponse(t, created, &build)
+
+	response := request(t, server, http.MethodPut,
+		testBase+"/buckets/images/versions/fp/builds/"+build.Build.ID+"/sboms",
+		map[string]any{"compressed_sbom": base64.StdEncoding.EncodeToString([]byte("zstd"))})
+	// Fixture source: Appendix A.11, captured by live conformance and S3d.
+	wantBody := "{\"code\":3,\"message\":\"This build's status isn't Running, so sboms can not be uploaded\",\"details\":[]}\n"
+	if response.Code != http.StatusBadRequest || response.Body.String() != wantBody {
+		t.Fatalf("non-running UploadSbom = %d %q, want 400 %q", response.Code, response.Body.String(), wantBody)
+	}
+	if len(repository.sboms) != 0 {
+		t.Fatalf("non-running UploadSbom stored documents: %#v", repository.sboms)
+	}
+}
+
 func TestUploadSbomReturns503WhenObjectStorageIsUnconfigured(t *testing.T) {
 	repository := newFakeRepository()
 	seed := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
@@ -1751,7 +1805,7 @@ func TestUploadSbomReturns503WhenObjectStorageIsUnconfigured(t *testing.T) {
 	request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
 	created := request(t, seed, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
-		map[string]any{"component_type": "docker"})
+		map[string]any{"component_type": "docker", "status": "BUILD_RUNNING"})
 	var build models.HashicorpCloudPacker20230101CreateBuildResponse
 	decodeResponse(t, created, &build)
 
@@ -1779,7 +1833,7 @@ func TestUploadSbomReturns503WhenObjectStorageIsUnavailable(t *testing.T) {
 	request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
 	created := request(t, seed, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
-		map[string]any{"component_type": "docker"})
+		map[string]any{"component_type": "docker", "status": "BUILD_RUNNING"})
 	var build models.HashicorpCloudPacker20230101CreateBuildResponse
 	decodeResponse(t, created, &build)
 
@@ -1810,7 +1864,7 @@ func TestDownloadSbomReturns503WhenObjectStorageIsUnavailable(t *testing.T) {
 	request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
 		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
 	created := request(t, seed, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
-		map[string]any{"component_type": "docker"})
+		map[string]any{"component_type": "docker", "status": "BUILD_RUNNING"})
 	var build models.HashicorpCloudPacker20230101CreateBuildResponse
 	decodeResponse(t, created, &build)
 	request(t, seed, http.MethodPut,

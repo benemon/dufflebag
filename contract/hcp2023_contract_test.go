@@ -387,6 +387,43 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 		)
 	}
 
+	// Packer uploads SBOMs while the build is running, before doCompleteBuild's
+	// terminal heartbeat. Any error fails the whole build, the response payload
+	// is ignored, and an omitted name defaults to the build fingerprint
+	// (dossier §5.6).
+	sbomFormat := sdkmodels.HashicorpCloudPacker20230101SbomFormatCYCLONEDX
+	uploadSbomParams := func(name string) *packer_service.PackerServiceUploadSbomParams {
+		return packer_service.NewPackerServiceUploadSbomParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("images").
+			WithFingerprint("fingerprint").
+			WithBuildID(createdBuild.Payload.Build.ID).
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101UploadSbomBody{
+				// Probe 66 accepted 1,049,625 compressed bytes. This 768 KiB
+				// fixture exercises the generated client's base64 expansion while
+				// staying below that observed working size.
+				CompressedSbom: bytes.Repeat([]byte{'z'}, 768<<10),
+				Format:         &sbomFormat,
+				Name:           name,
+			})
+	}
+	namedSbom, err := client.PackerServiceUploadSbom(uploadSbomParams("my-sbom"), contractAuth)
+	if err != nil {
+		t.Fatalf("generated UploadSbom: %v", err)
+	}
+	if namedSbom.Payload.Sbom == nil || namedSbom.Payload.Sbom.Name != "my-sbom" {
+		t.Fatalf("generated UploadSbom payload = %#v", namedSbom.Payload.Sbom)
+	}
+	unnamedSbom, err := client.PackerServiceUploadSbom(uploadSbomParams(""), contractAuth)
+	if err != nil {
+		t.Fatalf("generated unnamed UploadSbom: %v", err)
+	}
+	if unnamedSbom.Payload.Sbom == nil || unnamedSbom.Payload.Sbom.Name != "fingerprint" {
+		t.Fatalf("generated unnamed UploadSbom = %#v, want the fingerprint as name",
+			unnamedSbom.Payload.Sbom)
+	}
+
 	// doCompleteBuild's final PATCH: BUILD_DONE with artifacts and metadata.
 	// Completion is what makes the version assignable to a channel, and the
 	// name leaving "v0" is how Packer sees completion (dossier §5.2).
@@ -523,42 +560,6 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 		t.Fatalf("generated DeleteChannel latest error text = %v", err)
 	}
 
-	// Packer uploads SBOMs between the running and done heartbeats; the
-	// contract is the same either side. Any error fails the whole build, the
-	// response payload is ignored, and an omitted name is the server's to
-	// default to the build fingerprint (dossier §5.6).
-	sbomFormat := sdkmodels.HashicorpCloudPacker20230101SbomFormatCYCLONEDX
-	uploadSbomParams := func(name string) *packer_service.PackerServiceUploadSbomParams {
-		return packer_service.NewPackerServiceUploadSbomParams().
-			WithLocationOrganizationID(contractOrg).
-			WithLocationProjectID(contractProject).
-			WithBucketName("images").
-			WithFingerprint("fingerprint").
-			WithBuildID(createdBuild.Payload.Build.ID).
-			WithBody(&sdkmodels.HashicorpCloudPacker20230101UploadSbomBody{
-				// Probe 66 accepted 1,049,625 compressed bytes. This 768 KiB
-				// fixture exercises the generated client's base64 expansion while
-				// staying below that observed working size.
-				CompressedSbom: bytes.Repeat([]byte{'z'}, 768<<10),
-				Format:         &sbomFormat,
-				Name:           name,
-			})
-	}
-	namedSbom, err := client.PackerServiceUploadSbom(uploadSbomParams("my-sbom"), contractAuth)
-	if err != nil {
-		t.Fatalf("generated UploadSbom: %v", err)
-	}
-	if namedSbom.Payload.Sbom == nil || namedSbom.Payload.Sbom.Name != "my-sbom" {
-		t.Fatalf("generated UploadSbom payload = %#v", namedSbom.Payload.Sbom)
-	}
-	unnamedSbom, err := client.PackerServiceUploadSbom(uploadSbomParams(""), contractAuth)
-	if err != nil {
-		t.Fatalf("generated unnamed UploadSbom: %v", err)
-	}
-	if unnamedSbom.Payload.Sbom == nil || unnamedSbom.Payload.Sbom.Name != "fingerprint" {
-		t.Fatalf("generated unnamed UploadSbom = %#v, want the fingerprint as name",
-			unnamedSbom.Payload.Sbom)
-	}
 	listedSboms, err := client.PackerServiceListSboms(
 		packer_service.NewPackerServiceListSbomsParams().
 			WithLocationOrganizationID(contractOrg).

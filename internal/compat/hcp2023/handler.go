@@ -1016,6 +1016,34 @@ func (h *handler) uploadSbom(w http.ResponseWriter, r *http.Request) {
 	if !h.decodeBody(w, r, &body) {
 		return
 	}
+	build, err := h.repository.GetBuild(
+		r.Context(),
+		tenant(r),
+		r.PathValue("bucket"),
+		r.PathValue("fingerprint"),
+		r.PathValue("build"),
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		writeRPCError(w, http.StatusNotFound, 5, "build not found")
+		return
+	}
+	if err != nil {
+		h.writeInternal(w, r, "compat request failed", err)
+		return
+	}
+	// Appendix A.11 captured this refusal verbatim from live HCP twice.
+	if build.Status != registry.BuildRunning {
+		writeJSON(w, http.StatusBadRequest, &struct {
+			Code    int32                       `json:"code"`
+			Message string                      `json:"message"`
+			Details []*models.GoogleProtobufAny `json:"details"`
+		}{
+			Code:    3,
+			Message: "This build's status isn't Running, so sboms can not be uploaded",
+			Details: []*models.GoogleProtobufAny{},
+		})
+		return
+	}
 	// An omitted name is the server's to fill, and the fingerprint is the
 	// documented default: "If omitted, HCP Packer uses the build fingerprint as
 	// the file name" (dossier §5.6). No other validation — the spec declares
@@ -1456,6 +1484,8 @@ func renderVersion(
 		}
 		wireBuilds = append(wireBuilds, wire)
 	}
+	// RevokeAt stays nil for a never-revoked version so the non-omitted pointer
+	// renders null, matching the Appendix A.7 verbatim capture and S3a proof.
 	wire := &models.HashicorpCloudPacker20230101Version{
 		ID:             version.ID.String(),
 		Name:           name,
@@ -1488,7 +1518,8 @@ func renderVersion(
 			status = models.HashicorpCloudPacker20230101VersionStatusVERSIONREVOKED
 		}
 		wire.Status = &status
-		wire.RevokeAt = strfmt.DateTime(rev.RevokeAt)
+		revokeAt := strfmt.DateTime(rev.RevokeAt)
+		wire.RevokeAt = &revokeAt
 		wire.RevocationMessage = rev.Message
 		wire.RevocationAuthor = rev.Author
 		revocationType := models.HashicorpCloudPacker20230101RevocationTypeMANUAL

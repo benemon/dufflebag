@@ -194,7 +194,7 @@ func TestUnconfiguredRuntimeStartsAndSBOMUploadReturns503(t *testing.T) {
 		map[string]string{"fingerprint": "fp", "template_type": "HCL2"}, tokenResponse.AccessToken)
 	buildResponse := runtimeJSONRequest(t, process.address, http.MethodPost,
 		base+"/buckets/images/versions/fp/builds",
-		map[string]string{"component_type": "docker"}, tokenResponse.AccessToken)
+		map[string]string{"component_type": "docker", "status": "BUILD_RUNNING"}, tokenResponse.AccessToken)
 	var build struct {
 		Build struct {
 			ID string `json:"id"`

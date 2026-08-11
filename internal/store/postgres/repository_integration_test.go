@@ -2188,7 +2188,7 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 		registry.TemplateHCL2, store.StoredBuild{
 			Build: registry.Build{
 				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "amazon-ebs",
-				Status: registry.BuildDone, Platform: "aws",
+				Status: registry.BuildRunning, Platform: "aws",
 			},
 			Artifacts: []store.Artifact{{
 				ID: registry.NewID(at.Add(2 * time.Second)), ExternalIdentifier: "ami-1",
