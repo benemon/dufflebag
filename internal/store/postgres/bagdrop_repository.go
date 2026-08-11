@@ -256,6 +256,27 @@ func (r *Repository) RemoveBagDropAssociation(
 	return bagdrop.RemovalOutcome(outcome), nil
 }
 
+func (r *Repository) DeleteBagDropAssociation(
+	ctx context.Context, organizationID, projectID, bucketName string,
+) error {
+	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	deleted, err := q.DeleteBagDropAssociation(ctx, bucketName)
+	if err != nil {
+		return fmt.Errorf("delete Bag Drop association: %w", err)
+	}
+	if deleted != 1 {
+		return fmt.Errorf("delete Bag Drop association: expected one row, deleted %d", deleted)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete Bag Drop association: %w", err)
+	}
+	return nil
+}
+
 func (r *Repository) BagDropBucketExists(
 	ctx context.Context, organizationID, projectID, bucketName string,
 ) (bool, error) {

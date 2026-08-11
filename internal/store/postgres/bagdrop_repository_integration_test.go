@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,9 +200,118 @@ func TestBagDropAttemptedAssociationTombstoneAndDeleteGuard(t *testing.T) {
 	if err != nil || len(listed) != 1 || listed[0].State != bagdrop.AssociationPendingRemoval {
 		t.Fatalf("tombstone = %#v, %v", listed, err)
 	}
+	retriedAt := attemptedAt.Add(2 * time.Minute)
+	if err := repository.MarkBagDropAssociationAttempt(ctx, orgA, projectA, "images", retriedAt); err != nil {
+		t.Fatalf("mark tombstone retry: %v", err)
+	}
+	if err := repository.RecordBagDropAssociationFailure(
+		ctx, orgA, projectA, "images", "HTTP 500: delete refused", retriedAt,
+	); err != nil {
+		t.Fatalf("record tombstone failure: %v", err)
+	}
+	listed, err = repository.ListBagDropAssociations(ctx, orgA, projectA)
+	if err != nil || len(listed) != 1 || listed[0].LastSyncError == nil ||
+		*listed[0].LastSyncError != "HTTP 500: delete refused" {
+		t.Fatalf("failed tombstone retry = %#v, %v", listed, err)
+	}
 	service := bagdrop.NewService(repository, bagdrop.NewCredentialSealer(nil, ""), nil)
 	if err := service.Delete(ctx, orgA, projectA); !errors.Is(err, bagdrop.ErrCleanupPending) {
 		t.Fatalf("delete with tombstone = %v", err)
+	}
+}
+
+func TestBagDropConsumedTombstoneUnblocksConfigDelete(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	repository := store.NewRepository(db)
+	ctx := context.Background()
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	broker, err := audit.NewBroker(logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Fixture source: internal/compat/hcpauth/handler.go tokenResponse and
+	// docs/compatibility.md section 3.
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"access_token":"fixture-token","token_type":"Bearer","expires_in":3600}`))
+	}))
+	defer auth.Close()
+	remoteImages, foreignBucket := true, true
+	managedLatestDelete := false
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodGet && strings.HasSuffix(request.URL.Path, "/buckets"):
+			// Fixture source: internal/compat/hcp2023 ListBuckets response.
+			_, _ = w.Write([]byte(`{"buckets":[],"pagination":{}}`))
+		case request.Method == http.MethodDelete && strings.HasSuffix(request.URL.Path, "/buckets/images"):
+			remoteImages = false
+			// Fixture source: the vendored DeleteBucketResponse is an empty object.
+			_, _ = w.Write([]byte(`{}`))
+		case request.Method == http.MethodDelete && strings.Contains(request.URL.Path, "/channels/latest"):
+			managedLatestDelete = true
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = w.Write([]byte(`{"code":3,"message":"managed channel","details":[]}`))
+		default:
+			t.Fatalf("unexpected fake destination request: %s %s", request.Method, request.URL.String())
+		}
+	}))
+	defer api.Close()
+
+	sealer := bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef")
+	adapters := bagdrop.Registry{
+		bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(auth.URL, api.URL),
+	}
+	service := bagdrop.NewService(repository, sealer, adapters)
+	secret := "destination-secret"
+	if _, _, err := service.Put(ctx, orgA, projectA, bagdrop.Write{
+		Adapter: bagdrop.AdapterHCPPacker,
+		HCPPacker: bagdrop.HCPPackerConfig{
+			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
+		},
+		ClientSecret: &secret,
+	}); err != nil {
+		t.Fatalf("put config: %v", err)
+	}
+	if _, _, err := service.Enable(ctx, orgA, projectA); err != nil {
+		t.Fatalf("enable config: %v", err)
+	}
+	insertPinBucket(t, repository, "images")
+	if _, err := service.Associate(ctx, orgA, projectA, "images"); err != nil {
+		t.Fatalf("associate: %v", err)
+	}
+	attemptedAt := time.Date(2026, 8, 11, 9, 0, 0, 0, time.UTC)
+	if err := repository.MarkBagDropAssociationAttempt(ctx, orgA, projectA, "images", attemptedAt); err != nil {
+		t.Fatalf("mark sync attempt: %v", err)
+	}
+	if outcome, err := service.Unassociate(ctx, orgA, projectA, "images"); err != nil || outcome != bagdrop.RemovalPending {
+		t.Fatalf("unassociate = %q, %v", outcome, err)
+	}
+	if err := service.Delete(ctx, orgA, projectA); !errors.Is(err, bagdrop.ErrEnabled) {
+		t.Fatalf("enabled delete guard = %v", err)
+	}
+	reconciler, err := bagdrop.NewReconciler(repository, sealer, adapters, broker, time.Hour, logger)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := reconciler.ReconcileProject(ctx, bagdrop.Project{OrganizationID: orgA, ProjectID: projectA}); err != nil {
+		t.Fatalf("consume tombstone: %v", err)
+	}
+	associations, err := service.ListAssociations(ctx, orgA, projectA)
+	if err != nil || len(associations) != 0 {
+		t.Fatalf("associations after reconcile = %#v, %v", associations, err)
+	}
+	if remoteImages || !foreignBucket || managedLatestDelete {
+		t.Fatalf("destination invariants images=%v foreign=%v managed_latest_delete=%v",
+			remoteImages, foreignBucket, managedLatestDelete)
+	}
+	if _, err := service.Disable(ctx, orgA, projectA); err != nil {
+		t.Fatalf("disable config: %v", err)
+	}
+	if err := service.Delete(ctx, orgA, projectA); err != nil {
+		t.Fatalf("delete config after consumed tombstone: %v", err)
+	}
+	if _, err := service.Get(ctx, orgA, projectA); !errors.Is(err, bagdrop.ErrNotFound) {
+		t.Fatalf("get deleted config = %v", err)
 	}
 }
 

@@ -71,13 +71,15 @@ func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	}
 }
 
-func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDestination(t *testing.T) {
+func TestReconcileMirrorSemanticsAgainstHCP2023FakeDestination(t *testing.T) {
 	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		// Fixture source: internal/compat/hcpauth/handler.go tokenResponse.
 		_, _ = w.Write([]byte(tokenSuccessFixture))
 	}))
 	defer auth.Close()
 	var bucketExists, versionExists, buildExists, buildDone bool
+	var remoteChannelDrift, remoteVersionDrift, remoteBuildDrift bool
+	foreignBucket := true
 	var productionExists bool
 	productionFingerprint := ""
 	latestMutations := 0
@@ -86,6 +88,10 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 			t.Errorf("Authorization = %q", request.Header.Get("Authorization"))
 		}
 		path := request.URL.Path
+		if strings.Contains(path, "/buckets/foreign") {
+			foreignBucket = false
+			t.Errorf("foreign unassociated bucket was touched: %s %s", request.Method, path)
+		}
 		switch {
 		case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images"):
 			if !bucketExists {
@@ -95,6 +101,16 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 				return
 			}
 			_, _ = w.Write([]byte(`{"bucket":{"description":"images description"}}`))
+		case request.Method == http.MethodGet && strings.HasSuffix(path, "/buckets/images/versions"):
+			if versionExists {
+				drift := ""
+				if remoteVersionDrift {
+					drift = `,{"fingerprint":"fp-remote"}`
+				}
+				_, _ = w.Write([]byte(`{"versions":[{"fingerprint":"fp-1"}` + drift + `],"pagination":{}}`))
+			} else {
+				_, _ = w.Write([]byte(`{"versions":[],"pagination":{}}`))
+			}
 		case request.Method == http.MethodPut && strings.HasSuffix(path, "/buckets"):
 			bucketExists = true
 			_, _ = w.Write([]byte(`{"bucket":{"name":"images","description":"images description"}}`))
@@ -118,7 +134,11 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 			if buildDone {
 				status = "BUILD_DONE"
 			}
-			_, _ = w.Write([]byte(`{"builds":[{"id":"remote-build","component_type":"amazon-ebs","status":"` + status + `"}]}`))
+			drift := ""
+			if remoteBuildDrift {
+				drift = `,{"id":"remote-build-drift","component_type":"googlecompute","status":"BUILD_DONE"}`
+			}
+			_, _ = w.Write([]byte(`{"builds":[{"id":"remote-build","component_type":"amazon-ebs","status":"` + status + `"}` + drift + `]}`))
 		case request.Method == http.MethodPost && strings.HasSuffix(path, "/versions/fp-1/builds"):
 			var body struct {
 				ComponentType string `json:"component_type"`
@@ -176,7 +196,11 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 				}
 				production = `,{"name":"production","managed":false,"version":` + version + `}`
 			}
-			_, _ = w.Write([]byte(`{"channels":[{"name":"latest","managed":true,"version":{"fingerprint":"fp-1"}}` + production + `]}`))
+			drift := ""
+			if remoteChannelDrift {
+				drift = `,{"name":"remote-only","managed":false,"version":null}`
+			}
+			_, _ = w.Write([]byte(`{"channels":[{"name":"latest","managed":true,"version":{"fingerprint":"fp-1"}}` + production + drift + `]}`))
 		case request.Method == http.MethodPost && strings.HasSuffix(path, "/buckets/images/channels"):
 			var body struct {
 				Name string `json:"name"`
@@ -202,6 +226,18 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 			latestMutations++
 			w.WriteHeader(http.StatusBadRequest)
 			_, _ = w.Write([]byte(`{"code":3,"message":"Can't delete managed channel latest, it's controlled by HCP Packer","details":[]}`))
+		case request.Method == http.MethodDelete && strings.HasSuffix(path, "/channels/remote-only"):
+			remoteChannelDrift = false
+			// Fixture source: the vendored DeleteChannelResponse is an empty object.
+			_, _ = w.Write([]byte(`{}`))
+		case request.Method == http.MethodDelete && strings.HasSuffix(path, "/versions/fp-remote"):
+			remoteVersionDrift = false
+			// Fixture source: the vendored DeleteVersionResponse is an empty object.
+			_, _ = w.Write([]byte(`{}`))
+		case request.Method == http.MethodDelete && strings.HasSuffix(path, "/builds/remote-build-drift"):
+			remoteBuildDrift = false
+			// Fixture source: the vendored DeleteBuildResponse is an empty object.
+			_, _ = w.Write([]byte(`{}`))
 		case request.Method == http.MethodPatch && strings.HasSuffix(path, "/channels/production"):
 			var body struct {
 				VersionFingerprint string `json:"version_fingerprint"`
@@ -248,6 +284,15 @@ func TestReconcileMirrorsVersionsBeforeChannelAssignmentsAgainstHCP2023FakeDesti
 		productionFingerprint != "fp-1" || latestMutations != 0 || repository.successes["images"] != 1 {
 		t.Fatalf("destination state bucket=%v version=%v build_done=%v channel=%v/%q latest_mutations=%d successes=%v",
 			bucketExists, versionExists, buildDone, productionExists, productionFingerprint, latestMutations, repository.successes)
+	}
+	remoteChannelDrift, remoteVersionDrift, remoteBuildDrift = true, true, true
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if remoteChannelDrift || remoteVersionDrift || remoteBuildDrift || !foreignBucket ||
+		latestMutations != 0 || repository.successes["images"] != 2 {
+		t.Fatalf("destructive convergence channel=%v version=%v build=%v foreign=%v latest_mutations=%d successes=%v",
+			remoteChannelDrift, remoteVersionDrift, remoteBuildDrift, foreignBucket, latestMutations, repository.successes)
 	}
 }
 
@@ -516,22 +561,226 @@ func TestReconcileSecretNeverReachesStatusOrAudit(t *testing.T) {
 	}
 }
 
-func TestReconcileSkipsRunningVersionAndDeletedBucket(t *testing.T) {
-	reconciler, repository, _, writer := newTestReconciler(t, "secret")
-	repository.associations = []Association{testAssociation("running"), testAssociation("deleted")}
-	// Repository projections omit running versions. A nil snapshot is the
-	// locally-deleted association case and must remain wholly untouched.
-	repository.snapshots["running"] = &BucketSnapshot{Name: "running"}
-	repository.snapshots["deleted"] = nil
+func TestReconcileRemovesRemoteChannelDriftWithoutTouchingManagedLatestOrForeignBucket(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = &BucketSnapshot{Name: "images"}
+	seedDeletionInvariants(run, "images")
+	run.channels["images"]["remote-only"] = RemoteChannel{Name: "remote-only"}
 
 	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
 		t.Fatal(err)
 	}
-	if repository.marks["deleted"] != 0 || repository.successes["deleted"] != 0 || repository.failures["deleted"] != "" {
-		t.Fatalf("deleted association was touched: marks=%v successes=%v failures=%v", repository.marks, repository.successes, repository.failures)
+	if len(run.deletedChannels) != 1 || run.deletedChannels[0] != "remote-only" {
+		t.Fatalf("deleted channels = %v", run.deletedChannels)
 	}
-	if len(writer.records) != 2 {
-		t.Fatalf("running version caused unexpected mutations: %d audit records", len(writer.records))
+	assertDeletionInvariants(t, run, "images")
+	assertAuditMutation(t, writer, "bagdrop.sync.channel.delete", "drift")
+}
+
+func TestReconcileRemovesRemoteVersionDriftWithoutTouchingForeignBucket(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = &BucketSnapshot{
+		Name: "images", Versions: []VersionSnapshot{{Fingerprint: "fp-local"}},
+	}
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{
+		{Fingerprint: "fp-local"}, {Fingerprint: "fp-remote"},
+	}}
+	run.versions["fp-local"] = true
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.deletedVersions) != 1 || run.deletedVersions[0] != "fp-remote" {
+		t.Fatalf("deleted versions = %v", run.deletedVersions)
+	}
+	assertDeletionInvariants(t, run, "images")
+	assertAuditMutation(t, writer, "bagdrop.sync.version.delete", "drift")
+}
+
+func TestReconcileRemovesRemoteBuildDriftWhenVendoredDeleteBuildExists(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = testSnapshot("images")
+	seedDeletionInvariants(run, "images")
+	run.buckets["images"] = RemoteBucket{Description: "images description", Versions: []RemoteVersion{{Fingerprint: "fp-1"}}}
+	run.versions["fp-1"] = true
+	run.builds["fp-1"] = []RemoteBuild{
+		{ID: "local-build", ComponentType: "amazon-ebs", Status: "BUILD_DONE"},
+		{ID: "remote-build", ComponentType: "googlecompute", Status: "BUILD_DONE"},
+	}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.deletedBuilds) != 1 || run.deletedBuilds[0] != "fp-1/remote-build" {
+		t.Fatalf("deleted builds = %v", run.deletedBuilds)
+	}
+	assertDeletionInvariants(t, run, "images")
+	assertAuditMutation(t, writer, "bagdrop.sync.build.delete", "drift")
+}
+
+func TestReconcileDeletesChannelsThenVersionsThenSurvivingVersionBuilds(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = &BucketSnapshot{
+		Name: "images", Versions: []VersionSnapshot{{Fingerprint: "fp-local"}},
+	}
+	seedDeletionInvariants(run, "images")
+	run.channels["images"]["remote-only"] = RemoteChannel{Name: "remote-only"}
+	run.buckets["images"] = RemoteBucket{Versions: []RemoteVersion{
+		{Fingerprint: "fp-local"}, {Fingerprint: "fp-remote"},
+	}}
+	run.versions["fp-local"] = true
+	run.builds["fp-local"] = []RemoteBuild{{ID: "remote-build", ComponentType: "amazon-ebs"}}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(repository.events, ",")
+	channelAt := strings.Index(joined, "delete-channel:remote-only")
+	versionAt := strings.Index(joined, "delete-version:fp-remote")
+	buildAt := strings.Index(joined, "delete-build:remote-build")
+	if channelAt < 0 || versionAt <= channelAt || buildAt <= versionAt {
+		t.Fatalf("delete order = %v", repository.events)
+	}
+	assertDeletionInvariants(t, run, "images")
+}
+
+func TestReconcilePropagatesLocalBucketDeleteAndConsumesAssociation(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = nil
+	seedDeletionInvariants(run, "images")
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.deletedBuckets) != 1 || run.deletedBuckets[0] != "images" || len(repository.associations) != 0 {
+		t.Fatalf("delete result buckets=%v associations=%#v", run.deletedBuckets, repository.associations)
+	}
+	assertForeignBucketUntouched(t, run)
+	if len(run.deletedChannels) != 0 {
+		t.Fatalf("managed latest received leaf delete: %v", run.deletedChannels)
+	}
+	assertAuditMutation(t, writer, "bagdrop.sync.bucket.delete", "local_delete")
+}
+
+func TestReconcileConsumesTombstoneAfterRemoteDelete(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	tombstone := testAssociation("images")
+	tombstone.State = AssociationPendingRemoval
+	repository.associations = []Association{tombstone}
+	seedDeletionInvariants(run, "images")
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if len(run.deletedBuckets) != 1 || len(repository.associations) != 0 {
+		t.Fatalf("delete result buckets=%v associations=%#v", run.deletedBuckets, repository.associations)
+	}
+	assertForeignBucketUntouched(t, run)
+	if len(run.deletedChannels) != 0 {
+		t.Fatalf("managed latest received leaf delete: %v", run.deletedChannels)
+	}
+	assertAuditMutation(t, writer, "bagdrop.sync.bucket.delete", "unassociate")
+}
+
+func TestReconcileFailedRemoteDeleteRetainsTombstoneAndConvergesLater(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	tombstone := testAssociation("images")
+	tombstone.State = AssociationPendingRemoval
+	repository.associations = []Association{tombstone}
+	seedDeletionInvariants(run, "images")
+	run.deleteBucketErrors["images"] = &AdapterError{StatusCode: http.StatusInternalServerError, Code: 13, Summary: "refused"}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err == nil {
+		t.Fatal("reconcile succeeded despite refused remote delete")
+	}
+	if len(repository.associations) != 1 || repository.associations[0].State != AssociationPendingRemoval ||
+		!strings.Contains(repository.failures["images"], "HTTP 500 code 13: refused") {
+		t.Fatalf("lost cleanup intent: associations=%#v failures=%v", repository.associations, repository.failures)
+	}
+	assertDeletionInvariants(t, run, "images")
+
+	delete(run.deleteBucketErrors, "images")
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if len(repository.associations) != 0 || len(run.deletedBuckets) != 1 {
+		t.Fatalf("retry did not converge: associations=%#v deletes=%v", repository.associations, run.deletedBuckets)
+	}
+	assertForeignBucketUntouched(t, run)
+}
+
+func TestReconcileDeleteRequestAuditFailurePreventsRemoteMutation(t *testing.T) {
+	reconciler, repository, run, writer := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = nil
+	seedDeletionInvariants(run, "images")
+	writer.failAt = 1
+
+	err := reconciler.ReconcileProject(context.Background(), repository.project)
+	if !errors.Is(err, ErrAuditUnavailable) {
+		t.Fatalf("error = %v, want audit unavailable", err)
+	}
+	if len(run.deletedBuckets) != 0 || len(repository.associations) != 1 {
+		t.Fatalf("delete ran without request audit: deletes=%v associations=%#v",
+			run.deletedBuckets, repository.associations)
+	}
+	assertDeletionInvariants(t, run, "images")
+}
+
+func seedDeletionInvariants(run *testReconcileRun, associated string) {
+	run.buckets[associated] = RemoteBucket{}
+	run.buckets["foreign"] = RemoteBucket{Description: "must survive"}
+	run.channels[associated] = map[string]RemoteChannel{
+		"latest": {Name: "latest", Managed: true},
+	}
+	run.channels["foreign"] = map[string]RemoteChannel{
+		"latest":       {Name: "latest", Managed: true},
+		"foreign-only": {Name: "foreign-only"},
+	}
+}
+
+func assertDeletionInvariants(t *testing.T, run *testReconcileRun, associated string) {
+	t.Helper()
+	assertForeignBucketUntouched(t, run)
+	latest, exists := run.channels[associated]["latest"]
+	if !exists || !latest.Managed {
+		t.Fatalf("managed latest was touched: %#v", run.channels[associated])
+	}
+}
+
+func assertForeignBucketUntouched(t *testing.T, run *testReconcileRun) {
+	t.Helper()
+	if _, exists := run.buckets["foreign"]; !exists {
+		t.Fatal("foreign unassociated bucket was deleted")
+	}
+	if len(run.channels["foreign"]) != 2 {
+		t.Fatalf("foreign bucket contents were touched: %#v", run.channels["foreign"])
+	}
+}
+
+func assertAuditMutation(t *testing.T, writer *testAuditWriter, operation, detail string) {
+	t.Helper()
+	found := 0
+	for _, encoded := range writer.records {
+		var event map[string]any
+		if err := json.Unmarshal(encoded, &event); err != nil {
+			t.Fatal(err)
+		}
+		if event["operation"] == operation {
+			found++
+			if event["detail"] != detail {
+				t.Fatalf("%s detail = %#v, want %q", operation, event["detail"], detail)
+			}
+		}
+	}
+	if found != 2 {
+		t.Fatalf("%s audit records = %d, want request and response", operation, found)
 	}
 }
 
@@ -555,7 +804,7 @@ func newTestReconciler(t *testing.T, secret string) (*Reconciler, *testReconcile
 	run := &testReconcileRun{
 		events: &repository.events, buckets: make(map[string]RemoteBucket), versions: make(map[string]bool),
 		builds: make(map[string][]RemoteBuild), readFailures: make(map[string]error), createdBuckets: make(map[string]bool),
-		channels: make(map[string]map[string]RemoteChannel),
+		channels: make(map[string]map[string]RemoteChannel), deleteBucketErrors: make(map[string]error),
 	}
 	writer := &testAuditWriter{}
 	reconciler, err := NewReconciler(repository, sealer, Registry{
@@ -622,6 +871,16 @@ func (r *testReconcileRepository) RecordBagDropAssociationFailure(_ context.Cont
 	r.failures[name] = summary
 	return nil
 }
+func (r *testReconcileRepository) DeleteBagDropAssociation(_ context.Context, _, _, name string) error {
+	for i := range r.associations {
+		if r.associations[i].BucketName == name {
+			r.associations = append(r.associations[:i], r.associations[i+1:]...)
+			r.events = append(r.events, "delete-association:"+name)
+			return nil
+		}
+	}
+	return errors.New("association not found")
+}
 
 type testReconcileAdapter struct{ run ReconcileRun }
 
@@ -645,6 +904,11 @@ type testReconcileRun struct {
 	createdChannels    []string
 	updatedChannels    []string
 	updateChannelError error
+	deletedBuckets     []string
+	deleteBucketErrors map[string]error
+	deletedVersions    []string
+	deletedBuilds      []string
+	deletedChannels    []string
 }
 
 func (r *testReconcileRun) GetBucket(_ context.Context, name string) (*RemoteBucket, bool, error) {
@@ -669,6 +933,16 @@ func (r *testReconcileRun) UpdateBucket(_ context.Context, bucket BucketSnapshot
 	r.buckets[bucket.Name] = RemoteBucket{Description: bucket.Description}
 	return nil
 }
+func (r *testReconcileRun) DeleteBucket(_ context.Context, name string) error {
+	*r.events = append(*r.events, "delete-bucket:"+name)
+	if err := r.deleteBucketErrors[name]; err != nil {
+		return err
+	}
+	delete(r.buckets, name)
+	delete(r.channels, name)
+	r.deletedBuckets = append(r.deletedBuckets, name)
+	return nil
+}
 func (r *testReconcileRun) GetVersion(_ context.Context, _, fingerprint string) (bool, error) {
 	*r.events = append(*r.events, "get-version:"+fingerprint)
 	return r.versions[fingerprint], nil
@@ -676,6 +950,13 @@ func (r *testReconcileRun) GetVersion(_ context.Context, _, fingerprint string) 
 func (r *testReconcileRun) CreateVersion(_ context.Context, _ string, version VersionSnapshot) error {
 	*r.events = append(*r.events, "create-version:"+version.Fingerprint)
 	r.versions[version.Fingerprint] = true
+	return nil
+}
+func (r *testReconcileRun) DeleteVersion(_ context.Context, _, fingerprint string) error {
+	*r.events = append(*r.events, "delete-version:"+fingerprint)
+	delete(r.versions, fingerprint)
+	delete(r.builds, fingerprint)
+	r.deletedVersions = append(r.deletedVersions, fingerprint)
 	return nil
 }
 func (r *testReconcileRun) ListBuilds(_ context.Context, _, fingerprint string) ([]RemoteBuild, error) {
@@ -696,6 +977,18 @@ func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id str
 		}
 	}
 	r.updatedArtifacts = append([]ArtifactSnapshot(nil), build.Artifacts...)
+	return nil
+}
+func (r *testReconcileRun) DeleteBuild(_ context.Context, _, fingerprint, id string) error {
+	*r.events = append(*r.events, "delete-build:"+id)
+	builds := r.builds[fingerprint]
+	for i := range builds {
+		if builds[i].ID == id {
+			r.builds[fingerprint] = append(builds[:i], builds[i+1:]...)
+			break
+		}
+	}
+	r.deletedBuilds = append(r.deletedBuilds, fingerprint+"/"+id)
 	return nil
 }
 func (r *testReconcileRun) ListChannels(_ context.Context, bucket string) ([]RemoteChannel, error) {
@@ -731,6 +1024,16 @@ func (r *testReconcileRun) UpdateChannelAssignment(
 		detail = *fingerprint
 	}
 	r.updatedChannels = append(r.updatedChannels, name+":"+detail)
+	return nil
+}
+func (r *testReconcileRun) DeleteChannel(_ context.Context, bucket, name string) error {
+	*r.events = append(*r.events, "delete-channel:"+name)
+	channel := r.channels[bucket][name]
+	if channel.Managed {
+		return &AdapterError{StatusCode: http.StatusBadRequest, Code: 3, Summary: "managed latest cannot be deleted"}
+	}
+	delete(r.channels[bucket], name)
+	r.deletedChannels = append(r.deletedChannels, name)
 	return nil
 }
 

@@ -28,14 +28,18 @@ type ReconcileRun interface {
 	GetBucket(context.Context, string) (*RemoteBucket, bool, error)
 	CreateBucket(context.Context, BucketSnapshot) error
 	UpdateBucket(context.Context, BucketSnapshot) error
+	DeleteBucket(context.Context, string) error
 	GetVersion(context.Context, string, string) (bool, error)
 	CreateVersion(context.Context, string, VersionSnapshot) error
+	DeleteVersion(context.Context, string, string) error
 	ListBuilds(context.Context, string, string) ([]RemoteBuild, error)
 	CreateBuild(context.Context, string, string, BuildSnapshot) (string, error)
 	UpdateBuild(context.Context, string, string, string, BuildSnapshot) error
+	DeleteBuild(context.Context, string, string, string) error
 	ListChannels(context.Context, string) ([]RemoteChannel, error)
 	CreateChannel(context.Context, string, string) error
 	UpdateChannelAssignment(context.Context, string, string, *string) error
+	DeleteChannel(context.Context, string, string) error
 }
 
 type Registry map[AdapterKind]Adapter
@@ -167,7 +171,18 @@ func (r *hcpReconcileRun) GetBucket(ctx context.Context, name string) (*RemoteBu
 	if remoteError(err, http.StatusNotFound, 5) {
 		return nil, false, nil
 	}
-	return response.Bucket, err == nil, err
+	if err != nil {
+		return nil, false, err
+	}
+	if response.Bucket == nil {
+		return nil, false, errors.New("destination bucket response omitted bucket")
+	}
+	versions, err := r.listVersions(ctx, name)
+	if err != nil {
+		return nil, false, err
+	}
+	response.Bucket.Versions = versions
+	return response.Bucket, true, nil
 }
 
 func (r *hcpReconcileRun) CreateBucket(ctx context.Context, bucket BucketSnapshot) error {
@@ -180,6 +195,10 @@ func (r *hcpReconcileRun) UpdateBucket(ctx context.Context, bucket BucketSnapsho
 	return r.do(ctx, http.MethodPatch, r.basePath()+"/buckets/"+url.PathEscape(bucket.Name), map[string]any{
 		"description": bucket.Description,
 	}, nil)
+}
+
+func (r *hcpReconcileRun) DeleteBucket(ctx context.Context, bucket string) error {
+	return r.delete(ctx, r.basePath()+"/buckets/"+url.PathEscape(bucket))
 }
 
 func (r *hcpReconcileRun) GetVersion(ctx context.Context, bucket, fingerprint string) (bool, error) {
@@ -200,12 +219,60 @@ func (r *hcpReconcileRun) CreateVersion(ctx context.Context, bucket string, vers
 	return err
 }
 
-func (r *hcpReconcileRun) ListBuilds(ctx context.Context, bucket, fingerprint string) ([]RemoteBuild, error) {
-	var response struct {
-		Builds []RemoteBuild `json:"builds"`
+func (r *hcpReconcileRun) DeleteVersion(ctx context.Context, bucket, fingerprint string) error {
+	return r.delete(ctx, r.versionPath(bucket, fingerprint))
+}
+
+func (r *hcpReconcileRun) listVersions(ctx context.Context, bucket string) ([]RemoteVersion, error) {
+	path := r.basePath() + "/buckets/" + url.PathEscape(bucket) + "/versions"
+	var versions []RemoteVersion
+	pageToken := ""
+	for {
+		var response struct {
+			Versions   []RemoteVersion `json:"versions"`
+			Pagination struct {
+				NextPageToken string `json:"next_page_token"`
+			} `json:"pagination"`
+		}
+		pagePath := path
+		if pageToken != "" {
+			pagePath += "?pagination.next_page_token=" + url.QueryEscape(pageToken)
+		}
+		if err := r.do(ctx, http.MethodGet, pagePath, nil, &response); err != nil {
+			return nil, err
+		}
+		versions = append(versions, response.Versions...)
+		if response.Pagination.NextPageToken == "" {
+			return versions, nil
+		}
+		pageToken = response.Pagination.NextPageToken
 	}
-	err := r.do(ctx, http.MethodGet, r.versionPath(bucket, fingerprint)+"/builds", nil, &response)
-	return response.Builds, err
+}
+
+func (r *hcpReconcileRun) ListBuilds(ctx context.Context, bucket, fingerprint string) ([]RemoteBuild, error) {
+	path := r.versionPath(bucket, fingerprint) + "/builds"
+	var builds []RemoteBuild
+	pageToken := ""
+	for {
+		var response struct {
+			Builds     []RemoteBuild `json:"builds"`
+			Pagination struct {
+				NextPageToken string `json:"next_page_token"`
+			} `json:"pagination"`
+		}
+		pagePath := path
+		if pageToken != "" {
+			pagePath += "?pagination.next_page_token=" + url.QueryEscape(pageToken)
+		}
+		if err := r.do(ctx, http.MethodGet, pagePath, nil, &response); err != nil {
+			return nil, err
+		}
+		builds = append(builds, response.Builds...)
+		if response.Pagination.NextPageToken == "" {
+			return builds, nil
+		}
+		pageToken = response.Pagination.NextPageToken
+	}
 }
 
 func (r *hcpReconcileRun) CreateBuild(
@@ -253,6 +320,10 @@ func (r *hcpReconcileRun) UpdateBuild(
 	return r.do(ctx, http.MethodPatch, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID), body, nil)
 }
 
+func (r *hcpReconcileRun) DeleteBuild(ctx context.Context, bucket, fingerprint, buildID string) error {
+	return r.delete(ctx, r.versionPath(bucket, fingerprint)+"/builds/"+url.PathEscape(buildID))
+}
+
 func (r *hcpReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
 	var response struct {
 		Channels []struct {
@@ -295,6 +366,18 @@ func (r *hcpReconcileRun) UpdateChannelAssignment(
 		"version_fingerprint": value,
 		"update_mask":         "versionFingerprint",
 	}, nil)
+}
+
+func (r *hcpReconcileRun) DeleteChannel(ctx context.Context, bucket, name string) error {
+	return r.delete(ctx, r.channelPath(bucket)+"/"+url.PathEscape(name))
+}
+
+func (r *hcpReconcileRun) delete(ctx context.Context, path string) error {
+	err := r.do(ctx, http.MethodDelete, path, nil, nil)
+	if remoteError(err, http.StatusNotFound, 5) {
+		return nil
+	}
+	return err
 }
 
 func (r *hcpReconcileRun) channelPath(bucket string) string {

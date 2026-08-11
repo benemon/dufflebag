@@ -26,6 +26,7 @@ type ReconcileRepository interface {
 	MarkBagDropAssociationAttempt(context.Context, string, string, string, time.Time) error
 	RecordBagDropAssociationSuccess(context.Context, string, string, string, time.Time) error
 	RecordBagDropAssociationFailure(context.Context, string, string, string, string, time.Time) error
+	DeleteBagDropAssociation(context.Context, string, string, string) error
 }
 
 type Reconciler struct {
@@ -235,17 +236,14 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 	var runErr error
 	var failures []error
 	for _, association := range associations {
-		if association.State != AssociationActive {
-			continue
-		}
-		bucket, err := r.repository.GetBagDropBucketSnapshot(
-			ctx, project.OrganizationID, project.ProjectID, association.BucketName,
-		)
-		if err != nil {
-			return err
-		}
-		if bucket == nil {
-			continue
+		var bucket *BucketSnapshot
+		if association.State == AssociationActive {
+			bucket, err = r.repository.GetBagDropBucketSnapshot(
+				ctx, project.OrganizationID, project.ProjectID, association.BucketName,
+			)
+			if err != nil {
+				return err
+			}
 		}
 		attemptedAt := r.now().UTC()
 		if err := r.repository.MarkBagDropAssociationAttempt(
@@ -258,9 +256,19 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 		}
 		associationErr := runErr
 		if associationErr == nil {
-			associationErr = r.reconcileBucket(ctx, project, destination, run, *bucket)
+			switch {
+			case association.State == AssociationPendingRemoval:
+				associationErr = r.deleteAssociatedBucket(ctx, project, destination, run, association, "unassociate")
+			case bucket == nil:
+				associationErr = r.deleteAssociatedBucket(ctx, project, destination, run, association, "local_delete")
+			default:
+				associationErr = r.reconcileBucket(ctx, project, destination, run, *bucket)
+			}
 		}
 		if associationErr == nil {
+			if association.State == AssociationPendingRemoval || bucket == nil {
+				continue
+			}
 			if err := r.repository.RecordBagDropAssociationSuccess(
 				ctx, project.OrganizationID, project.ProjectID, association.BucketName, r.now().UTC(),
 			); err != nil {
@@ -285,6 +293,21 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 	return errors.Join(failures...)
 }
 
+func (r *Reconciler) deleteAssociatedBucket(
+	ctx context.Context, project Project, destination Destination, run ReconcileRun,
+	association Association, reason string,
+) error {
+	if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.delete", "bucket",
+		association.BucketName, reason, func() error {
+			return run.DeleteBucket(ctx, association.BucketName)
+		}); err != nil {
+		return err
+	}
+	return r.repository.DeleteBagDropAssociation(
+		ctx, project.OrganizationID, project.ProjectID, association.BucketName,
+	)
+}
+
 func (r *Reconciler) reconcileBucket(
 	ctx context.Context, project Project, destination Destination, run ReconcileRun, bucket BucketSnapshot,
 ) error {
@@ -297,12 +320,14 @@ func (r *Reconciler) reconcileBucket(
 			func() error { return run.CreateBucket(ctx, bucket) }); err != nil {
 			return err
 		}
+		remote = &RemoteBucket{}
 	} else if remote.Description != bucket.Description {
 		if err := r.mutate(ctx, project, destination, "bagdrop.sync.bucket.update", "bucket", bucket.Name, "",
 			func() error { return run.UpdateBucket(ctx, bucket) }); err != nil {
 			return err
 		}
 	}
+	remoteBuildsByVersion := make(map[string][]RemoteBuild, len(bucket.Versions))
 	for _, version := range bucket.Versions {
 		exists, err := run.GetVersion(ctx, bucket.Name, version.Fingerprint)
 		if err != nil {
@@ -318,6 +343,7 @@ func (r *Reconciler) reconcileBucket(
 		if err != nil {
 			return err
 		}
+		remoteBuildsByVersion[version.Fingerprint] = remoteBuilds
 		for _, build := range version.Builds {
 			remoteBuild := findRemoteBuild(remoteBuilds, build.ComponentType)
 			if remoteBuild != nil && remoteBuild.Status == "BUILD_DONE" {
@@ -359,7 +385,42 @@ func (r *Reconciler) reconcileBucket(
 	// Channel assignments can only reference complete local versions. Because
 	// the snapshot is transactional and versions/builds converge above, every
 	// assignment target exists remotely before its pointer is set here.
-	return r.reconcileChannels(ctx, project, destination, run, bucket)
+	if err := r.reconcileChannels(ctx, project, destination, run, bucket); err != nil {
+		return err
+	}
+	localVersions := make(map[string]bool, len(bucket.Versions))
+	for _, version := range bucket.Versions {
+		localVersions[version.Fingerprint] = true
+	}
+	for _, version := range remote.Versions {
+		if _, exists := localVersions[version.Fingerprint]; exists {
+			continue
+		}
+		if err := r.mutate(ctx, project, destination, "bagdrop.sync.version.delete", "version",
+			version.Fingerprint, "drift", func() error {
+				return run.DeleteVersion(ctx, bucket.Name, version.Fingerprint)
+			}); err != nil {
+			return err
+		}
+	}
+	for _, version := range bucket.Versions {
+		localBuilds := make(map[string]bool, len(version.Builds))
+		for _, build := range version.Builds {
+			localBuilds[build.ComponentType] = true
+		}
+		for _, build := range remoteBuildsByVersion[version.Fingerprint] {
+			if localBuilds[build.ComponentType] {
+				continue
+			}
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.delete", "build",
+				version.Fingerprint+"/"+build.ComponentType, "drift", func() error {
+					return run.DeleteBuild(ctx, bucket.Name, version.Fingerprint, build.ID)
+				}); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (r *Reconciler) reconcileChannels(
@@ -375,7 +436,9 @@ func (r *Reconciler) reconcileChannels(
 			ordinaryRemote[channel.Name] = channel
 		}
 	}
+	localChannels := make(map[string]bool, len(bucket.Channels))
 	for _, channel := range bucket.Channels {
+		localChannels[channel.Name] = true
 		remoteChannel, exists := ordinaryRemote[channel.Name]
 		if !exists {
 			if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.create", "channel", channel.Name, "",
@@ -414,6 +477,15 @@ func (r *Reconciler) reconcileChannels(
 					ctx, bucket.Name, channel.Name, channel.AssignedVersionFingerprint,
 				)
 			}); err != nil {
+			return err
+		}
+	}
+	for name := range ordinaryRemote {
+		if localChannels[name] {
+			continue
+		}
+		if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.delete", "channel", name, "drift",
+			func() error { return run.DeleteChannel(ctx, bucket.Name, name) }); err != nil {
 			return err
 		}
 	}
