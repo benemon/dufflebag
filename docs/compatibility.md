@@ -44,7 +44,7 @@ environment surface in `hcp-sdk-go/config/env.go` is live in the stock binary.
 | `HCP_CLIENT_ID` / `HCP_CLIENT_SECRET` | Service-principal client credentials |
 | `HCP_ORGANIZATION_ID` / `HCP_PROJECT_ID` | Profile; **only applied when both are set** |
 | `HCP_API_TLS` | `insecure` (skip verify) or `disabled` (plain HTTP) |
-| `HCP_AUTH_TLS` | `insecure` only — TLS cannot be disabled for auth |
+| `HCP_AUTH_TLS` | `insecure`, or `disabled` — the latter is accepted without error but does **not** disable anything (see correction below) |
 | `HCP_PORTAL_URL`, `HCP_SCADA_ADDRESS`, `HCP_SCADA_TLS` | Must be non-empty; geography defaults suffice |
 | `HCP_GEOGRAPHY` | Applied *first* in `FromEnv`, so individual vars override it |
 
@@ -53,11 +53,24 @@ environment surface in `hcp-sdk-go/config/env.go` is live in the stock binary.
 - The auth URL **must** use scheme `https`. There is no override. However
   `HCP_AUTH_TLS=insecure` is read *after* `WithAuth()` in `FromEnv`, so it wins
   and a self-signed auth cert works.
-- `apiAddress` must be non-empty and carry no scheme. `HCP_API_TLS=disabled`
-  sets `apiTLSConfig = nil`, which makes `httpclient.New` select scheme `http`.
+- `apiAddress` must be non-empty — that is the only check `validate()` makes on
+  it; a scheme-bearing value passes validation and fails later, at the HTTP
+  layer. `HCP_API_TLS=disabled` sets `apiTLSConfig = nil`, which makes
+  `httpclient.New` select scheme `http`.
 - `portalURL` and `scadaAddress` must be non-empty — satisfied by the default
   US geography config without any action.
 - Either client credentials or an OAuth2 client ID must be present.
+
+> **Correction (2026-08-11):** two claims above previously overstated the SDK
+> (review finding 1.13, verified against `hcp-sdk-go@v0.174.0 config/`). The
+> variable table said `HCP_AUTH_TLS` accepts `insecure` only; in fact
+> `tlsConfigForSetting` (`config/env.go:180-190`) parses `disabled` without
+> error and sets `authTLSConfig = nil`, which means *default* certificate
+> verification — the claimed effect (auth TLS cannot be disabled) is right,
+> but the setting is silently accepted and un-does a previously set
+> `insecure`. The constraints list said `apiAddress` must "carry no scheme";
+> `validate()` (`config/hcp.go`) checks non-empty only, and no scheme check
+> exists anywhere in `config/`.
 
 Given the lab CA, issue real certificates for both hosts and skip the insecure
 flags entirely.
