@@ -256,8 +256,8 @@ recorded parent version with the channel's current assignment for
 HCP response containing null parent fields does not establish that Packer
 omitted them from its request.
 
-Still genuinely deferrable: version and build deletion, external artifact
-search, enforced-block CRUD, and all `runtasks` endpoints. The `packages` and
+Still genuinely deferrable: external artifact search, enforced-block CRUD,
+and all `runtasks` endpoints. The `packages` and
 `vulnerabilities` operations, listed here as deferrable in earlier revisions,
 are now served — see the two scope reversals in §8.
 
@@ -274,6 +274,8 @@ routed and tested:
 | `DeleteChannel` | `DELETE` | `/buckets/{bucket_name}/channels/{channel_name}` | publisher |
 | `DeleteBucket` | `DELETE` | `/buckets/{bucket_name}` | publisher |
 | `UpdateVersion` (revocation and restore) | `PATCH` | `/buckets/{bucket_name}/versions/{fingerprint}` | publisher |
+| `DeleteVersion` | `DELETE` | `/buckets/{bucket_name}/versions/{fingerprint}` | publisher |
+| `DeleteBuild` | `DELETE` | `.../builds/{build_id}` | publisher |
 | `ListSboms` | `GET` | `.../builds/{build_id}/sboms` | reader |
 | `GetSbom` | `GET` | `.../builds/{build_id}/sboms/{sbom_name}` | reader |
 | `DownloadSbom` | `GET` | `.../builds/{build_id}/sboms/{sbom_name}/download` | reader |
@@ -334,6 +336,37 @@ in its history whose version is not revoked, all in the revoke transaction).
 `disable_rollback_channels: true` opts out and leaves the assignments in
 place. A channel whose entire history is revoked has no valid target and is
 left as-is rather than invented into an unassigned state.
+
+**Version and build deletion, served 2026-08-12 (probes A.15/A.15b).**
+`DeleteVersion` and `DeleteBuild` return the empty object their vendored
+response definitions declare. A version currently assigned to any user
+channel is refused with HTTP 400 / code 9 and `Version is assigned by channels:
+<name>. Please, remove the channels assignment before deleting the version.`
+Multiple current user-channel names are sorted ascending and joined with `, `;
+that separator is Dufflebag's interpolation because the captured refusal had
+one channel. The managed `latest` channel is not a blocker. Deleting its target
+rolls it to the newest surviving complete, unrevoked version using the same
+newest-valid assignment-history selector as revocation rollback; deleting the
+last version records the fresh-bucket unassigned shape (`version: null`).
+Revoked and incomplete `v0` versions are deletable.
+
+Deletion is complete across the relational and object-store aggregate. Version
+deletion removes its builds, artifacts, projected packages and SBOM rows;
+build deletion removes that build's corresponding children without changing
+the version's name, completion, sequence or active status, including when it
+leaves zero builds. Bucket deletion now uses the same SBOM-object cleanup.
+Object keys are selected inside the database transaction, relational cascades
+commit first, and object deletion is best-effort afterward: a failed cleanup
+can leave only a harmless orphan, never a surviving row pointing at deleted
+bytes. The same version fingerprint can then be recorded afresh.
+
+Sequence allocation remains `max(surviving sequence)+1`: deleting `v2` and
+then completing a replacement therefore reuses `v2`. Misses deliberately keep
+the captured endpoint asymmetry. `DELETE` of a missing version is HTTP 404 /
+code 5, `Error: The version with identifier <fingerprint> does not exist.`,
+while `GET` keeps its HTTP 409-ish / code 10 version-identity miss. A missing
+build is HTTP 404 / code 5, `The build with identifier <build_id> does not
+exist.`
 
 ### Second API version — unsupported by the client-version floor
 

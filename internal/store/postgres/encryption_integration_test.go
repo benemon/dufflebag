@@ -145,6 +145,52 @@ func TestEncryptedBuildMetadataRoundTripsAndStoresNoPlaintext(t *testing.T) {
 	}
 }
 
+func TestDeleteOperationsPreserveEncryptedRowVerification(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	repository.SetKeyring(testRing(t))
+	at := time.Date(2026, 8, 12, 14, 0, 0, 0, time.UTC)
+	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "sealed-delete", Labels: map[string]string{}, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := completeVersionForRollback(t, repository, ctx, tenant, "sealed-delete", "first",
+		at.Add(time.Second), at.Add(2*time.Second))
+	completeVersionForRollback(t, repository, ctx, tenant, "sealed-delete", "second",
+		at.Add(3*time.Second), at.Add(4*time.Second))
+
+	if err := repository.DeleteVersion(ctx, tenant, "sealed-delete", "second", at.Add(5*time.Second)); err != nil {
+		t.Fatalf("DeleteVersion under encryption: %v", err)
+	}
+	remaining, err := repository.GetVersion(ctx, tenant, "sealed-delete", "first")
+	if err != nil || remaining.ID != first.ID {
+		t.Fatalf("remaining encrypted version = %#v, %v", remaining, err)
+	}
+	latest, err := repository.GetChannel(ctx, tenant, "sealed-delete", "latest")
+	if err != nil || latest.Version == nil || latest.Version.ID != first.ID {
+		t.Fatalf("encrypted latest after deletion = %#v, %v", latest, err)
+	}
+	history, err := repository.ListChannelAssignmentHistory(ctx, tenant, "sealed-delete", "latest")
+	if err != nil || len(history) != 2 {
+		t.Fatalf("MAC-verified rollback history = %#v, %v", history, err)
+	}
+	builds, err := repository.ListBuilds(ctx, tenant, "sealed-delete", "first")
+	if err != nil || len(builds) != 1 {
+		t.Fatalf("encrypted surviving builds = %#v, %v", builds, err)
+	}
+	if err := repository.DeleteBuild(ctx, tenant, "sealed-delete", "first", builds[0].ID.String()); err != nil {
+		t.Fatalf("DeleteBuild under encryption: %v", err)
+	}
+	latest, err = repository.GetChannel(ctx, tenant, "sealed-delete", "latest")
+	if err != nil || latest.Version == nil || latest.Version.ID != first.ID || !latest.Version.Complete() {
+		t.Fatalf("encrypted latest after build deletion = %#v, %v", latest, err)
+	}
+}
+
 // The tenancy axis of the acceptance criteria: a valid ciphertext moved to
 // another tenant's row must fail to decrypt, not open under the new identity.
 func TestSealedMetadataMovedAcrossTenantsFailsToRead(t *testing.T) {

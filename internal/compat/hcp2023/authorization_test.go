@@ -13,6 +13,7 @@ import (
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/domain/identity"
+	"github.com/benemon/dufflebag/internal/domain/registry"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
 	"github.com/google/uuid"
 )
@@ -295,9 +296,17 @@ func TestRoutesEnforceTheirRequiredRole(t *testing.T) {
 			map[string]any{"name": "images"}, true},
 		{"builder may NOT promote", identity.RoleBuilder, http.MethodPost,
 			"/buckets/images/channels", channelBody, false},
+		{"builder may not delete a version", identity.RoleBuilder, http.MethodDelete,
+			"/buckets/images/versions/missing", nil, false},
+		{"builder may not delete a build", identity.RoleBuilder, http.MethodDelete,
+			"/buckets/images/versions/missing/builds/missing", nil, false},
 
 		{"publisher may promote", identity.RolePublisher, http.MethodPost,
 			"/buckets/images/channels", channelBody, true},
+		{"publisher may delete a version", identity.RolePublisher, http.MethodDelete,
+			"/buckets/images/versions/missing", nil, true},
+		{"publisher may delete a build", identity.RolePublisher, http.MethodDelete,
+			"/buckets/images/versions/missing/builds/missing", nil, true},
 
 		// Root outranks the tenancy question, so it reaches everything.
 		{"root may promote anywhere", identity.RoleRoot, http.MethodPost,
@@ -317,6 +326,15 @@ func TestRoutesEnforceTheirRequiredRole(t *testing.T) {
 			seed := newHandler(repository, fakePrincipals{role: identity.RolePublisher},
 				testAuthenticator{}, testLogger(), func() time.Time { return testTime })
 			request(t, seed, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+			if c.method == http.MethodDelete && strings.Contains(c.path, "/versions/") {
+				request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
+					map[string]any{"fingerprint": "missing", "template_type": "HCL2"})
+			}
+			if c.method == http.MethodDelete && strings.Contains(c.path, "/builds/") {
+				repository.builds["images/missing"] = []store.StoredBuild{{
+					Build: registry.Build{ID: registry.ID("missing")},
+				}}
+			}
 
 			response := request(t, server, c.method, testBase+c.path, c.body)
 			if c.allowed {
@@ -361,6 +379,7 @@ func TestEveryPackerRouteHasItsExactAuditDescriptor(t *testing.T) {
 		"GET /buckets/{bucket}/versions":                                                    {"version.list", "version_collection", ""},
 		"GET /buckets/{bucket}/versions/{fingerprint}":                                      {"version.read", "version", "fingerprint"},
 		"PATCH /buckets/{bucket}/versions/{fingerprint}":                                    {"version.update", "version", "fingerprint"},
+		"DELETE /buckets/{bucket}/versions/{fingerprint}":                                   {"version.delete", "version", "fingerprint"},
 		"POST /buckets/{bucket}/versions":                                                   {"version.create", "version", ""},
 		"POST /buckets/{bucket}/versions/{fingerprint}/builds":                              {"build.create", "build", ""},
 		"GET /buckets/{bucket}/versions/{fingerprint}/builds":                               {"build.list", "build_collection", ""},
@@ -369,6 +388,7 @@ func TestEveryPackerRouteHasItsExactAuditDescriptor(t *testing.T) {
 		"GET /buckets/{bucket}/versions/{fingerprint}/builds/{build}/sboms/{sbom}":          {"sbom.read", "sbom", "sbom"},
 		"GET /buckets/{bucket}/versions/{fingerprint}/builds/{build}/sboms/{sbom}/download": {"sbom.download", "sbom", "sbom"},
 		"PATCH /buckets/{bucket}/versions/{fingerprint}/builds/{build}":                     {"build.update", "build", "build"},
+		"DELETE /buckets/{bucket}/versions/{fingerprint}/builds/{build}":                    {"build.delete", "build", "build"},
 		"PUT /buckets/{bucket}/versions/{fingerprint}/builds/{build}/sboms":                 {"sbom.upload", "build", "build"},
 	}
 	seen := make(map[string]bool, len(routes()))
@@ -578,11 +598,13 @@ func TestEveryRouteRequiresTheRoleItShould(t *testing.T) {
 		// Promotion and destruction. A build credential must not reach these
 		// (ADR-0019); bucket deletion sits with the same authority as channel
 		// deletion, so one Terraform principal can destroy what it applied.
-		"POST /buckets/{bucket}/channels":             identity.RolePublisher,
-		"POST /buckets/{bucket}/channels/assign":      identity.RolePublisher,
-		"PATCH /buckets/{bucket}/channels/{channel}":  identity.RolePublisher,
-		"DELETE /buckets/{bucket}/channels/{channel}": identity.RolePublisher,
-		"DELETE /buckets/{bucket}":                    identity.RolePublisher,
+		"POST /buckets/{bucket}/channels":                                identity.RolePublisher,
+		"POST /buckets/{bucket}/channels/assign":                         identity.RolePublisher,
+		"PATCH /buckets/{bucket}/channels/{channel}":                     identity.RolePublisher,
+		"DELETE /buckets/{bucket}/channels/{channel}":                    identity.RolePublisher,
+		"DELETE /buckets/{bucket}":                                       identity.RolePublisher,
+		"DELETE /buckets/{bucket}/versions/{fingerprint}":                identity.RolePublisher,
+		"DELETE /buckets/{bucket}/versions/{fingerprint}/builds/{build}": identity.RolePublisher,
 		// Revocation changes what consumers may use — the same authority that
 		// blesses a version onto a channel, and never a build credential.
 		"PATCH /buckets/{bucket}/versions/{fingerprint}": identity.RolePublisher,

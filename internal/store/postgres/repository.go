@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
@@ -119,6 +121,17 @@ type StoredBuild struct {
 	UpdatedAt                time.Time
 }
 
+// VersionAssignedError identifies the user channels that must be unassigned
+// before a version can be deleted.
+type VersionAssignedError struct {
+	Channels []string
+}
+
+func (e *VersionAssignedError) Error() string {
+	return "Version is assigned by channels: " + strings.Join(e.Channels, ", ") +
+		". Please, remove the channels assignment before deleting the version."
+}
+
 // Repository persists registry aggregates in tenant-scoped transactions.
 type Repository struct {
 	db      *sql.DB
@@ -230,13 +243,247 @@ func (r *Repository) DeleteBucket(ctx context.Context, tenant Tenant, name strin
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	rows, err := tx.QueryContext(ctx, `
+		SELECT sboms.object_key
+		FROM sboms
+		JOIN builds ON builds.id = sboms.build_id
+		JOIN versions ON versions.id = builds.version_id
+		JOIN buckets ON buckets.id = versions.bucket_id
+		WHERE buckets.name = $1
+	`, name)
+	if err != nil {
+		return fmt.Errorf("list bucket SBOM objects: %w", err)
+	}
+	objectKeys, err := scanObjectKeys(rows)
+	if err != nil {
+		return fmt.Errorf("list bucket SBOM objects: %w", err)
+	}
 	if _, err := q.DeleteBucketByName(ctx, name); err != nil {
 		return mapNotFound("delete bucket", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete bucket: %w", err)
 	}
+	r.deleteSBOMObjects(ctx, objectKeys)
 	return nil
+}
+
+// DeleteVersion removes a version aggregate after refusing any current user
+// channel assignment. The managed latest channel is re-pointed using the same
+// newest-valid assignment selection as revocation rollback.
+func (r *Repository) DeleteVersion(
+	ctx context.Context,
+	tenant Tenant,
+	bucketName, fingerprint string,
+	at time.Time,
+) error {
+	tx, q, err := r.begin(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	// This is deliberately the first data query. A current user-channel
+	// assignment is the endpoint's authoritative refusal, while managed latest
+	// is service-owned tracking and never blocks deletion.
+	rows, err := tx.QueryContext(ctx, `
+		SELECT channels.name
+		FROM channels
+		JOIN buckets ON buckets.id = channels.bucket_id
+		JOIN LATERAL (
+			SELECT assignments.version_id
+			FROM channel_assignments AS assignments
+			WHERE assignments.channel_id = channels.id
+			ORDER BY assignments.assigned_at DESC, assignments.id DESC
+			LIMIT 1
+		) AS current_assignment ON true
+		JOIN versions ON versions.id = current_assignment.version_id
+		WHERE buckets.name = $1
+		  AND versions.fingerprint = $2
+		  AND NOT channels.managed
+		ORDER BY channels.name
+	`, bucketName, fingerprint)
+	if err != nil {
+		return fmt.Errorf("list assigning channels: %w", err)
+	}
+	channels := make([]string, 0)
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan assigning channel: %w", err)
+		}
+		channels = append(channels, name)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("list assigning channels: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close assigning channels: %w", err)
+	}
+	if len(channels) != 0 {
+		return &VersionAssignedError{Channels: channels}
+	}
+
+	versionRow, err := q.GetVersionByFingerprint(ctx, postgresdb.GetVersionByFingerprintParams{
+		Name: bucketName, Fingerprint: fingerprint,
+	})
+	if err != nil {
+		return mapNotFound("delete version", err)
+	}
+
+	var latestChannelID sql.NullString
+	err = tx.QueryRowContext(ctx, `
+		SELECT channels.id
+		FROM channels
+		JOIN LATERAL (
+			SELECT assignments.version_id
+			FROM channel_assignments AS assignments
+			WHERE assignments.channel_id = channels.id
+			ORDER BY assignments.assigned_at DESC, assignments.id DESC
+			LIMIT 1
+		) AS current_assignment ON true
+		WHERE channels.bucket_id = $1 AND channels.managed
+		  AND current_assignment.version_id = $2
+	`, versionRow.BucketID, versionRow.ID).Scan(&latestChannelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		latestChannelID = sql.NullString{}
+	} else if err != nil {
+		return fmt.Errorf("find managed latest assignment: %w", err)
+	}
+
+	rows, err = tx.QueryContext(ctx, `
+		SELECT sboms.object_key
+		FROM sboms
+		JOIN builds ON builds.id = sboms.build_id
+		WHERE builds.version_id = $1
+	`, versionRow.ID)
+	if err != nil {
+		return fmt.Errorf("list version SBOM objects: %w", err)
+	}
+	objectKeys, err := scanObjectKeys(rows)
+	if err != nil {
+		return fmt.Errorf("list version SBOM objects: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM versions WHERE id = $1`, versionRow.ID); err != nil {
+		return fmt.Errorf("delete version: %w", err)
+	}
+	if latestChannelID.Valid {
+		channelID, err := registry.ParseID(latestChannelID.String)
+		if err != nil {
+			return fmt.Errorf("parse managed latest channel id: %w", err)
+		}
+		rollbackID, found, err := r.newestValidAssignedVersion(ctx, tx, channelID)
+		if err != nil {
+			return err
+		}
+		if found {
+			if err := r.recordAssignment(ctx, tx, tenant, channelID, rollbackID, "Dufflebag", at); err != nil {
+				return fmt.Errorf("rollback managed latest assignment: %w", err)
+			}
+		} else {
+			unassignedAt := assignmentWriteTime(at)
+			assignmentID := registry.NewID(at).String()
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO channel_assignments (
+					organization_id, project_id, id, channel_id, version_id, author_id, assigned_at, integrity_mac
+				) VALUES ($1, $2, $3, $4, NULL, 'Dufflebag', $5, $6)
+			`, tenant.OrganizationID, tenant.ProjectID, assignmentID, channelID.String(), unassignedAt,
+				r.rowMAC(assignmentMACMessage(tenant, assignmentID, channelID.String(), "", "Dufflebag", unassignedAt))); err != nil {
+				return fmt.Errorf("clear managed latest assignment: %w", err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE channels SET updated_at = $2 WHERE id = $1`, channelID.String(), at); err != nil {
+				return fmt.Errorf("update cleared managed latest channel: %w", err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete version: %w", err)
+	}
+	r.deleteSBOMObjects(ctx, objectKeys)
+	return nil
+}
+
+// DeleteBuild removes one build aggregate without changing the parent
+// version's completion, sequence, or revocation state.
+func (r *Repository) DeleteBuild(
+	ctx context.Context,
+	tenant Tenant,
+	bucketName, fingerprint, buildID string,
+) error {
+	tx, _, err := r.begin(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var persistedID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT builds.id
+		FROM builds
+		JOIN versions ON versions.id = builds.version_id
+		JOIN buckets ON buckets.id = versions.bucket_id
+		WHERE buckets.name = $1 AND versions.fingerprint = $2 AND builds.id = $3
+	`, bucketName, fingerprint, buildID).Scan(&persistedID)
+	if err != nil {
+		return mapNotFound("delete build", err)
+	}
+	rows, err := tx.QueryContext(ctx, `SELECT object_key FROM sboms WHERE build_id = $1`, persistedID)
+	if err != nil {
+		return fmt.Errorf("list build SBOM objects: %w", err)
+	}
+	objectKeys, err := scanObjectKeys(rows)
+	if err != nil {
+		return fmt.Errorf("list build SBOM objects: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM builds WHERE id = $1`, persistedID); err != nil {
+		return fmt.Errorf("delete build: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete build: %w", err)
+	}
+	r.deleteSBOMObjects(ctx, objectKeys)
+	return nil
+}
+
+func scanObjectKeys(rows *sql.Rows) ([]string, error) {
+	keys := make([]string, 0)
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			_ = rows.Close()
+			return nil, err
+		}
+		keys = append(keys, key)
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	return keys, nil
+}
+
+// deleteSBOMObjects is shared by every aggregate deletion. Rows are already
+// committed away before it runs, so a failed delete can only leave a harmless
+// orphan; it can never strand a surviving locator whose object is gone.
+func (r *Repository) deleteSBOMObjects(ctx context.Context, keys []string) {
+	if len(keys) == 0 {
+		return
+	}
+	if r.objects == nil {
+		slog.Default().Warn("delete SBOM objects", "error", ErrObjectStorageNotConfigured, "count", len(keys))
+		return
+	}
+	for _, key := range keys {
+		if err := r.objects.Delete(ctx, key); err != nil {
+			slog.Default().Warn("delete SBOM object", "object_key", key, "error", err)
+		}
+	}
 }
 
 func (r *Repository) UpdateBucket(
@@ -851,71 +1098,53 @@ func (r *Repository) RevokeVersion(
 
 	if !req.DisableRollbackChannels {
 		rows, err := tx.QueryContext(ctx, `
-			WITH affected_channels AS (
-				SELECT channels.id
-				FROM channels
-				JOIN LATERAL (
-					SELECT assignments.version_id
-					FROM channel_assignments AS assignments
-					WHERE assignments.channel_id = channels.id
-					ORDER BY assignments.assigned_at DESC, assignments.id DESC
-					LIMIT 1
-				) AS current_assignment ON true
-				JOIN versions ON versions.id = current_assignment.version_id
-				WHERE versions.id = $1
-				   OR versions.revocation_inherited_from_id = $1
-			)
-			SELECT affected_channels.id, rollback_assignment.version_id
-			FROM affected_channels
+			SELECT channels.id
+			FROM channels
 			JOIN LATERAL (
 				SELECT assignments.version_id
 				FROM channel_assignments AS assignments
-				JOIN versions ON versions.id = assignments.version_id
-				WHERE assignments.channel_id = affected_channels.id
-				  AND versions.revoke_at IS NULL
+				WHERE assignments.channel_id = channels.id
 				ORDER BY assignments.assigned_at DESC, assignments.id DESC
 				LIMIT 1
-			) AS rollback_assignment ON true
+			) AS current_assignment ON true
+			JOIN versions ON versions.id = current_assignment.version_id
+			WHERE versions.id = $1
+			   OR versions.revocation_inherited_from_id = $1
 		`, version.ID.String())
 		if err != nil {
-			return nil, fmt.Errorf("list channel rollbacks: %w", err)
+			return nil, fmt.Errorf("list channels requiring rollback: %w", err)
 		}
-		type channelRollback struct {
-			channelID registry.ID
-			versionID registry.ID
-		}
-		rollbacks := make([]channelRollback, 0)
+		channelIDs := make([]registry.ID, 0)
 		for rows.Next() {
-			var channelID, versionID string
-			if err := rows.Scan(&channelID, &versionID); err != nil {
+			var channelID string
+			if err := rows.Scan(&channelID); err != nil {
 				_ = rows.Close()
-				return nil, fmt.Errorf("scan channel rollback: %w", err)
+				return nil, fmt.Errorf("scan channel requiring rollback: %w", err)
 			}
 			parsedChannelID, err := registry.ParseID(channelID)
 			if err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("parse rollback channel id: %w", err)
 			}
-			parsedVersionID, err := registry.ParseID(versionID)
-			if err != nil {
-				_ = rows.Close()
-				return nil, fmt.Errorf("parse rollback version id: %w", err)
-			}
-			rollbacks = append(rollbacks, channelRollback{
-				channelID: parsedChannelID,
-				versionID: parsedVersionID,
-			})
+			channelIDs = append(channelIDs, parsedChannelID)
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
-			return nil, fmt.Errorf("list channel rollbacks: %w", err)
+			return nil, fmt.Errorf("list channels requiring rollback: %w", err)
 		}
 		if err := rows.Close(); err != nil {
-			return nil, fmt.Errorf("close channel rollbacks: %w", err)
+			return nil, fmt.Errorf("close channels requiring rollback: %w", err)
 		}
-		for _, rollback := range rollbacks {
+		for _, channelID := range channelIDs {
+			rollbackID, found, err := r.newestValidAssignedVersion(ctx, tx, channelID)
+			if err != nil {
+				return nil, err
+			}
+			if !found {
+				continue
+			}
 			if err := r.recordAssignment(
-				ctx, tx, tenant, rollback.channelID, rollback.versionID, "Dufflebag", at,
+				ctx, tx, tenant, channelID, rollbackID, "Dufflebag", at,
 			); err != nil {
 				return nil, fmt.Errorf("rollback channel assignment: %w", err)
 			}
@@ -929,6 +1158,37 @@ func (r *Repository) RevokeVersion(
 		return nil, fmt.Errorf("commit revoke version: %w", err)
 	}
 	return version, nil
+}
+
+// newestValidAssignedVersion is the single rollback selector for revocation
+// and managed-latest deletion. It walks assignment history newest-first and
+// skips versions that no longer exist or are revoked.
+func (r *Repository) newestValidAssignedVersion(
+	ctx context.Context,
+	tx *sql.Tx,
+	channelID registry.ID,
+) (registry.ID, bool, error) {
+	var versionID string
+	err := tx.QueryRowContext(ctx, `
+		SELECT assignments.version_id
+		FROM channel_assignments AS assignments
+		JOIN versions ON versions.id = assignments.version_id
+		WHERE assignments.channel_id = $1
+		  AND versions.revoke_at IS NULL
+		ORDER BY assignments.assigned_at DESC, assignments.id DESC
+		LIMIT 1
+	`, channelID.String()).Scan(&versionID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", false, fmt.Errorf("select newest valid channel assignment: %w", err)
+	}
+	parsed, err := registry.ParseID(versionID)
+	if err != nil {
+		return "", false, fmt.Errorf("parse rollback version id: %w", err)
+	}
+	return parsed, true, nil
 }
 
 // RestoreRevokedVersion clears a version's revocation and every inherited

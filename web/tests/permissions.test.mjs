@@ -22,17 +22,17 @@ test('each role gets the nested console action snapshot declared by the server',
   assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
   assert.deepEqual(
     allowedActions('publisher'),
-    ['pinBuckets', 'revokeVersions', 'manageChannels', 'deleteBuckets'],
+    ['pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets'],
   )
   assert.deepEqual(
     allowedActions('maintainer'),
     [
-      'pinBuckets', 'revokeVersions', 'manageChannels', 'deleteBuckets',
+      'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets',
       'managePrincipals', 'configureBagDrop',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
-    'pinBuckets', 'revokeVersions', 'manageChannels', 'deleteBuckets', 'configureAudit',
+    'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets', 'configureAudit',
     'manageEncryption', 'managePrincipals', 'configureBagDrop',
   ])
   assert.deepEqual(allowedActions(null), [])
@@ -48,6 +48,13 @@ test('revokeVersions permission mapping requires publisher', () => {
   assert.equal(allowedActions('builder').includes('revokeVersions'), false)
   assert.equal(allowedActions('publisher').includes('revokeVersions'), true)
   assert.equal(allowedActions('maintainer').includes('revokeVersions'), true)
+})
+
+test('deleteVersions permission mapping requires publisher', () => {
+  assert.equal(allowedActions('reader').includes('deleteVersions'), false)
+  assert.equal(allowedActions('builder').includes('deleteVersions'), false)
+  assert.equal(allowedActions('publisher').includes('deleteVersions'), true)
+  assert.equal(allowedActions('maintainer').includes('deleteVersions'), true)
 })
 
 test('manageChannels permission mapping requires publisher', () => {

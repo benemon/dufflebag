@@ -306,6 +306,20 @@ export async function restoreVersion(
   )
 }
 
+export async function deleteVersion(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  fingerprint: string,
+): Promise<void> {
+  await request(
+    token,
+    'DELETE',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+      `/versions/${encodeURIComponent(fingerprint)}`,
+  )
+}
+
 export type ApiVulnerability = {
   identifier?: string
   description?: string

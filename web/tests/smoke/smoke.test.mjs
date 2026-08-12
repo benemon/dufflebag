@@ -2157,6 +2157,67 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await api(rootToken, 'DELETE', bagdropBase)
   })
 
+  await t.test('a version is deleted through the console, refused first while assigned', async () => {
+    // Self-contained bucket: two complete versions, a user channel on v1.
+    const builderToken = await tokenFor(seeded.principal.client_id, seeded.principal.secret)
+    const promoterToken = await tokenFor(seeded.promoter.client_id, seeded.promoter.secret)
+    const bucketBase =
+      `/packer/2023-01-01/organizations/${seeded.organization.id}` +
+      `/projects/${seeded.project.id}/buckets`
+    await api(builderToken, 'PUT', bucketBase, { name: 'smoke-deletable' })
+    const delPath = `${bucketBase}/smoke-deletable/versions`
+    for (const [fp, run] of [['fp-d1', 'smoke-del-1'], ['fp-d2', 'smoke-del-2']]) {
+      await api(builderToken, 'POST', delPath, { fingerprint: fp, template_type: 'HCL2' })
+      const { build } = await api(builderToken, 'POST', `${delPath}/${fp}/builds`, {
+        component_type: 'docker.del', packer_run_uuid: run, artifacts: [],
+      })
+      await api(builderToken, 'PATCH', `${delPath}/${fp}/builds/${build.id}`, {
+        status: 'BUILD_DONE', platform: 'docker',
+        artifacts: [{ external_identifier: `del-${fp}`, region: 'local' }], metadata: {},
+      })
+    }
+    await api(promoterToken, 'POST', `${bucketBase}/smoke-deletable/channels`, { name: 'hold' })
+    await api(promoterToken, 'PATCH', `${bucketBase}/smoke-deletable/channels/hold`, {
+      update_mask: 'versionFingerprint', version_fingerprint: 'fp-d1',
+    })
+
+    // The assigned version's delete is refused with the server's own words.
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-deletable')
+    await clickByText('button', 'Versions')
+    await page.waitForSelector('table[aria-label="Versions"]')
+    await clickByText('button', 'v1')
+    await waitForText('Lineage')
+    await clickByText('button', 'Delete version')
+    await waitForText('Delete smoke-deletable v1')
+    await clickByText('.pf-v6-c-modal-box button', 'Delete version')
+    await waitForText('Version is assigned by channels: hold')
+    await clickByText('.pf-v6-c-modal-box button', 'Cancel')
+
+    // Unassigned, the same action deletes; the console lands on the bucket and
+    // the wire agrees the version is gone while its sibling survives.
+    await api(promoterToken, 'PATCH', `${bucketBase}/smoke-deletable/channels/hold`, {
+      update_mask: 'versionFingerprint', version_fingerprint: '',
+    })
+    await clickByText('button', 'Delete version')
+    await waitForText('Delete smoke-deletable v1')
+    await clickByText('.pf-v6-c-modal-box button', 'Delete version')
+    await until('the console to land on the bucket after deletion', async () =>
+      (await bodyText()).includes('Bucket details'))
+    await until('the deleted version to leave the wire', async () => {
+      try {
+        await api(builderToken, 'GET', `${delPath}/fp-d1`)
+        return false
+      } catch {
+        return true
+      }
+    })
+    const survivor = await api(builderToken, 'GET', `${delPath}/fp-d2`)
+    assert.equal(survivor.version.name, 'v2')
+    await api(promoterToken, 'DELETE', `${bucketBase}/smoke-deletable/channels/hold`)
+    await api(promoterToken, 'DELETE', `${bucketBase}/smoke-deletable`)
+  })
+
   let consoleBuilder
   await t.test('a builder principal is minted through the form, where the session stands', async () => {
     // Standing in acme/widgets, the form creates a PROJECT-scoped builder —

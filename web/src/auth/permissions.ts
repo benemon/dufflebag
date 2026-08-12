@@ -6,6 +6,8 @@ export const ACTION_REQUIREMENTS = {
   pinBuckets: 'builder',
   // Compatibility-plane registry safety operations authorize RolePublisher.
   revokeVersions: 'publisher',
+  // Compatibility-plane version deletion authorizes RolePublisher.
+  deleteVersions: 'publisher',
   // Compatibility-plane channel lifecycle and assignment authorize RolePublisher.
   manageChannels: 'publisher',
   // Compatibility-plane bucket deletion authorizes RolePublisher.

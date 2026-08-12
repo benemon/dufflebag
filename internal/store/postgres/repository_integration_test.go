@@ -2214,6 +2214,19 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 		}); err != nil {
 		t.Fatalf("UploadSbom: %v", err)
 	}
+	var bucketSBOMKey string
+	objectKeyTx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := objectKeyTx.QueryRowContext(ctx, `SELECT object_key FROM sboms WHERE build_id = $1`,
+		build.ID.String()).Scan(&bucketSBOMKey); err != nil {
+		_ = objectKeyTx.Rollback()
+		t.Fatal(err)
+	}
+	if err := objectKeyTx.Commit(); err != nil {
+		t.Fatal(err)
+	}
 	channel, err := repository.CreateChannel(ctx, tenant, store.Channel{
 		ID: registry.NewID(at.Add(4 * time.Second)), BucketName: bucket.Name,
 		Name: "production", CreatedAt: at.Add(4 * time.Second),
@@ -2244,6 +2257,9 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 
 	if err := repository.DeleteBucket(ctx, tenant, bucket.Name); err != nil {
 		t.Fatalf("DeleteBucket: %v", err)
+	}
+	if _, err := objects.Get(ctx, bucketSBOMKey); err == nil {
+		t.Fatal("DeleteBucket left its SBOM object behind")
 	}
 	if _, err := repository.GetBucket(ctx, tenant, bucket.Name); !errors.Is(err, registry.ErrNotFound) {
 		t.Fatalf("GetBucket after delete = %v, want ErrNotFound", err)
@@ -2288,6 +2304,318 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 	if withVersion != 0 || markers != 1 {
 		t.Fatalf("assignment rows after DeleteBucket = %d with version, %d markers; want 0 and 1",
 			withVersion, markers)
+	}
+}
+
+func TestDeleteVersionAndDeleteBuildContracts(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	otherTenant := store.ParseTenant(orgB, projectB)
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	at := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+
+	createBucket := func(name string, offset time.Duration) {
+		t.Helper()
+		if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+			ID: registry.NewID(at.Add(offset)), Name: name, Labels: map[string]string{}, CreatedAt: at.Add(offset),
+		}); err != nil {
+			t.Fatalf("CreateBucket %s: %v", name, err)
+		}
+	}
+	createRunning := func(bucket, fingerprint, component string, offset time.Duration) (*registry.Version, *store.StoredBuild) {
+		t.Helper()
+		createdAt := at.Add(offset)
+		version, err := registry.NewVersion(
+			registry.NewID(createdAt), bucket, fingerprint, registry.TemplateHCL2, createdAt,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		version, err = repository.CreateVersion(ctx, tenant, version)
+		if err != nil {
+			t.Fatalf("CreateVersion %s/%s: %v", bucket, fingerprint, err)
+		}
+		build, err := repository.CreateBuild(
+			ctx, tenant, bucket, fingerprint, registry.TemplateHCL2,
+			store.StoredBuild{
+				Build: registry.Build{
+					ID: registry.NewID(createdAt.Add(time.Millisecond)), ComponentType: component,
+					Status: registry.BuildRunning, Platform: "linux",
+				},
+				Labels: map[string]string{},
+				Artifacts: []store.Artifact{{
+					ID:                 registry.NewID(createdAt.Add(2 * time.Millisecond)),
+					ExternalIdentifier: "artifact-" + fingerprint, Region: "lab", CreatedAt: createdAt,
+				}},
+				CreatedAt: createdAt,
+			}, testVersionName,
+		)
+		if err != nil {
+			t.Fatalf("CreateBuild %s/%s: %v", bucket, fingerprint, err)
+		}
+		return version, build
+	}
+	complete := func(bucket, fingerprint string, build *store.StoredBuild, offset time.Duration) *registry.Version {
+		t.Helper()
+		build.Status = registry.BuildDone
+		build.MetadataSeen = true
+		if _, err := repository.UpdateBuild(
+			ctx, tenant, bucket, fingerprint, *build, testVersionName, at.Add(offset),
+		); err != nil {
+			t.Fatalf("complete %s/%s: %v", bucket, fingerprint, err)
+		}
+		version, err := repository.GetVersion(ctx, tenant, bucket, fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return version
+	}
+	upload := func(bucket, fingerprint string, build *store.StoredBuild, offset time.Duration) (*store.Sbom, string) {
+		t.Helper()
+		document := compressIntegrationSBOM(t, `{
+			"bomFormat":"CycloneDX","specVersion":"1.6","components":[
+				{"name":"openssl","version":"3.0.11","purl":"pkg:rpm/openssl@3.0.11"}
+			]}`)
+		sbom, err := repository.UploadSbom(ctx, tenant, bucket, fingerprint, build.ID.String(), store.Sbom{
+			ID: registry.NewID(at.Add(offset)), Name: "manifest", Format: "CYCLONEDX",
+			CompressedData: document, CreatedAt: at.Add(offset),
+		})
+		if err != nil {
+			t.Fatalf("UploadSbom %s/%s: %v", bucket, fingerprint, err)
+		}
+		var key string
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT object_key FROM sboms WHERE id = $1`, sbom.ID.String()).Scan(&key); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		return sbom, key
+	}
+
+	createBucket("delete-version", 0)
+	_, firstBuild := createRunning("delete-version", "fp-one", "docker", time.Second)
+	first := complete("delete-version", "fp-one", firstBuild, 2*time.Second)
+	_, secondBuild := createRunning("delete-version", "fp-two", "docker", 3*time.Second)
+	secondSBOM, secondObjectKey := upload("delete-version", "fp-two", secondBuild, 4*time.Second)
+	second := complete("delete-version", "fp-two", secondBuild, 5*time.Second)
+	if sequence, ok := second.Sequence(); !ok || sequence != 2 {
+		t.Fatalf("second version sequence = %d,%v, want v2", sequence, ok)
+	}
+	for i, name := range []string{"zeta", "alpha"} {
+		if _, err := repository.CreateChannel(ctx, tenant, store.Channel{
+			ID: registry.NewID(at.Add(time.Duration(6+i) * time.Second)), BucketName: "delete-version",
+			Name: name, CreatedAt: at.Add(time.Duration(6+i) * time.Second),
+		}, "fp-two", "publisher"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	err := repository.DeleteVersion(ctx, tenant, "delete-version", "fp-two", at.Add(8*time.Second))
+	var assigned *store.VersionAssignedError
+	if !errors.As(err, &assigned) || !reflect.DeepEqual(assigned.Channels, []string{"alpha", "zeta"}) {
+		t.Fatalf("assigned DeleteVersion = %#v, %v", assigned, err)
+	}
+	for _, name := range []string{"alpha", "zeta"} {
+		if err := repository.DeleteChannel(ctx, tenant, "delete-version", name); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.DeleteVersion(ctx, tenant, "delete-version", "fp-two", at.Add(9*time.Second)); err != nil {
+		t.Fatalf("DeleteVersion tracked by managed latest: %v", err)
+	}
+	latest, err := repository.GetChannel(ctx, tenant, "delete-version", "latest")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if latest.Version == nil || latest.Version.ID != first.ID {
+		t.Fatalf("latest after DeleteVersion = %#v, want fp-one", latest.Version)
+	}
+	if _, err := repository.GetVersion(ctx, tenant, "delete-version", "fp-two"); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("GetVersion after deletion = %v, want ErrNotFound", err)
+	}
+	if _, err := repository.GetSbom(ctx, tenant, "delete-version", "fp-two", secondBuild.ID.String(), secondSBOM.Name); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("GetSbom after version deletion = %v, want ErrNotFound", err)
+	}
+	if _, err := objects.Get(ctx, secondObjectKey); err == nil {
+		t.Fatal("DeleteVersion left its SBOM object behind")
+	}
+	if err := objects.CheckBucket(ctx); err != nil {
+		t.Fatalf("restore object-store health after absence check: %v", err)
+	}
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, query := range map[string]string{
+		"build":    `SELECT count(*) FROM builds WHERE id = '` + secondBuild.ID.String() + `'`,
+		"artifact": `SELECT count(*) FROM artifacts WHERE build_id = '` + secondBuild.ID.String() + `'`,
+		"sbom":     `SELECT count(*) FROM sboms WHERE id = '` + secondSBOM.ID.String() + `'`,
+		"package":  `SELECT count(*) FROM sbom_packages WHERE sbom_id = '` + secondSBOM.ID.String() + `'`,
+	} {
+		var count int
+		if err := tx.QueryRowContext(ctx, query).Scan(&count); err != nil || count != 0 {
+			_ = tx.Rollback()
+			t.Fatalf("%s rows after DeleteVersion = %d, %v", label, count, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	// The same fingerprint can be recorded afresh, and max(surviving)+1 reuses
+	// the freed v2 name rather than advancing to v3.
+	_, replacementBuild := createRunning("delete-version", "fp-two", "docker", 10*time.Second)
+	replacement := complete("delete-version", "fp-two", replacementBuild, 11*time.Second)
+	if sequence, ok := replacement.Sequence(); !ok || sequence != 2 {
+		t.Fatalf("replacement sequence = %d,%v, want reused v2", sequence, ok)
+	}
+	if err := repository.DeleteVersion(ctx, otherTenant, "delete-version", "fp-two", at.Add(12*time.Second)); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("cross-tenant DeleteVersion = %v, want invisible miss", err)
+	}
+	if err := repository.DeleteBuild(ctx, otherTenant, "delete-version", "fp-two", replacementBuild.ID.String()); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("cross-tenant DeleteBuild = %v, want invisible miss", err)
+	}
+	if _, err := repository.GetVersion(ctx, tenant, "delete-version", "fp-two"); err != nil {
+		t.Fatalf("cross-tenant deletion changed owner row: %v", err)
+	}
+
+	createBucket("delete-last", 20*time.Second)
+	_, lastBuild := createRunning("delete-last", "only", "docker", 21*time.Second)
+	complete("delete-last", "only", lastBuild, 22*time.Second)
+	if err := repository.DeleteVersion(ctx, tenant, "delete-last", "only", at.Add(23*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	lastLatest, err := repository.GetChannel(ctx, tenant, "delete-last", "latest")
+	if err != nil || lastLatest.Version != nil {
+		t.Fatalf("latest after last version deletion = %#v, %v; want unassigned", lastLatest, err)
+	}
+
+	createBucket("delete-special", 30*time.Second)
+	incomplete, err := registry.NewVersion(
+		registry.NewID(at.Add(31*time.Second)), "delete-special", "incomplete", registry.TemplateHCL2, at.Add(31*time.Second),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, incomplete); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteVersion(ctx, tenant, "delete-special", "incomplete", at.Add(32*time.Second)); err != nil {
+		t.Fatalf("delete incomplete v0: %v", err)
+	}
+	revoked, _ := registry.NewVersion(
+		registry.NewID(at.Add(33*time.Second)), "delete-special", "revoked", registry.TemplateHCL2, at.Add(33*time.Second),
+	)
+	if _, err := repository.CreateVersion(ctx, tenant, revoked); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RevokeVersion(ctx, tenant, "delete-special", "revoked", store.RevocationRequest{
+		RevokeAt: at.Add(34 * time.Second), Author: "publisher",
+	}, testVersionName, at.Add(34*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeleteVersion(ctx, tenant, "delete-special", "revoked", at.Add(35*time.Second)); err != nil {
+		t.Fatalf("delete revoked version: %v", err)
+	}
+
+	createBucket("delete-build", 40*time.Second)
+	_, onlyBuild := createRunning("delete-build", "complete", "docker", 41*time.Second)
+	buildSBOM, buildObjectKey := upload("delete-build", "complete", onlyBuild, 42*time.Second)
+	complete("delete-build", "complete", onlyBuild, 43*time.Second)
+	if err := repository.DeleteBuild(ctx, tenant, "delete-build", "complete", onlyBuild.ID.String()); err != nil {
+		t.Fatalf("DeleteBuild: %v", err)
+	}
+	remaining, err := repository.GetVersion(ctx, tenant, "delete-build", "complete")
+	if err != nil || !remaining.Complete() || remaining.Revocation() != nil {
+		t.Fatalf("version after last build deletion = %#v, %v; want complete active", remaining, err)
+	}
+	builds, err := repository.ListBuilds(ctx, tenant, "delete-build", "complete")
+	if err != nil || len(builds) != 0 {
+		t.Fatalf("builds after DeleteBuild = %#v, %v", builds, err)
+	}
+	if _, err := repository.GetSbom(ctx, tenant, "delete-build", "complete", onlyBuild.ID.String(), buildSBOM.Name); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("GetSbom after DeleteBuild = %v, want ErrNotFound", err)
+	}
+	if _, err := objects.Get(ctx, buildObjectKey); err == nil {
+		t.Fatal("DeleteBuild left its SBOM object behind")
+	}
+	tx, err = store.BeginTenant(ctx, db, orgA, projectA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for label, query := range map[string]string{
+		"artifact": `SELECT count(*) FROM artifacts WHERE build_id = '` + onlyBuild.ID.String() + `'`,
+		"sbom":     `SELECT count(*) FROM sboms WHERE id = '` + buildSBOM.ID.String() + `'`,
+		"package":  `SELECT count(*) FROM sbom_packages WHERE sbom_id = '` + buildSBOM.ID.String() + `'`,
+	} {
+		var count int
+		if err := tx.QueryRowContext(ctx, query).Scan(&count); err != nil || count != 0 {
+			_ = tx.Rollback()
+			t.Fatalf("%s rows after DeleteBuild = %d, %v", label, count, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDeleteVersionManagedLatestDoesNotBlock(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 12, 16, 0, 0, 0, time.UTC)
+	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "delete-managed-latest", Labels: map[string]string{}, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	completeVersionForRollback(t, repository, ctx, tenant, "delete-managed-latest", "only",
+		at.Add(time.Second), at.Add(2*time.Second))
+	if err := repository.DeleteVersion(ctx, tenant, "delete-managed-latest", "only", at.Add(3*time.Second)); err != nil {
+		t.Fatalf("managed latest blocked DeleteVersion: %v", err)
+	}
+	latest, err := repository.GetChannel(ctx, tenant, "delete-managed-latest", "latest")
+	if err != nil || latest.Version != nil {
+		t.Fatalf("latest after deleting its only version = %#v, %v; want unassigned", latest, err)
+	}
+}
+
+func TestDeleteVersionLatestRollsToSurvivor(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 12, 17, 0, 0, 0, time.UTC)
+	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "delete-latest-rollback", Labels: map[string]string{}, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	first := completeVersionForRollback(t, repository, ctx, tenant, "delete-latest-rollback", "first",
+		at.Add(time.Second), at.Add(2*time.Second))
+	completeVersionForRollback(t, repository, ctx, tenant, "delete-latest-rollback", "second",
+		at.Add(3*time.Second), at.Add(4*time.Second))
+	if err := repository.DeleteVersion(ctx, tenant, "delete-latest-rollback", "second", at.Add(5*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	latest, err := repository.GetChannel(ctx, tenant, "delete-latest-rollback", "latest")
+	if err != nil || latest.Version == nil || latest.Version.ID != first.ID {
+		t.Fatalf("latest after deleting newest = %#v, %v; want first", latest, err)
+	}
+	history, err := repository.ListChannelAssignmentHistory(ctx, tenant, "delete-latest-rollback", "latest")
+	if err != nil || len(history) != 2 || history[0].Version.ID != first.ID {
+		t.Fatalf("latest rollback history = %#v, %v; want a new assignment to first", history, err)
 	}
 }
 
