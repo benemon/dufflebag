@@ -8,7 +8,6 @@ import { Versions } from './screens/Versions'
 import { Version } from './screens/Version'
 import { Build } from './screens/Build'
 import { Login } from './screens/Login'
-import { NotBuilt } from './screens/NotBuilt'
 import { Instance } from './screens/Instance'
 import { Principals } from './screens/Principals'
 import { Audit } from './screens/Audit'
@@ -76,7 +75,6 @@ function Authenticated() {
         <Route path="/buckets/:bucket" element={<Versions />} />
         <Route path="/buckets/:bucket/versions/:fingerprint" element={<Version />} />
         <Route path="/buckets/:bucket/versions/:fingerprint/builds/:build" element={<Build />} />
-        <Route path="/ancestry" element={<NotBuilt title="Ancestry" />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />
