@@ -838,8 +838,11 @@ function CreateChannelModal({
   )
 }
 
+// Only active, complete versions are offered for assignment: a revoked or
+// revocation-scheduled version is a version being pulled OUT of consumption
+// (Ben's ruling, duf-awx8). The server stays the arbiter at the wire.
 function completeChannelVersions(versions: Version[]): Version[] {
-  return versions.filter((version) => version.state !== 'incomplete')
+  return versions.filter((version) => version.state === 'complete')
 }
 
 export function CreateChannelModalView({

@@ -719,7 +719,7 @@ export function OperationsCard({
     <Card>
       <CardTitle>Operations</CardTitle>
       <CardBody>
-        {version.state !== 'incomplete' ? (
+        {version.state === 'complete' ? (
           <Form>
             {failure ? (
               <Alert variant="danger" isInline title="The action was refused">
