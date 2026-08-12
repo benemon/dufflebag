@@ -18,6 +18,7 @@ let EnforcedProvisionersRow
 let VersionView
 let RevokeModalView
 let RestoreModalView
+let DeleteVersionModalView
 let OperationsCard
 let BuildView
 let loadVersions
@@ -36,6 +37,7 @@ let parentFreshnessText
 let ApiError
 let revokeVersion
 let restoreVersion
+let deleteVersion
 let createChannel
 let assignChannelVersion
 let deleteChannel
@@ -43,6 +45,7 @@ let FacetRail
 let facetCountText
 let platformTenancyGap
 const versionDataSource = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
+const versionScreenSource = readFileSync(new URL('../src/screens/Version.tsx', import.meta.url), 'utf8')
 
 before(async () => {
   vite = await createServer({
@@ -56,7 +59,7 @@ before(async () => {
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
-  ;({ VersionView, RevokeModalView, RestoreModalView, OperationsCard,
+  ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard,
     terraformConsumeSnippet, terraformPromotionSnippet } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
   ;({ BuildView, packerBuildCommand, sbomFileName } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
@@ -65,7 +68,7 @@ before(async () => {
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail, facetCountText } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
-  ;({ ApiError, revokeVersion, restoreVersion, createChannel, assignChannelVersion,
+  ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
     deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
 
@@ -309,6 +312,7 @@ test('version safety actions are live for publisher and restricted below publish
     const restore = detailMarkup(actionVersion('revoked'), { callerRole: role })
     assert.match(restore, /Requires publisher/)
     assert.match(restore, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Restore/)
+    assert.match(revoke, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Delete version/)
   }
 
   for (const [state, label] of [['complete', 'Revoke'], ['revoked', 'Restore']]) {
@@ -316,6 +320,8 @@ test('version safety actions are live for publisher and restricted below publish
     assert.match(markup, new RegExp(`>${label}<`))
     assert.doesNotMatch(markup, /Requires publisher/)
     assert.doesNotMatch(markup, new RegExp(`<button[^>]*disabled[^>]*>[\\s\\S]{0,240}${label}`))
+    assert.match(markup, />Delete version</)
+    assert.doesNotMatch(markup, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Delete version/)
   }
 })
 
@@ -397,7 +403,7 @@ test('the revoke modal builds immediate and scheduled options from its controls'
   }])
 })
 
-test('revoke and restore clients send exact compat-plane PATCH bodies', async () => {
+test('revoke, restore and delete clients send exact compat-plane requests', async () => {
   const originalFetch = globalThis.fetch
   const calls = []
   globalThis.fetch = async (input, init) => {
@@ -417,19 +423,20 @@ test('revoke and restore clients send exact compat-plane PATCH bodies', async ()
       disable_rollback_channels: true,
     })
     await restoreVersion('bearer', tenant, 'images/base', 'fp one')
+    await deleteVersion('bearer', tenant, 'images/base', 'fp one')
   } finally {
     globalThis.fetch = originalFetch
   }
 
-  assert.equal(calls.length, 3)
+  assert.equal(calls.length, 4)
   for (const call of calls) {
-    assert.equal(call.init.method, 'PATCH')
     assert.equal(call.init.headers.Authorization, 'Bearer bearer')
     assert.match(
       call.path,
       /\/organizations\/org%20one\/projects\/project%2Fone\/buckets\/images%2Fbase\/versions\/fp%20one$/,
     )
   }
+  assert.deepEqual(calls.map(({ init }) => init.method), ['PATCH', 'PATCH', 'PATCH', 'DELETE'])
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     revoke_at: '2026-08-12T14:00:00.000Z',
   })
@@ -441,6 +448,35 @@ test('revoke and restore clients send exact compat-plane PATCH bodies', async ()
     disable_rollback_channels: true,
   })
   assert.deepEqual(JSON.parse(calls[2].init.body), { restore: true })
+  assert.equal(calls[3].init.body, undefined)
+})
+
+test('delete version confirmation states permanence and renders server refusal verbatim', async () => {
+  const refusal = 'Version is assigned by channels: production. Please, remove the channels assignment before deleting the version.'
+  const calls = []
+  const markup = renderToStaticMarkup(React.createElement(DeleteVersionModalView, {
+    bucket: 'images', version: actionVersion(), callerRole: 'publisher', submitting: false,
+    failure: refusal, onConfirm: async () => calls.push('delete'), onClose: () => {},
+  }))
+  assert.match(markup, /Delete images v7/)
+  assert.match(markup, /is permanent/)
+  assert.match(markup, /builds, artifacts and SBOMs/)
+  assert.match(markup, /Channels must be unassigned/)
+  assert.match(markup, new RegExp(refusal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+
+  const view = DeleteVersionModalView({
+    bucket: 'images', version: actionVersion(), callerRole: 'publisher', submitting: false,
+    failure: null, onConfirm: async () => calls.push('delete'), onClose: () => {},
+  })
+  await findElement(view, (element) => element.props.children === 'Delete version').props.onClick()
+  assert.deepEqual(calls, ['delete'])
+})
+
+test('the Version container navigates to the bucket only after delete succeeds', () => {
+  assert.match(
+    versionScreenSource,
+    /await deleteVersion\(state\.token, tenant, bucket, fingerprint\)\s+navigate\(`\/buckets\/\$\{encodeURIComponent\(bucket\)\}`\)/,
+  )
 })
 
 test('a compat-plane ApiError message is rendered verbatim in either modal', () => {

@@ -10,7 +10,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import { useNavigate, useParams } from 'react-router'
 
 import {
-  assignChannelVersion, revokeVersion, restoreVersion, signOutIfUnauthorized,
+  assignChannelVersion, deleteVersion, revokeVersion, restoreVersion, signOutIfUnauthorized,
   type RevokeVersionOptions,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -87,6 +87,16 @@ export function Version() {
           throw err
         }
       }}
+      onDelete={async () => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await deleteVersion(state.token, tenant, bucket, fingerprint)
+          navigate(`/buckets/${encodeURIComponent(bucket)}`)
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
       onPromote={async (channel) => {
         if (!state || !tenant) throw new Error('No session.')
         try {
@@ -116,6 +126,7 @@ export function VersionView({
   callerRole = null,
   onRevoke = () => Promise.reject(new Error('No session.')),
   onRestore = () => Promise.reject(new Error('No session.')),
+  onDelete = () => Promise.reject(new Error('No session.')),
   onPromote = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
@@ -135,11 +146,12 @@ export function VersionView({
   callerRole?: Role | null
   onRevoke?: (options: RevokeVersionOptions) => Promise<void>
   onRestore?: () => Promise<void>
+  onDelete?: () => Promise<void>
   onPromote?: (channel: string) => Promise<void>
 }) {
   const version = detail?.version ?? suppliedVersion ?? null
   const [facet, setFacet] = useState<'overview' | 'builds'>('overview')
-  const [action, setAction] = useState<'revoke' | 'restore' | null>(null)
+  const [action, setAction] = useState<'revoke' | 'restore' | 'delete' | null>(null)
   const restores = version?.state === 'revoked' || version?.state === 'revocation-scheduled'
   return (
     <>
@@ -166,32 +178,42 @@ export function VersionView({
                   {version.templateType && <Label isCompact>{version.templateType}</Label>}
                 </span>
               </Title>
-              {restores ? (
-                <div>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+                {restores ? (
+                  <div>
+                    <RoleRestrictedButton
+                      action="revokeVersions"
+                      callerRole={callerRole}
+                      variant="secondary"
+                      onClick={() => setAction('restore')}
+                    >
+                      Restore
+                    </RoleRestrictedButton>
+                    {version.state === 'revocation-scheduled' ? (
+                      <Content component="p" style={{ marginTop: 4 }}>
+                        Restoring cancels the scheduled revocation.
+                      </Content>
+                    ) : null}
+                  </div>
+                ) : (
                   <RoleRestrictedButton
                     action="revokeVersions"
                     callerRole={callerRole}
-                    variant="secondary"
-                    onClick={() => setAction('restore')}
+                    variant="danger"
+                    onClick={() => setAction('revoke')}
                   >
-                    Restore
+                    Revoke
                   </RoleRestrictedButton>
-                  {version.state === 'revocation-scheduled' ? (
-                    <Content component="p" style={{ marginTop: 4 }}>
-                      Restoring cancels the scheduled revocation.
-                    </Content>
-                  ) : null}
-                </div>
-              ) : (
+                )}
                 <RoleRestrictedButton
-                  action="revokeVersions"
+                  action="deleteVersions"
                   callerRole={callerRole}
                   variant="danger"
-                  onClick={() => setAction('revoke')}
+                  onClick={() => setAction('delete')}
                 >
-                  Revoke
+                  Delete version
                 </RoleRestrictedButton>
-              )}
+              </div>
             </div>
             <DescriptionList isHorizontal style={{ marginTop: 16 }}>
               <DescriptionListGroup>
@@ -287,6 +309,95 @@ export function VersionView({
           onClose={() => setAction(null)}
         />
       ) : null}
+      {version && action === 'delete' ? (
+        <DeleteVersionModal
+          bucket={bucket}
+          version={version}
+          callerRole={callerRole}
+          onConfirm={onDelete}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function DeleteVersionModal({
+  bucket, version, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const confirm = async () => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return (
+    <Modal aria-labelledby="delete-version-modal-title" isOpen onClose={onClose} variant="small">
+      <DeleteVersionModalView
+        bucket={bucket}
+        version={version}
+        callerRole={callerRole}
+        submitting={submitting}
+        failure={failure}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+export function DeleteVersionModalView({
+  bucket, version, callerRole, submitting, failure, onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  submitting: boolean
+  failure: string | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  return (
+    <>
+      <ModalHeader labelId="delete-version-modal-title" title={`Delete ${bucket} ${version.name}`} />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Content component="p">
+          Deleting {bucket} {version.name} is permanent. Its builds, artifacts and SBOMs
+          are deleted with it. Channels must be unassigned from this version first.
+        </Content>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="deleteVersions"
+          callerRole={callerRole}
+          variant="danger"
+          isLoading={submitting}
+          isDisabled={submitting}
+          onClick={onConfirm}
+        >
+          Delete version
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
     </>
   )
 }

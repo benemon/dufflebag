@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -773,7 +772,7 @@ func TestUnmatchedPathsAnswerAStatusBody(t *testing.T) {
 		method string
 		path   string
 	}{
-		{"an unserved operation", http.MethodDelete, testBase + "/buckets/images/versions/fp"},
+		{"an unserved operation", http.MethodDelete, testBase + "/registry"},
 		{"an unknown path", http.MethodGet, testBase + "/nonsense"},
 		{"a method mismatch", http.MethodPost, testBase + "/registry"},
 		{"the unimplemented 2021-04-30 tree", http.MethodGet,
@@ -1369,6 +1368,37 @@ func (r *fakeRepository) GetVersion(
 	return version, nil
 }
 
+func (r *fakeRepository) DeleteVersion(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint string,
+	_ time.Time,
+) error {
+	key := bucket + "/" + fingerprint
+	version, ok := r.versions[key]
+	if !ok {
+		return registry.ErrNotFound
+	}
+	var channels []string
+	for _, channel := range r.channels {
+		if channel.BucketName == bucket && !channel.Managed && channel.Version == version {
+			channels = append(channels, channel.Name)
+		}
+	}
+	if len(channels) != 0 {
+		sort.Strings(channels)
+		return &store.VersionAssignedError{Channels: channels}
+	}
+	delete(r.versions, key)
+	delete(r.builds, key)
+	for _, channel := range r.channels {
+		if channel.Version == version {
+			channel.Version = nil
+		}
+	}
+	return nil
+}
+
 func TestNeverRevokedVersionRendersNullRevokeAtLikeLiveContract(t *testing.T) {
 	version, err := registry.RestoreVersion(registry.Version{
 		ID:           registry.NewID(testTime),
@@ -1903,9 +1933,23 @@ func (r *fakeRepository) UpdateBuild(
 			return &r.builds[key][i], nil
 		}
 	}
-	return nil, errors.New("build missing")
+	return nil, registry.ErrNotFound
 }
 
+func (r *fakeRepository) DeleteBuild(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint, buildID string,
+) error {
+	key := bucket + "/" + fingerprint
+	for i := range r.builds[key] {
+		if r.builds[key][i].ID.String() == buildID {
+			r.builds[key] = append(r.builds[key][:i], r.builds[key][i+1:]...)
+			return nil
+		}
+	}
+	return registry.ErrNotFound
+}
 func mapsEqual(a, b map[string]string) bool {
 	if len(a) != len(b) {
 		return false
@@ -1956,6 +2000,94 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 		t.Fatalf("bucket deletion left contents: %#v %#v %#v",
 			repository.versions, repository.builds, repository.channels)
 	}
+}
+
+func TestDeleteVersionRefusalsAndSuccess(t *testing.T) {
+	repository := newFakeRepository()
+	version, err := registry.NewVersion(
+		registry.NewID(testTime), "images", "assigned", registry.TemplateHCL2, testTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.versions["images/assigned"] = version
+	for i, name := range []string{"zeta", "alpha"} {
+		repository.channels["images/"+name] = &store.Channel{
+			ID:         registry.NewID(testTime.Add(time.Duration(i+1) * time.Second)),
+			BucketName: "images", Name: name, Version: version,
+		}
+	}
+	repository.channels["images/latest"] = &store.Channel{
+		ID: registry.NewID(testTime.Add(3 * time.Second)), BucketName: "images",
+		Name: "latest", Managed: true, Version: version,
+	}
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	trail := &auditTrail{}
+	server = audit.NewHTTPHandler(trail, server.(audit.Resolver), server,
+		audit.StaticHMACKey("test-v1", []byte("test-audit-hmac-key")))
+
+	response := request(t, server, http.MethodDelete,
+		testBase+"/buckets/images/versions/assigned", nil)
+	if response.Code != http.StatusBadRequest || response.Body.String() !=
+		"{\"code\":9,\"details\":[],\"message\":\"Version is assigned by channels: alpha, zeta. Please, remove the channels assignment before deleting the version.\"}\n" {
+		t.Fatalf("assigned DeleteVersion = %d %s", response.Code, response.Body)
+	}
+	assertAuditFields(t, trail.responses(t)[0], map[string]any{
+		"operation": "version.delete", "target_type": "version", "target_id": "assigned",
+		"outcome": "refused", "reason": "version_assigned",
+	})
+
+	delete(repository.channels, "images/alpha")
+	delete(repository.channels, "images/zeta")
+	response = request(t, server, http.MethodDelete,
+		testBase+"/buckets/images/versions/assigned", nil)
+	if response.Code != http.StatusOK || response.Body.String() != "{}\n" {
+		t.Fatalf("successful DeleteVersion = %d %s, want 200 {}", response.Code, response.Body)
+	}
+	response = request(t, server, http.MethodDelete,
+		testBase+"/buckets/images/versions/assigned", nil)
+	if response.Code != http.StatusNotFound || response.Body.String() !=
+		"{\"code\":5,\"details\":[],\"message\":\"Error: The version with identifier assigned does not exist.\"}\n" {
+		t.Fatalf("missing DeleteVersion = %d %s", response.Code, response.Body)
+	}
+	responses := trail.responses(t)
+	assertAuditFields(t, responses[len(responses)-1], map[string]any{
+		"operation": "version.delete", "target_type": "version", "target_id": "assigned",
+		"outcome": "refused", "reason": "version_not_found",
+	})
+}
+
+func TestDeleteBuildMissingAndSuccess(t *testing.T) {
+	repository := newFakeRepository()
+	version, err := registry.NewVersion(
+		registry.NewID(testTime), "images", "fp", registry.TemplateHCL2, testTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.versions["images/fp"] = version
+	buildID := registry.NewID(testTime.Add(time.Second))
+	repository.builds["images/fp"] = []store.StoredBuild{{Build: registry.Build{ID: buildID}}}
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	trail := &auditTrail{}
+	server = audit.NewHTTPHandler(trail, server.(audit.Resolver), server,
+		audit.StaticHMACKey("test-v1", []byte("test-audit-hmac-key")))
+
+	path := testBase + "/buckets/images/versions/fp/builds/" + buildID.String()
+	response := request(t, server, http.MethodDelete, path, nil)
+	if response.Code != http.StatusOK || response.Body.String() != "{}\n" {
+		t.Fatalf("successful DeleteBuild = %d %s, want 200 {}", response.Code, response.Body)
+	}
+	response = request(t, server, http.MethodDelete, path, nil)
+	want := "{\"code\":5,\"details\":[],\"message\":\"The build with identifier " + buildID.String() + " does not exist.\"}\n"
+	if response.Code != http.StatusNotFound || response.Body.String() != want {
+		t.Fatalf("missing DeleteBuild = %d %s", response.Code, response.Body)
+	}
+	responses := trail.responses(t)
+	assertAuditFields(t, responses[len(responses)-1], map[string]any{
+		"operation": "build.delete", "target_type": "build", "target_id": buildID.String(),
+		"outcome": "refused", "reason": "build_not_found",
+	})
 }
 
 func TestUploadSbomStoresAndNamesTheDocument(t *testing.T) {

@@ -48,10 +48,12 @@ type Repository interface {
 	CreateVersion(context.Context, store.Tenant, *registry.Version) (*registry.Version, error)
 	GetVersion(context.Context, store.Tenant, string, string) (*registry.Version, error)
 	ListVersions(context.Context, store.Tenant, string) ([]*registry.Version, error)
+	DeleteVersion(context.Context, store.Tenant, string, string, time.Time) error
 	CreateBuild(context.Context, store.Tenant, string, string, registry.TemplateType, store.StoredBuild, func(*registry.Version) string) (*store.StoredBuild, error)
 	ListBuilds(context.Context, store.Tenant, string, string) ([]store.StoredBuild, error)
 	GetBuild(context.Context, store.Tenant, string, string, string) (*store.StoredBuild, error)
 	UpdateBuild(context.Context, store.Tenant, string, string, store.StoredBuild, func(*registry.Version) string, time.Time) (*store.StoredBuild, error)
+	DeleteBuild(context.Context, store.Tenant, string, string, string) error
 	RevokeVersion(context.Context, store.Tenant, string, string, store.RevocationRequest, func(*registry.Version) string, time.Time) (*registry.Version, error)
 	RestoreRevokedVersion(context.Context, store.Tenant, string, string, time.Time) (*registry.Version, error)
 	UploadSbom(context.Context, store.Tenant, string, string, string, store.Sbom) (*store.Sbom, error)
@@ -119,9 +121,11 @@ func routes() []route {
 		// Publisher, like channel writes: revocation changes what consumers may
 		// use, which is the same authority that blesses a version onto a channel.
 		{method: http.MethodPatch, path: "/buckets/{bucket}/versions/{fingerprint}", notFoundCode: 10, required: identity.RolePublisher, operation: "version.update", targetType: "version", targetIDParam: "fingerprint", handle: (*handler).updateVersion},
+		{method: http.MethodDelete, path: "/buckets/{bucket}/versions/{fingerprint}", notFoundCode: 5, required: identity.RolePublisher, operation: "version.delete", targetType: "version", targetIDParam: "fingerprint", handle: (*handler).deleteVersion},
 		{method: http.MethodPost, path: "/buckets/{bucket}/versions/{fingerprint}/builds", notFoundCode: 10, required: identity.RoleBuilder, operation: "build.create", targetType: "build", handle: (*handler).createBuild},
 		{method: http.MethodGet, path: "/buckets/{bucket}/versions/{fingerprint}/builds", notFoundCode: 10, required: identity.RoleReader, operation: "build.list", targetType: "build_collection", handle: (*handler).listBuilds},
 		{method: http.MethodPatch, path: "/buckets/{bucket}/versions/{fingerprint}/builds/{build}", notFoundCode: 10, required: identity.RoleBuilder, operation: "build.update", targetType: "build", targetIDParam: "build", handle: (*handler).updateBuild},
+		{method: http.MethodDelete, path: "/buckets/{bucket}/versions/{fingerprint}/builds/{build}", notFoundCode: 5, required: identity.RolePublisher, operation: "build.delete", targetType: "build", targetIDParam: "build", handle: (*handler).deleteBuild},
 		{method: http.MethodGet, path: "/buckets/{bucket}/versions/{fingerprint}/builds/{build}/packages", notFoundCode: 10, required: identity.RoleReader, operation: "package.list", targetType: "build", targetIDParam: "build", handle: (*handler).listBuildPackages},
 		{method: http.MethodGet, path: "/buckets/{bucket}/versions/{fingerprint}/builds/{build}/sboms", notFoundCode: 10, required: identity.RoleReader, operation: "sbom.list", targetType: "build", targetIDParam: "build", handle: (*handler).listSboms},
 		{method: http.MethodPut, path: "/buckets/{bucket}/versions/{fingerprint}/builds/{build}/sboms", notFoundCode: 10, required: identity.RoleBuilder, operation: "sbom.upload", targetType: "build", targetIDParam: "build", handle: (*handler).uploadSbom},
@@ -690,6 +694,56 @@ func (h *handler) deleteBucket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var response models.HashicorpCloudPacker20230101DeleteBucketResponse = struct{}{}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *handler) deleteVersion(w http.ResponseWriter, r *http.Request) {
+	err := h.repository.DeleteVersion(
+		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"), h.now().UTC(),
+	)
+	var assigned *store.VersionAssignedError
+	if errors.As(err, &assigned) {
+		audit.FromContext(r.Context()).Enrich(audit.Enrichment{
+			Outcome: identity.AuditOutcomeRefused, Reason: "version_assigned",
+		})
+		writeRPCError(w, http.StatusBadRequest, 9, assigned.Error())
+		return
+	}
+	if errors.Is(err, registry.ErrNotFound) {
+		audit.FromContext(r.Context()).Enrich(audit.Enrichment{
+			Outcome: identity.AuditOutcomeRefused, Reason: "version_not_found",
+		})
+		writeRPCError(w, http.StatusNotFound, 5, fmt.Sprintf(
+			"Error: The version with identifier %s does not exist.", r.PathValue("fingerprint"),
+		))
+		return
+	}
+	if err != nil {
+		h.writeInternal(w, r, "delete version", err)
+		return
+	}
+	var response models.HashicorpCloudPacker20230101DeleteVersionResponse = struct{}{}
+	writeJSON(w, http.StatusOK, response)
+}
+
+func (h *handler) deleteBuild(w http.ResponseWriter, r *http.Request) {
+	err := h.repository.DeleteBuild(
+		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"), r.PathValue("build"),
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		audit.FromContext(r.Context()).Enrich(audit.Enrichment{
+			Outcome: identity.AuditOutcomeRefused, Reason: "build_not_found",
+		})
+		writeRPCError(w, http.StatusNotFound, 5, fmt.Sprintf(
+			"The build with identifier %s does not exist.", r.PathValue("build"),
+		))
+		return
+	}
+	if err != nil {
+		h.writeInternal(w, r, "delete build", err)
+		return
+	}
+	var response models.HashicorpCloudPacker20230101DeleteBuildResponse = struct{}{}
 	writeJSON(w, http.StatusOK, response)
 }
 

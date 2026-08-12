@@ -1523,10 +1523,7 @@ func TestGeneratedClientReadsStoredVulnerabilities(t *testing.T) {
 	}
 }
 
-// Whatever this plane does not serve must still answer a google.rpc.Status
-// body the generated client can parse and Packer's errCodeRegex can match —
-// http.ServeMux's text/plain 404 satisfies neither (review finding 7).
-func TestUnservedOperationsAnswerAParsableStatus(t *testing.T) {
+func TestGeneratedClientDeletesVersionsAndBuilds(t *testing.T) {
 	repository := newContractRepository()
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	server := httptest.NewServer(hcp2023.NewHandlerWithRepository(repository, contractPrincipals{}, contractAuthenticator{}, logger))
@@ -1539,25 +1536,76 @@ func TestUnservedOperationsAnswerAParsableStatus(t *testing.T) {
 			WithSchemes([]string{"http"}),
 	).PackerService
 
-	_, err := client.PackerServiceDeleteVersion(
-		packer_service.NewPackerServiceDeleteVersionParams().
+	deleteVersion := func(fingerprint string) (*packer_service.PackerServiceDeleteVersionOK, error) {
+		return client.PackerServiceDeleteVersion(packer_service.NewPackerServiceDeleteVersionParams().
 			WithLocationOrganizationID(contractOrg).
 			WithLocationProjectID(contractProject).
 			WithBucketName("images").
-			WithFingerprint("fingerprint"),
-		contractAuth,
+			WithFingerprint(fingerprint), contractAuth)
+	}
+	_, err := deleteVersion("missing")
+	var missingVersion *packer_service.PackerServiceDeleteVersionDefault
+	if !errors.As(err, &missingVersion) || !missingVersion.IsCode(http.StatusNotFound) ||
+		missingVersion.Payload.Code != 5 || missingVersion.Payload.Message !=
+		"Error: The version with identifier missing does not exist." {
+		t.Fatalf("generated missing DeleteVersion = %#v, %v", missingVersion, err)
+	}
+
+	version, err := registry.NewVersion(
+		registry.NewID(time.Now()), "images", "assigned", registry.TemplateHCL2, time.Now(),
 	)
-	// The typed default proves the client parsed a JSON status body; the
-	// string form is what Packer's regex sees.
-	var unserved *packer_service.PackerServiceDeleteVersionDefault
-	if !errors.As(err, &unserved) || !unserved.IsCode(http.StatusNotImplemented) {
-		t.Fatalf("generated DeleteVersion = %v, want a parsed 501 status", err)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if unserved.Payload.Code != 12 {
-		t.Fatalf("generated DeleteVersion code = %d, want 12", unserved.Payload.Code)
+	repository.versions["images/assigned"] = version
+	repository.channels["images/zeta"] = &store.Channel{Name: "zeta", BucketName: "images", Version: version}
+	repository.channels["images/alpha"] = &store.Channel{Name: "alpha", BucketName: "images", Version: version}
+	repository.channels["images/latest"] = &store.Channel{Name: "latest", BucketName: "images", Managed: true, Version: version}
+	_, err = deleteVersion("assigned")
+	var assigned *packer_service.PackerServiceDeleteVersionDefault
+	if !errors.As(err, &assigned) || !assigned.IsCode(http.StatusBadRequest) ||
+		assigned.Payload.Code != 9 || assigned.Payload.Message !=
+		"Version is assigned by channels: alpha, zeta. Please, remove the channels assignment before deleting the version." {
+		t.Fatalf("generated assigned DeleteVersion = %#v, %v", assigned, err)
 	}
-	if !strings.Contains(err.Error(), `"code":12`) {
-		t.Fatalf("generated DeleteVersion error text = %v, want a regex-matchable code 12", err)
+	delete(repository.channels, "images/alpha")
+	delete(repository.channels, "images/zeta")
+	if response, err := deleteVersion("assigned"); err != nil || response == nil || response.Payload == nil {
+		t.Fatalf("generated DeleteVersion success = %#v, %v", response, err)
+	} else if payload, ok := response.Payload.(map[string]interface{}); !ok || len(payload) != 0 {
+		t.Fatalf("generated DeleteVersion payload = %#v, want {}", response.Payload)
+	}
+
+	buildVersion, err := registry.NewVersion(
+		registry.NewID(time.Now()), "images", "build-version", registry.TemplateHCL2, time.Now(),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.versions["images/build-version"] = buildVersion
+	buildID := registry.NewID(time.Now()).String()
+	repository.builds["images/build-version"] = []store.StoredBuild{{
+		Build: registry.Build{ID: registry.ID(buildID)}, VersionID: buildVersion.ID,
+	}}
+	deleteBuild := func() (*packer_service.PackerServiceDeleteBuildOK, error) {
+		return client.PackerServiceDeleteBuild(packer_service.NewPackerServiceDeleteBuildParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("images").
+			WithFingerprint("build-version").
+			WithBuildID(buildID), contractAuth)
+	}
+	if response, err := deleteBuild(); err != nil || response == nil || response.Payload == nil {
+		t.Fatalf("generated DeleteBuild success = %#v, %v", response, err)
+	} else if payload, ok := response.Payload.(map[string]interface{}); !ok || len(payload) != 0 {
+		t.Fatalf("generated DeleteBuild payload = %#v, want {}", response.Payload)
+	}
+	_, err = deleteBuild()
+	var missingBuild *packer_service.PackerServiceDeleteBuildDefault
+	if !errors.As(err, &missingBuild) || !missingBuild.IsCode(http.StatusNotFound) ||
+		missingBuild.Payload.Code != 5 || missingBuild.Payload.Message !=
+		"The build with identifier "+buildID+" does not exist." {
+		t.Fatalf("generated missing DeleteBuild = %#v, %v", missingBuild, err)
 	}
 }
 
@@ -2118,6 +2166,37 @@ func (r *contractRepository) GetVersion(
 	return version, nil
 }
 
+func (r *contractRepository) DeleteVersion(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint string,
+	_ time.Time,
+) error {
+	key := bucket + "/" + fingerprint
+	version, ok := r.versions[key]
+	if !ok {
+		return registry.ErrNotFound
+	}
+	var channels []string
+	for _, channel := range r.channels {
+		if channel.BucketName == bucket && !channel.Managed && channel.Version == version {
+			channels = append(channels, channel.Name)
+		}
+	}
+	if len(channels) != 0 {
+		sort.Strings(channels)
+		return &store.VersionAssignedError{Channels: channels}
+	}
+	delete(r.versions, key)
+	delete(r.builds, key)
+	for _, channel := range r.channels {
+		if channel.Version == version {
+			channel.Version = nil
+		}
+	}
+	return nil
+}
+
 func (r *contractRepository) projectVersionRelationships(version *registry.Version) {
 	version.HasDescendants = false
 	version.Parents = nil
@@ -2326,6 +2405,21 @@ func (r *contractRepository) UpdateBuild(
 		return &r.builds[key][i], nil
 	}
 	return nil, errors.New("build missing")
+}
+
+func (r *contractRepository) DeleteBuild(
+	_ context.Context,
+	_ store.Tenant,
+	bucket, fingerprint, buildID string,
+) error {
+	key := bucket + "/" + fingerprint
+	for i := range r.builds[key] {
+		if r.builds[key][i].ID.String() == buildID {
+			r.builds[key] = append(r.builds[key][:i], r.builds[key][i+1:]...)
+			return nil
+		}
+	}
+	return registry.ErrNotFound
 }
 
 func (r *contractRepository) inheritParentRevocation(

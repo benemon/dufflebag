@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/benemon/dufflebag/internal/compat/hcp2023/models"
+	"github.com/benemon/dufflebag/internal/domain/registry"
+	store "github.com/benemon/dufflebag/internal/store/postgres"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 )
 
@@ -171,6 +173,34 @@ func TestResponsesConformToVendoredSpec(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			response := request(t, handler, c.method, c.path, c.body)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body: %s", response.Code, response.Body.String())
+			}
+			assertConforms(t, response, c.definition)
+		})
+	}
+}
+
+func TestDeleteVersionAndBuildResponsesConformToVendoredSpec(t *testing.T) {
+	for _, c := range []struct {
+		name, path, definition string
+		deleteBuild            bool
+	}{
+		{"DeleteVersion", "/buckets/images/versions/fp", "hashicorp.cloud.packer_20230101.DeleteVersionResponse", false},
+		{"DeleteBuild", "/buckets/images/versions/fp/builds/build-id", "hashicorp.cloud.packer_20230101.DeleteBuildResponse", true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			repository := newFakeRepository()
+			handler := NewHandlerWithRepository(repository, testPrincipals(), testAuthenticator{}, testLogger())
+			request(t, handler, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+			request(t, handler, http.MethodPost, testBase+"/buckets/images/versions",
+				map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
+			if c.deleteBuild {
+				repository.builds["images/fp"] = []store.StoredBuild{{
+					Build: registry.Build{ID: registry.ID("build-id")},
+				}}
+			}
+			response := request(t, handler, http.MethodDelete, testBase+c.path, nil)
 			if response.Code != http.StatusOK {
 				t.Fatalf("status = %d, want 200; body: %s", response.Code, response.Body.String())
 			}
