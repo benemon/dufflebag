@@ -257,6 +257,14 @@ FROM versions
 JOIN buckets ON buckets.id = versions.bucket_id
 WHERE buckets.name = $1 AND versions.fingerprint = $2;
 
+-- name: GetVersionByID :one
+SELECT versions.*, buckets.name AS bucket_name
+FROM versions
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE versions.organization_id = $1
+  AND versions.project_id = $2
+  AND versions.id = $3;
+
 -- name: GetVersionRelationships :one
 WITH parents AS (
     SELECT builds.parent_version_id,

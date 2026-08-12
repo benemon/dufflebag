@@ -48,10 +48,10 @@ type Repository interface {
 	CreateVersion(context.Context, store.Tenant, *registry.Version) (*registry.Version, error)
 	GetVersion(context.Context, store.Tenant, string, string) (*registry.Version, error)
 	ListVersions(context.Context, store.Tenant, string) ([]*registry.Version, error)
-	CreateBuild(context.Context, store.Tenant, string, string, registry.TemplateType, store.StoredBuild) (*store.StoredBuild, error)
+	CreateBuild(context.Context, store.Tenant, string, string, registry.TemplateType, store.StoredBuild, func(*registry.Version) string) (*store.StoredBuild, error)
 	ListBuilds(context.Context, store.Tenant, string, string) ([]store.StoredBuild, error)
 	GetBuild(context.Context, store.Tenant, string, string, string) (*store.StoredBuild, error)
-	UpdateBuild(context.Context, store.Tenant, string, string, store.StoredBuild, time.Time) (*store.StoredBuild, error)
+	UpdateBuild(context.Context, store.Tenant, string, string, store.StoredBuild, func(*registry.Version) string, time.Time) (*store.StoredBuild, error)
 	RevokeVersion(context.Context, store.Tenant, string, string, store.RevocationRequest, func(*registry.Version) string, time.Time) (*registry.Version, error)
 	RestoreRevokedVersion(context.Context, store.Tenant, string, string, time.Time) (*registry.Version, error)
 	UploadSbom(context.Context, store.Tenant, string, string, string, store.Sbom) (*store.Sbom, error)
@@ -945,6 +945,7 @@ func (h *handler) createBuild(w http.ResponseWriter, r *http.Request) {
 			Artifacts:                createArtifacts(body.Artifacts, at),
 			CreatedAt:                at,
 		},
+		versionName,
 	)
 	if errors.Is(err, registry.ErrConflict) {
 		// Code 9 pairs with HTTP 400 on live HCP, not 409 (dossier §5.1; duf-xwx).
@@ -1009,6 +1010,18 @@ func (h *handler) updateBuild(w http.ResponseWriter, r *http.Request) {
 		h.writeInternal(w, r, "compat request failed", err)
 		return
 	}
+	if body.ParentVersionID != "" && build.ParentVersionID != "" &&
+		body.ParentVersionID != build.ParentVersionID {
+		writeRPCError(w, http.StatusBadRequest, 6,
+			"You cannot override a build's Parent Version ID if it has already been set.")
+		return
+	}
+	if body.ParentChannelID != "" && build.ParentChannelID != "" &&
+		body.ParentChannelID != build.ParentChannelID {
+		writeRPCError(w, http.StatusBadRequest, 6,
+			"You cannot override a build's Parent Channel ID if it has already been set.")
+		return
+	}
 	at := h.now().UTC()
 	if err := patchBuild(build, &body, at); err != nil {
 		h.writeInternal(w, r, "encode build metadata", err)
@@ -1020,6 +1033,7 @@ func (h *handler) updateBuild(w http.ResponseWriter, r *http.Request) {
 		r.PathValue("bucket"),
 		r.PathValue("fingerprint"),
 		*build,
+		versionName,
 		at,
 	)
 	if err != nil {

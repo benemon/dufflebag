@@ -1171,6 +1171,78 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 			restoredInherited, err)
 	}
 
+	// Packer sends explicit parent IDs on the completing UpdateBuild. If the
+	// parent is already revoked, that SDK-driven child flow inherits immediately
+	// rather than waiting for another revoke operation (live probe A.14).
+	if _, err := client.PackerServiceUpdateVersion(
+		updateVersionParams(&sdkmodels.HashicorpCloudPacker20230101UpdateVersionBody{
+			RevokeAt: strfmt.DateTime(time.Now().UTC()), RevocationMessage: "record-time contract",
+		}),
+		contractAuth,
+	); err != nil {
+		t.Fatalf("generated parent revoke before child flow: %v", err)
+	}
+	if _, err := client.PackerServiceCreateVersion(
+		packer_service.NewPackerServiceCreateVersionParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101CreateVersionBody{
+				Fingerprint: "derived-record-time", TemplateType: &templateType,
+			}),
+		contractAuth,
+	); err != nil {
+		t.Fatalf("generated CreateVersion record-time child: %v", err)
+	}
+	recordTimeBuild, err := client.PackerServiceCreateBuild(
+		packer_service.NewPackerServiceCreateBuildParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithFingerprint("derived-record-time").
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101CreateBuildBody{
+				ComponentType: "docker", PackerRunUUID: "record-time-child",
+				Status: &buildStatus, Artifacts: []*sdkmodels.HashicorpCloudPacker20230101ArtifactCreateBody{},
+			}),
+		contractAuth,
+	)
+	if err != nil {
+		t.Fatalf("generated CreateBuild record-time child: %v", err)
+	}
+	if _, err := client.PackerServiceUpdateBuild(
+		packer_service.NewPackerServiceUpdateBuildParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithFingerprint("derived-record-time").
+			WithBuildID(recordTimeBuild.Payload.Build.ID).
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101UpdateBuildBody{
+				Status: &doneStatus, Metadata: &sdkmodels.HashicorpCloudPacker20230101BuildMetadata{},
+				Artifacts:       []*sdkmodels.HashicorpCloudPacker20230101ArtifactCreateBody{},
+				ParentVersionID: completedVersion.Payload.Version.ID,
+				ParentChannelID: reassigned.Payload.Channel.ID,
+			}),
+		contractAuth,
+	); err != nil {
+		t.Fatalf("generated completing record-time child UpdateBuild: %v", err)
+	}
+	recordTimeChild, err := client.PackerServiceGetVersion(
+		packer_service.NewPackerServiceGetVersionParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithFingerprint("derived-record-time"),
+		contractAuth,
+	)
+	if err != nil || recordTimeChild.Payload.Version.RevocationType == nil ||
+		*recordTimeChild.Payload.Version.RevocationType != sdkmodels.HashicorpCloudPacker20230101RevocationTypeINHERITED ||
+		recordTimeChild.Payload.Version.Status == nil ||
+		*recordTimeChild.Payload.Version.Status != sdkmodels.HashicorpCloudPacker20230101VersionStatusVERSIONREVOKED ||
+		recordTimeChild.Payload.Version.RevocationInheritedFrom == nil ||
+		recordTimeChild.Payload.Version.RevocationInheritedFrom.VersionID != completedVersion.Payload.Version.ID {
+		t.Fatalf("generated record-time inherited child = %#v, %v", recordTimeChild, err)
+	}
+
 	// The provider's channel destroy calls DeleteChannel directly.
 	if _, err := client.PackerServiceDeleteChannel(
 		packer_service.NewPackerServiceDeleteChannelParams().
@@ -2180,6 +2252,7 @@ func (r *contractRepository) CreateBuild(
 	bucket, fingerprint string,
 	templateType registry.TemplateType,
 	build store.StoredBuild,
+	versionName func(*registry.Version) string,
 ) (*store.StoredBuild, error) {
 	version, err := r.GetVersion(context.Background(), store.Tenant{}, bucket, fingerprint)
 	if err != nil {
@@ -2196,6 +2269,7 @@ func (r *contractRepository) CreateBuild(
 	}
 	build.VersionID, build.UpdatedAt = version.ID, build.CreatedAt
 	r.builds[key] = append(r.builds[key], build)
+	r.inheritParentRevocation(version, build.ParentVersionID, versionName, build.CreatedAt)
 	return &r.builds[key][len(r.builds[key])-1], nil
 }
 
@@ -2229,6 +2303,7 @@ func (r *contractRepository) UpdateBuild(
 	_ store.Tenant,
 	bucket, fingerprint string,
 	build store.StoredBuild,
+	versionName func(*registry.Version) string,
 	at time.Time,
 ) (*store.StoredBuild, error) {
 	key := bucket + "/" + fingerprint
@@ -2246,10 +2321,38 @@ func (r *contractRepository) UpdateBuild(
 			build.UpdatedAt = at
 		}
 		r.builds[key][i] = build
+		r.inheritParentRevocation(r.versions[key], build.ParentVersionID, versionName, at)
 		r.completeVersion(key, bucket, at)
 		return &r.builds[key][i], nil
 	}
 	return nil, errors.New("build missing")
+}
+
+func (r *contractRepository) inheritParentRevocation(
+	child *registry.Version,
+	parentVersionID string,
+	versionName func(*registry.Version) string,
+	at time.Time,
+) {
+	if parentVersionID == "" || parentVersionID == child.ID.String() || child.Revocation() != nil {
+		return
+	}
+	for _, parent := range r.versions {
+		if parent.ID.String() != parentVersionID || parent.Revocation() == nil {
+			continue
+		}
+		revocation := parent.Revocation()
+		if err := child.Revoke(registry.Revocation{
+			RevokeAt: revocation.RevokeAt, Message: revocation.Message, Author: revocation.Author,
+			InheritedFrom: &registry.RevokedAncestor{
+				VersionID: parent.ID, BucketName: parent.BucketName, Fingerprint: parent.Fingerprint,
+				VersionName: versionName(parent),
+			},
+		}, at); err != nil {
+			panic("contract fake record-time inheritance: " + err.Error())
+		}
+		return
+	}
 }
 
 // completeVersion mirrors the real store: a version whose builds have all
@@ -2277,6 +2380,9 @@ func (r *contractRepository) completeVersion(key, bucket string, at time.Time) {
 	}
 	if err := version.MarkComplete(sequence, at); err != nil {
 		panic("contract fake completion: " + err.Error())
+	}
+	if revocation := version.Revocation(); revocation != nil && !revocation.RevokeAt.After(at) {
+		return
 	}
 	// Mirrors the real store: completion assigns the version to the bucket's
 	// managed "latest" channel with no client call, in the same instant

@@ -73,14 +73,14 @@ func seedEncryptedBuild(
 	if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
 		t.Fatalf("CreateVersion: %v", err)
 	}
-	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, version.Fingerprint,
-		registry.TemplateHCL2, store.StoredBuild{
-			Build: registry.Build{
-				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker",
-				Status: registry.BuildRunning, Platform: "docker",
-			},
-			Labels: map[string]string{}, CreatedAt: at.Add(2 * time.Second),
-		})
+	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2, store.StoredBuild{
+		Build: registry.Build{
+			ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker",
+			Status: registry.BuildRunning, Platform: "docker",
+		},
+		Labels: map[string]string{}, CreatedAt: at.Add(2 * time.Second),
+	}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("CreateBuild: %v", err)
 	}
@@ -116,8 +116,9 @@ func TestEncryptedBuildMetadataRoundTripsAndStoresNoPlaintext(t *testing.T) {
 	bucketName, fingerprint, build := seedEncryptedBuild(t, repository, tenant, "meta")
 	build.Metadata = []byte(`{"cpu":"amd64","note":"` + metadataCanary + `"}`)
 	build.MetadataSeen = true
-	updated, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build,
+	updated, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build, testVersionName,
 		build.CreatedAt.Add(time.Minute))
+
 	if err != nil {
 		t.Fatalf("UpdateBuild: %v", err)
 	}
@@ -158,7 +159,7 @@ func TestSealedMetadataMovedAcrossTenantsFailsToRead(t *testing.T) {
 	bucketA, fingerprintA, buildA := seedEncryptedBuild(t, repository, tenantA, "a")
 	buildA.Metadata = []byte(`{"secret":"` + metadataCanary + `"}`)
 	buildA.MetadataSeen = true
-	if _, err := repository.UpdateBuild(ctx, tenantA, bucketA, fingerprintA, *buildA,
+	if _, err := repository.UpdateBuild(ctx, tenantA, bucketA, fingerprintA, *buildA, testVersionName,
 		buildA.CreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("UpdateBuild A: %v", err)
 	}
@@ -207,7 +208,7 @@ func TestUnencryptedMetadataStaysPlaintext(t *testing.T) {
 	bucketName, fingerprint, build := seedEncryptedBuild(t, repository, tenant, "plain")
 	build.Metadata = []byte(`{"note":"` + metadataCanary + `"}`)
 	build.MetadataSeen = true
-	if _, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build,
+	if _, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build, testVersionName,
 		build.CreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("UpdateBuild: %v", err)
 	}
@@ -279,8 +280,8 @@ func TestEncryptedSbomBytesAreSealedInObjectStorage(t *testing.T) {
 	completed.Status = registry.BuildDone
 	completed.MetadataSeen = true
 	if _, err := repository.UpdateBuild(
-		ctx, tenant, bucketName, fingerprint, completed, build.CreatedAt.Add(2*time.Second),
-	); err != nil {
+		ctx, tenant, bucketName, fingerprint, completed, testVersionName,
+		build.CreatedAt.Add(2*time.Second)); err != nil {
 		t.Fatalf("complete encrypted build: %v", err)
 	}
 	snapshot, err := repository.GetBagDropBucketSnapshot(ctx, orgA, projectA, bucketName)
@@ -316,7 +317,7 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 	}}
 	// Completion drives the whole chain: build MAC, artifact MAC, version
 	// completion MAC, and the managed-latest auto-assignment MAC.
-	if _, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build,
+	if _, err := repository.UpdateBuild(ctx, tenant, bucketName, fingerprint, *build, testVersionName,
 		build.CreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("UpdateBuild to done: %v", err)
 	}
@@ -352,6 +353,23 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 	}
 	if revoked.Revocation() == nil {
 		t.Fatal("revocation did not persist")
+	}
+	childBucket, childFingerprint, childBuild := seedEncryptedBuild(t, repository, tenant, "record-time-child")
+	childBuild.ParentVersionID = revoked.ID.String()
+	if _, err := repository.UpdateBuild(
+		ctx, tenant, childBucket, childFingerprint, *childBuild, testVersionName,
+		childBuild.CreatedAt.Add(time.Minute),
+	); err != nil {
+		t.Fatalf("record parent edge under encryption: %v", err)
+	}
+	inherited, err := repository.GetVersion(ctx, tenant, childBucket, childFingerprint)
+	if err != nil {
+		t.Fatalf("read record-time inherited row with its resealed MAC: %v", err)
+	}
+	if revocation := inherited.Revocation(); revocation == nil || revocation.InheritedFrom == nil ||
+		revocation.InheritedFrom.VersionID != revoked.ID || revocation.Message != "sealed" ||
+		revocation.Author != "ops" {
+		t.Fatalf("encrypted record-time revocation = %+v", revocation)
 	}
 	// The channel read is the path packer's data sources consume, and its
 	// SELECT carries its own column list — it must verify the re-sealed row

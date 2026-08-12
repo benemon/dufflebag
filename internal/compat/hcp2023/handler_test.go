@@ -502,6 +502,48 @@ func TestBuildEndpointsAreIdempotentAndHeartbeatSafe(t *testing.T) {
 			persisted.ParentVersionID, persisted.ParentChannelID,
 		)
 	}
+
+	emptyParentNoop := request(t, server, http.MethodPatch, updatePath, map[string]any{
+		"status": "BUILD_RUNNING", "artifacts": []any{},
+		"parent_version_id": "", "parent_channel_id": "",
+	})
+	if emptyParentNoop.Code != http.StatusOK {
+		t.Fatalf("empty parent no-op status = %d: %s", emptyParentNoop.Code, emptyParentNoop.Body)
+	}
+	for _, tc := range []struct {
+		name    string
+		field   string
+		value   string
+		message string
+	}{
+		{
+			name: "parent version", field: "parent_version_id", value: "01DIFFERENTVERSION",
+			message: "You cannot override a build's Parent Version ID if it has already been set.",
+		},
+		{
+			name: "parent channel", field: "parent_channel_id", value: "01DIFFERENTCHANNEL",
+			message: "You cannot override a build's Parent Channel ID if it has already been set.",
+		},
+	} {
+		refused := request(t, server, http.MethodPatch, updatePath, map[string]any{
+			"status": "BUILD_RUNNING", "artifacts": []any{}, tc.field: tc.value,
+		})
+		if refused.Code != http.StatusBadRequest ||
+			!strings.Contains(refused.Body.String(), `"code":6`) ||
+			!strings.Contains(refused.Body.String(), tc.message) {
+			t.Fatalf("mutable %s refusal = %d %s", tc.name, refused.Code, refused.Body)
+		}
+	}
+	persisted, err = repository.GetBuild(
+		context.Background(), store.Tenant{}, "images", "fp", firstBody.Build.ID,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if persisted.ParentVersionID != "01PARENTVERSION" || persisted.ParentChannelID != "01PARENTCHANNEL" {
+		t.Fatalf("refused parent mutation changed stored ids to %q %q",
+			persisted.ParentVersionID, persisted.ParentChannelID)
+	}
 }
 
 func TestChannelAndBucketListEndpoints(t *testing.T) {
@@ -1791,6 +1833,7 @@ func (r *fakeRepository) CreateBuild(
 	bucket, fingerprint string,
 	templateType registry.TemplateType,
 	build store.StoredBuild,
+	_ func(*registry.Version) string,
 ) (*store.StoredBuild, error) {
 	version, err := r.GetVersion(context.Background(), store.Tenant{}, bucket, fingerprint)
 	if err != nil {
@@ -1841,6 +1884,7 @@ func (r *fakeRepository) UpdateBuild(
 	_ store.Tenant,
 	bucket, fingerprint string,
 	build store.StoredBuild,
+	_ func(*registry.Version) string,
 	at time.Time,
 ) (*store.StoredBuild, error) {
 	key := bucket + "/" + fingerprint
