@@ -21,7 +21,6 @@ let refreshOrganizationsOnPickerOpen
 let grantableRoles
 let PrincipalsView
 let BucketsView
-let ChannelsView
 
 before(async () => {
   vite = await createServer({
@@ -43,7 +42,6 @@ before(async () => {
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
   ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
-  ;({ ChannelsView } = await vite.ssrLoadModule('/src/screens/Channels.tsx'))
 })
 
 after(async () => {
@@ -378,10 +376,4 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
   assert.match(buckets, /No organisations exist/)
   assert.match(buckets, /Principals and Instance work/)
   assert.doesNotMatch(buckets, /No buckets in this project/)
-
-  const channels = renderToStaticMarkup(React.createElement(ChannelsView, {
-    byChannel: [], loading: false, failure: null, gap,
-  }))
-  assert.match(channels, /No organisations exist/)
-  assert.doesNotMatch(channels, /No channels in this project/)
 })

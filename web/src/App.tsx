@@ -4,7 +4,6 @@ import { Alert, Content, PageSection } from '@patternfly/react-core'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
 import { Buckets } from './screens/Buckets'
-import { Channels } from './screens/Channels'
 import { Versions } from './screens/Versions'
 import { Version } from './screens/Version'
 import { Build } from './screens/Build'
@@ -77,7 +76,6 @@ function Authenticated() {
         <Route path="/buckets/:bucket" element={<Versions />} />
         <Route path="/buckets/:bucket/versions/:fingerprint" element={<Version />} />
         <Route path="/buckets/:bucket/versions/:fingerprint/builds/:build" element={<Build />} />
-        <Route path="/channels" element={<Channels />} />
         <Route path="/ancestry" element={<NotBuilt title="Ancestry" />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
