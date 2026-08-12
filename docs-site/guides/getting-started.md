@@ -1,7 +1,9 @@
 # Getting started
 
 This guide points stock Packer and `terraform-provider-hcp` at a running
-dufflebag instance.
+dufflebag instance. If you do not have one yet, the
+[installation guide](./installation.md) gets you there on Kubernetes,
+OpenShift, or plain Docker/Podman.
 
 ## Prerequisites
 
