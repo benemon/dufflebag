@@ -152,9 +152,16 @@ build-ui: ## Build the web console when npm is available
 	fi
 
 .PHONY: docs
-docs: ## Build the documentation site and platform API reference
-	mkdir -p docs-site/public
+# CHART_VERSION is stamped by CI (0.1.<run number>) so helm clients see
+# upgrades; local builds carry an obvious development version.
+CHART_VERSION ?= 0.0.0-dev
+DOCS_SITE_URL ?= https://benemon.github.io/dufflebag
+
+docs: ## Build the documentation site, platform API reference and Helm repo
+	mkdir -p docs-site/public/charts
 	./docs-site/node_modules/.bin/redocly build-docs spec/platform/openapi.yaml --output docs-site/public/platform-api.html
+	helm package deploy/helm/dufflebag --version "$(CHART_VERSION)" --destination docs-site/public/charts >/dev/null
+	helm repo index docs-site/public/charts --url "$(DOCS_SITE_URL)/charts"
 	./docs-site/node_modules/.bin/vitepress build docs-site
 
 .PHONY: test-ui

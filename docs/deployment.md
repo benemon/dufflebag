@@ -31,6 +31,17 @@ helm install dufflebag deploy/helm/dufflebag \
   --namespace dufflebag --create-namespace
 ```
 
+The chart is also published as a Helm repository on the documentation site,
+versioned per merge to main:
+
+```sh
+helm repo add dufflebag https://benemon.github.io/dufflebag/charts
+helm install dufflebag dufflebag/dufflebag \
+  --namespace dufflebag --create-namespace
+```
+
+Only the most recently published chart version is served.
+
 The defaults select the image repository and tag for each component, allocate
 persistent volumes for PostgreSQL, Ceph and Vault, and leave component resource
 requests and limits unset. The same values file carries the internal database
