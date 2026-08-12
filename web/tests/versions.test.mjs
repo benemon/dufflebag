@@ -317,6 +317,19 @@ test('version safety actions are live for publisher and restricted below publish
   }
 })
 
+test('bucket-detail deletion is live for publisher and disabled with a reason below publisher', () => {
+  for (const role of ['reader', 'builder']) {
+    const markup = listMarkup([], { callerRole: role })
+    assert.match(markup, /Requires publisher/)
+    assert.match(markup, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Delete bucket/)
+  }
+
+  const publisher = listMarkup([], { callerRole: 'publisher' })
+  assert.match(publisher, />Delete bucket</)
+  assert.doesNotMatch(publisher, /Requires publisher/)
+  assert.doesNotMatch(publisher, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Delete bucket/)
+})
+
 test('the version state selects Revoke or Restore without a second action', () => {
   const active = detailMarkup(actionVersion('complete'), { callerRole: 'publisher' })
   assert.match(active, />Revoke</)
@@ -1404,9 +1417,11 @@ test('empty and gap states are distinct, and list rows remain read-only', async 
   const list = listMarkup([version])
   const detail = detailMarkup(version, { callerRole: 'publisher' })
   for (const markup of [list, detail]) assert.match(markup, />production</)
-  for (const unsupported of ['Promote', 'Assign', 'Delete', 'Create version', 'Schedule']) {
+  for (const unsupported of ['Promote', 'Assign', 'Create version', 'Schedule']) {
     assert.doesNotMatch(list, new RegExp(unsupported))
   }
+  assert.equal((list.match(/>Delete bucket</g) ?? []).length, 1)
+  assert.doesNotMatch(list, /Delete version|Delete channel|Delete v1/)
   assert.doesNotMatch(list, />Revoke</)
   assert.match(detail, />Revoke</)
 })

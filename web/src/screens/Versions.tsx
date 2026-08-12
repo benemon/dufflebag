@@ -12,9 +12,10 @@ import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-ico
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
+import { DeleteBucketModal } from '../components/DeleteBucketModal'
 
 import {
-  assignChannelVersion, createChannel, deleteChannel, signOutIfUnauthorized,
+  assignChannelVersion, createChannel, deleteBucket, deleteChannel, signOutIfUnauthorized,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
@@ -90,6 +91,16 @@ export function Versions() {
           throw err
         }
       }}
+      onDeleteBucket={async () => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await deleteBucket(state.token, tenant, bucket)
+          navigate('/buckets')
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
     />
   )
 }
@@ -118,6 +129,7 @@ export function VersionsView({
   onCreateChannel = () => Promise.reject(new Error('No session.')),
   onAssignChannel = () => Promise.reject(new Error('No session.')),
   onDeleteChannel = () => Promise.reject(new Error('No session.')),
+  onDeleteBucket = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   bucketData?: BucketPage | null
@@ -138,9 +150,11 @@ export function VersionsView({
   }) => Promise<void>
   onAssignChannel?: (channel: string, fingerprint: string) => Promise<void>
   onDeleteChannel?: (channel: string) => Promise<void>
+  onDeleteBucket?: () => Promise<void>
 }) {
   const versions = bucketData?.versions ?? suppliedVersions ?? []
   const [facet, setFacet] = useState<'overview' | 'versions' | 'channels'>('overview')
+  const [deletingBucket, setDeletingBucket] = useState(false)
   const versionsCount: FacetCount = bucketData || suppliedVersions
     ? knownCount(versions.length)
     : { status: 'unknown' }
@@ -159,14 +173,26 @@ export function VersionsView({
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{bucket}</BreadcrumbItem>
         </Breadcrumb>
-        <Title headingLevel="h1" size="2xl">
-          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            {bucket}
-            {bucketData?.templateTypes.map((templateType) => (
-              <Label key={templateType} isCompact>{templateType}</Label>
-            ))}
-          </span>
-        </Title>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
+          <Title headingLevel="h1" size="2xl">
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              {bucket}
+              {bucketData?.templateTypes.map((templateType) => (
+                <Label key={templateType} isCompact>{templateType}</Label>
+              ))}
+            </span>
+          </Title>
+          {!loading && !failure && !gap ? (
+            <RoleRestrictedButton
+              action="deleteBuckets"
+              callerRole={callerRole}
+              variant="danger"
+              onClick={() => setDeletingBucket(true)}
+            >
+              Delete bucket
+            </RoleRestrictedButton>
+          ) : null}
+        </div>
         {bucketData && (
           <>
             <Content component="p">
@@ -253,6 +279,14 @@ export function VersionsView({
           />
         )}
       </PageSection>
+      {deletingBucket ? (
+        <DeleteBucketModal
+          bucket={bucket}
+          callerRole={callerRole}
+          onConfirm={onDeleteBucket}
+          onClose={() => setDeletingBucket(false)}
+        />
+      ) : null}
     </>
   )
 }

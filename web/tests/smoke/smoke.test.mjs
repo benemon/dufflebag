@@ -1778,6 +1778,34 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.ok(remaining.channels.some((channel) => channel.name === 'latest'))
   })
 
+  await t.test('the facet bucket is deleted through the console, gone at the wire', async () => {
+    // Ends the smoke-revocable arc: the bucket detail's danger action removes
+    // the bucket the revoke and channel facets used, landing back on the list.
+    const builderToken = await tokenFor(seeded.principal.client_id, seeded.principal.secret)
+    const bucketPath =
+      `/packer/2023-01-01/organizations/${seeded.organization.id}` +
+      `/projects/${seeded.project.id}/buckets/smoke-revocable`
+
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
+    await waitForText('Bucket details')
+    // The opener and the modal confirm share a label; scope the confirm.
+    await clickByText('button', 'Delete bucket')
+    await waitForText('Delete smoke-revocable')
+    await clickByText('.pf-v6-c-modal-box button', 'Delete bucket')
+    await until('the console to land back on the bucket list', async () =>
+      (await bodyText()).includes('All buckets'))
+    await until('the bucket to leave the wire', async () => {
+      try {
+        await api(builderToken, 'GET', bucketPath)
+        return false
+      } catch {
+        return true
+      }
+    })
+    assert.doesNotMatch(await bodyText(), /smoke-revocable/)
+  })
+
   await t.test('scanner states remain explicit from no scan through channel movement', async () => {
     const rootToken = await tokenFor(credentials.clientID, credentials.secret)
     const compatBase =

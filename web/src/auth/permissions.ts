@@ -8,6 +8,8 @@ export const ACTION_REQUIREMENTS = {
   revokeVersions: 'publisher',
   // Compatibility-plane channel lifecycle and assignment authorize RolePublisher.
   manageChannels: 'publisher',
+  // Compatibility-plane bucket deletion authorizes RolePublisher.
+  deleteBuckets: 'publisher',
   // internal/platform/v1/audit_targets.go checks RoleRoot for create/delete.
   configureAudit: 'root',
   // internal/platform/v1/encryption.go checks RoleRoot for encryption operations.

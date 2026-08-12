@@ -11,9 +11,11 @@ import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-ico
 import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
+import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
-import { requirementReason } from '../auth/permissions'
-import type { ApiPin } from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { permitsAction, requirementReason, type Role } from '../auth/permissions'
+import { deleteBucket, signOutIfUnauthorized, type ApiPin } from '../api/client'
 import type { TenancyGap } from '../data/tenant'
 
 /**
@@ -25,10 +27,27 @@ import type { TenancyGap } from '../data/tenant'
 export function Buckets() {
   const location = useLocation()
   const navigate = useNavigate()
+  const [refresh, setRefresh] = useState(0)
+  const bucketData = useBuckets(`${location.key}:${refresh}`)
+  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const tenant = state && selectedOrganization && selectedProject
+    ? { organizationID: selectedOrganization, projectID: selectedProject }
+    : null
   return (
     <BucketsView
-      {...useBuckets(location.key)}
+      {...bucketData}
+      callerRole={self?.role ?? null}
       openBucket={(bucket) => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
+      onDeleteBucket={async (bucket) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await deleteBucket(state.token, tenant, bucket)
+          setRefresh((current) => current + 1)
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
     />
   )
 }
@@ -43,8 +62,10 @@ export function BucketsView({
   pinsFailure = null,
   canPin = false,
   togglePin = async () => {},
+  callerRole = null,
   gap,
   openBucket,
+  onDeleteBucket = () => Promise.reject(new Error('No session.')),
 }: {
   buckets: Bucket[]
   total: number
@@ -55,10 +76,12 @@ export function BucketsView({
   pinsFailure?: string | null
   canPin?: boolean
   togglePin?: (bucketName: string, pinned: boolean) => Promise<void>
+  callerRole?: Role | null
   /** A platform session with no tenancy chosen yet — stated, never fetched around. */
   gap?: TenancyGap | null
   /** Navigation into a bucket's versions; a callback so the view stays router-free. */
   openBucket: (bucket: string) => void
+  onDeleteBucket?: (bucket: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [nameFilter, setNameFilter] = useState('')
@@ -68,6 +91,7 @@ export function BucketsView({
   const [sort, setSort] = useState('last-push')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
+  const [deletingBucket, setDeletingBucket] = useState<string | null>(null)
   const platforms = [...new Set(buckets.flatMap((bucket) => bucket.platforms))].sort()
   const filteredBuckets = buckets
     .filter((bucket) => bucket.name.toLowerCase().includes(nameFilter.trim().toLowerCase()))
@@ -313,6 +337,8 @@ export function BucketsView({
                             pinned={pins.some((pin) => pin.bucket_name === bucket.name)}
                             canPin={canPin}
                             togglePin={togglePin}
+                            callerRole={callerRole}
+                            onDelete={() => setDeletingBucket(bucket.name)}
                           />
                         </Td>
                       </Tr>
@@ -332,6 +358,14 @@ export function BucketsView({
           </CardBody>
         </Card>
       </PageSection>
+      {deletingBucket ? (
+        <DeleteBucketModal
+          bucket={deletingBucket}
+          callerRole={callerRole}
+          onConfirm={() => onDeleteBucket(deletingBucket)}
+          onClose={() => setDeletingBucket(null)}
+        />
+      ) : null}
     </>
   )
 }
@@ -425,15 +459,20 @@ function BucketActions({
   pinned,
   canPin,
   togglePin,
+  callerRole,
+  onDelete,
 }: {
   bucket: string
   openBucket: (bucket: string) => void
   pinned: boolean
   canPin: boolean
   togglePin: (bucketName: string, pinned: boolean) => Promise<void>
+  callerRole: Role | null
+  onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
   const pinAction = pinBucketAction(canPin)
+  const deleteAction = deleteBucketAction(callerRole)
   return (
     <Dropdown
       isOpen={open}
@@ -460,9 +499,24 @@ function BucketActions({
         >
           {pinAction.label}
         </DropdownItem>
+        <DropdownItem
+          isDanger
+          isDisabled={deleteAction.disabled}
+          onClick={onDelete}
+        >
+          {deleteAction.label}
+        </DropdownItem>
       </DropdownList>
     </Dropdown>
   )
+}
+
+export function deleteBucketAction(callerRole: Role | null): { disabled: boolean; label: string } {
+  const allowed = permitsAction(callerRole, 'deleteBuckets')
+  return {
+    disabled: !allowed,
+    label: `Delete bucket…${allowed ? '' : ` — ${requirementReason('deleteBuckets')}`}`,
+  }
 }
 
 export function pinBucketAction(canPin: boolean): { disabled: boolean; label: string } {
