@@ -192,6 +192,8 @@ const channelVersions = [
   { ...actionVersion(), name: 'v8', fingerprint: 'fp-new' },
   actionVersion(),
   { ...actionVersion('incomplete'), name: 'v0', fingerprint: 'fp-incomplete' },
+  { ...actionVersion('revoked'), name: 'v6', fingerprint: 'fp-revoked' },
+  { ...actionVersion('revocation-scheduled'), name: 'v5', fingerprint: 'fp-scheduled' },
 ]
 
 const channelFacetMarkup = (callerRole) => renderToStaticMarkup(React.createElement(
@@ -479,7 +481,7 @@ test('managed channel rows never render a kebab', () => {
   }
 })
 
-test('channel version selects contain complete versions newest first and exclude incomplete', () => {
+test('channel version selects contain only active complete versions, newest first', () => {
   const create = renderToStaticMarkup(React.createElement(CreateChannelModalView, {
     bucket: 'images', versions: channelVersions, callerRole: 'publisher', name: 'staging',
     restricted: false, fingerprint: '', submitting: false, failure: null,
@@ -495,6 +497,7 @@ test('channel version selects contain complete versions newest first and exclude
     assert.match(markup, /value="fp-new">v8/)
     assert.match(markup, /value="fp-action"[^>]*>v7/)
     assert.doesNotMatch(markup, /fp-incomplete|>v0</)
+    assert.doesNotMatch(markup, /fp-revoked|fp-scheduled/)
     assert.ok(markup.indexOf('value="fp-new"') < markup.indexOf('value="fp-action"'))
   }
   assert.match(assign, /value="fp-action"[^>]*disabled[^>]*>v7 \(current\)/)
@@ -533,7 +536,7 @@ test('delete confirmation names the channel and its history consequence', () => 
   assert.match(markup, />Delete production</)
 })
 
-test('Promote is live for publisher, role-restricted below publisher, and absent when incomplete', () => {
+test('Promote is live for publisher, role-restricted below publisher, and absent unless active-complete', () => {
   const render = (state, callerRole) => renderToStaticMarkup(React.createElement(OperationsCard, {
     bucket: 'images', version: actionVersion(state),
     channels: [
@@ -551,9 +554,11 @@ test('Promote is live for publisher, role-restricted below publisher, and absent
   const publisher = render('complete', 'publisher')
   assert.match(publisher, />Promote</)
   assert.doesNotMatch(publisher, /Requires publisher/)
-  const incomplete = render('incomplete', 'publisher')
-  assert.doesNotMatch(incomplete, /<button[^>]*>Promote<\/button>/)
-  assert.match(incomplete, /hcp_packer_channel_assignment/)
+  for (const state of ['incomplete', 'revoked', 'revocation-scheduled']) {
+    const markup = render(state, 'publisher')
+    assert.doesNotMatch(markup, /<button[^>]*>Promote<\/button>/)
+    assert.match(markup, /hcp_packer_channel_assignment/)
+  }
 })
 
 test('channel clients send exact compat-plane paths and bodies', async () => {
