@@ -1,0 +1,202 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "dufflebag.fullname" . }}-ceph-bootstrap
+  labels:
+    {{- include "dufflebag.labels" . | nindent 4 }}
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    set -eu
+    access_key=$1
+    secret_key=$2
+    bucket=$3
+    service_host=$4
+    rgw_up() {
+      python3 -c 'import socket; socket.create_connection(("127.0.0.1", 8000), 2).close()' 2>/dev/null
+    }
+    # Let the image finish its own boot sequence entirely before touching
+    # anything: restarting RGW while its setup program still waits on marker
+    # files deadlocks supervisord's ordering.
+    until rgw_up; do sleep 2; done
+    until radosgw-admin user info --uid=dufflebag >/dev/null 2>&1; do
+      radosgw-admin user create --uid=dufflebag --display-name='dufflebag' \
+        --access-key="$access_key" --secret-key="$secret_key" >/dev/null 2>&1 || true
+      sleep 2
+    done
+    # The image bakes "rgw dns name = <pod hostname>" into ceph.conf at every
+    # boot, so RGW parses the Service hostname as a virtual-host bucket name
+    # and answers 404 even for path-style requests. Rewrite it to the Service
+    # name once RGW is serving, restart it, and wait for it to come back.
+    if ! grep -q "^rgw dns name = $service_host\$" /etc/ceph/ceph.conf; then
+      sed -i "s/^rgw dns name = .*/rgw dns name = $service_host/" /etc/ceph/ceph.conf
+      supervisorctl restart ceph-rgw >/dev/null 2>&1 || true
+      sleep 2
+      until rgw_up; do sleep 2; done
+    fi
+    until python3 /bootstrap/create-bucket.py "$access_key" "$secret_key" "$bucket"; do
+      sleep 2
+    done
+  create-bucket.py: |
+    import datetime, hashlib, hmac, sys, urllib.error, urllib.request
+
+    access, secret, bucket = sys.argv[1], sys.argv[2], sys.argv[3]
+    host, region, service = "127.0.0.1:8000", "us-east-1", "s3"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    stamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    payload = hashlib.sha256(b"").hexdigest()
+    canonical = "\n".join([
+        "PUT", "/" + bucket, "",
+        "host:" + host, "x-amz-content-sha256:" + payload,
+        "x-amz-date:" + stamp, "",
+        "host;x-amz-content-sha256;x-amz-date", payload,
+    ])
+    scope = "/".join([date, region, service, "aws4_request"])
+    to_sign = "\n".join([
+        "AWS4-HMAC-SHA256", stamp, scope,
+        hashlib.sha256(canonical.encode()).hexdigest(),
+    ])
+    key = ("AWS4" + secret).encode()
+    for part in (date, region, service, "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    request = urllib.request.Request("http://" + host + "/" + bucket, method="PUT")
+    request.add_header("Host", host)
+    request.add_header("x-amz-content-sha256", payload)
+    request.add_header("x-amz-date", stamp)
+    request.add_header("Authorization",
+        "AWS4-HMAC-SHA256 Credential=" + access + "/" + scope +
+        ", SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=" + signature)
+    try:
+        with urllib.request.urlopen(request) as response:
+            print("created", response.status)
+    except urllib.error.HTTPError as err:
+        body = err.read().decode()
+        if err.code == 409 or "BucketAlreadyOwnedByYou" in body:
+            print("exists")
+        else:
+            print("failed", err.code, body)
+            sys.exit(1)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dufflebag.fullname" . }}-ceph
+  labels:
+    {{- include "dufflebag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: ceph
+  ports:
+    - name: s3
+      port: 8000
+      targetPort: s3
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "dufflebag.fullname" . }}-ceph
+  labels:
+    {{- include "dufflebag.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "dufflebag.fullname" . }}-ceph
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: ceph
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: ceph
+      {{- if .Values.security.openshift }}
+      annotations:
+        # Admission otherwise selects the most restrictive validating SCC;
+        # this pins the granted anyuid so the image may run as root.
+        openshift.io/required-scc: anyuid
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "dufflebag.fullname" . }}-ceph
+      {{- if not .Values.security.openshift }}
+      # Under the openshift profile the pinned anyuid SCC forbids an explicit
+      # seccompProfile and applies the runtime default itself.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      initContainers:
+        # The image bakes its expected /var/lib/ceph tree; an empty PVC mounted
+        # over it shadows that structure and the daemons fail on first boot.
+        # Seed the volume from the image once, then leave it alone.
+        - name: seed-data
+          image: {{ printf "%s:%s" .Values.ceph.image.repository .Values.ceph.image.tag | quote }}
+          securityContext:
+            {{- include "dufflebag.cephSecurityContext" . | nindent 12 }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Not an emptiness check: fresh block volumes carry lost+found,
+              # so probe for the baked tree's own structure instead.
+              if [ ! -d /seed-target/tmp ]; then
+                cp -a /var/lib/ceph/. /seed-target/
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /seed-target
+      containers:
+        - name: ceph
+          image: {{ printf "%s:%s" .Values.ceph.image.repository .Values.ceph.image.tag | quote }}
+          securityContext:
+            {{- include "dufflebag.cephSecurityContext" . | nindent 12 }}
+          ports:
+            - name: s3
+              containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 60
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -ec
+                  - /bootstrap/bootstrap.sh "$CEPH_ACCESS_KEY" "$CEPH_SECRET_KEY" "$CEPH_BUCKET" {{ printf "%s-ceph" (include "dufflebag.fullname" .) | quote }}
+          env:
+            - name: CEPH_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-ceph
+                  key: access-key
+            - name: CEPH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-ceph
+                  key: secret-key
+            - name: CEPH_BUCKET
+              value: {{ .Values.ceph.bucket | quote }}
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ceph
+            - name: bootstrap
+              mountPath: /bootstrap
+          resources:
+            {{- toYaml .Values.ceph.resources | nindent 12 }}
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: {{ include "dufflebag.fullname" . }}-ceph-bootstrap
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: {{ .Values.ceph.persistence.size }}
+
