@@ -1723,6 +1723,61 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(restored.version.revoke_at, null, 'the console restore did not clear the wire')
   })
 
+  await t.test('a channel is created, promoted to, and deleted through the console', async () => {
+    // Reuses the revoke facet's bucket: v1 is active again after its restore.
+    const builderToken = await tokenFor(seeded.principal.client_id, seeded.principal.secret)
+    const channelsPath =
+      `/packer/2023-01-01/organizations/${seeded.organization.id}` +
+      `/projects/${seeded.project.id}/buckets/smoke-revocable/channels`
+
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
+    await clickByText('button', 'Channels')
+    await waitForText('latest')
+
+    // Create an unassigned channel through the modal; the opener and the
+    // confirm share a label, so the confirm is scoped to the modal box.
+    await clickByText('button', 'Create channel')
+    await waitForText('Create channel in smoke-revocable')
+    await page.type('#channel-name', 'staging')
+    await clickByText('.pf-v6-c-modal-box button', 'Create channel')
+    await until('the staging channel row to appear', async () =>
+      (await bodyText()).includes('staging'))
+    const created = await api(builderToken, 'GET', channelsPath)
+    const staging = created.channels.find((channel) => channel.name === 'staging')
+    assert.ok(staging, 'the console create did not reach the wire')
+    assert.ok(!staging.version, 'a fresh channel arrived assigned')
+
+    // Promote this version onto it from the version screen's Operations card.
+    await clickByText('button', 'Versions')
+    await page.waitForSelector('table[aria-label="Versions"]')
+    await clickByText('button', 'v1')
+    await waitForText('Operations')
+    await page.select('#promotion-channel', 'staging')
+    await clickByText('button', 'Promote')
+    await until('the promotion to land at the wire', async () => {
+      const { channels } = await api(builderToken, 'GET', channelsPath)
+      return channels.find((channel) => channel.name === 'staging')
+        ?.version?.fingerprint === 'smoke-revocable-fp'
+    })
+
+    // Delete it through the kebab's danger confirmation; history goes with it.
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
+    await clickByText('button', 'Channels')
+    await page.click('button[aria-label="Actions for staging"]')
+    await clickByText('button', 'Delete channel')
+    await waitForText('Delete smoke-revocable staging')
+    await clickByText('.pf-v6-c-modal-box button', 'Delete staging')
+    await until('the staging channel to leave the wire', async () => {
+      const { channels } = await api(builderToken, 'GET', channelsPath)
+      return !channels.some((channel) => channel.name === 'staging')
+    })
+    // The managed latest was never offered an action and is still there.
+    const remaining = await api(builderToken, 'GET', channelsPath)
+    assert.ok(remaining.channels.some((channel) => channel.name === 'latest'))
+  })
+
   await t.test('scanner states remain explicit from no scan through channel movement', async () => {
     const rootToken = await tokenFor(credentials.clientID, credentials.secret)
     const compatBase =

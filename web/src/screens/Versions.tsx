@@ -1,14 +1,24 @@
-import { useState, type CSSProperties, type ReactNode } from 'react'
+import { useState, type CSSProperties, type ReactNode, type Ref } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
-  Label, PageSection, Title,
+  Dropdown, DropdownItem, DropdownList, Form, FormGroup, FormSelect, FormSelectOption,
+  Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, TextInput,
+  Title, Tooltip,
 } from '@patternfly/react-core'
+import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
+import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 
+import {
+  assignChannelVersion, createChannel, deleteChannel, signOutIfUnauthorized,
+} from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { permitsAction, requirementReason, type Role } from '../auth/permissions'
 import {
   useChannelHistory, useEnforcedProvisioners, useVersions, type BucketChannel, type BucketPage,
   type ChannelHistoryEntry, type ParentFreshness, type Version,
@@ -24,13 +34,17 @@ import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
  * The design's custom timeline rail is a deliberate non-PatternFly addition
  * and is omitted; the state Labels carry the same information.
  *
- * Read-only (ADR-0012): Packer creates versions and Terraform promotes them;
- * this screen shows the result. No promote, assign or delete affordances.
+ * Packer creates versions. Publishers manage channel lifecycle and assignments
+ * here; Terraform remains the automation path.
  */
 export function Versions() {
   const { bucket = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, failure, gap } = useVersions(bucket)
+  const { data, loading, failure, gap, reload } = useVersions(bucket)
+  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const tenant = state && selectedOrganization && selectedProject
+    ? { organizationID: selectedOrganization, projectID: selectedProject }
+    : null
   const enforcedProvisioners = useEnforcedProvisioners(bucket)
   return (
     <VersionsView
@@ -42,9 +56,40 @@ export function Versions() {
       enforcedProvisioners={enforcedProvisioners.data}
       enforcedProvisionersLoading={enforcedProvisioners.loading}
       enforcedProvisionersFailure={enforcedProvisioners.failure}
+      callerRole={self?.role ?? null}
       onBack={() => navigate('/buckets')}
       onOpenVersion={(fingerprint) =>
         navigate(`/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}`)}
+      onCreateChannel={async (options) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await createChannel(state.token, tenant, bucket, options)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
+      onAssignChannel={async (channel, fingerprint) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await assignChannelVersion(state.token, tenant, bucket, channel, fingerprint)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
+      onDeleteChannel={async (channel) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await deleteChannel(state.token, tenant, bucket, channel)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
     />
   )
 }
@@ -67,8 +112,12 @@ export function VersionsView({
   enforcedProvisioners = [],
   enforcedProvisionersLoading = false,
   enforcedProvisionersFailure = null,
+  callerRole = null,
   onBack,
   onOpenVersion,
+  onCreateChannel = () => Promise.reject(new Error('No session.')),
+  onAssignChannel = () => Promise.reject(new Error('No session.')),
+  onDeleteChannel = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   bucketData?: BucketPage | null
@@ -81,8 +130,14 @@ export function VersionsView({
   enforcedProvisioners?: string[]
   enforcedProvisionersLoading?: boolean
   enforcedProvisionersFailure?: string | null
+  callerRole?: Role | null
   onBack: () => void
   onOpenVersion: (fingerprint: string) => void
+  onCreateChannel?: (options: {
+    name: string; restricted?: boolean; fingerprint?: string
+  }) => Promise<void>
+  onAssignChannel?: (channel: string, fingerprint: string) => Promise<void>
+  onDeleteChannel?: (channel: string) => Promise<void>
 }) {
   const versions = bucketData?.versions ?? suppliedVersions ?? []
   const [facet, setFacet] = useState<'overview' | 'versions' | 'channels'>('overview')
@@ -184,8 +239,13 @@ export function VersionsView({
                   <BucketChannelsFacet
                     bucket={bucket}
                     channels={bucketData?.channels ?? []}
+                    versions={versions}
                     latestVersion={bucketData?.latestVersion ?? null}
+                    callerRole={callerRole}
                     onOpenVersion={onOpenVersion}
+                    onCreateChannel={onCreateChannel}
+                    onAssignChannel={onAssignChannel}
+                    onDeleteChannel={onDeleteChannel}
                   />
                 ),
               },
@@ -466,23 +526,51 @@ export function VersionsFacet({
 export function BucketChannelsFacet({
   bucket,
   channels,
+  versions = [],
   latestVersion,
+  callerRole = null,
   onOpenVersion,
+  onCreateChannel = () => Promise.reject(new Error('No session.')),
+  onAssignChannel = () => Promise.reject(new Error('No session.')),
+  onDeleteChannel = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   channels: BucketChannel[]
+  versions?: Version[]
   latestVersion: BucketPage['latestVersion']
+  callerRole?: Role | null
   onOpenVersion: (fingerprint: string) => void
+  onCreateChannel?: (options: {
+    name: string; restricted?: boolean; fingerprint?: string
+  }) => Promise<void>
+  onAssignChannel?: (channel: string, fingerprint: string) => Promise<void>
+  onDeleteChannel?: (channel: string) => Promise<void>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [action, setAction] = useState<
+    { kind: 'create' } | { kind: 'assign' | 'delete'; channel: BucketChannel } | null
+  >(null)
   return (
-    <Card style={cardStyle}>
-      <CardTitle>Channels</CardTitle>
-      <CardBody style={{ padding: '16px 0 0' }}>
-        {channels.length === 0 ? (
-          <Alert variant="info" isInline title="No channels in this bucket" />
-        ) : (
-          <Table aria-label={`${bucket} channels`} variant="compact">
+    <>
+      <Card style={cardStyle}>
+        <CardTitle>
+          <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>Channels</span>
+            <RoleRestrictedButton
+              action="manageChannels"
+              callerRole={callerRole}
+              variant="primary"
+              onClick={() => setAction({ kind: 'create' })}
+            >
+              Create channel
+            </RoleRestrictedButton>
+          </span>
+        </CardTitle>
+        <CardBody style={{ padding: '16px 0 0' }}>
+          {channels.length === 0 ? (
+            <Alert variant="info" isInline title="No channels in this bucket" />
+          ) : (
+            <Table aria-label={`${bucket} channels`} variant="compact">
             <Thead>
               <Tr>
                 <Th screenReaderText="Row expansion" />
@@ -490,6 +578,7 @@ export function BucketChannelsFacet({
                 <Th>Assigned version</Th>
                 <Th>Assigned by</Th>
                 <Th>Assigned time</Th>
+                <Th screenReaderText="Actions" />
               </Tr>
             </Thead>
             {channels.map((channel, index) => (
@@ -521,10 +610,20 @@ export function BucketChannelsFacet({
                     {channel.fingerprint ? (channel.author ?? 'Unknown') : '—'}
                   </Td>
                   <Td dataLabel="Assigned time">{channel.assignedAt}</Td>
+                  <Td dataLabel="Actions">
+                    {channel.managed ? null : (
+                      <ChannelActions
+                        channel={channel}
+                        callerRole={callerRole}
+                        onAssign={() => setAction({ kind: 'assign', channel })}
+                        onDelete={() => setAction({ kind: 'delete', channel })}
+                      />
+                    )}
+                  </Td>
                 </Tr>
                 <Tr isExpanded={expanded === channel.name}>
                   <Td />
-                  <Td dataLabel="Channel detail" colSpan={4}>
+                  <Td dataLabel="Channel detail" colSpan={5}>
                     <ExpandableRowContent>
                       <DescriptionList isHorizontal isCompact style={{ maxWidth: 720 }}>
                         <DescriptionListGroup>
@@ -557,10 +656,424 @@ export function BucketChannelsFacet({
                 </Tr>
               </Tbody>
             ))}
-          </Table>
-        )}
-      </CardBody>
-    </Card>
+            </Table>
+          )}
+        </CardBody>
+      </Card>
+      {action?.kind === 'create' ? (
+        <CreateChannelModal
+          bucket={bucket}
+          versions={versions}
+          callerRole={callerRole}
+          onConfirm={onCreateChannel}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+      {action?.kind === 'assign' ? (
+        <AssignChannelModal
+          bucket={bucket}
+          channel={action.channel}
+          versions={versions}
+          callerRole={callerRole}
+          onConfirm={(fingerprint) => onAssignChannel(action.channel.name, fingerprint)}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+      {action?.kind === 'delete' ? (
+        <DeleteChannelModal
+          bucket={bucket}
+          channel={action.channel}
+          callerRole={callerRole}
+          onConfirm={() => onDeleteChannel(action.channel.name)}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+    </>
+  )
+}
+
+function ChannelActions({
+  channel, callerRole, onAssign, onDelete,
+}: {
+  channel: BucketChannel
+  callerRole: Role | null
+  onAssign: () => void
+  onDelete: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const refused = !permitsAction(callerRole, 'manageChannels')
+  const reason = requirementReason('manageChannels')
+  const toggle = (ref: Ref<MenuToggleElement>) => (
+    <MenuToggle
+      ref={ref}
+      variant="plain"
+      aria-label={`Actions for ${channel.name}`}
+      isExpanded={open}
+      isDisabled={refused}
+      onClick={() => setOpen(!open)}
+    >
+      <EllipsisVIcon />
+      {refused ? <span className="pf-v6-u-screen-reader"> — {reason}</span> : null}
+    </MenuToggle>
+  )
+  return (
+    <Dropdown
+      isOpen={open}
+      onOpenChange={setOpen}
+      onSelect={() => setOpen(false)}
+      toggle={(ref) => refused ? (
+        <Tooltip content={reason}>
+          <span tabIndex={0} aria-label={reason} style={{ display: 'inline-block' }}>
+            {toggle(ref)}
+          </span>
+        </Tooltip>
+      ) : toggle(ref)}
+    >
+      <DropdownList>
+        <DropdownItem isDisabled={refused} onClick={onAssign}>
+          Assign version…{refused ? ` — ${reason}` : ''}
+        </DropdownItem>
+        <DropdownItem isDisabled={refused} onClick={onDelete}>
+          Delete channel{refused ? ` — ${reason}` : ''}
+        </DropdownItem>
+      </DropdownList>
+    </Dropdown>
+  )
+}
+
+function CreateChannelModal({
+  bucket, versions, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  versions: Version[]
+  callerRole: Role | null
+  onConfirm: (options: {
+    name: string; restricted?: boolean; fingerprint?: string
+  }) => Promise<void>
+  onClose: () => void
+}) {
+  const [name, setName] = useState('')
+  const [restricted, setRestricted] = useState(false)
+  const [fingerprint, setFingerprint] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const confirm = async (options: {
+    name: string; restricted?: boolean; fingerprint?: string
+  }) => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm(options)
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return (
+    <Modal aria-labelledby="create-channel-modal-title" isOpen onClose={onClose} variant="small">
+      <CreateChannelModalView
+        bucket={bucket}
+        versions={versions}
+        callerRole={callerRole}
+        name={name}
+        restricted={restricted}
+        fingerprint={fingerprint}
+        submitting={submitting}
+        failure={failure}
+        onNameChange={setName}
+        onRestrictedChange={setRestricted}
+        onFingerprintChange={setFingerprint}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+function completeChannelVersions(versions: Version[]): Version[] {
+  return versions.filter((version) => version.state !== 'incomplete')
+}
+
+export function CreateChannelModalView({
+  bucket, versions, callerRole, name, restricted, fingerprint, submitting, failure,
+  onNameChange, onRestrictedChange, onFingerprintChange, onConfirm, onClose,
+}: {
+  bucket: string
+  versions: Version[]
+  callerRole: Role | null
+  name: string
+  restricted: boolean
+  fingerprint: string
+  submitting: boolean
+  failure: string | null
+  onNameChange: (name: string) => void
+  onRestrictedChange: (restricted: boolean) => void
+  onFingerprintChange: (fingerprint: string) => void
+  onConfirm: (options: {
+    name: string; restricted?: boolean; fingerprint?: string
+  }) => Promise<void>
+  onClose: () => void
+}) {
+  const completeVersions = completeChannelVersions(versions)
+  return (
+    <>
+      <ModalHeader labelId="create-channel-modal-title" title={`Create channel in ${bucket}`} />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Form>
+          <FormGroup label="Name" isRequired fieldId="channel-name">
+            <TextInput
+              id="channel-name"
+              value={name}
+              onChange={(_event, value) => onNameChange(value)}
+            />
+          </FormGroup>
+          <Checkbox
+            id="channel-restricted"
+            label="Restricted"
+            description="Only explicitly authorised consumers can use this channel."
+            isChecked={restricted}
+            onChange={(_event, checked) => onRestrictedChange(checked)}
+          />
+          <FormGroup label="Initial version" fieldId="channel-initial-version">
+            <FormSelect
+              id="channel-initial-version"
+              value={fingerprint}
+              onChange={(_event, value) => onFingerprintChange(value)}
+            >
+              <FormSelectOption value="" label="None" />
+              {completeVersions.map((version) => (
+                <FormSelectOption
+                  key={version.fingerprint}
+                  value={version.fingerprint}
+                  label={version.name}
+                />
+              ))}
+            </FormSelect>
+          </FormGroup>
+        </Form>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="manageChannels"
+          callerRole={callerRole}
+          variant="primary"
+          isLoading={submitting}
+          isDisabled={submitting || name.trim() === ''}
+          onClick={() => onConfirm({
+            name: name.trim(),
+            ...(restricted ? { restricted: true } : {}),
+            ...(fingerprint ? { fingerprint } : {}),
+          })}
+        >
+          Create channel
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
+    </>
+  )
+}
+
+function AssignChannelModal({
+  bucket, channel, versions, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  channel: BucketChannel
+  versions: Version[]
+  callerRole: Role | null
+  onConfirm: (fingerprint: string) => Promise<void>
+  onClose: () => void
+}) {
+  const completeVersions = completeChannelVersions(versions)
+  const currentIsOffered = completeVersions.some(
+    (version) => version.fingerprint === channel.fingerprint,
+  )
+  const [fingerprint, setFingerprint] = useState(
+    currentIsOffered ? channel.fingerprint : (completeVersions[0]?.fingerprint ?? ''),
+  )
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const confirm = async (selected: string) => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm(selected)
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return (
+    <Modal aria-labelledby="assign-channel-modal-title" isOpen onClose={onClose} variant="small">
+      <AssignChannelModalView
+        bucket={bucket}
+        channel={channel}
+        versions={versions}
+        callerRole={callerRole}
+        fingerprint={fingerprint}
+        submitting={submitting}
+        failure={failure}
+        onFingerprintChange={setFingerprint}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+export function AssignChannelModalView({
+  bucket, channel, versions, callerRole, fingerprint, submitting, failure,
+  onFingerprintChange, onConfirm, onClose,
+}: {
+  bucket: string
+  channel: BucketChannel
+  versions: Version[]
+  callerRole: Role | null
+  fingerprint: string
+  submitting: boolean
+  failure: string | null
+  onFingerprintChange: (fingerprint: string) => void
+  onConfirm: (fingerprint: string) => Promise<void>
+  onClose: () => void
+}) {
+  const completeVersions = completeChannelVersions(versions)
+  return (
+    <>
+      <ModalHeader
+        labelId="assign-channel-modal-title"
+        title={`Assign ${bucket} version to ${channel.name}`}
+      />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Form>
+          <FormGroup label="Version" isRequired fieldId="channel-version">
+            <FormSelect
+              id="channel-version"
+              value={fingerprint}
+              onChange={(_event, value) => onFingerprintChange(value)}
+            >
+              {completeVersions.length === 0 ? (
+                <FormSelectOption value="" label="No complete versions" isDisabled />
+              ) : completeVersions.map((version) => {
+                const current = version.fingerprint === channel.fingerprint
+                return (
+                  <FormSelectOption
+                    key={version.fingerprint}
+                    value={version.fingerprint}
+                    label={`${version.name}${current ? ' (current)' : ''}`}
+                    isDisabled={current}
+                  />
+                )
+              })}
+            </FormSelect>
+          </FormGroup>
+        </Form>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="manageChannels"
+          callerRole={callerRole}
+          variant="primary"
+          isLoading={submitting}
+          isDisabled={submitting || fingerprint === '' || fingerprint === channel.fingerprint}
+          onClick={() => onConfirm(fingerprint)}
+        >
+          Assign version
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
+    </>
+  )
+}
+
+function DeleteChannelModal({
+  bucket, channel, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  channel: BucketChannel
+  callerRole: Role | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+  const confirm = async () => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+  return (
+    <Modal aria-labelledby="delete-channel-modal-title" isOpen onClose={onClose} variant="small">
+      <DeleteChannelModalView
+        bucket={bucket}
+        channel={channel}
+        callerRole={callerRole}
+        submitting={submitting}
+        failure={failure}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+export function DeleteChannelModalView({
+  bucket, channel, callerRole, submitting, failure, onConfirm, onClose,
+}: {
+  bucket: string
+  channel: BucketChannel
+  callerRole: Role | null
+  submitting: boolean
+  failure: string | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  return (
+    <>
+      <ModalHeader labelId="delete-channel-modal-title" title={`Delete ${bucket} ${channel.name}`} />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Content component="p">
+          Deleting {channel.name} destroys its assignment history.
+        </Content>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="manageChannels"
+          callerRole={callerRole}
+          variant="danger"
+          isLoading={submitting}
+          isDisabled={submitting}
+          onClick={onConfirm}
+        >
+          Delete {channel.name}
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
+    </>
   )
 }
 

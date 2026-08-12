@@ -3,14 +3,15 @@ import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox,
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
-  DescriptionListTerm, Form, FormGroup, Label, Modal, ModalBody, ModalFooter,
-  ModalHeader, PageSection, Radio, TextArea, TextInput, Title,
+  DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Label, Modal,
+  ModalBody, ModalFooter, ModalHeader, PageSection, Radio, TextArea, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
 
 import {
-  revokeVersion, restoreVersion, signOutIfUnauthorized, type RevokeVersionOptions,
+  assignChannelVersion, revokeVersion, restoreVersion, signOutIfUnauthorized,
+  type RevokeVersionOptions,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
@@ -30,8 +31,8 @@ import { FacetRail, knownCount } from './RegistryFacets'
  *
  * Components follow the design's version page (mockup 1a1, isVersion):
  *   Breadcrumb · Title · LabelGroup · DescriptionList · Card · Table
- * Promotion remains Terraform's job; ADR-0015 admits revocation and restore
- * here as registry safety operations.
+ * Publishers may promote a complete version from the operations card;
+ * Terraform remains the automation path beside that console action.
  */
 export function Version() {
   const { bucket = '', fingerprint = '' } = useParams()
@@ -86,6 +87,16 @@ export function Version() {
           throw err
         }
       }}
+      onPromote={async (channel) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await assignChannelVersion(state.token, tenant, bucket, channel, fingerprint)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
     />
   )
 }
@@ -105,6 +116,7 @@ export function VersionView({
   callerRole = null,
   onRevoke = () => Promise.reject(new Error('No session.')),
   onRestore = () => Promise.reject(new Error('No session.')),
+  onPromote = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   detail?: VersionDetail | null
@@ -123,6 +135,7 @@ export function VersionView({
   callerRole?: Role | null
   onRevoke?: (options: RevokeVersionOptions) => Promise<void>
   onRestore?: () => Promise<void>
+  onPromote?: (channel: string) => Promise<void>
 }) {
   const version = detail?.version ?? suppliedVersion ?? null
   const [facet, setFacet] = useState<'overview' | 'builds'>('overview')
@@ -230,8 +243,10 @@ export function VersionView({
                     version={version}
                     detail={detail ?? null}
                     findings={findings}
+                    callerRole={callerRole}
                     onOpenBuild={onOpenBuild}
                     onOpenVersion={onOpenVersion}
+                    onPromote={onPromote}
                   />
                 ),
               },
@@ -547,15 +562,19 @@ function VersionOverview({
   version,
   detail,
   findings,
+  callerRole,
   onOpenBuild,
   onOpenVersion,
+  onPromote,
 }: {
   bucket: string
   version: VersionData
   detail: VersionDetail | null
   findings: BuildFindings[]
+  callerRole: Role | null
   onOpenBuild: (build: string) => void
   onOpenVersion: (bucket: string, fingerprint: string) => void
+  onPromote: (channel: string) => Promise<void>
 }) {
   return (
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -574,7 +593,13 @@ function VersionOverview({
       {detail && (
         <div style={{ flex: '0 1 440px', display: 'flex', flexDirection: 'column', gap: 24 }}>
           <ConsumeCard bucket={bucket} version={version} />
-          <OperationsCard bucket={bucket} version={version} channels={detail.channels} />
+          <OperationsCard
+            bucket={bucket}
+            version={version}
+            channels={detail.channels}
+            callerRole={callerRole}
+            onPromote={onPromote}
+          />
         </div>
       )}
     </div>
@@ -661,21 +686,69 @@ function ConsumeCard({ bucket, version }: { bucket: string; version: VersionData
   )
 }
 
-function OperationsCard({
+export function OperationsCard({
   bucket,
   version,
   channels,
+  callerRole,
+  onPromote,
 }: {
   bucket: string
   version: VersionData
   channels: BucketChannel[]
+  callerRole: Role | null
+  onPromote: (channel: string) => Promise<void>
 }) {
   const promotable = channels.filter((channel) => !channel.managed)
+  const [channel, setChannel] = useState(promotable[0]?.name ?? '')
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
   if (promotable.length === 0) return null
+  const promote = async () => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onPromote(channel)
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
   return (
     <Card>
       <CardTitle>Operations</CardTitle>
       <CardBody>
+        {version.state !== 'incomplete' ? (
+          <Form>
+            {failure ? (
+              <Alert variant="danger" isInline title="The action was refused">
+                <Content component="p">{failure}</Content>
+              </Alert>
+            ) : null}
+            <FormGroup label="Promote to channel" fieldId="promotion-channel">
+              <FormSelect
+                id="promotion-channel"
+                value={channel}
+                onChange={(_event, value) => setChannel(value)}
+              >
+                {promotable.map((option) => (
+                  <FormSelectOption key={option.name} value={option.name} label={option.name} />
+                ))}
+              </FormSelect>
+            </FormGroup>
+            <RoleRestrictedButton
+              action="manageChannels"
+              callerRole={callerRole}
+              variant="primary"
+              isLoading={submitting}
+              isDisabled={submitting || channel === ''}
+              onClick={() => void promote()}
+            >
+              Promote
+            </RoleRestrictedButton>
+          </Form>
+        ) : null}
         {promotable.map((channel) => (
           <div key={channel.name} style={{ marginTop: 16 }}>
             <Content component="p">

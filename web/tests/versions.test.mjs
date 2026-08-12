@@ -10,11 +10,15 @@ let vite
 let VersionsView
 let VersionsFacet
 let BucketChannelsFacet
+let CreateChannelModalView
+let AssignChannelModalView
+let DeleteChannelModalView
 let AssignmentHistoryTable
 let EnforcedProvisionersRow
 let VersionView
 let RevokeModalView
 let RestoreModalView
+let OperationsCard
 let BuildView
 let loadVersions
 let loadVersion
@@ -32,6 +36,9 @@ let parentFreshnessText
 let ApiError
 let revokeVersion
 let restoreVersion
+let createChannel
+let assignChannelVersion
+let deleteChannel
 let FacetRail
 let facetCountText
 let platformTenancyGap
@@ -45,10 +52,11 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ VersionsView, VersionsFacet, BucketChannelsFacet, AssignmentHistoryTable,
+  ;({ VersionsView, VersionsFacet, BucketChannelsFacet, CreateChannelModalView,
+    AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
-  ;({ VersionView, RevokeModalView, RestoreModalView,
+  ;({ VersionView, RevokeModalView, RestoreModalView, OperationsCard,
     terraformConsumeSnippet, terraformPromotionSnippet } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
   ;({ BuildView, packerBuildCommand, sbomFileName } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
@@ -57,7 +65,8 @@ before(async () => {
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail, facetCountText } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
-  ;({ ApiError, revokeVersion, restoreVersion } = await vite.ssrLoadModule('/src/api/client.ts'))
+  ;({ ApiError, revokeVersion, restoreVersion, createChannel, assignChannelVersion,
+    deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
 
 after(async () => {
@@ -173,6 +182,35 @@ const actionVersion = (state = 'complete') => ({
   name: 'v7', fingerprint: 'fp-action', state, templateType: 'HCL2', channels: [],
   assignments: [], builds: [], parents: [], children: [], created: '2026-08-12 10:00 UTC',
 })
+
+const channelFixture = (over = {}) => ({
+  name: 'production', versionName: 'v7', fingerprint: 'fp-action', managed: false,
+  restricted: false, assignedAt: '2026-08-12 10:01 UTC', author: 'publisher', ...over,
+})
+
+const channelVersions = [
+  { ...actionVersion(), name: 'v8', fingerprint: 'fp-new' },
+  actionVersion(),
+  { ...actionVersion('incomplete'), name: 'v0', fingerprint: 'fp-incomplete' },
+]
+
+const channelFacetMarkup = (callerRole) => renderToStaticMarkup(React.createElement(
+  BucketChannelsFacet,
+  {
+    bucket: 'images',
+    channels: [
+      channelFixture({ name: 'latest', managed: true, restricted: true }),
+      channelFixture(),
+    ],
+    versions: channelVersions,
+    latestVersion: { name: 'v8', fingerprint: 'fp-new' },
+    callerRole,
+    onOpenVersion: () => {},
+    onCreateChannel: async () => {},
+    onAssignChannel: async () => {},
+    onDeleteChannel: async () => {},
+  },
+))
 
 const revokeModalProps = (over = {}) => ({
   bucket: 'images', version: actionVersion(), callerRole: 'publisher', message: '', when: 'now',
@@ -403,6 +441,157 @@ test('a compat-plane ApiError message is rendered verbatim in either modal', () 
     assert.match(markup, /The action was refused/)
     assert.match(markup, /restore refused by registry policy/)
   }
+})
+
+test('channel actions are live for publisher and disabled with a reason below publisher', () => {
+  for (const role of ['reader', 'builder']) {
+    const markup = channelFacetMarkup(role)
+    assert.match(markup, /Requires publisher/)
+    assert.match(markup, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Create channel/)
+    assert.match(markup, /<button[^>]*disabled[^>]*aria-label="Actions for production"/)
+  }
+
+  const publisher = channelFacetMarkup('publisher')
+  assert.match(publisher, />Create channel</)
+  assert.match(publisher, /aria-label="Actions for production"/)
+  assert.doesNotMatch(publisher, /Requires publisher/)
+  assert.doesNotMatch(publisher, /<button[^>]*disabled[^>]*aria-label="Actions for production"/)
+})
+
+test('managed channel rows never render a kebab', () => {
+  for (const role of ['reader', 'builder', 'publisher']) {
+    const markup = channelFacetMarkup(role)
+    assert.doesNotMatch(markup, /aria-label="Actions for latest"/)
+    assert.match(markup, /aria-label="Actions for production"/)
+  }
+})
+
+test('channel version selects contain complete versions newest first and exclude incomplete', () => {
+  const create = renderToStaticMarkup(React.createElement(CreateChannelModalView, {
+    bucket: 'images', versions: channelVersions, callerRole: 'publisher', name: 'staging',
+    restricted: false, fingerprint: '', submitting: false, failure: null,
+    onNameChange: () => {}, onRestrictedChange: () => {}, onFingerprintChange: () => {},
+    onConfirm: async () => {}, onClose: () => {},
+  }))
+  const assign = renderToStaticMarkup(React.createElement(AssignChannelModalView, {
+    bucket: 'images', channel: channelFixture(), versions: channelVersions,
+    callerRole: 'publisher', fingerprint: 'fp-action', submitting: false, failure: null,
+    onFingerprintChange: () => {}, onConfirm: async () => {}, onClose: () => {},
+  }))
+  for (const markup of [create, assign]) {
+    assert.match(markup, /value="fp-new">v8/)
+    assert.match(markup, /value="fp-action"[^>]*>v7/)
+    assert.doesNotMatch(markup, /fp-incomplete|>v0</)
+    assert.ok(markup.indexOf('value="fp-new"') < markup.indexOf('value="fp-action"'))
+  }
+  assert.match(assign, /value="fp-action"[^>]*disabled[^>]*>v7 \(current\)/)
+})
+
+test('channel modal failures preserve duplicate and managed-refusal messages', () => {
+  const duplicate = new ApiError(
+    409, 'Error: The channel with identifier production already exists.',
+  ).message
+  const managed = new ApiError(
+    400, 'Can\'t update channel assignment on channel "latest". This channel is managed by Dufflebag',
+  ).message
+  const create = renderToStaticMarkup(React.createElement(CreateChannelModalView, {
+    bucket: 'images', versions: channelVersions, callerRole: 'publisher', name: 'production',
+    restricted: false, fingerprint: '', submitting: false, failure: duplicate,
+    onNameChange: () => {}, onRestrictedChange: () => {}, onFingerprintChange: () => {},
+    onConfirm: async () => {}, onClose: () => {},
+  }))
+  const assign = renderToStaticMarkup(React.createElement(AssignChannelModalView, {
+    bucket: 'images', channel: channelFixture({ name: 'latest', managed: true }),
+    versions: channelVersions, callerRole: 'publisher', fingerprint: 'fp-new',
+    submitting: false, failure: managed, onFingerprintChange: () => {},
+    onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.match(create, /Error: The channel with identifier production already exists\./)
+  assert.match(assign, /Can&#x27;t update channel assignment on channel &quot;latest&quot;\. This channel is managed by Dufflebag/)
+})
+
+test('delete confirmation names the channel and its history consequence', () => {
+  const markup = renderToStaticMarkup(React.createElement(DeleteChannelModalView, {
+    bucket: 'images', channel: channelFixture(), callerRole: 'publisher', submitting: false,
+    failure: null, onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.match(markup, /Delete images production/)
+  assert.match(markup, /Deleting production destroys its assignment history\./)
+  assert.match(markup, />Delete production</)
+})
+
+test('Promote is live for publisher, role-restricted below publisher, and absent when incomplete', () => {
+  const render = (state, callerRole) => renderToStaticMarkup(React.createElement(OperationsCard, {
+    bucket: 'images', version: actionVersion(state),
+    channels: [
+      channelFixture({ name: 'latest', managed: true }),
+      channelFixture({ name: 'production' }),
+    ],
+    callerRole,
+    onPromote: async () => {},
+  }))
+  for (const role of ['reader', 'builder']) {
+    const markup = render('complete', role)
+    assert.match(markup, /Requires publisher/)
+    assert.match(markup, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Promote/)
+  }
+  const publisher = render('complete', 'publisher')
+  assert.match(publisher, />Promote</)
+  assert.doesNotMatch(publisher, /Requires publisher/)
+  const incomplete = render('incomplete', 'publisher')
+  assert.doesNotMatch(incomplete, /<button[^>]*>Promote<\/button>/)
+  assert.match(incomplete, /hcp_packer_channel_assignment/)
+})
+
+test('channel clients send exact compat-plane paths and bodies', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (input, init) => {
+    calls.push({ path: String(input), init })
+    return new Response(null, { status: 204 })
+  }
+  try {
+    const tenant = { organizationID: 'org one', projectID: 'project/one' }
+    await createChannel('bearer', tenant, 'images/base', { name: 'plain' })
+    await createChannel('bearer', tenant, 'images/base', {
+      name: 'restricted', restricted: true,
+    })
+    await createChannel('bearer', tenant, 'images/base', {
+      name: 'initial', fingerprint: 'fp one',
+    })
+    await createChannel('bearer', tenant, 'images/base', {
+      name: 'both', restricted: true, fingerprint: 'fp two',
+    })
+    await assignChannelVersion('bearer', tenant, 'images/base', 'production/main', 'fp three')
+    await deleteChannel('bearer', tenant, 'images/base', 'staging/main')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(calls.length, 6)
+  for (const call of calls) assert.equal(call.init.headers.Authorization, 'Bearer bearer')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { name: 'plain' })
+  assert.equal('restricted' in JSON.parse(calls[0].init.body), false)
+  assert.equal('version_fingerprint' in JSON.parse(calls[0].init.body), false)
+  assert.deepEqual(JSON.parse(calls[1].init.body), { name: 'restricted', restricted: true })
+  assert.deepEqual(JSON.parse(calls[2].init.body), {
+    name: 'initial', version_fingerprint: 'fp one',
+  })
+  assert.deepEqual(JSON.parse(calls[3].init.body), {
+    name: 'both', restricted: true, version_fingerprint: 'fp two',
+  })
+  for (const call of calls.slice(0, 4)) {
+    assert.equal(call.init.method, 'POST')
+    assert.match(call.path, /\/organizations\/org%20one\/projects\/project%2Fone\/buckets\/images%2Fbase\/channels$/)
+  }
+  assert.equal(calls[4].init.method, 'PATCH')
+  assert.match(calls[4].path, /\/channels\/production%2Fmain$/)
+  assert.deepEqual(JSON.parse(calls[4].init.body), {
+    update_mask: 'versionFingerprint', version_fingerprint: 'fp three',
+  })
+  assert.equal(calls[5].init.method, 'DELETE')
+  assert.match(calls[5].path, /\/channels\/staging%2Fmain$/)
+  assert.equal('body' in calls[5].init, false)
 })
 
 test('an incomplete version renders as incomplete, not as broken', async () => {
@@ -1181,7 +1370,7 @@ test('the list windows old versions instead of hiding them', () => {
   assert.match(markup, /3 older versions · show all/)
 })
 
-test('empty and gap states are distinct, and only the admitted version safety write appears', async () => {
+test('empty and gap states are distinct, and list rows remain read-only', async () => {
   const emptyMarkup = listMarkup([])
   assert.match(emptyMarkup, /No versions in this bucket/)
 
@@ -1193,8 +1382,8 @@ test('empty and gap states are distinct, and only the admitted version safety wr
   assert.match(gapMarkup, /Choose an organisation/)
   assert.doesNotMatch(gapMarkup, /No versions in this bucket/)
 
-  // Promotion, assignment and deletion still belong to Terraform and Packer;
-  // ADR-0015 admits revocation and restore as registry safety operations.
+  // Channel actions belong to the Channels facet and the loaded detail's
+  // Operations card; a compact version projection does not invent them.
   const version = await withFetch(
     {
       '/versions/fp-complete': () => json({ version: completeVersion }),
@@ -1214,11 +1403,9 @@ test('empty and gap states are distinct, and only the admitted version safety wr
   assert.deepEqual(version.channels, ['production'])
   const list = listMarkup([version])
   const detail = detailMarkup(version, { callerRole: 'publisher' })
-  for (const markup of [list, detail]) {
-    assert.match(markup, />production</)
-    for (const unsupported of ['Promote', 'Assign', 'Delete', 'Create version', 'Schedule']) {
-      assert.doesNotMatch(markup, new RegExp(unsupported))
-    }
+  for (const markup of [list, detail]) assert.match(markup, />production</)
+  for (const unsupported of ['Promote', 'Assign', 'Delete', 'Create version', 'Schedule']) {
+    assert.doesNotMatch(list, new RegExp(unsupported))
   }
   assert.doesNotMatch(list, />Revoke</)
   assert.match(detail, />Revoke</)

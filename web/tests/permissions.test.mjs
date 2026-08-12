@@ -20,13 +20,13 @@ after(async () => { await vite.close() })
 test('each role gets the nested console action snapshot declared by the server', () => {
   assert.deepEqual(allowedActions('reader'), [])
   assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
-  assert.deepEqual(allowedActions('publisher'), ['pinBuckets', 'revokeVersions'])
+  assert.deepEqual(allowedActions('publisher'), ['pinBuckets', 'revokeVersions', 'manageChannels'])
   assert.deepEqual(
     allowedActions('maintainer'),
-    ['pinBuckets', 'revokeVersions', 'managePrincipals', 'configureBagDrop'],
+    ['pinBuckets', 'revokeVersions', 'manageChannels', 'managePrincipals', 'configureBagDrop'],
   )
   assert.deepEqual(allowedActions('root'), [
-    'pinBuckets', 'revokeVersions', 'configureAudit', 'manageEncryption',
+    'pinBuckets', 'revokeVersions', 'manageChannels', 'configureAudit', 'manageEncryption',
     'managePrincipals', 'configureBagDrop',
   ])
   assert.deepEqual(allowedActions(null), [])
@@ -42,6 +42,13 @@ test('revokeVersions permission mapping requires publisher', () => {
   assert.equal(allowedActions('builder').includes('revokeVersions'), false)
   assert.equal(allowedActions('publisher').includes('revokeVersions'), true)
   assert.equal(allowedActions('maintainer').includes('revokeVersions'), true)
+})
+
+test('manageChannels permission mapping requires publisher', () => {
+  assert.equal(allowedActions('reader').includes('manageChannels'), false)
+  assert.equal(allowedActions('builder').includes('manageChannels'), false)
+  assert.equal(allowedActions('publisher').includes('manageChannels'), true)
+  assert.equal(allowedActions('maintainer').includes('manageChannels'), true)
 })
 
 test('each role gets the navigation snapshot declared by the server', () => {
