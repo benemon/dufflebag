@@ -6,6 +6,8 @@ export const ACTION_REQUIREMENTS = {
   pinBuckets: 'builder',
   // Compatibility-plane registry safety operations authorize RolePublisher.
   revokeVersions: 'publisher',
+  // Compatibility-plane channel lifecycle and assignment authorize RolePublisher.
+  manageChannels: 'publisher',
   // internal/platform/v1/audit_targets.go checks RoleRoot for create/delete.
   configureAudit: 'root',
   // internal/platform/v1/encryption.go checks RoleRoot for encryption operations.

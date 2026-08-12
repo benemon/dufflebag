@@ -198,11 +198,13 @@ export type BuildDetail = {
  * client (docs/architecture.md: wire models are never domain models).
  */
 export function useVersions(bucket: string) {
-  return useVersionData<BucketPage | null>(
+  const [revision, setRevision] = useState(0)
+  const result = useVersionData<BucketPage | null>(
     null,
     (token, tenant) => loadBucketPage(token, tenant, bucket),
-    bucket,
+    bucket + '/' + revision,
   )
+  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** Enforced provisioners are independent so their failure stays local to the Overview row. */

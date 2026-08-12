@@ -399,6 +399,56 @@ export async function listChannels(
   return body.channels ?? []
 }
 
+export async function createChannel(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  options: { name: string; restricted?: boolean; fingerprint?: string },
+): Promise<void> {
+  await request(
+    token,
+    'POST',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}/channels`,
+    {
+      name: options.name,
+      ...(options.restricted === undefined ? {} : { restricted: options.restricted }),
+      ...(options.fingerprint === undefined
+        ? {}
+        : { version_fingerprint: options.fingerprint }),
+    },
+  )
+}
+
+export async function deleteChannel(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  channel: string,
+): Promise<void> {
+  await request(
+    token,
+    'DELETE',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+      `/channels/${encodeURIComponent(channel)}`,
+  )
+}
+
+export async function assignChannelVersion(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  channel: string,
+  fingerprint: string,
+): Promise<void> {
+  await request(
+    token,
+    'PATCH',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+      `/channels/${encodeURIComponent(channel)}`,
+    { update_mask: 'versionFingerprint', version_fingerprint: fingerprint },
+  )
+}
+
 export async function listChannelAssignmentHistory(
   token: string,
   tenant: Tenant,
