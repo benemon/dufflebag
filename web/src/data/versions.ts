@@ -216,12 +216,14 @@ export function useEnforcedProvisioners(bucket: string) {
 
 /** One version by fingerprint, for the drill-down page. */
 export function useVersion(bucket: string, fingerprint: string) {
-  return useVersionData<VersionDetail | null>(
+  const [revision, setRevision] = useState(0)
+  const result = useVersionData<VersionDetail | null>(
     null,
     (token, tenant) => loadVersionDetail(token, tenant, bucket, fingerprint),
-    bucket + '/' + fingerprint,
+    bucket + '/' + fingerprint + '/' + revision,
     (detail) => detail?.version.builds.some(buildIsInProgress) ?? false,
   )
+  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** One build by id, including its package-inventory status. */

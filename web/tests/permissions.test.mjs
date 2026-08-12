@@ -20,10 +20,14 @@ after(async () => { await vite.close() })
 test('each role gets the nested console action snapshot declared by the server', () => {
   assert.deepEqual(allowedActions('reader'), [])
   assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
-  assert.deepEqual(allowedActions('publisher'), ['pinBuckets'])
-  assert.deepEqual(allowedActions('maintainer'), ['pinBuckets', 'managePrincipals', 'configureBagDrop'])
+  assert.deepEqual(allowedActions('publisher'), ['pinBuckets', 'revokeVersions'])
+  assert.deepEqual(
+    allowedActions('maintainer'),
+    ['pinBuckets', 'revokeVersions', 'managePrincipals', 'configureBagDrop'],
+  )
   assert.deepEqual(allowedActions('root'), [
-    'pinBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals', 'configureBagDrop',
+    'pinBuckets', 'revokeVersions', 'configureAudit', 'manageEncryption',
+    'managePrincipals', 'configureBagDrop',
   ])
   assert.deepEqual(allowedActions(null), [])
 })
@@ -31,6 +35,13 @@ test('each role gets the nested console action snapshot declared by the server',
 test('pinBuckets permission mapping requires builder', () => {
   assert.equal(allowedActions('reader').includes('pinBuckets'), false)
   assert.equal(allowedActions('builder').includes('pinBuckets'), true)
+})
+
+test('revokeVersions permission mapping requires publisher', () => {
+  assert.equal(allowedActions('reader').includes('revokeVersions'), false)
+  assert.equal(allowedActions('builder').includes('revokeVersions'), false)
+  assert.equal(allowedActions('publisher').includes('revokeVersions'), true)
+  assert.equal(allowedActions('maintainer').includes('revokeVersions'), true)
 })
 
 test('each role gets the navigation snapshot declared by the server', () => {

@@ -1670,6 +1670,59 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('All buckets')
   })
 
+  await t.test('a version is revoked and restored through the console, confirmed at the wire', async () => {
+    // A dedicated bucket keeps revocation cascades (descendants, channel
+    // rollback) away from every other facet's fixtures.
+    const builderToken = await tokenFor(seeded.principal.client_id, seeded.principal.secret)
+    const bucketBase =
+      `/packer/2023-01-01/organizations/${seeded.organization.id}` +
+      `/projects/${seeded.project.id}/buckets`
+    await api(builderToken, 'PUT', bucketBase, {
+      name: 'smoke-revocable', description: 'revocation facet fixture',
+    })
+    const revPath = `${bucketBase}/smoke-revocable/versions`
+    await api(builderToken, 'POST', revPath, {
+      fingerprint: 'smoke-revocable-fp', template_type: 'HCL2',
+    })
+    const { build: revocableBuild } = await api(
+      builderToken, 'POST', `${revPath}/smoke-revocable-fp/builds`,
+      { component_type: 'docker.revocable', packer_run_uuid: 'smoke-revocable-run', artifacts: [] },
+    )
+    await api(builderToken, 'PATCH', `${revPath}/smoke-revocable-fp/builds/${revocableBuild.id}`, {
+      status: 'BUILD_DONE', platform: 'docker',
+      artifacts: [{ external_identifier: 'sha256:smoke-revocable', region: 'local' }],
+      metadata: {},
+    })
+
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
+    await clickByText('button', 'Versions')
+    await page.waitForSelector('table[aria-label="Versions"]')
+    await clickByText('button', 'v1')
+    await waitForText('Lineage')
+
+    // Revoke now, through the danger confirmation; the state label only flips
+    // when the wire answered and the refetch landed.
+    await clickByText('button', 'Revoke')
+    await waitForText('Revoke smoke-revocable v1')
+    await clickByText('button', 'Revoke smoke-revocable v1')
+    await until('the version to render revoked after the wire confirms', async () =>
+      /revoked/.test(await bodyText()))
+    const revoked = await api(builderToken, 'GET', `${revPath}/smoke-revocable-fp`)
+    assert.ok(revoked.version.revoke_at, 'the console revoke did not reach the wire')
+
+    // Restore through its confirmation; active again on screen and at the wire.
+    await clickByText('button', 'Restore')
+    await waitForText('Restore smoke-revocable v1')
+    await clickByText('button', 'Restore smoke-revocable v1')
+    await until('the version to render active after restore', async () => {
+      const text = await bodyText()
+      return !/revoked/.test(text) && /complete/.test(text)
+    })
+    const restored = await api(builderToken, 'GET', `${revPath}/smoke-revocable-fp`)
+    assert.equal(restored.version.revoke_at, null, 'the console restore did not clear the wire')
+  })
+
   await t.test('scanner states remain explicit from no scan through channel movement', async () => {
     const rootToken = await tokenFor(credentials.clientID, credentials.secret)
     const compatBase =

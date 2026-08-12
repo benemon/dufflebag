@@ -1,13 +1,20 @@
 import { useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox,
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
-  DescriptionListTerm, Label, PageSection, Title,
+  DescriptionListTerm, Form, FormGroup, Label, Modal, ModalBody, ModalFooter,
+  ModalHeader, PageSection, Radio, TextArea, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
 
+import {
+  revokeVersion, restoreVersion, signOutIfUnauthorized, type RevokeVersionOptions,
+} from '../api/client'
+import { useAuth } from '../auth/AuthContext'
+import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import type { Role } from '../auth/permissions'
 import {
   useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
   type BuildState, type Version as VersionData, type VersionDetail,
@@ -23,12 +30,17 @@ import { FacetRail, knownCount } from './RegistryFacets'
  *
  * Components follow the design's version page (mockup 1a1, isVersion):
  *   Breadcrumb · Title · LabelGroup · DescriptionList · Card · Table
- * Read-only (ADR-0012): promotion is Terraform's job; nothing here writes.
+ * Promotion remains Terraform's job; ADR-0015 admits revocation and restore
+ * here as registry safety operations.
  */
 export function Version() {
   const { bucket = '', fingerprint = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, failure, gap } = useVersion(bucket, fingerprint)
+  const { data, loading, failure, gap, reload } = useVersion(bucket, fingerprint)
+  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const tenant = state && selectedOrganization && selectedProject
+    ? { organizationID: selectedOrganization, projectID: selectedProject }
+    : null
   const { data: findings } = useVersionFindings(
     bucket,
     fingerprint,
@@ -53,6 +65,27 @@ export function Version() {
       onOpenVersion={(relatedBucket, relatedFingerprint) => navigate(
         `/buckets/${encodeURIComponent(relatedBucket)}/versions/${encodeURIComponent(relatedFingerprint)}`,
       )}
+      callerRole={self?.role ?? null}
+      onRevoke={async (options) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await revokeVersion(state.token, tenant, bucket, fingerprint, options)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
+      onRestore={async () => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await restoreVersion(state.token, tenant, bucket, fingerprint)
+          reload()
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
     />
   )
 }
@@ -69,6 +102,9 @@ export function VersionView({
   onBackToBucket,
   onOpenBuild = () => {},
   onOpenVersion = () => {},
+  callerRole = null,
+  onRevoke = () => Promise.reject(new Error('No session.')),
+  onRestore = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   detail?: VersionDetail | null
@@ -84,9 +120,14 @@ export function VersionView({
   onBackToBucket: () => void
   onOpenBuild?: (build: string) => void
   onOpenVersion?: (bucket: string, fingerprint: string) => void
+  callerRole?: Role | null
+  onRevoke?: (options: RevokeVersionOptions) => Promise<void>
+  onRestore?: () => Promise<void>
 }) {
   const version = detail?.version ?? suppliedVersion ?? null
   const [facet, setFacet] = useState<'overview' | 'builds'>('overview')
+  const [action, setAction] = useState<'revoke' | 'restore' | null>(null)
+  const restores = version?.state === 'revoked' || version?.state === 'revocation-scheduled'
   return (
     <>
       <PageSection variant="default">
@@ -101,16 +142,44 @@ export function VersionView({
         </Breadcrumb>
         {version && (
           <>
-            <Title headingLevel="h1" size="2xl">
-              <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                {version.name}
-                <VersionStateLabel state={version.state} />
-                {version.channels.map((channel) => (
-                  <Label key={channel} isCompact>{channel}</Label>
-                ))}
-                {version.templateType && <Label isCompact>{version.templateType}</Label>}
-              </span>
-            </Title>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
+              <Title headingLevel="h1" size="2xl">
+                <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                  {version.name}
+                  <VersionStateLabel state={version.state} />
+                  {version.channels.map((channel) => (
+                    <Label key={channel} isCompact>{channel}</Label>
+                  ))}
+                  {version.templateType && <Label isCompact>{version.templateType}</Label>}
+                </span>
+              </Title>
+              {restores ? (
+                <div>
+                  <RoleRestrictedButton
+                    action="revokeVersions"
+                    callerRole={callerRole}
+                    variant="secondary"
+                    onClick={() => setAction('restore')}
+                  >
+                    Restore
+                  </RoleRestrictedButton>
+                  {version.state === 'revocation-scheduled' ? (
+                    <Content component="p" style={{ marginTop: 4 }}>
+                      Restoring cancels the scheduled revocation.
+                    </Content>
+                  ) : null}
+                </div>
+              ) : (
+                <RoleRestrictedButton
+                  action="revokeVersions"
+                  callerRole={callerRole}
+                  variant="danger"
+                  onClick={() => setAction('revoke')}
+                >
+                  Revoke
+                </RoleRestrictedButton>
+              )}
+            </div>
             <DescriptionList isHorizontal style={{ marginTop: 16 }}>
               <DescriptionListGroup>
                 <DescriptionListTerm>Fingerprint</DescriptionListTerm>
@@ -185,6 +254,290 @@ export function VersionView({
           />
         ) : null}
       </PageSection>
+      {version && action === 'revoke' ? (
+        <RevokeModal
+          bucket={bucket}
+          version={version}
+          callerRole={callerRole}
+          onConfirm={onRevoke}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+      {version && action === 'restore' ? (
+        <RestoreModal
+          bucket={bucket}
+          version={version}
+          callerRole={callerRole}
+          onConfirm={onRestore}
+          onClose={() => setAction(null)}
+        />
+      ) : null}
+    </>
+  )
+}
+
+type RevokeWhen = 'now' | 'scheduled'
+
+function RevokeModal({
+  bucket, version, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  onConfirm: (options: RevokeVersionOptions) => Promise<void>
+  onClose: () => void
+}) {
+  const [message, setMessage] = useState('')
+  const [when, setWhen] = useState<RevokeWhen>('now')
+  const [scheduledAt, setScheduledAt] = useState('')
+  const [skipDescendants, setSkipDescendants] = useState(false)
+  const [disableRollback, setDisableRollback] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+
+  const confirm = async (options: RevokeVersionOptions) => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm(options)
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal aria-labelledby="revoke-version-modal-title" isOpen onClose={onClose} variant="small">
+      <RevokeModalView
+        bucket={bucket}
+        version={version}
+        callerRole={callerRole}
+        message={message}
+        when={when}
+        scheduledAt={scheduledAt}
+        skipDescendants={skipDescendants}
+        disableRollback={disableRollback}
+        submitting={submitting}
+        failure={failure}
+        onMessageChange={setMessage}
+        onWhenChange={setWhen}
+        onScheduledAtChange={setScheduledAt}
+        onSkipDescendantsChange={setSkipDescendants}
+        onDisableRollbackChange={setDisableRollback}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+export function RevokeModalView({
+  bucket, version, callerRole, message, when, scheduledAt, skipDescendants,
+  disableRollback, submitting, failure, onMessageChange, onWhenChange,
+  onScheduledAtChange, onSkipDescendantsChange, onDisableRollbackChange,
+  onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  message: string
+  when: RevokeWhen
+  scheduledAt: string
+  skipDescendants: boolean
+  disableRollback: boolean
+  submitting: boolean
+  failure: string | null
+  onMessageChange: (message: string) => void
+  onWhenChange: (when: RevokeWhen) => void
+  onScheduledAtChange: (scheduledAt: string) => void
+  onSkipDescendantsChange: (checked: boolean) => void
+  onDisableRollbackChange: (checked: boolean) => void
+  onConfirm: (options: RevokeVersionOptions) => Promise<void>
+  onClose: () => void
+}) {
+  const parsedSchedule = scheduledAt === '' ? null : new Date(scheduledAt)
+  const scheduleMissing = when === 'scheduled' && (
+    parsedSchedule === null || Number.isNaN(parsedSchedule.getTime())
+  )
+  const schedulePast = when === 'scheduled' && !scheduleMissing &&
+    parsedSchedule!.getTime() <= Date.now()
+  const scheduleFailure = scheduleMissing
+    ? 'Choose a scheduled time.'
+    : schedulePast
+      ? 'Scheduled time must be in the future.'
+      : null
+  const idPrefix = `revoke-${version.fingerprint}`
+
+  return (
+    <>
+      <ModalHeader labelId="revoke-version-modal-title" title={`Revoke ${bucket} ${version.name}`} />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Form>
+          <FormGroup label="Revocation message" fieldId={`${idPrefix}-message`}>
+            <TextArea
+              id={`${idPrefix}-message`}
+              value={message}
+              resizeOrientation="vertical"
+              onChange={(_event, value) => onMessageChange(value)}
+            />
+          </FormGroup>
+          <FormGroup label="When" fieldId={`${idPrefix}-when`} role="radiogroup">
+            <Radio
+              id={`${idPrefix}-now`}
+              name={`${idPrefix}-when`}
+              label="Now"
+              isChecked={when === 'now'}
+              onChange={() => onWhenChange('now')}
+            />
+            <Radio
+              id={`${idPrefix}-scheduled`}
+              name={`${idPrefix}-when`}
+              label="At a scheduled time"
+              isChecked={when === 'scheduled'}
+              onChange={() => onWhenChange('scheduled')}
+            />
+          </FormGroup>
+          {when === 'scheduled' ? (
+            <FormGroup label="Scheduled time" isRequired fieldId={`${idPrefix}-scheduled-at`}>
+              <TextInput
+                id={`${idPrefix}-scheduled-at`}
+                type="datetime-local"
+                value={scheduledAt}
+                validated={scheduleFailure ? 'error' : 'default'}
+                aria-invalid={scheduleFailure ? 'true' : undefined}
+                aria-describedby={scheduleFailure ? `${idPrefix}-scheduled-at-error` : undefined}
+                onChange={(_event, value) => onScheduledAtChange(value)}
+              />
+              {scheduleFailure ? (
+                <Content component="p" id={`${idPrefix}-scheduled-at-error`}>
+                  {scheduleFailure}
+                </Content>
+              ) : null}
+            </FormGroup>
+          ) : null}
+          <Checkbox
+            id={`${idPrefix}-skip-descendants`}
+            label="Skip descendant revocation"
+            description="Leave descendant versions active."
+            isChecked={skipDescendants}
+            onChange={(_event, checked) => onSkipDescendantsChange(checked)}
+          />
+          <Checkbox
+            id={`${idPrefix}-disable-rollback`}
+            label="Do not roll channels back"
+            description="Leave channel assignments unchanged."
+            isChecked={disableRollback}
+            onChange={(_event, checked) => onDisableRollbackChange(checked)}
+          />
+        </Form>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="revokeVersions"
+          callerRole={callerRole}
+          variant="danger"
+          isLoading={submitting}
+          isDisabled={submitting || scheduleFailure !== null}
+          onClick={() => onConfirm({
+            revoke_at: when === 'now' ? new Date().toISOString() : parsedSchedule!.toISOString(),
+            ...(message.trim() ? { revocation_message: message.trim() } : {}),
+            ...(skipDescendants ? { skip_descendants_revocation: true } : {}),
+            ...(disableRollback ? { disable_rollback_channels: true } : {}),
+          })}
+        >
+          Revoke {bucket} {version.name}
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
+    </>
+  )
+}
+
+function RestoreModal({
+  bucket, version, callerRole, onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [failure, setFailure] = useState<string | null>(null)
+
+  const confirm = async () => {
+    setSubmitting(true)
+    setFailure(null)
+    try {
+      await onConfirm()
+      onClose()
+    } catch (err: unknown) {
+      setFailure(err instanceof Error ? err.message : 'The action failed.')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal aria-labelledby="restore-version-modal-title" isOpen onClose={onClose} variant="small">
+      <RestoreModalView
+        bucket={bucket}
+        version={version}
+        callerRole={callerRole}
+        submitting={submitting}
+        failure={failure}
+        onConfirm={confirm}
+        onClose={onClose}
+      />
+    </Modal>
+  )
+}
+
+export function RestoreModalView({
+  bucket, version, callerRole, submitting, failure, onConfirm, onClose,
+}: {
+  bucket: string
+  version: VersionData
+  callerRole: Role | null
+  submitting: boolean
+  failure: string | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  return (
+    <>
+      <ModalHeader labelId="restore-version-modal-title" title={`Restore ${bucket} ${version.name}`} />
+      <ModalBody>
+        {failure ? (
+          <Alert variant="danger" isInline title="The action was refused">
+            <Content component="p">{failure}</Content>
+          </Alert>
+        ) : null}
+        <Content component="p">
+          This clears the revocation and inherited descendant revocations; manual descendant
+          revocations remain, and channel assignments are not reassigned.
+        </Content>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="revokeVersions"
+          callerRole={callerRole}
+          variant="primary"
+          isLoading={submitting}
+          isDisabled={submitting}
+          onClick={onConfirm}
+        >
+          Restore {bucket} {version.name}
+        </RoleRestrictedButton>
+        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
+      </ModalFooter>
     </>
   )
 }

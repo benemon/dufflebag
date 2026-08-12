@@ -13,6 +13,8 @@ let BucketChannelsFacet
 let AssignmentHistoryTable
 let EnforcedProvisionersRow
 let VersionView
+let RevokeModalView
+let RestoreModalView
 let BuildView
 let loadVersions
 let loadVersion
@@ -27,6 +29,9 @@ let packerBuildCommand
 let sbomFileName
 let channelVersionGap
 let parentFreshnessText
+let ApiError
+let revokeVersion
+let restoreVersion
 let FacetRail
 let facetCountText
 let platformTenancyGap
@@ -43,7 +48,8 @@ before(async () => {
   ;({ VersionsView, VersionsFacet, BucketChannelsFacet, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
-  ;({ VersionView, terraformConsumeSnippet, terraformPromotionSnippet } =
+  ;({ VersionView, RevokeModalView, RestoreModalView,
+    terraformConsumeSnippet, terraformPromotionSnippet } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
   ;({ BuildView, packerBuildCommand, sbomFileName } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
   ;({ loadVersions, loadVersion, loadBucketPage, loadEnforcedProvisioners, loadChannelHistory,
@@ -51,6 +57,7 @@ before(async () => {
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail, facetCountText } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
+  ;({ ApiError, revokeVersion, restoreVersion } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
 
 after(async () => {
@@ -162,6 +169,32 @@ const detailMarkup = (version, extra = {}) =>
     ...extra,
   }))
 
+const actionVersion = (state = 'complete') => ({
+  name: 'v7', fingerprint: 'fp-action', state, templateType: 'HCL2', channels: [],
+  assignments: [], builds: [], parents: [], children: [], created: '2026-08-12 10:00 UTC',
+})
+
+const revokeModalProps = (over = {}) => ({
+  bucket: 'images', version: actionVersion(), callerRole: 'publisher', message: '', when: 'now',
+  scheduledAt: '', skipDescendants: false, disableRollback: false, submitting: false,
+  failure: null, onMessageChange: () => {}, onWhenChange: () => {},
+  onScheduledAtChange: () => {}, onSkipDescendantsChange: () => {},
+  onDisableRollbackChange: () => {}, onConfirm: async () => {}, onClose: () => {}, ...over,
+})
+
+const findElement = (node, predicate) => {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (predicate(node)) return node
+  return findElement(node.props.children, predicate)
+}
+
 test('a complete version projects complete and a v0 projects incomplete', async () => {
   const versions = await withFetch(
     {
@@ -225,6 +258,151 @@ test('a restored version projects and renders as active again', async () => {
 	const markup = listMarkup(versions)
 	assert.match(markup, />complete</)
 	assert.doesNotMatch(markup, />revoked</)
+})
+
+test('version safety actions are live for publisher and restricted below publisher', () => {
+  for (const role of ['reader', 'builder']) {
+    const revoke = detailMarkup(actionVersion('complete'), { callerRole: role })
+    assert.match(revoke, /Requires publisher/)
+    assert.match(revoke, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Revoke/)
+
+    const restore = detailMarkup(actionVersion('revoked'), { callerRole: role })
+    assert.match(restore, /Requires publisher/)
+    assert.match(restore, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Restore/)
+  }
+
+  for (const [state, label] of [['complete', 'Revoke'], ['revoked', 'Restore']]) {
+    const markup = detailMarkup(actionVersion(state), { callerRole: 'publisher' })
+    assert.match(markup, new RegExp(`>${label}<`))
+    assert.doesNotMatch(markup, /Requires publisher/)
+    assert.doesNotMatch(markup, new RegExp(`<button[^>]*disabled[^>]*>[\\s\\S]{0,240}${label}`))
+  }
+})
+
+test('the version state selects Revoke or Restore without a second action', () => {
+  const active = detailMarkup(actionVersion('complete'), { callerRole: 'publisher' })
+  assert.match(active, />Revoke</)
+  assert.doesNotMatch(active, />Restore</)
+
+  const revoked = detailMarkup(actionVersion('revoked'), { callerRole: 'publisher' })
+  assert.match(revoked, />Restore</)
+  assert.doesNotMatch(revoked, />Revoke</)
+
+  const scheduled = detailMarkup(actionVersion('revocation-scheduled'), { callerRole: 'publisher' })
+  assert.match(scheduled, />Restore</)
+  assert.doesNotMatch(scheduled, />Revoke</)
+  assert.match(scheduled, /Restoring cancels the scheduled revocation/)
+})
+
+test('the revoke modal builds immediate and scheduled options from its controls', async () => {
+  const immediateCalls = []
+  const before = Date.now()
+  const immediate = RevokeModalView(revokeModalProps({
+    message: '   ', onConfirm: async (options) => immediateCalls.push(options),
+  }))
+  await findElement(
+    immediate,
+    (element) => element.props.children?.join?.('') === 'Revoke images v7',
+  ).props.onClick()
+  const after = Date.now()
+  assert.equal(immediateCalls.length, 1)
+  assert.deepEqual(Object.keys(immediateCalls[0]), ['revoke_at'])
+  assert.ok(Date.parse(immediateCalls[0].revoke_at) >= before)
+  assert.ok(Date.parse(immediateCalls[0].revoke_at) <= after)
+
+  let skipDescendants = false
+  let disableRollback = false
+  const scheduledCalls = []
+  const props = () => revokeModalProps({
+    message: 'retired image',
+    when: 'scheduled',
+    scheduledAt: '2099-04-03T12:30',
+    skipDescendants,
+    disableRollback,
+    onSkipDescendantsChange: (checked) => { skipDescendants = checked },
+    onDisableRollbackChange: (checked) => { disableRollback = checked },
+    onConfirm: async (options) => scheduledCalls.push(options),
+  })
+  const choices = RevokeModalView(props())
+  findElement(choices, (element) => element.props.label === 'Skip descendant revocation')
+    .props.onChange({}, true)
+  findElement(choices, (element) => element.props.label === 'Do not roll channels back')
+    .props.onChange({}, true)
+  assert.equal(skipDescendants, true)
+  assert.equal(disableRollback, true)
+
+  const scheduled = RevokeModalView(props())
+  await findElement(
+    scheduled,
+    (element) => element.props.children?.join?.('') === 'Revoke images v7',
+  ).props.onClick()
+  assert.deepEqual(scheduledCalls, [{
+    revoke_at: new Date('2099-04-03T12:30').toISOString(),
+    revocation_message: 'retired image',
+    skip_descendants_revocation: true,
+    disable_rollback_channels: true,
+  }])
+})
+
+test('revoke and restore clients send exact compat-plane PATCH bodies', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (input, init) => {
+    calls.push({ path: String(input), init })
+    return json({ version: completeVersion })
+  }
+  try {
+    const tenant = { organizationID: 'org one', projectID: 'project/one' }
+    await revokeVersion('bearer', tenant, 'images/base', 'fp one', {
+      revoke_at: '2026-08-12T14:00:00.000Z',
+      revocation_message: '',
+    })
+    await revokeVersion('bearer', tenant, 'images/base', 'fp one', {
+      revoke_at: '2026-08-13T09:15:00.000Z',
+      revocation_message: 'retired image',
+      skip_descendants_revocation: true,
+      disable_rollback_channels: true,
+    })
+    await restoreVersion('bearer', tenant, 'images/base', 'fp one')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+
+  assert.equal(calls.length, 3)
+  for (const call of calls) {
+    assert.equal(call.init.method, 'PATCH')
+    assert.equal(call.init.headers.Authorization, 'Bearer bearer')
+    assert.match(
+      call.path,
+      /\/organizations\/org%20one\/projects\/project%2Fone\/buckets\/images%2Fbase\/versions\/fp%20one$/,
+    )
+  }
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    revoke_at: '2026-08-12T14:00:00.000Z',
+  })
+  assert.equal('revoke_in' in JSON.parse(calls[0].init.body), false)
+  assert.deepEqual(JSON.parse(calls[1].init.body), {
+    revoke_at: '2026-08-13T09:15:00.000Z',
+    revocation_message: 'retired image',
+    skip_descendants_revocation: true,
+    disable_rollback_channels: true,
+  })
+  assert.deepEqual(JSON.parse(calls[2].init.body), { restore: true })
+})
+
+test('a compat-plane ApiError message is rendered verbatim in either modal', () => {
+  const message = new ApiError(409, 'restore refused by registry policy').message
+  const revoke = renderToStaticMarkup(React.createElement(
+    RevokeModalView, revokeModalProps({ failure: message }),
+  ))
+  const restore = renderToStaticMarkup(React.createElement(RestoreModalView, {
+    bucket: 'images', version: actionVersion('revoked'), callerRole: 'publisher',
+    submitting: false, failure: message, onConfirm: async () => {}, onClose: () => {},
+  }))
+  for (const markup of [revoke, restore]) {
+    assert.match(markup, /The action was refused/)
+    assert.match(markup, /restore refused by registry policy/)
+  }
 })
 
 test('an incomplete version renders as incomplete, not as broken', async () => {
@@ -1003,7 +1181,7 @@ test('the list windows old versions instead of hiding them', () => {
   assert.match(markup, /3 older versions · show all/)
 })
 
-test('empty and gap states are distinct, and write affordances are absent', async () => {
+test('empty and gap states are distinct, and only the admitted version safety write appears', async () => {
   const emptyMarkup = listMarkup([])
   assert.match(emptyMarkup, /No versions in this bucket/)
 
@@ -1015,8 +1193,8 @@ test('empty and gap states are distinct, and write affordances are absent', asyn
   assert.match(gapMarkup, /Choose an organisation/)
   assert.doesNotMatch(gapMarkup, /No versions in this bucket/)
 
-  // Read-only per ADR-0012: promotion, assignment and deletion belong to
-  // Terraform and Packer, not these screens.
+  // Promotion, assignment and deletion still belong to Terraform and Packer;
+  // ADR-0015 admits revocation and restore as registry safety operations.
   const version = await withFetch(
     {
       '/versions/fp-complete': () => json({ version: completeVersion }),
@@ -1031,17 +1209,19 @@ test('empty and gap states are distinct, and write affordances are absent', asyn
     () => loadVersion('token', { organizationID: 'org', projectID: 'project' }, 'images', 'fp-complete'),
   )
   // The association actually projects and renders — the channel pill names
-  // production on both screens — so a read-only page is still an informative
-  // one, not merely one with the write words missing.
+  // production on both screens, so the safety action does not displace the
+  // assignment context.
   assert.deepEqual(version.channels, ['production'])
-  for (const markup of [listMarkup([version]), detailMarkup(version)]) {
+  const list = listMarkup([version])
+  const detail = detailMarkup(version, { callerRole: 'publisher' })
+  for (const markup of [list, detail]) {
     assert.match(markup, />production</)
-    for (const unsupported of [
-      'Promote', 'Assign', 'Delete', 'Revoke', 'Create version', 'Schedule',
-    ]) {
+    for (const unsupported of ['Promote', 'Assign', 'Delete', 'Create version', 'Schedule']) {
       assert.doesNotMatch(markup, new RegExp(unsupported))
     }
   }
+  assert.doesNotMatch(list, />Revoke</)
+  assert.match(detail, />Revoke</)
 })
 
 test('the bucket ancestry card aggregates every version and names the local version', async () => {
