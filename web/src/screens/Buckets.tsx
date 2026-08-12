@@ -15,7 +15,7 @@ import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, requirementReason, type Role } from '../auth/permissions'
-import { deleteBucket, signOutIfUnauthorized, type ApiPin } from '../api/client'
+import { deleteBucket, getBagDropStatus, signOutIfUnauthorized, type ApiPin } from '../api/client'
 import type { TenancyGap } from '../data/tenant'
 
 /**
@@ -48,6 +48,14 @@ export function Buckets() {
           throw err
         }
       }}
+      onCheckMirrored={async (bucket) => {
+        if (!state || !tenant) return false
+        const status = await getBagDropStatus(state.token, tenant)
+        return status.associations.some(
+          (association) =>
+            association.bucket_name === bucket && association.state === 'active',
+        )
+      }}
     />
   )
 }
@@ -66,6 +74,7 @@ export function BucketsView({
   gap,
   openBucket,
   onDeleteBucket = () => Promise.reject(new Error('No session.')),
+  onCheckMirrored,
 }: {
   buckets: Bucket[]
   total: number
@@ -82,6 +91,7 @@ export function BucketsView({
   /** Navigation into a bucket's versions; a callback so the view stays router-free. */
   openBucket: (bucket: string) => void
   onDeleteBucket?: (bucket: string) => Promise<void>
+  onCheckMirrored?: (bucket: string) => Promise<boolean>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [nameFilter, setNameFilter] = useState('')
@@ -364,6 +374,9 @@ export function BucketsView({
           callerRole={callerRole}
           onConfirm={() => onDeleteBucket(deletingBucket)}
           onClose={() => setDeletingBucket(null)}
+          checkMirrored={
+            onCheckMirrored ? () => onCheckMirrored(deletingBucket) : undefined
+          }
         />
       ) : null}
     </>

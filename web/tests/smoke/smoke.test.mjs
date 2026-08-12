@@ -2116,6 +2116,47 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bag Drop is not configured')
   })
 
+  await t.test('the bucket-delete confirmation warns for a Bag Drop-mirrored bucket', async () => {
+    // A stored-disabled destination and an API-side association are enough:
+    // the warning reads the same reader-visible status the Bag Drop screen does.
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const bagdropBase =
+      `/api/v1/organizations/${seeded.organization.id}` +
+      `/projects/${seeded.project.id}/bagdrop`
+    await api(rootToken, 'PUT', bagdropBase, {
+      adapter: 'dufflebag',
+      dufflebag: {
+        endpoint: 'https://mirror.invalid',
+        organization_id: seeded.organization.id,
+        project_id: seeded.project.id,
+        client_id: 'smoke-mirror-client',
+        client_secret: 'smoke-mirror-secret',
+      },
+    })
+    await api(rootToken, 'PUT', `${bagdropBase}/buckets/smoke-images`)
+
+    await clickByText('a', 'Buckets')
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
+    await page.click('button[aria-label="Actions for smoke-images"]')
+    await clickByText('button', 'Delete bucket…')
+    await waitForText('Delete smoke-images')
+    await waitForText('This bucket is mirrored by Bag Drop')
+    await clickByText('.pf-v6-c-modal-box button', 'Cancel')
+
+    // Un-associated, the same confirmation carries no mirror warning.
+    await api(rootToken, 'DELETE', `${bagdropBase}/buckets/smoke-images`)
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
+    await page.click('button[aria-label="Actions for smoke-images"]')
+    await clickByText('button', 'Delete bucket…')
+    await waitForText('Delete smoke-images')
+    await until('the warning to stay absent for the un-mirrored bucket', async () =>
+      !(await bodyText()).includes('mirrored by Bag Drop'))
+    await clickByText('.pf-v6-c-modal-box button', 'Cancel')
+
+    // Leave the world as this subtest found it.
+    await api(rootToken, 'DELETE', bagdropBase)
+  })
+
   let consoleBuilder
   await t.test('a builder principal is minted through the form, where the session stands', async () => {
     // Standing in acme/widgets, the form creates a PROJECT-scoped builder —
