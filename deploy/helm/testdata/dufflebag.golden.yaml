@@ -1,0 +1,969 @@
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dufflebag
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dufflebag-vault
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dufflebag-vault-bootstrap
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: dufflebag-ceph
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+---
+# Source: dufflebag/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dufflebag-postgres
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+type: Opaque
+stringData:
+  postgres-password: "migrate"
+  migrate-password: "migrate"
+  app-password: "app"
+  admin-database-url: "postgres://dufflebag_migrate:migrate@dufflebag-postgres:5432/dufflebag?sslmode=disable"
+  app-database-url: "postgres://dufflebag_app:app@dufflebag-postgres:5432/dufflebag?sslmode=disable"
+---
+# Source: dufflebag/templates/secrets.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: dufflebag-ceph
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+type: Opaque
+stringData:
+  access-key: "demoaccess"
+  secret-key: "demosecret"
+---
+# Source: dufflebag/templates/ceph.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dufflebag-ceph-bootstrap
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+data:
+  bootstrap.sh: |
+    #!/bin/sh
+    set -eu
+    access_key=$1
+    secret_key=$2
+    bucket=$3
+    service_host=$4
+    rgw_up() {
+      python3 -c 'import socket; socket.create_connection(("127.0.0.1", 8000), 2).close()' 2>/dev/null
+    }
+    # Let the image finish its own boot sequence entirely before touching
+    # anything: restarting RGW while its setup program still waits on marker
+    # files deadlocks supervisord's ordering.
+    until rgw_up; do sleep 2; done
+    until radosgw-admin user info --uid=dufflebag >/dev/null 2>&1; do
+      radosgw-admin user create --uid=dufflebag --display-name='dufflebag' \
+        --access-key="$access_key" --secret-key="$secret_key" >/dev/null 2>&1 || true
+      sleep 2
+    done
+    # The image bakes "rgw dns name = <pod hostname>" into ceph.conf at every
+    # boot, so RGW parses the Service hostname as a virtual-host bucket name
+    # and answers 404 even for path-style requests. Rewrite it to the Service
+    # name once RGW is serving, restart it, and wait for it to come back.
+    if ! grep -q "^rgw dns name = $service_host\$" /etc/ceph/ceph.conf; then
+      sed -i "s/^rgw dns name = .*/rgw dns name = $service_host/" /etc/ceph/ceph.conf
+      supervisorctl restart ceph-rgw >/dev/null 2>&1 || true
+      sleep 2
+      until rgw_up; do sleep 2; done
+    fi
+    until python3 /bootstrap/create-bucket.py "$access_key" "$secret_key" "$bucket"; do
+      sleep 2
+    done
+  create-bucket.py: |
+    import datetime, hashlib, hmac, sys, urllib.error, urllib.request
+
+    access, secret, bucket = sys.argv[1], sys.argv[2], sys.argv[3]
+    host, region, service = "127.0.0.1:8000", "us-east-1", "s3"
+    now = datetime.datetime.now(datetime.timezone.utc)
+    stamp, date = now.strftime("%Y%m%dT%H%M%SZ"), now.strftime("%Y%m%d")
+    payload = hashlib.sha256(b"").hexdigest()
+    canonical = "\n".join([
+        "PUT", "/" + bucket, "",
+        "host:" + host, "x-amz-content-sha256:" + payload,
+        "x-amz-date:" + stamp, "",
+        "host;x-amz-content-sha256;x-amz-date", payload,
+    ])
+    scope = "/".join([date, region, service, "aws4_request"])
+    to_sign = "\n".join([
+        "AWS4-HMAC-SHA256", stamp, scope,
+        hashlib.sha256(canonical.encode()).hexdigest(),
+    ])
+    key = ("AWS4" + secret).encode()
+    for part in (date, region, service, "aws4_request"):
+        key = hmac.new(key, part.encode(), hashlib.sha256).digest()
+    signature = hmac.new(key, to_sign.encode(), hashlib.sha256).hexdigest()
+    request = urllib.request.Request("http://" + host + "/" + bucket, method="PUT")
+    request.add_header("Host", host)
+    request.add_header("x-amz-content-sha256", payload)
+    request.add_header("x-amz-date", stamp)
+    request.add_header("Authorization",
+        "AWS4-HMAC-SHA256 Credential=" + access + "/" + scope +
+        ", SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=" + signature)
+    try:
+        with urllib.request.urlopen(request) as response:
+            print("created", response.status)
+    except urllib.error.HTTPError as err:
+        body = err.read().decode()
+        if err.code == 409 or "BucketAlreadyOwnedByYou" in body:
+            print("exists")
+        else:
+            print("failed", err.code, body)
+            sys.exit(1)
+---
+# Source: dufflebag/templates/postgres.yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dufflebag-postgres-init
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+data:
+  01-roles.sh: |
+    #!/bin/sh
+    set -eu
+    psql -v ON_ERROR_STOP=1 --username postgres --dbname dufflebag \
+      --set=migrate_password="$POSTGRES_MIGRATE_PASSWORD" \
+      --set=app_password="$POSTGRES_APP_PASSWORD" <<'SQL'
+    CREATE ROLE dufflebag_migrate LOGIN PASSWORD :'migrate_password';
+    ALTER DATABASE dufflebag OWNER TO dufflebag_migrate;
+    CREATE ROLE dufflebag_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOBYPASSRLS;
+    GRANT CONNECT ON DATABASE dufflebag TO dufflebag_app;
+    GRANT USAGE ON SCHEMA public TO dufflebag_app;
+    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app;
+    ALTER DEFAULT PRIVILEGES FOR ROLE dufflebag_migrate IN SCHEMA public
+      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dufflebag_app;
+    SQL
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: dufflebag-dufflebag-vault-reviewer
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: dufflebag-vault
+    namespace: dufflebag
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: dufflebag-vault-bootstrap
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    resourceNames: ["dufflebag-vault-bootstrap"]
+    verbs: ["get"]
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["create"]
+---
+# Source: dufflebag/templates/serviceaccounts-rbac.yaml
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: dufflebag-vault-bootstrap
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: dufflebag-vault-bootstrap
+subjects:
+  - kind: ServiceAccount
+    name: dufflebag-vault-bootstrap
+    namespace: dufflebag
+---
+# Source: dufflebag/templates/ceph.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dufflebag-ceph
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  selector:
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/component: ceph
+  ports:
+    - name: s3
+      port: 8000
+      targetPort: s3
+---
+# Source: dufflebag/templates/dufflebag.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dufflebag
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  selector:
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/component: dufflebag
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+# Source: dufflebag/templates/postgres.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dufflebag-postgres
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  selector:
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/component: postgres
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: postgres
+---
+# Source: dufflebag/templates/vault.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: dufflebag-vault
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  publishNotReadyAddresses: true
+  selector:
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/component: vault
+  ports:
+    - name: vault
+      port: 8200
+      targetPort: vault
+---
+# Source: dufflebag/templates/dufflebag.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dufflebag
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dufflebag
+      app.kubernetes.io/component: dufflebag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dufflebag
+        app.kubernetes.io/component: dufflebag
+    spec:
+      serviceAccountName: dufflebag
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: "docker.io/library/postgres:17-alpine"
+          command: ["/bin/sh", "-ec", "until pg_isready -h dufflebag-postgres -U postgres -d dufflebag; do sleep 2; done"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: postgres-password
+          resources:
+            {}
+        # HELM_ASSERT_MIGRATE_BEGIN
+        - name: migrate
+          image: "quay.io/benjamin_holmes/dufflebag:latest"
+          args: ["migrate"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: DFBG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: admin-database-url
+          resources:
+            {}
+        # HELM_ASSERT_MIGRATE_END
+        - name: wait-for-vault-bootstrapped
+          image: "docker.io/hashicorp/vault:2.0.3"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export VAULT_ADDR=http://dufflebag-vault:8200
+              jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              until login=$(vault write -format=json auth/kubernetes/login role=dufflebag jwt="$jwt" 2>/dev/null); do sleep 2; done
+              token=$(printf '%s' "$login" | sed -n 's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+              [ -n "$token" ]
+              VAULT_TOKEN="$token" vault write transit/encrypt/dufflebag plaintext=cmVhZHk= >/dev/null
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {}
+        - name: wait-for-ceph
+          image: "quay.io/benjamin_holmes/ceph-aio:v20"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until python3 -c 'import socket; socket.create_connection(("dufflebag-ceph", 8000), 2).close()'; do sleep 2; done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            {}
+      containers:
+        - name: dufflebag
+          image: "quay.io/benjamin_holmes/dufflebag:latest"
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: DFBG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: app-database-url
+            - name: DFBG_HTTP_ADDR
+              value: :8080
+            - name: DFBG_KEY_PROVIDER
+              value: vault
+            - name: VAULT_ADDR
+              value: http://dufflebag-vault:8200
+            - name: DFBG_VAULT_AUTH_METHOD
+              value: kubernetes
+            - name: DFBG_VAULT_K8S_ROLE
+              value: dufflebag
+            - name: DFBG_VAULT_K8S_MOUNT
+              value: kubernetes
+            - name: DFBG_VAULT_K8S_TOKEN_PATH
+              value: /var/run/secrets/kubernetes.io/serviceaccount/token
+            - name: DFBG_VAULT_TRANSIT_MOUNT
+              value: transit
+            - name: DFBG_VAULT_TRANSIT_KEY
+              value: dufflebag
+            - name: DFBG_OBJECT_STORAGE_ENDPOINT
+              value: http://dufflebag-ceph:8000
+            - name: DFBG_OBJECT_STORAGE_REGION
+              value: us-east-1
+            - name: DFBG_OBJECT_STORAGE_BUCKET
+              value: "dufflebag"
+            - name: DFBG_OBJECT_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-ceph
+                  key: access-key
+            - name: DFBG_OBJECT_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-ceph
+                  key: secret-key
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            # Readiness means listening, not initialized: /sys/health answers
+            # 501 until the instance is claimed, and a Service that never
+            # routes to an unclaimed instance would make the first-run wizard
+            # unreachable. The console route serves 200 as soon as the
+            # listener is up.
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            {}
+---
+# Source: dufflebag/templates/ceph.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dufflebag-ceph
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  serviceName: dufflebag-ceph
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dufflebag
+      app.kubernetes.io/component: ceph
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dufflebag
+        app.kubernetes.io/component: ceph
+    spec:
+      serviceAccountName: dufflebag-ceph
+      # Under the openshift profile the pinned anyuid SCC forbids an explicit
+      # seccompProfile and applies the runtime default itself.
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        # The image bakes its expected /var/lib/ceph tree; an empty PVC mounted
+        # over it shadows that structure and the daemons fail on first boot.
+        # Seed the volume from the image once, then leave it alone.
+        - name: seed-data
+          image: "quay.io/benjamin_holmes/ceph-aio:v20"
+          securityContext:
+            allowPrivilegeEscalation: false
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              # Not an emptiness check: fresh block volumes carry lost+found,
+              # so probe for the baked tree's own structure instead.
+              if [ ! -d /seed-target/tmp ]; then
+                cp -a /var/lib/ceph/. /seed-target/
+              fi
+          volumeMounts:
+            - name: data
+              mountPath: /seed-target
+      containers:
+        - name: ceph
+          image: "quay.io/benjamin_holmes/ceph-aio:v20"
+          securityContext:
+            allowPrivilegeEscalation: false
+          ports:
+            - name: s3
+              containerPort: 8000
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            periodSeconds: 5
+            failureThreshold: 60
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - /bin/sh
+                  - -ec
+                  - /bootstrap/bootstrap.sh "$CEPH_ACCESS_KEY" "$CEPH_SECRET_KEY" "$CEPH_BUCKET" "dufflebag-ceph"
+          env:
+            - name: CEPH_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-ceph
+                  key: access-key
+            - name: CEPH_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-ceph
+                  key: secret-key
+            - name: CEPH_BUCKET
+              value: "dufflebag"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/ceph
+            - name: bootstrap
+              mountPath: /bootstrap
+          resources:
+            {}
+      volumes:
+        - name: bootstrap
+          configMap:
+            name: dufflebag-ceph-bootstrap
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 10Gi
+---
+# Source: dufflebag/templates/postgres.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dufflebag-postgres
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  serviceName: dufflebag-postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dufflebag
+      app.kubernetes.io/component: postgres
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dufflebag
+        app.kubernetes.io/component: postgres
+    spec:
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-data-directory
+          image: "docker.io/library/postgres:17-alpine"
+          command: ["/bin/sh", "-ec", "chmod g+rwx /var/lib/postgresql/data || true"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+          resources:
+            {}
+      containers:
+        - name: postgres
+          image: "docker.io/library/postgres:17-alpine"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              if [ "$(id -u)" = 0 ]; then
+                exec gosu postgres:root docker-entrypoint.sh postgres
+              fi
+              exec docker-entrypoint.sh postgres
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - CHOWN
+                - DAC_OVERRIDE
+                - FOWNER
+                - SETGID
+                - SETUID
+          env:
+            - name: POSTGRES_DB
+              value: dufflebag
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: postgres-password
+            - name: POSTGRES_MIGRATE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: migrate-password
+            - name: POSTGRES_APP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: dufflebag-postgres
+                  key: app-password
+            - name: PGDATA
+              value: /var/lib/postgresql/data/pgdata
+          ports:
+            - name: postgres
+              containerPort: 5432
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "postgres", "-d", "dufflebag"]
+            periodSeconds: 2
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: initdb
+              mountPath: /docker-entrypoint-initdb.d
+          resources:
+            {}
+      volumes:
+        - name: initdb
+          configMap:
+            name: dufflebag-postgres-init
+            defaultMode: 0555
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+# Source: dufflebag/templates/vault.yaml
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: dufflebag-vault
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+spec:
+  serviceName: dufflebag-vault
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: dufflebag
+      app.kubernetes.io/component: vault
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dufflebag
+        app.kubernetes.io/component: vault
+    spec:
+      serviceAccountName: dufflebag-vault
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: prepare-data-directory
+          image: "docker.io/library/postgres:17-alpine"
+          command: ["/bin/sh", "-ec", "chmod g+rwx /vault/file || true"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: data
+              mountPath: /vault/file
+            - name: config
+              mountPath: /vault/config
+          resources:
+            {}
+      containers:
+        - name: vault
+          image: "docker.io/hashicorp/vault:2.0.3"
+          args: ["server"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          env:
+            - name: VAULT_LOCAL_CONFIG
+              value: '{"ui":true,"disable_mlock":true,"storage":{"file":{"path":"/vault/file"}},"listener":[{"tcp":{"address":"0.0.0.0:8200","tls_disable":true}}],"api_addr":"http://dufflebag-vault:8200"}'
+          ports:
+            - name: vault
+              containerPort: 8200
+          readinessProbe:
+            # The listener is plain HTTP; without VAULT_ADDR the CLI probes
+            # https and the pod never reports Ready. Sealed still exits
+            # non-zero, so readiness continues to mean unsealed.
+            exec:
+              command:
+                - /bin/sh
+                - -ec
+                - VAULT_ADDR=http://127.0.0.1:8200 vault status
+            periodSeconds: 3
+          livenessProbe:
+            tcpSocket:
+              port: vault
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /vault/file
+            - name: config
+              mountPath: /vault/config
+          resources:
+            {}
+        - name: unsealer
+          image: "docker.io/hashicorp/vault:2.0.3"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export VAULT_ADDR=http://127.0.0.1:8200
+              while :; do
+                unseal_key=$(cat /bootstrap/unseal-key 2>/dev/null || true)
+                if [ -n "$unseal_key" ]; then
+                  status=$(vault status -format=json 2>/dev/null || true)
+                  if printf '%s' "$status" | grep -q '"sealed"[[:space:]]*:[[:space:]]*true'; then
+                    vault operator unseal "$unseal_key" >/dev/null || true
+                  fi
+                fi
+                sleep 5
+              done
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: bootstrap-secret
+              mountPath: /bootstrap
+              readOnly: true
+          resources:
+            {}
+      volumes:
+        - name: bootstrap-secret
+          secret:
+            secretName: dufflebag-vault-bootstrap
+            optional: true
+        # The image's entrypoint writes VAULT_LOCAL_CONFIG under /vault/config,
+        # which is image-owned: unwritable at OpenShift's arbitrary UID. An
+        # emptyDir is group-writable via the SCC-assigned fsGroup.
+        - name: config
+          emptyDir: {}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 1Gi
+---
+# Source: dufflebag/templates/vault.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: dufflebag-vault-bootstrap
+  labels:
+    app.kubernetes.io/name: dufflebag
+    app.kubernetes.io/instance: dufflebag
+    app.kubernetes.io/managed-by: Helm
+    helm.sh/chart: dufflebag-0.1.0
+  annotations:
+    # A Job's pod template is immutable, so upgrades would fail against the
+    # completed install-time Job. As a hook it is replaced each install and
+    # upgrade; every step it performs is idempotent by construction.
+    helm.sh/hook: post-install,post-upgrade
+    helm.sh/hook-delete-policy: before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: dufflebag
+        app.kubernetes.io/component: vault-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: dufflebag-vault-bootstrap
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          image: "docker.io/hashicorp/vault:2.0.3"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export VAULT_ADDR=http://dufflebag-vault:8200
+              until status=$(vault status -format=json 2>/dev/null || true) && [ -n "$status" ]; do sleep 2; done
+              if printf '%s' "$status" | grep -q '"initialized"[[:space:]]*:[[:space:]]*false'; then
+                vault operator init -key-shares=1 -key-threshold=1 -format=json > /work/init.json
+                unseal_key=$(sed -n '/"unseal_keys_b64"/{n;s/.*"\([^"]*\)".*/\1/p;}' /work/init.json)
+                root_token=$(sed -n 's/.*"root_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' /work/init.json)
+                [ -n "$unseal_key" ] && [ -n "$root_token" ]
+                printf '%s' "$unseal_key" > /work/unseal-key
+                printf '%s' "$root_token" > /work/root-token
+              else
+                until [ -s /bootstrap/unseal-key ] && [ -s /bootstrap/root-token ]; do sleep 2; done
+                unseal_key=$(cat /bootstrap/unseal-key)
+                root_token=$(cat /bootstrap/root-token)
+                [ -n "$unseal_key" ] && [ -n "$root_token" ]
+              fi
+              vault operator unseal "$unseal_key" >/dev/null 2>&1 || true
+              export VAULT_TOKEN="$root_token"
+              vault secrets list -format=json | grep -q '"transit/"' || vault secrets enable -path=transit transit
+              vault write -f transit/keys/dufflebag >/dev/null
+              vault auth list -format=json | grep -q '"kubernetes/"' || vault auth enable -path=kubernetes kubernetes
+              vault write auth/kubernetes/config \
+                kubernetes_host="https://$KUBERNETES_SERVICE_HOST:$KUBERNETES_SERVICE_PORT_HTTPS" \
+                kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt >/dev/null
+              cat >/work/dufflebag-policy.hcl <<'POLICY'
+              path "transit/encrypt/dufflebag" {
+                capabilities = ["update"]
+              }
+              path "transit/decrypt/dufflebag" {
+                capabilities = ["update"]
+              }
+              path "transit/rewrap/dufflebag" {
+                capabilities = ["update"]
+              }
+              POLICY
+              vault policy write dufflebag /work/dufflebag-policy.hcl
+              vault write auth/kubernetes/role/dufflebag \
+                bound_service_account_names=dufflebag \
+                bound_service_account_namespaces=dufflebag \
+                policies=dufflebag token_ttl=1h >/dev/null
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: bootstrap-secret
+              mountPath: /bootstrap
+              readOnly: true
+            - name: work
+              mountPath: /work
+          resources:
+            {}
+        - name: escrow-bootstrap-credentials
+          image: "quay.io/benjamin_holmes/ceph-aio:v20"
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              python3 - <<'PY'
+              import base64, json, os, ssl, time, urllib.error, urllib.request
+
+              namespace = open('/var/run/secrets/kubernetes.io/serviceaccount/namespace').read()
+              token = open('/var/run/secrets/kubernetes.io/serviceaccount/token').read()
+              secret_name = 'dufflebag-vault-bootstrap'
+              api = 'https://' + os.environ['KUBERNETES_SERVICE_HOST'] + ':' + os.environ['KUBERNETES_SERVICE_PORT_HTTPS']
+              collection = api + '/api/v1/namespaces/' + namespace + '/secrets'
+              headers = {'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json'}
+              context = ssl.create_default_context(cafile='/var/run/secrets/kubernetes.io/serviceaccount/ca.crt')
+              try:
+                  urllib.request.urlopen(urllib.request.Request(collection + '/' + secret_name, headers=headers), context=context)
+                  raise SystemExit(0)
+              except urllib.error.HTTPError as error:
+                  if error.code != 404:
+                      raise
+              while not all(os.path.exists('/work/' + key) and os.path.getsize('/work/' + key) for key in ('unseal-key', 'root-token')):
+                  time.sleep(1)
+              data = {}
+              for key in ('unseal-key', 'root-token'):
+                  data[key] = base64.b64encode(open('/work/' + key, 'rb').read()).decode()
+              body = json.dumps({
+                  'apiVersion': 'v1', 'kind': 'Secret',
+                  'metadata': {'name': secret_name, 'namespace': namespace},
+                  'type': 'Opaque', 'data': data,
+              }).encode()
+              urllib.request.urlopen(urllib.request.Request(collection, data=body, headers=headers), context=context)
+              PY
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: work
+              mountPath: /work
+          resources:
+            {}
+      volumes:
+        - name: bootstrap-secret
+          secret:
+            secretName: dufflebag-vault-bootstrap
+            optional: true
+        - name: work
+          emptyDir: {}

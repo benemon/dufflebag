@@ -348,6 +348,26 @@ test-smoke: $(if $(DUFFLEBAG_BIN),,build-ui) ## Drive the real console in a real
 test-kind: ## Validate the single-replica Kubernetes manifests on KIND
 	e2e/kubernetes/test-kind.sh
 
+HELM_UPDATE_GOLDEN ?= 0
+HELM_GOLDEN := deploy/helm/testdata/dufflebag.golden.yaml
+
+.PHONY: helm-lint
+helm-lint: ## Lint and verify the self-contained Helm chart
+	@set -e; rendered=$$(mktemp); status=0; trap 'rm -f "$$rendered"' EXIT; \
+		helm lint deploy/helm/dufflebag || status=1; \
+		helm template dufflebag deploy/helm/dufflebag --namespace dufflebag > "$$rendered" || status=1; \
+		if [ "$(HELM_UPDATE_GOLDEN)" = 1 ]; then \
+			cp "$$rendered" "$(HELM_GOLDEN)"; \
+		else \
+			diff -u "$(HELM_GOLDEN)" "$$rendered" || status=1; \
+		fi; \
+		deploy/helm/assert-rendered.sh || status=1; \
+		exit $$status
+
+.PHONY: test-helm-kind
+test-helm-kind: ## Install the encrypted self-contained Helm stack on KIND
+	deploy/helm/test-helm-kind.sh
+
 .PHONY: test-packer
 # This direct invocation is LOCAL ONLY: it requires the lab CA, provisioned
 # hostname certificate, local DNS entry, Packer, and Docker. CI runs the same

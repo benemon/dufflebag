@@ -14,6 +14,7 @@ You need:
 
 The [deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
 covers PostgreSQL, migrations, TLS and running the server.
+For a self-contained alternative, use its [Helm section](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#helm).
 
 ## Initialize the instance
 

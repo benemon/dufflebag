@@ -1,0 +1,157 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "dufflebag.fullname" . }}
+  labels:
+    {{- include "dufflebag.labels" . | nindent 4 }}
+spec:
+  selector:
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: dufflebag
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "dufflebag.fullname" . }}
+  labels:
+    {{- include "dufflebag.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: dufflebag
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: dufflebag
+    spec:
+      serviceAccountName: {{ include "dufflebag.fullname" . }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      initContainers:
+        - name: wait-for-postgres
+          image: {{ printf "%s:%s" .Values.postgres.image.repository .Values.postgres.image.tag | quote }}
+          command: ["/bin/sh", "-ec", "until pg_isready -h {{ include "dufflebag.fullname" . }}-postgres -U postgres -d dufflebag; do sleep 2; done"]
+          securityContext:
+            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-postgres
+                  key: postgres-password
+          resources:
+            {{- toYaml .Values.postgres.resources | nindent 12 }}
+        # HELM_ASSERT_MIGRATE_BEGIN
+        - name: migrate
+          image: {{ printf "%s:%s" .Values.dufflebag.image.repository .Values.dufflebag.image.tag | quote }}
+          args: ["migrate"]
+          securityContext:
+            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: DFBG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-postgres
+                  key: admin-database-url
+          resources:
+            {{- toYaml .Values.dufflebag.resources | nindent 12 }}
+        # HELM_ASSERT_MIGRATE_END
+        - name: wait-for-vault-bootstrapped
+          image: {{ printf "%s:%s" .Values.vault.image.repository .Values.vault.image.tag | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              export VAULT_ADDR=http://{{ include "dufflebag.fullname" . }}-vault:8200
+              jwt=$(cat /var/run/secrets/kubernetes.io/serviceaccount/token)
+              until login=$(vault write -format=json auth/kubernetes/login role=dufflebag jwt="$jwt" 2>/dev/null); do sleep 2; done
+              token=$(printf '%s' "$login" | sed -n 's/.*"client_token"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p')
+              [ -n "$token" ]
+              VAULT_TOKEN="$token" vault write transit/encrypt/dufflebag plaintext=cmVhZHk= >/dev/null
+          securityContext:
+            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.vault.resources | nindent 12 }}
+        - name: wait-for-ceph
+          image: {{ printf "%s:%s" .Values.ceph.image.repository .Values.ceph.image.tag | quote }}
+          command:
+            - /bin/sh
+            - -ec
+            - |
+              until python3 -c 'import socket; socket.create_connection(("{{ include "dufflebag.fullname" . }}-ceph", 8000), 2).close()'; do sleep 2; done
+          securityContext:
+            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
+          resources:
+            {{- toYaml .Values.ceph.resources | nindent 12 }}
+      containers:
+        - name: dufflebag
+          image: {{ printf "%s:%s" .Values.dufflebag.image.repository .Values.dufflebag.image.tag | quote }}
+          securityContext:
+            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
+          env:
+            - name: DFBG_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-postgres
+                  key: app-database-url
+            - name: DFBG_HTTP_ADDR
+              value: :8080
+            - name: DFBG_KEY_PROVIDER
+              value: vault
+            - name: VAULT_ADDR
+              value: http://{{ include "dufflebag.fullname" . }}-vault:8200
+            - name: DFBG_VAULT_AUTH_METHOD
+              value: kubernetes
+            - name: DFBG_VAULT_K8S_ROLE
+              value: dufflebag
+            - name: DFBG_VAULT_K8S_MOUNT
+              value: kubernetes
+            - name: DFBG_VAULT_K8S_TOKEN_PATH
+              value: /var/run/secrets/kubernetes.io/serviceaccount/token
+            - name: DFBG_VAULT_TRANSIT_MOUNT
+              value: transit
+            - name: DFBG_VAULT_TRANSIT_KEY
+              value: dufflebag
+            - name: DFBG_OBJECT_STORAGE_ENDPOINT
+              value: http://{{ include "dufflebag.fullname" . }}-ceph:8000
+            - name: DFBG_OBJECT_STORAGE_REGION
+              value: us-east-1
+            - name: DFBG_OBJECT_STORAGE_BUCKET
+              value: {{ .Values.ceph.bucket | quote }}
+            - name: DFBG_OBJECT_STORAGE_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-ceph
+                  key: access-key
+            - name: DFBG_OBJECT_STORAGE_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "dufflebag.fullname" . }}-ceph
+                  key: secret-key
+          ports:
+            - name: http
+              containerPort: 8080
+          readinessProbe:
+            # Readiness means listening, not initialized: /sys/health answers
+            # 501 until the instance is claimed, and a Service that never
+            # routes to an unclaimed instance would make the first-run wizard
+            # unreachable. The console route serves 200 as soon as the
+            # listener is up.
+            httpGet:
+              path: /
+              port: http
+            periodSeconds: 2
+          livenessProbe:
+            tcpSocket:
+              port: http
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.dufflebag.resources | nindent 12 }}

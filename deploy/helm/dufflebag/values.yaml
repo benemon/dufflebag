@@ -1,0 +1,58 @@
+# This chart is batteries-included and lab-grade. It initializes Vault with one
+# unseal share and stores both that unseal key and Vault's root token in a
+# namespace Secret so the pod can unseal itself after a restart. Anyone who can
+# read that Secret controls Vault. Production deployments should bring their
+# own independently operated Vault and should not use this chart's trust model.
+
+dufflebag:
+  image:
+    repository: quay.io/benjamin_holmes/dufflebag
+    tag: latest
+  resources: {}
+
+postgres:
+  image:
+    # Fully qualified: OpenShift resolves bare shortnames against Red Hat
+    # registries first, where these tags do not exist.
+    repository: docker.io/library/postgres
+    tag: 17-alpine
+  persistence:
+    size: 2Gi
+  resources: {}
+  adminPassword: migrate
+  appPassword: app
+
+ceph:
+  image:
+    repository: quay.io/benjamin_holmes/ceph-aio
+    tag: v20
+  persistence:
+    size: 10Gi
+  resources: {}
+  bucket: dufflebag
+  accessKey: demoaccess
+  secretKey: demosecret
+
+vault:
+  image:
+    repository: docker.io/hashicorp/vault
+    tag: 2.0.3
+  persistence:
+    size: 1Gi
+  resources: {}
+
+route:
+  enabled: false
+  host: ""
+
+ingress:
+  enabled: false
+  host: dufflebag.local
+
+
+security:
+  # The strict restricted-v2 posture (drop ALL everywhere). Enable on
+  # OpenShift, where pods run at an arbitrary non-root UID; leave false on
+  # plain Kubernetes, where the postgres and ceph images start as root and
+  # need setuid capabilities to drop privileges themselves.
+  openshift: false

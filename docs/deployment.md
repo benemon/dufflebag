@@ -20,6 +20,50 @@ automatically after their expiry window. The image is based on Red Hat UBI
 the OAuth token endpoint, the Packer registry API, the resource-manager API,
 first-run initialisation and the embedded console.
 
+## Helm
+
+The repository includes a self-contained, single-replica chart for a disposable
+or lab deployment. It installs dufflebag, PostgreSQL, ceph-aio object storage,
+and community Vault without dependency charts:
+
+```sh
+helm install dufflebag deploy/helm/dufflebag \
+  --namespace dufflebag --create-namespace
+```
+
+The defaults select the image repository and tag for each component, allocate
+persistent volumes for PostgreSQL, Ceph and Vault, and leave component resource
+requests and limits unset. The same values file carries the internal database
+and object-storage credentials; override those defaults outside an isolated
+lab. `ingress.enabled` adds a plain Kubernetes Ingress. On OpenShift,
+`route.enabled` adds an edge-terminated Route and `route.host` optionally fixes
+its hostname. With neither enabled, the only access point is the in-cluster
+`dufflebag` Service.
+
+On OpenShift, also set `security.openshift=true`. The profile keeps every pod
+under the restricted-v2 constraints — dufflebag, PostgreSQL and Vault all run
+happily at an arbitrary non-root UID — with one exception: the Ceph
+all-in-one image must run as root, so the chart pins its ServiceAccount to
+the `anyuid` SCC via a RoleBinding. Installing therefore needs a user who can
+grant SCC use and create the chart's one ClusterRoleBinding (Vault's token
+reviewer); in practice that means a cluster administrator, which is also true
+of most Route-bearing charts. On plain Kubernetes leave the profile off: the
+PostgreSQL and Ceph images start as root and drop privileges themselves,
+which the default profile permits with a documented capability set.
+
+The chart's Vault lifecycle is deliberately lab-grade. A bootstrap Job creates
+one unseal share and stores both that unseal key and Vault's root token in a
+namespace Secret; an unsealer sidecar reads the Secret after restarts. Anyone
+who can read that Secret controls Vault. Production deployments should bring
+their own independently operated Vault instead of adopting this trust model.
+Deleting the namespace deletes the escrowed credentials, so a retained Vault
+volume without its matching Secret cannot be unsealed.
+
+The chart runs exactly one dufflebag replica. It does not add leader election or
+other HA machinery. A fresh instance stays NotReady until the one-shot
+`POST /sys/init` request claims it, matching the readiness contract described
+under [Serving](#serving).
+
 ## One hostname, no path prefix
 
 Plan the ingress around two constraints that come from the Packer SDK, not
