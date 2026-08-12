@@ -7,6 +7,7 @@ on:
       - 'docs-site/**'
       - 'spec/platform/**'
       - 'docs/**'
+      - 'deploy/helm/**'
 
 permissions:
   contents: read
@@ -36,7 +37,7 @@ jobs:
         run: npm ci
         working-directory: docs-site
       - name: Build documentation
-        run: make docs
+        run: make docs CHART_VERSION="0.1.${{ github.run_number }}"
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v6
       - name: Upload GitHub Pages artifact
