@@ -250,6 +250,50 @@ export async function getVersion(
   return body.version ?? {}
 }
 
+export type RevokeVersionOptions = {
+  revoke_at: string
+  revocation_message?: string
+  skip_descendants_revocation?: true
+  disable_rollback_channels?: true
+}
+
+export async function revokeVersion(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  fingerprint: string,
+  options: RevokeVersionOptions,
+): Promise<void> {
+  const message = options.revocation_message?.trim()
+  await request(
+    token,
+    'PATCH',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+      `/versions/${encodeURIComponent(fingerprint)}`,
+    {
+      revoke_at: options.revoke_at,
+      ...(message ? { revocation_message: message } : {}),
+      ...(options.skip_descendants_revocation ? { skip_descendants_revocation: true } : {}),
+      ...(options.disable_rollback_channels ? { disable_rollback_channels: true } : {}),
+    },
+  )
+}
+
+export async function restoreVersion(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+  fingerprint: string,
+): Promise<void> {
+  await request(
+    token,
+    'PATCH',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+      `/versions/${encodeURIComponent(fingerprint)}`,
+    { restore: true },
+  )
+}
+
 export type ApiVulnerability = {
   identifier?: string
   description?: string

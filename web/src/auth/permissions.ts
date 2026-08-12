@@ -4,6 +4,8 @@ export type Role = (typeof ROLES)[number]
 export const ACTION_REQUIREMENTS = {
   // internal/platform/v1/handler.go's SetPin and DeletePin authorize RoleBuilder.
   pinBuckets: 'builder',
+  // Compatibility-plane registry safety operations authorize RolePublisher.
+  revokeVersions: 'publisher',
   // internal/platform/v1/audit_targets.go checks RoleRoot for create/delete.
   configureAudit: 'root',
   // internal/platform/v1/encryption.go checks RoleRoot for encryption operations.
