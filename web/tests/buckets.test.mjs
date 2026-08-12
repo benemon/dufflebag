@@ -239,6 +239,21 @@ test('bucket deletion names every consequence and renders a server error verbati
   assert.match(markup, /bucket is protected by registry policy/)
 })
 
+test('bucket deletion warns when Bag Drop mirrors the bucket, and only then', () => {
+  const mirrored = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+    bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
+    mirrored: true, onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.match(mirrored, /This bucket is mirrored by Bag Drop/)
+  assert.match(mirrored, /also deletes the destination copy at the next reconcile/)
+
+  const plain = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+    bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
+    onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.doesNotMatch(plain, /mirrored by Bag Drop/)
+})
+
 test('kebab pin toggle drives setPin and deletePin contract calls', async () => {
   const originalFetch = globalThis.fetch
   const requests = []

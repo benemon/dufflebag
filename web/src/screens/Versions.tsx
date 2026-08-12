@@ -15,7 +15,8 @@ import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
 
 import {
-  assignChannelVersion, createChannel, deleteBucket, deleteChannel, signOutIfUnauthorized,
+  assignChannelVersion, createChannel, deleteBucket, deleteChannel, getBagDropStatus,
+  signOutIfUnauthorized,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
@@ -101,6 +102,14 @@ export function Versions() {
           throw err
         }
       }}
+      onCheckMirrored={async () => {
+        if (!state || !tenant) return false
+        const status = await getBagDropStatus(state.token, tenant)
+        return status.associations.some(
+          (association) =>
+            association.bucket_name === bucket && association.state === 'active',
+        )
+      }}
     />
   )
 }
@@ -130,6 +139,7 @@ export function VersionsView({
   onAssignChannel = () => Promise.reject(new Error('No session.')),
   onDeleteChannel = () => Promise.reject(new Error('No session.')),
   onDeleteBucket = () => Promise.reject(new Error('No session.')),
+  onCheckMirrored,
 }: {
   bucket: string
   bucketData?: BucketPage | null
@@ -151,6 +161,7 @@ export function VersionsView({
   onAssignChannel?: (channel: string, fingerprint: string) => Promise<void>
   onDeleteChannel?: (channel: string) => Promise<void>
   onDeleteBucket?: () => Promise<void>
+  onCheckMirrored?: () => Promise<boolean>
 }) {
   const versions = bucketData?.versions ?? suppliedVersions ?? []
   const [facet, setFacet] = useState<'overview' | 'versions' | 'channels'>('overview')
@@ -285,6 +296,7 @@ export function VersionsView({
           callerRole={callerRole}
           onConfirm={onDeleteBucket}
           onClose={() => setDeletingBucket(false)}
+          checkMirrored={onCheckMirrored}
         />
       ) : null}
     </>
