@@ -11,5 +11,6 @@ registry browsing.
 Dufflebag is an independent community project. It is not maintained, supported
 or endorsed by IBM or HashiCorp.
 
+- [Install an instance](./guides/installation.md)
 - [Point Packer and Terraform at an instance](./guides/getting-started.md)
 - [Use the platform API](./guides/platform-api.md)

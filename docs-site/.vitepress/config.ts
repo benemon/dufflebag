@@ -2,6 +2,7 @@ import { existsSync } from 'node:fs'
 import { defineConfig } from 'vitepress'
 
 const guideSidebar = [
+  { text: 'Installation', link: '/guides/installation' },
   { text: 'Getting started', link: '/guides/getting-started' },
   { text: 'Platform API', link: '/guides/platform-api' },
 ]
