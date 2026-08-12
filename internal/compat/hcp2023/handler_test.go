@@ -1578,6 +1578,68 @@ func TestUpdateVersionRevokesThroughTheWire(t *testing.T) {
 	}
 }
 
+func TestUpdateVersionRestoreResponses(t *testing.T) {
+	inherited := registry.Revocation{
+		RevokeAt: testTime.Add(time.Hour), Author: "ops",
+		InheritedFrom: &registry.RevokedAncestor{
+			VersionID: registry.NewID(testTime), BucketName: "base",
+			Fingerprint: "base-fp", VersionName: "v1",
+		},
+	}
+	cases := []struct {
+		name        string
+		revocation  *registry.Revocation
+		wantStatus  int
+		wantMessage string
+	}{
+		{
+			name: "active", wantStatus: http.StatusBadRequest,
+			wantMessage: "Restoring does not apply. This version is valid and it is not scheduled to be revoked. ",
+		},
+		{name: "manually revoked", revocation: &registry.Revocation{
+			RevokeAt: testTime.Add(time.Hour), Author: "ops",
+		}, wantStatus: http.StatusOK},
+		{
+			name: "inherited revocation", revocation: &inherited, wantStatus: http.StatusBadRequest,
+			wantMessage: "Directly restoring this version does not apply. The revocation status is inherited from an ancestor version. To restore this version, the revoked ancestor should be restored.",
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			repository := newFakeRepository()
+			server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+			request(t, server, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+			request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
+				map[string]any{"fingerprint": "fp-1", "template_type": "HCL2"})
+			version := repository.versions["images/fp-1"]
+			if c.revocation != nil {
+				if err := version.Revoke(*c.revocation, testTime); err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			response := request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-1",
+				map[string]any{"restore": true})
+			if response.Code != c.wantStatus {
+				t.Fatalf("status = %d, want %d; body %s", response.Code, c.wantStatus, response.Body)
+			}
+			if c.wantStatus == http.StatusOK {
+				if version.Revocation() != nil {
+					t.Fatalf("manual revocation = %+v; want cleared", version.Revocation())
+				}
+				return
+			}
+			var refusal models.GoogleRPCStatus
+			decodeResponse(t, response, &refusal)
+			if refusal.Code != 9 || refusal.Message != c.wantMessage {
+				t.Fatalf("refusal = code %d message %q; want code 9 message %q",
+					refusal.Code, refusal.Message, c.wantMessage)
+			}
+		})
+	}
+}
+
 func TestUpdateVersionRestoreAuditsRefusalAndSuccess(t *testing.T) {
 	repository := newFakeRepository()
 	seed := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
@@ -1594,6 +1656,23 @@ func TestUpdateVersionRestoreAuditsRefusalAndSuccess(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("restore active status = %d, want 400", response.Code)
 	}
+	request(t, seed, http.MethodPost, testBase+"/buckets/images/versions",
+		map[string]any{"fingerprint": "fp-inherited", "template_type": "HCL2"})
+	inherited := repository.versions["images/fp-inherited"]
+	if err := inherited.Revoke(registry.Revocation{
+		RevokeAt: testTime.Add(time.Hour), Author: "ops",
+		InheritedFrom: &registry.RevokedAncestor{
+			VersionID: registry.NewID(testTime), BucketName: "base",
+			Fingerprint: "base-fp", VersionName: "v1",
+		},
+	}, testTime); err != nil {
+		t.Fatal(err)
+	}
+	response = request(t, server, http.MethodPatch, testBase+"/buckets/images/versions/fp-inherited",
+		map[string]any{"restore": true})
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("restore inherited status = %d, want 400", response.Code)
+	}
 	version := repository.versions["images/fp-1"]
 	if err := version.Revoke(registry.Revocation{
 		RevokeAt: testTime.Add(time.Hour), Author: "ops",
@@ -1607,14 +1686,18 @@ func TestUpdateVersionRestoreAuditsRefusalAndSuccess(t *testing.T) {
 	}
 
 	responses := trail.responses(t)
-	if len(responses) != 2 || len(trail.records) != 4 {
-		t.Fatalf("audit records = %#v; want request/response pairs for refusal and success", trail.records)
+	if len(responses) != 3 || len(trail.records) != 6 {
+		t.Fatalf("audit records = %#v; want request/response pairs for two refusals and success", trail.records)
 	}
 	assertAuditFields(t, responses[0], map[string]any{
 		"operation": "version.update", "target_type": "version", "target_id": "fp-1",
 		"outcome": "refused", "reason": "version_not_revoked",
 	})
 	assertAuditFields(t, responses[1], map[string]any{
+		"operation": "version.update", "target_type": "version", "target_id": "fp-inherited",
+		"outcome": "refused", "reason": "version_revocation_inherited",
+	})
+	assertAuditFields(t, responses[2], map[string]any{
 		"operation": "version.update", "target_type": "version", "target_id": "fp-1",
 		"outcome": "success",
 	}, "reason")

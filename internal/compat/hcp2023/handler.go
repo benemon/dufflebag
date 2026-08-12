@@ -834,6 +834,14 @@ func (h *handler) updateVersion(w http.ResponseWriter, r *http.Request) {
 		writeVersionNotFound(w, r.PathValue("fingerprint"))
 		return
 	}
+	if errors.Is(err, registry.ErrRestoreInherited) {
+		audit.FromContext(r.Context()).Enrich(audit.Enrichment{
+			Outcome: identity.AuditOutcomeRefused, Reason: "version_revocation_inherited",
+		})
+		writeRPCError(w, http.StatusBadRequest, 9,
+			"Directly restoring this version does not apply. The revocation status is inherited from an ancestor version. To restore this version, the revoked ancestor should be restored.")
+		return
+	}
 	if errors.Is(err, registry.ErrConflict) {
 		// Code 9 pairs with HTTP 400 on live HCP, not 409 (dossier §5.1).
 		if body.Restore {
