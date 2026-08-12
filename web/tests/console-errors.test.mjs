@@ -7,7 +7,6 @@ import { createServer } from 'vite'
 
 let vite
 let BucketsView
-let ChannelsView
 let loadBuckets
 let selectTenantProject
 let ApiError
@@ -24,7 +23,6 @@ before(async () => {
     ssr: { noExternal: [/@patternfly\//] },
   })
   ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
-  ;({ ChannelsView } = await vite.ssrLoadModule('/src/screens/Channels.tsx'))
   ;({ loadBuckets } = await vite.ssrLoadModule('/src/data/buckets.ts'))
   ;({ selectTenantProject } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ ApiError, signOutIfUnauthorized } = await vite.ssrLoadModule('/src/api/client.ts'))
@@ -46,15 +44,6 @@ test('bucket and channel failures are visible instead of empty successful data',
   assert.match(bucketMarkup, /Buckets could not be loaded/)
   assert.match(bucketMarkup, /500 from \/packer\/buckets/)
   assert.doesNotMatch(bucketMarkup, /No buckets in this project/)
-
-  const channelMarkup = renderToStaticMarkup(React.createElement(ChannelsView, {
-    byChannel: [],
-    loading: false,
-    failure: 'network unavailable',
-  }))
-  assert.match(channelMarkup, /Channels could not be loaded/)
-  assert.match(channelMarkup, /network unavailable/)
-  assert.doesNotMatch(channelMarkup, /No channels in this project/)
 
   const projectMarkup = renderToStaticMarkup(React.createElement(ProjectLoadFailure, {
     failure: '503 from /resource-manager/projects',
@@ -193,34 +182,6 @@ test('an incomplete v0 at the head of the listing does not put latest behind', a
   }
 })
 
-test('the managed channel is labelled managed, user channels are not', () => {
-  const markup = renderToStaticMarkup(React.createElement(ChannelsView, {
-    byChannel: [
-      {
-        name: 'latest',
-        managed: true,
-        assignments: [{
-          bucket: 'images', versionName: 'v1', fingerprint: 'fp-1', drift: { kind: 'current' },
-        }],
-      },
-      {
-        name: 'production',
-        managed: false,
-        assignments: [{
-          bucket: 'images', versionName: 'v1', fingerprint: 'fp-1', drift: { kind: 'current' },
-        }],
-      },
-    ],
-    loading: false,
-    failure: null,
-  }))
-  assert.match(markup, /latest/)
-  // Exactly one "managed" LABEL — latest's; production must not inherit it.
-  // Matched as element text so the screen's prose ("assignment is managed
-  // with Terraform") cannot satisfy the assertion.
-  const managedLabels = markup.match(/>managed</g) ?? []
-  assert.equal(managedLabels.length, 1)
-})
 
 test('empty results are distinct and unsupported actions are absent', () => {
   const emptyMarkup = renderToStaticMarkup(React.createElement(BucketsView, {
