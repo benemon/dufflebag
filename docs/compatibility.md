@@ -761,6 +761,26 @@ at completion, and refuse mutation with the shapes above.
 > `Dufflebag` under the same branding rule, and pre-migration rows carry the
 > honest explicit unknown `""` because their actor was never stored.
 
+### Channel restriction — stored, not enforced (recorded divergence, 2026-08-12)
+
+The `restricted` flag round-trips faithfully: `CreateChannel` and
+`UpdateChannel` persist it, `GetChannel`/`ListChannels` render it, and the
+managed `latest` carries `restricted: true` as live HCP does. What dufflebag
+deliberately does **not** implement is the access semantics HCP's user
+documentation attaches to the flag — restricted channels being invisible to
+viewer-role users. No dufflebag read path filters on `restricted`; a reader
+sees every channel.
+
+This is a recorded divergence, not an oversight. HCP's documented behaviour
+interacts with the data-source path in a way only a live probe can pin down —
+`latest` is restricted by default upstream, yet `channel_name = "latest"`
+resolution with reader-grade credentials is the commonest consumption pattern,
+so HCP evidently grants data-source access through registry roles rather than
+the flag alone. Enforcing from the documentation without that observation
+risks breaking working reader-credential builds, the exact asymmetry the
+be-permissive rule exists to avoid. If enforcement is ever taken up, a
+viewer-role probe of the channel list and `latest` resolution comes first.
+
 ---
 
 ## 8. Explicitly out of scope
