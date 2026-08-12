@@ -160,6 +160,18 @@ export async function getBucket(token: string, tenant: Tenant, bucket: string): 
   return body.bucket ?? { name: bucket }
 }
 
+export async function deleteBucket(
+  token: string,
+  tenant: Tenant,
+  bucket: string,
+): Promise<void> {
+  await request(
+    token,
+    'DELETE',
+    `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}`,
+  )
+}
+
 export type ApiEnforcedBlockDetail = {
   id?: string
   name?: string

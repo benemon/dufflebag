@@ -8,8 +8,12 @@ import { createServer } from 'vite'
 let vite
 let BucketsView
 let pinBucketAction
+let deleteBucketAction
+let DeleteBucketModalView
 let loadBuckets
 let toggleBucketPin
+let deleteBucket
+let ApiError
 
 before(async () => {
   vite = await createServer({
@@ -19,8 +23,12 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ BucketsView, pinBucketAction } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
+  ;({ BucketsView, pinBucketAction, deleteBucketAction } =
+    await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
+  ;({ DeleteBucketModalView } =
+    await vite.ssrLoadModule('/src/components/DeleteBucketModal.tsx'))
   ;({ loadBuckets, toggleBucketPin } = await vite.ssrLoadModule('/src/data/buckets.ts'))
+  ;({ deleteBucket, ApiError } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
 
 after(async () => {
@@ -48,6 +56,19 @@ const json = (body) =>
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   })
+
+const findElement = (node, predicate) => {
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const found = findElement(child, predicate)
+      if (found) return found
+    }
+    return null
+  }
+  if (!React.isValidElement(node)) return null
+  if (predicate(node)) return node
+  return findElement(node.props.children, predicate)
+}
 
 // Fixtures follow the server's rendering (renderVersion/renderBucket in
 // internal/compat/hcp2023/handler.go): a version carries has_descendants and a
@@ -150,6 +171,72 @@ test('reader sees the kebab pin item disabled with its builder reason', () => {
     label: 'Pin bucket — Requires builder',
   })
   assert.deepEqual(pinBucketAction(true), { disabled: false, label: 'Pin bucket' })
+})
+
+test('bucket-list deletion is live for publisher and disabled with a reason below publisher', () => {
+  for (const role of [null, 'reader', 'builder']) {
+    assert.deepEqual(deleteBucketAction(role), {
+      disabled: true,
+      label: 'Delete bucket… — Requires publisher',
+    })
+  }
+  assert.deepEqual(deleteBucketAction('publisher'), {
+    disabled: false,
+    label: 'Delete bucket…',
+  })
+})
+
+test('bucket deletion sends DELETE to the exact compat-plane path', async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (input, init) => {
+    calls.push({ path: String(input), init })
+    return new Response(null, { status: 204 })
+  }
+  try {
+    await deleteBucket(
+      'bearer',
+      { organizationID: 'org one', projectID: 'project/one' },
+      'images/base',
+    )
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].init.method, 'DELETE')
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer bearer')
+  assert.equal(
+    calls[0].path,
+    '/packer/2023-01-01/organizations/org%20one/projects/project%2Fone/buckets/images%2Fbase',
+  )
+  assert.equal('body' in calls[0].init, false)
+})
+
+test('bucket deletion waits for the plain danger confirmation', async () => {
+  let deletes = 0
+  const modal = DeleteBucketModalView({
+    bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
+    onConfirm: async () => { deletes++ }, onClose: () => {},
+  })
+  assert.equal(deletes, 0)
+  const danger = findElement(modal, (element) => element.props.variant === 'danger')
+  await danger.props.onClick()
+  assert.equal(deletes, 1)
+})
+
+test('bucket deletion names every consequence and renders a server error verbatim', () => {
+  const message = new ApiError(409, 'bucket is protected by registry policy').message
+  const markup = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+    bucket: 'images', callerRole: 'publisher', submitting: false, failure: message,
+    onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.match(markup, /Delete images/)
+  assert.match(
+    markup,
+    /Deleting images permanently removes the bucket and all its versions, builds, artifacts, channels and history\./,
+  )
+  assert.match(markup, /The action was refused/)
+  assert.match(markup, /bucket is protected by registry policy/)
 })
 
 test('kebab pin toggle drives setPin and deletePin contract calls', async () => {
