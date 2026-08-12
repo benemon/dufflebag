@@ -7,7 +7,8 @@ import "errors"
 // missing version — because those codes are transport accidents, not domain
 // facts. See docs/architecture.md.
 var (
-	ErrNotFound = errors.New("not found")
-	ErrInvalid  = errors.New("invalid")
-	ErrConflict = errors.New("conflict")
+	ErrNotFound         = errors.New("not found")
+	ErrInvalid          = errors.New("invalid")
+	ErrConflict         = errors.New("conflict")
+	ErrRestoreInherited = errors.New("restore inherited revocation")
 )

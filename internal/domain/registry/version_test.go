@@ -260,6 +260,28 @@ func TestRestoreRefusesValidVersion(t *testing.T) {
 	}
 }
 
+func TestRestoreRefusesInheritedRevocation(t *testing.T) {
+	v := newVersion(t)
+	revocation := Revocation{
+		RevokeAt: epoch.Add(time.Hour), Author: "ops",
+		InheritedFrom: &RevokedAncestor{
+			VersionID: NewID(epoch), BucketName: "base", Fingerprint: "base-fp", VersionName: "v1",
+		},
+	}
+	if err := v.Revoke(revocation, epoch); err != nil {
+		t.Fatalf("Revoke: %v", err)
+	}
+	if err := v.Restore(epoch.Add(2 * time.Hour)); !errors.Is(err, ErrRestoreInherited) || !errors.Is(err, ErrConflict) {
+		t.Fatalf("Restore = %v; want ErrRestoreInherited in the ErrConflict family", err)
+	}
+	if got := v.Revocation(); got == nil || got.InheritedFrom == nil {
+		t.Fatalf("Revocation() = %+v; refused restore must leave it intact", got)
+	}
+	if !v.UpdatedAt.Equal(epoch) {
+		t.Fatalf("UpdatedAt = %v; refused restore must leave it unchanged", v.UpdatedAt)
+	}
+}
+
 func TestRevokeRejectsBadInput(t *testing.T) {
 	cases := []struct {
 		name string

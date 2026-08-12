@@ -3110,6 +3110,65 @@ func TestRestoreRevokedVersionClearsMatchingInheritedDescendantsAndAllowsRerevok
 	}
 }
 
+func TestRestoreRevokedVersionRefusesInheritedDescendantAndLeavesRowIntact(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	repository.SetKeyring(testRing(t))
+	at := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+	seedRestoreVersionGraph(t, repository, tenant, at, map[string][]string{
+		"base": nil, "derived": {"base"},
+	})
+	if _, err := repository.RevokeVersion(ctx, tenant, "base", "base-fp",
+		store.RevocationRequest{RevokeAt: at.Add(time.Hour), Message: "inherited", Author: "ops"},
+		func(*registry.Version) string { return "v1" }, at.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+
+	before, err := repository.GetVersion(ctx, tenant, "derived", "derived-fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := before.Revocation()
+	if want == nil || want.InheritedFrom == nil {
+		t.Fatalf("derived revocation = %+v; want inherited", want)
+	}
+	updatedAt := before.UpdatedAt
+	if _, err := repository.RestoreRevokedVersion(
+		ctx, tenant, "derived", "derived-fp", at.Add(2*time.Hour),
+	); !errors.Is(err, registry.ErrRestoreInherited) || !errors.Is(err, registry.ErrConflict) {
+		t.Fatalf("restore inherited descendant = %v; want ErrRestoreInherited in the ErrConflict family", err)
+	}
+
+	// This read independently verifies the unchanged row's integrity MAC.
+	after, err := repository.GetVersion(ctx, tenant, "derived", "derived-fp")
+	if err != nil {
+		t.Fatalf("read refused descendant with its original MAC: %v", err)
+	}
+	got := after.Revocation()
+	if got == nil || got.InheritedFrom == nil ||
+		!got.RevokeAt.Equal(want.RevokeAt) || got.Message != want.Message || got.Author != want.Author ||
+		*got.InheritedFrom != *want.InheritedFrom || !after.UpdatedAt.Equal(updatedAt) {
+		t.Fatalf("derived after refused restore = revocation %+v updated_at %v; want %+v and %v",
+			got, after.UpdatedAt, want, updatedAt)
+	}
+
+	if _, err := repository.RestoreRevokedVersion(
+		ctx, tenant, "base", "base-fp", at.Add(3*time.Hour),
+	); err != nil {
+		t.Fatalf("restore ancestor: %v", err)
+	}
+	cleared, err := repository.GetVersion(ctx, tenant, "derived", "derived-fp")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.Revocation() != nil {
+		t.Fatalf("derived revocation after ancestor restore = %+v; want cleared", cleared.Revocation())
+	}
+}
+
 func TestRestoreRevokedVersionLeavesManualDescendantRevoked(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()

@@ -1083,6 +1083,25 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 		t.Fatalf("generated inherited revocation = %#v", inherited)
 	}
 
+	// A descendant cannot restore a revocation inherited from its ancestor.
+	updateVersionRefusal = nil
+	_, err = client.PackerServiceUpdateVersion(
+		packer_service.NewPackerServiceUpdateVersionParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBucketName("derived").
+			WithFingerprint("derived-1").
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101UpdateVersionBody{Restore: true}),
+		contractAuth,
+	)
+	if !errors.As(err, &updateVersionRefusal) || !updateVersionRefusal.IsCode(http.StatusBadRequest) ||
+		updateVersionRefusal.Payload.Code != 9 ||
+		updateVersionRefusal.Payload.Message !=
+			"Directly restoring this version does not apply. The revocation status is inherited from an ancestor version. To restore this version, the revoked ancestor should be restored." {
+		t.Fatalf("generated UpdateVersion restore inherited = %#v, %v; want the exact parsed 400 code 9",
+			updateVersionRefusal, err)
+	}
+
 	// Re-revoking is a state conflict: 400 with code 9, like the managed
 	// channel refusals.
 	_, err = client.PackerServiceUpdateVersion(
@@ -2126,9 +2145,14 @@ func (r *contractRepository) RestoreRevokedVersion(
 			revocation.InheritedFrom.VersionID != version.ID {
 			continue
 		}
-		if err := descendant.Restore(at); err != nil {
+		sequence, _ := descendant.Sequence()
+		state := *descendant
+		state.UpdatedAt = at
+		restored, err := registry.RestoreVersion(state, descendant.Complete(), sequence, nil)
+		if err != nil {
 			return nil, err
 		}
+		*descendant = *restored
 	}
 	return version, nil
 }

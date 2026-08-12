@@ -174,8 +174,11 @@ func (v *Version) Revoke(rev Revocation, at time.Time) error {
 
 // Restore clears a version's revocation state.
 func (v *Version) Restore(at time.Time) error {
-	if v.revocation == nil {
+	switch {
+	case v.revocation == nil:
 		return fmt.Errorf("%w: version %s is not revoked", ErrConflict, v.ID)
+	case v.revocation.InheritedFrom != nil:
+		return fmt.Errorf("%w: %w: version %s inherits its revocation", ErrConflict, ErrRestoreInherited, v.ID)
 	}
 	v.revocation = nil
 	v.UpdatedAt = at

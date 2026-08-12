@@ -308,6 +308,11 @@ trailing space); combining restore with `revoke_at` or `revoke_in` returns code
 3. Restore does not forward-roll channel assignments. In the recorded diamond
 limit, a descendant also covered by a second still-revoked ancestor becomes
 active because inheritance is computed at revoke time only (duf-1hy6).
+As live-proven on 2026-08-12 (probe A.14), directly restoring an
+inherited-revoked version is refused with `Directly restoring this version does
+not apply. The revocation status is inherited from an ancestor version. To
+restore this version, the revoked ancestor should be restored.` Restore the
+ancestor instead, which clears its inherited descendants.
 
 Channel rollback matches upstream (duf-h37y, confirmed by a 2026-08-09 live
 probe: revoking a version rolls every channel then pointing at it — user
