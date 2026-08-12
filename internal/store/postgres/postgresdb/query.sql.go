@@ -1009,6 +1009,72 @@ func (q *Queries) GetVersionByFingerprint(ctx context.Context, arg GetVersionByF
 	return i, err
 }
 
+const getVersionByID = `-- name: GetVersionByID :one
+SELECT versions.organization_id, versions.project_id, versions.id, versions.bucket_id, versions.fingerprint, versions.template_type, versions.complete, versions.sequence, versions.created_at, versions.updated_at, versions.author_id, versions.integrity_mac, versions.revoke_at, versions.revocation_message, versions.revocation_author, versions.revocation_inherited_from_id, versions.revocation_inherited_from_bucket, versions.revocation_inherited_from_fingerprint, versions.revocation_inherited_from_name, buckets.name AS bucket_name
+FROM versions
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE versions.organization_id = $1
+  AND versions.project_id = $2
+  AND versions.id = $3
+`
+
+type GetVersionByIDParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	ID             string    `json:"id"`
+}
+
+type GetVersionByIDRow struct {
+	OrganizationID                     uuid.UUID      `json:"organization_id"`
+	ProjectID                          uuid.UUID      `json:"project_id"`
+	ID                                 string         `json:"id"`
+	BucketID                           string         `json:"bucket_id"`
+	Fingerprint                        string         `json:"fingerprint"`
+	TemplateType                       string         `json:"template_type"`
+	Complete                           bool           `json:"complete"`
+	Sequence                           sql.NullInt32  `json:"sequence"`
+	CreatedAt                          time.Time      `json:"created_at"`
+	UpdatedAt                          time.Time      `json:"updated_at"`
+	AuthorID                           string         `json:"author_id"`
+	IntegrityMac                       []byte         `json:"integrity_mac"`
+	RevokeAt                           sql.NullTime   `json:"revoke_at"`
+	RevocationMessage                  sql.NullString `json:"revocation_message"`
+	RevocationAuthor                   sql.NullString `json:"revocation_author"`
+	RevocationInheritedFromID          sql.NullString `json:"revocation_inherited_from_id"`
+	RevocationInheritedFromBucket      sql.NullString `json:"revocation_inherited_from_bucket"`
+	RevocationInheritedFromFingerprint sql.NullString `json:"revocation_inherited_from_fingerprint"`
+	RevocationInheritedFromName        sql.NullString `json:"revocation_inherited_from_name"`
+	BucketName                         string         `json:"bucket_name"`
+}
+
+func (q *Queries) GetVersionByID(ctx context.Context, arg GetVersionByIDParams) (GetVersionByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getVersionByID, arg.OrganizationID, arg.ProjectID, arg.ID)
+	var i GetVersionByIDRow
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ProjectID,
+		&i.ID,
+		&i.BucketID,
+		&i.Fingerprint,
+		&i.TemplateType,
+		&i.Complete,
+		&i.Sequence,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.AuthorID,
+		&i.IntegrityMac,
+		&i.RevokeAt,
+		&i.RevocationMessage,
+		&i.RevocationAuthor,
+		&i.RevocationInheritedFromID,
+		&i.RevocationInheritedFromBucket,
+		&i.RevocationInheritedFromFingerprint,
+		&i.RevocationInheritedFromName,
+		&i.BucketName,
+	)
+	return i, err
+}
+
 const getVersionRelationships = `-- name: GetVersionRelationships :one
 WITH parents AS (
     SELECT builds.parent_version_id,

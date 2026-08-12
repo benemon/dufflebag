@@ -406,6 +406,7 @@ func (r *Repository) CreateBuild(
 	bucketName, fingerprint string,
 	templateType registry.TemplateType,
 	build StoredBuild,
+	versionName func(*registry.Version) string,
 ) (*StoredBuild, error) {
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
@@ -453,6 +454,11 @@ func (r *Repository) CreateBuild(
 		return nil, mapNotFound("create build", err)
 	}
 	if err := r.sealBuildRow(ctx, q, &row); err != nil {
+		return nil, err
+	}
+	if err := r.inheritParentRevocation(
+		ctx, q, tenant, version, row.ParentVersionID.String, versionName, build.CreatedAt,
+	); err != nil {
 		return nil, err
 	}
 	for _, artifact := range build.Artifacts {
@@ -543,6 +549,7 @@ func (r *Repository) UpdateBuild(
 	tenant Tenant,
 	bucketName, fingerprint string,
 	build StoredBuild,
+	versionName func(*registry.Version) string,
 	at time.Time,
 ) (*StoredBuild, error) {
 	tx, q, err := r.begin(ctx, tenant)
@@ -613,6 +620,11 @@ func (r *Repository) UpdateBuild(
 	if err != nil {
 		return nil, err
 	}
+	if err := r.inheritParentRevocation(
+		ctx, q, tenant, version, row.ParentVersionID.String, versionName, at,
+	); err != nil {
+		return nil, err
+	}
 	if !version.Complete() && version.ReadyToComplete() {
 		if _, err := q.LockBucketForVersionSequence(ctx, versionRow.BucketID); err != nil {
 			return nil, fmt.Errorf("lock bucket for version sequence: %w", err)
@@ -648,12 +660,14 @@ func (r *Repository) UpdateBuild(
 		// probes 13-14). The channel exists for every bucket (CreateBucket
 		// above, migration 000008), so a miss here is data corruption, not a
 		// client condition.
-		latest, err := r.getChannel(ctx, tx, q, tenant, bucketName, "latest")
-		if err != nil {
-			return nil, fmt.Errorf("managed latest channel for completion: %w", err)
-		}
-		if err := r.recordAssignment(ctx, tx, tenant, latest.ID, version.ID, "Dufflebag", at); err != nil {
-			return nil, err
+		if revocation := version.Revocation(); revocation == nil || revocation.RevokeAt.After(at) {
+			latest, err := r.getChannel(ctx, tx, q, tenant, bucketName, "latest")
+			if err != nil {
+				return nil, fmt.Errorf("managed latest channel for completion: %w", err)
+			}
+			if err := r.recordAssignment(ctx, tx, tenant, latest.ID, version.ID, "Dufflebag", at); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -665,6 +679,78 @@ func (r *Repository) UpdateBuild(
 		return nil, fmt.Errorf("commit update build: %w", err)
 	}
 	return restored, nil
+}
+
+// inheritParentRevocation applies a stored build's explicit parent-version
+// edge. Missing, foreign, and self-referential IDs are tolerated like ancestry
+// reads, and an existing child revocation always wins.
+func (r *Repository) inheritParentRevocation(
+	ctx context.Context,
+	q *postgresdb.Queries,
+	tenant Tenant,
+	child *registry.Version,
+	parentVersionID string,
+	versionName func(*registry.Version) string,
+	at time.Time,
+) error {
+	if parentVersionID == "" || parentVersionID == child.ID.String() || child.Revocation() != nil {
+		return nil
+	}
+	row, err := q.GetVersionByID(ctx, postgresdb.GetVersionByIDParams{
+		OrganizationID: tenant.OrganizationID,
+		ProjectID:      tenant.ProjectID,
+		ID:             parentVersionID,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get parent version for revocation inheritance: %w", err)
+	}
+	parent, err := r.restoreVersion(ctx, q, tenant, postgresdb.GetVersionByFingerprintRow(row))
+	if err != nil {
+		return err
+	}
+	parentRevocation := parent.Revocation()
+	if parentRevocation == nil {
+		return nil
+	}
+	ancestor := registry.RevokedAncestor{
+		VersionID: parent.ID, BucketName: parent.BucketName, Fingerprint: parent.Fingerprint,
+		VersionName: versionName(parent),
+	}
+	inherited := registry.Revocation{
+		RevokeAt: parentRevocation.RevokeAt, Message: parentRevocation.Message,
+		Author: parentRevocation.Author, InheritedFrom: &ancestor,
+	}
+	if err := child.Revoke(inherited, at); err != nil {
+		if errors.Is(err, registry.ErrConflict) {
+			return nil
+		}
+		return err
+	}
+	if err := r.revokeRow(ctx, q, child.ID.String(), inherited, at); err != nil {
+		if errors.Is(err, registry.ErrConflict) {
+			row, reloadErr := q.GetVersionByID(ctx, postgresdb.GetVersionByIDParams{
+				OrganizationID: tenant.OrganizationID,
+				ProjectID:      tenant.ProjectID,
+				ID:             child.ID.String(),
+			})
+			if reloadErr != nil {
+				return fmt.Errorf("reload concurrently revoked child version: %w", reloadErr)
+			}
+			persisted, reloadErr := r.restoreVersion(
+				ctx, q, tenant, postgresdb.GetVersionByFingerprintRow(row),
+			)
+			if reloadErr != nil {
+				return reloadErr
+			}
+			*child = *persisted
+			return nil
+		}
+		return err
+	}
+	return nil
 }
 
 // RevocationRequest is a manual revocation as the compat plane received it.

@@ -415,8 +415,8 @@ func TestBagDropSnapshotExcludesManagedLatestTripwire(t *testing.T) {
 				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker", Status: registry.BuildRunning,
 			},
 			Labels: map[string]string{}, CreatedAt: at.Add(2 * time.Second),
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,8 +424,8 @@ func TestBagDropSnapshotExcludesManagedLatestTripwire(t *testing.T) {
 	completed.Status = registry.BuildDone
 	completed.MetadataSeen = true
 	if _, err := repository.UpdateBuild(
-		ctx, tenant, bucket.Name, version.Fingerprint, completed, at.Add(3*time.Second),
-	); err != nil {
+		ctx, tenant, bucket.Name, version.Fingerprint, completed, testVersionName,
+		at.Add(3*time.Second)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.CreateChannel(ctx, tenant, store.Channel{

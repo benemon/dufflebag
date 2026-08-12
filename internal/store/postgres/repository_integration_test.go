@@ -28,6 +28,13 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
+func testVersionName(version *registry.Version) string {
+	if sequence, complete := version.Sequence(); complete {
+		return fmt.Sprintf("v%d", sequence)
+	}
+	return "v0"
+}
+
 func TestRepositoryRoundTripsRegistryAggregate(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -107,8 +114,8 @@ func TestRepositoryRoundTripsRegistryAggregate(t *testing.T) {
 				CreatedAt:          buildAt.Add(2 * time.Millisecond),
 			}},
 			CreatedAt: buildAt,
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("CreateBuild: %v", err)
 	}
@@ -124,8 +131,8 @@ func TestRepositoryRoundTripsRegistryAggregate(t *testing.T) {
 				Status: registry.BuildRunning, Platform: "docker",
 			},
 			PackerRunUUID: "run-2", Labels: map[string]string{}, CreatedAt: buildAt.Add(3 * time.Second),
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("CreateBuild newer: %v", err)
 	}
@@ -202,8 +209,8 @@ func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 				Status: registry.BuildRunning, Platform: "docker",
 			},
 			Labels: map[string]string{}, CreatedAt: at.Add(5 * time.Second),
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,8 +220,9 @@ func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 	childBuild.ParentVersionID = parentVersion.ID.String()
 	childBuild.ParentChannelID = parentChannel.ID.String()
 	updated, err := repository.UpdateBuild(
-		ctx, tenant, childBucket.Name, childVersion.Fingerprint, *childBuild, at.Add(6*time.Second),
-	)
+		ctx, tenant, childBucket.Name, childVersion.Fingerprint, *childBuild, testVersionName,
+		at.Add(6*time.Second))
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -324,8 +332,7 @@ func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 			ParentChannelID: parentChannel.ID.String(),
 			Labels:          map[string]string{},
 			CreatedAt:       at.Add(10 * time.Second),
-		},
-	); err != nil {
+		}, testVersionName); err != nil {
 		t.Fatal(err)
 	}
 	stableChannel, err := repository.CreateChannel(ctx, tenant, store.Channel{
@@ -347,8 +354,7 @@ func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 			ParentChannelID: stableChannel.ID.String(),
 			Labels:          map[string]string{},
 			CreatedAt:       at.Add(10*time.Second + 2*time.Millisecond),
-		},
-	); err != nil {
+		}, testVersionName); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
@@ -469,8 +475,7 @@ func TestRepositoryCreateSequenceIsIdempotent(t *testing.T) {
 				ID: registry.NewID(at.Add(3 * time.Second)), ComponentType: "mismatched", Status: registry.BuildPending,
 			},
 			Labels: map[string]string{}, CreatedAt: at,
-		},
-	); !errors.Is(err, registry.ErrConflict) {
+		}, testVersionName); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("CreateBuild template mismatch = %v, want ErrConflict", err)
 	}
 
@@ -481,8 +486,8 @@ func TestRepositoryCreateSequenceIsIdempotent(t *testing.T) {
 				ID: registry.NewID(at.Add(3 * time.Second)), ComponentType: "docker", Status: registry.BuildPending,
 			},
 			Labels: map[string]string{}, CreatedAt: at,
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -509,8 +514,8 @@ func TestRepositoryCreateSequenceIsIdempotent(t *testing.T) {
 				ID: registry.NewID(at.Add(5 * time.Second)), ComponentType: "docker", Status: registry.BuildPending,
 			},
 			Labels: map[string]string{}, CreatedAt: at.Add(time.Minute),
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("replayed CreateBuild: %v", err)
 	}
@@ -631,8 +636,8 @@ func TestRepositoryConcurrentCreateSequenceIsIdempotent(t *testing.T) {
 						},
 						Labels:    map[string]string{},
 						CreatedAt: workerAt,
-					},
-				)
+					}, testVersionName)
+
 				buildResults[componentIndex] <- buildResult{
 					worker: worker, component: component, build: build, err: buildErr,
 				}
@@ -790,16 +795,17 @@ func TestRepositoryUpdateBuildHeartbeatIsNotAStateTransition(t *testing.T) {
 				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker", Status: registry.BuildRunning,
 			},
 			Labels: map[string]string{}, CreatedAt: at.Add(2 * time.Second),
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	heartbeatAt := at.Add(time.Hour)
 	afterHeartbeat, err := repository.UpdateBuild(
-		ctx, tenant, bucket.Name, version.Fingerprint, *build, heartbeatAt,
-	)
+		ctx, tenant, bucket.Name, version.Fingerprint, *build, testVersionName,
+		heartbeatAt)
+
 	if err != nil {
 		t.Fatalf("heartbeat UpdateBuild: %v", err)
 	}
@@ -819,8 +825,9 @@ func TestRepositoryUpdateBuildHeartbeatIsNotAStateTransition(t *testing.T) {
 	completedBuild.MetadataSeen = true
 	completedAt := heartbeatAt.Add(time.Minute)
 	afterCompletion, err := repository.UpdateBuild(
-		ctx, tenant, bucket.Name, version.Fingerprint, completedBuild, completedAt,
-	)
+		ctx, tenant, bucket.Name, version.Fingerprint, completedBuild, testVersionName,
+		completedAt)
+
 	if err != nil {
 		t.Fatalf("meaningful UpdateBuild: %v", err)
 	}
@@ -1156,8 +1163,7 @@ func TestRepositoryBucketsIncludeLatestVersionAndPlatforms(t *testing.T) {
 				}}
 			}
 			if _, err := repository.CreateBuild(
-				ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2, build,
-			); err != nil {
+				ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2, build, testVersionName); err != nil {
 				t.Fatalf("CreateBuild %s/%s: %v", seed.fingerprint, buildSeed.component, err)
 			}
 		}
@@ -1284,8 +1290,8 @@ func TestVersionCompletionAssignsManagedLatest(t *testing.T) {
 					ID: registry.NewID(buildAt), ComponentType: "docker", Status: registry.BuildRunning,
 				},
 				Labels: map[string]string{}, CreatedAt: buildAt,
-			},
-		)
+			}, testVersionName)
+
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1293,8 +1299,8 @@ func TestVersionCompletionAssignsManagedLatest(t *testing.T) {
 		completed.Status = registry.BuildDone
 		completed.MetadataSeen = true
 		if _, err := repository.UpdateBuild(
-			ctx, tenant, bucket.Name, fingerprint, completed, completeAt,
-		); err != nil {
+			ctx, tenant, bucket.Name, fingerprint, completed, testVersionName,
+			completeAt); err != nil {
 			t.Fatalf("completing UpdateBuild: %v", err)
 		}
 	}
@@ -1354,8 +1360,8 @@ func TestVersionCompletionAssignsManagedLatest(t *testing.T) {
 		t.Fatal(err)
 	}
 	if _, err := repository.UpdateBuild(
-		ctx, tenant, bucket.Name, "fp-2", builds[0], at.Add(3*time.Hour),
-	); err != nil {
+		ctx, tenant, bucket.Name, "fp-2", builds[0], testVersionName,
+		at.Add(3*time.Hour)); err != nil {
 		t.Fatal(err)
 	}
 	history, err = repository.ListChannelAssignmentHistory(ctx, tenant, bucket.Name, "latest")
@@ -1404,8 +1410,8 @@ func TestConcurrentVersionCompletionsAllocateDistinctSequences(t *testing.T) {
 						ComponentType: "docker", Status: registry.BuildRunning,
 					},
 					Labels: map[string]string{}, CreatedAt: createdAt,
-				},
-			)
+				}, testVersionName)
+
 			if err != nil {
 				t.Fatalf("round %d CreateBuild: %v", round, err)
 			}
@@ -1422,8 +1428,9 @@ func TestConcurrentVersionCompletionsAllocateDistinctSequences(t *testing.T) {
 				defer wg.Done()
 				<-start
 				_, err := repository.UpdateBuild(
-					ctx, tenant, bucket.Name, fingerprints[i], *builds[i], at.Add(24*time.Hour),
-				)
+					ctx, tenant, bucket.Name, fingerprints[i], *builds[i], testVersionName,
+					at.Add(24*time.Hour))
+
 				errs <- err
 			}(i)
 		}
@@ -2185,18 +2192,18 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 	if _, err := repository.CreateVersion(ctx, tenant, complete); err != nil {
 		t.Fatal(err)
 	}
-	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, complete.Fingerprint,
-		registry.TemplateHCL2, store.StoredBuild{
-			Build: registry.Build{
-				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "amazon-ebs",
-				Status: registry.BuildRunning, Platform: "aws",
-			},
-			Artifacts: []store.Artifact{{
-				ID: registry.NewID(at.Add(2 * time.Second)), ExternalIdentifier: "ami-1",
-				Region: "eu-west-2", CreatedAt: at,
-			}},
-			CreatedAt: at,
-		})
+	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, complete.Fingerprint, registry.TemplateHCL2, store.StoredBuild{
+		Build: registry.Build{
+			ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "amazon-ebs",
+			Status: registry.BuildRunning, Platform: "aws",
+		},
+		Artifacts: []store.Artifact{{
+			ID: registry.NewID(at.Add(2 * time.Second)), ExternalIdentifier: "ami-1",
+			Region: "eu-west-2", CreatedAt: at,
+		}},
+		CreatedAt: at,
+	}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("CreateBuild: %v", err)
 	}
@@ -2311,14 +2318,14 @@ func TestUploadSbomStoresAndReplaces(t *testing.T) {
 	if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
 		t.Fatal(err)
 	}
-	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, version.Fingerprint,
-		registry.TemplateHCL2, store.StoredBuild{
-			Build: registry.Build{
-				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker",
-				Status: registry.BuildRunning, Platform: "docker",
-			},
-			CreatedAt: at,
-		})
+	build, err := repository.CreateBuild(ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2, store.StoredBuild{
+		Build: registry.Build{
+			ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker",
+			Status: registry.BuildRunning, Platform: "docker",
+		},
+		CreatedAt: at,
+	}, testVersionName)
+
 	if err != nil {
 		t.Fatalf("CreateBuild: %v", err)
 	}
@@ -2736,16 +2743,16 @@ func TestRevokeVersionRollsBackChannelFromInheritedDescendant(t *testing.T) {
 				Status: registry.BuildRunning,
 			},
 			Labels: map[string]string{}, ParentVersionID: parent.ID.String(), CreatedAt: childCreatedAt,
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 	childBuild.Status = registry.BuildDone
 	childBuild.MetadataSeen = true
 	if _, err := repository.UpdateBuild(
-		ctx, tenant, "rollback-child", "child-new-fp", *childBuild, at.Add(7*time.Minute),
-	); err != nil {
+		ctx, tenant, "rollback-child", "child-new-fp", *childBuild, testVersionName,
+		at.Add(7*time.Minute)); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := repository.CreateChannel(ctx, tenant, store.Channel{
@@ -2809,16 +2816,16 @@ func completeVersionForRollback(
 				Status: registry.BuildRunning,
 			},
 			Labels: map[string]string{}, CreatedAt: createdAt,
-		},
-	)
+		}, testVersionName)
+
 	if err != nil {
 		t.Fatal(err)
 	}
 	build.Status = registry.BuildDone
 	build.MetadataSeen = true
 	if _, err := repository.UpdateBuild(
-		ctx, tenant, bucketName, fingerprint, *build, completeAt,
-	); err != nil {
+		ctx, tenant, bucketName, fingerprint, *build, testVersionName,
+		completeAt); err != nil {
 		t.Fatal(err)
 	}
 	completed, err := repository.GetVersion(ctx, tenant, bucketName, fingerprint)
@@ -2861,16 +2868,15 @@ func TestRevokeVersionInheritsDownAncestryTransitively(t *testing.T) {
 		}
 		versions[name] = version
 		if parent, ok := parents[name]; ok {
-			if _, err := repository.CreateBuild(ctx, tenant, name, version.Fingerprint,
-				registry.TemplateHCL2, store.StoredBuild{
-					Build: registry.Build{
-						ID: registry.NewID(when.Add(2 * time.Second)), ComponentType: "docker",
-						Status: registry.BuildRunning, Platform: "docker",
-					},
-					Labels:          map[string]string{},
-					ParentVersionID: versions[parent].ID.String(),
-					CreatedAt:       when.Add(2 * time.Second),
-				}); err != nil {
+			if _, err := repository.CreateBuild(ctx, tenant, name, version.Fingerprint, registry.TemplateHCL2, store.StoredBuild{
+				Build: registry.Build{
+					ID: registry.NewID(when.Add(2 * time.Second)), ComponentType: "docker",
+					Status: registry.BuildRunning, Platform: "docker",
+				},
+				Labels:          map[string]string{},
+				ParentVersionID: versions[parent].ID.String(),
+				CreatedAt:       when.Add(2 * time.Second),
+			}, testVersionName); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -2992,16 +2998,15 @@ func TestRevokeVersionSkipsDescendantsWhenAsked(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := repository.CreateBuild(ctx, tenant, "solo-child", "solo-child-fp",
-		registry.TemplateHCL2, store.StoredBuild{
-			Build: registry.Build{
-				ID: registry.NewID(at.Add(2 * time.Minute)), ComponentType: "docker",
-				Status: registry.BuildRunning, Platform: "docker",
-			},
-			Labels:          map[string]string{},
-			ParentVersionID: parent.ID.String(),
-			CreatedAt:       at.Add(2 * time.Minute),
-		}); err != nil {
+	if _, err := repository.CreateBuild(ctx, tenant, "solo-child", "solo-child-fp", registry.TemplateHCL2, store.StoredBuild{
+		Build: registry.Build{
+			ID: registry.NewID(at.Add(2 * time.Minute)), ComponentType: "docker",
+			Status: registry.BuildRunning, Platform: "docker",
+		},
+		Labels:          map[string]string{},
+		ParentVersionID: parent.ID.String(),
+		CreatedAt:       at.Add(2 * time.Minute),
+	}, testVersionName); err != nil {
 		t.Fatal(err)
 	}
 
@@ -3058,16 +3063,15 @@ func seedRestoreVersionGraph(
 	for _, name := range names {
 		for i, parent := range parents[name] {
 			when := at.Add(time.Duration(len(names)+i) * time.Minute)
-			if _, err := repository.CreateBuild(context.Background(), tenant, name, name+"-fp",
-				registry.TemplateHCL2, store.StoredBuild{
-					Build: registry.Build{
-						ID: registry.NewID(when), ComponentType: fmt.Sprintf("docker-%d", i),
-						Status: registry.BuildRunning, Platform: "docker",
-					},
-					Labels:          map[string]string{},
-					ParentVersionID: versions[parent].ID.String(),
-					CreatedAt:       when,
-				}); err != nil {
+			if _, err := repository.CreateBuild(context.Background(), tenant, name, name+"-fp", registry.TemplateHCL2, store.StoredBuild{
+				Build: registry.Build{
+					ID: registry.NewID(when), ComponentType: fmt.Sprintf("docker-%d", i),
+					Status: registry.BuildRunning, Platform: "docker",
+				},
+				Labels:          map[string]string{},
+				ParentVersionID: versions[parent].ID.String(),
+				CreatedAt:       when,
+			}, testVersionName); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -3234,5 +3238,265 @@ func TestRestoreRevokedVersionLeavesDescendantInheritedFromDifferentAncestor(t *
 	if rev := child.Revocation(); rev == nil || rev.InheritedFrom == nil ||
 		rev.InheritedFrom.VersionID != versions["other"].ID || rev.Author != "other-owner" {
 		t.Fatalf("child revocation = %+v; different ancestor's inherited revocation must stand", rev)
+	}
+}
+
+func TestRecordTimeRevocationInheritance(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	repository.SetKeyring(testRing(t))
+	at := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	next := 0
+
+	createVersion := func(name string, complete bool) *registry.Version {
+		t.Helper()
+		when := at.Add(time.Duration(next) * time.Minute)
+		next++
+		if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+			ID: registry.NewID(when), Name: name, Labels: map[string]string{}, CreatedAt: when,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		version := registry.Version{
+			ID: registry.NewID(when.Add(time.Second)), BucketName: name,
+			Fingerprint: name + "-fp", TemplateType: registry.TemplateHCL2,
+			CreatedAt: when, UpdatedAt: when,
+		}
+		var restored *registry.Version
+		var err error
+		if complete {
+			restored, err = registry.RestoreVersion(version, true, 1, nil)
+		} else {
+			restored, err = registry.NewVersion(
+				version.ID, version.BucketName, version.Fingerprint, version.TemplateType, when,
+			)
+		}
+		if err != nil {
+			t.Fatal(err)
+		}
+		created, err := repository.CreateVersion(ctx, tenant, restored)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return created
+	}
+	createBuild := func(child *registry.Version, component, parentID string) *store.StoredBuild {
+		t.Helper()
+		when := at.Add(time.Duration(next) * time.Minute)
+		next++
+		build, err := repository.CreateBuild(
+			ctx, tenant, child.BucketName, child.Fingerprint, registry.TemplateHCL2,
+			store.StoredBuild{
+				Build: registry.Build{
+					ID: registry.NewID(when), ComponentType: component,
+					Status: registry.BuildRunning, Platform: "docker",
+				},
+				Labels: map[string]string{}, ParentVersionID: parentID, CreatedAt: when,
+			}, testVersionName,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return build
+	}
+	updateParent := func(child *registry.Version, build *store.StoredBuild, parentID string, done bool) {
+		t.Helper()
+		build.ParentVersionID = parentID
+		if done {
+			build.Status = registry.BuildDone
+			build.MetadataSeen = true
+		}
+		when := at.Add(time.Duration(next) * time.Minute)
+		next++
+		if _, err := repository.UpdateBuild(
+			ctx, tenant, child.BucketName, child.Fingerprint, *build, testVersionName, when,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+	revoke := func(version *registry.Version, effectAt time.Time, message, author string) {
+		t.Helper()
+		if _, err := repository.RevokeVersion(
+			ctx, tenant, version.BucketName, version.Fingerprint,
+			store.RevocationRequest{
+				RevokeAt: effectAt, Message: message, Author: author,
+			}, testVersionName, at.Add(time.Duration(next)*time.Minute),
+		); err != nil {
+			t.Fatal(err)
+		}
+		next++
+	}
+	read := func(version *registry.Version) *registry.Version {
+		t.Helper()
+		got, err := repository.GetVersion(ctx, tenant, version.BucketName, version.Fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+
+	parent := createVersion("rt-parent", true)
+	walkChild := createVersion("rt-walk-child", false)
+	createBuild(walkChild, "walk", parent.ID.String())
+	effectAt := at.Add(-time.Hour).Truncate(time.Microsecond)
+	revoke(parent, effectAt, "CVE-2026-0014", "ops")
+
+	updateChild := createVersion("rt-update-child", false)
+	updateBuild := createBuild(updateChild, "update", "")
+	updateParent(updateChild, updateBuild, parent.ID.String(), false)
+	createChild := createVersion("rt-create-child", false)
+	createBuild(createChild, "create", parent.ID.String())
+	duplicateChild := createVersion("rt-duplicate-child", false)
+	duplicateBuild := createBuild(duplicateChild, "duplicate", "")
+	if _, err := repository.CreateBuild(
+		ctx, tenant, duplicateChild.BucketName, duplicateChild.Fingerprint, registry.TemplateHCL2,
+		store.StoredBuild{
+			Build: registry.Build{
+				ID: registry.NewID(at.Add(49 * time.Hour)), ComponentType: duplicateBuild.ComponentType,
+				Status: registry.BuildRunning, Platform: "docker",
+			},
+			Labels: map[string]string{}, ParentVersionID: parent.ID.String(),
+			CreatedAt: at.Add(49 * time.Hour),
+		}, testVersionName,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if revocation := read(duplicateChild).Revocation(); revocation != nil {
+		t.Fatalf("duplicate CreateBuild used discarded request parent: %+v", revocation)
+	}
+
+	walkRevocation := read(walkChild).Revocation()
+	for _, child := range []*registry.Version{updateChild, createChild} {
+		revocation := read(child).Revocation()
+		if revocation == nil || revocation.InheritedFrom == nil {
+			t.Fatalf("%s revocation = %+v; want inherited", child.BucketName, revocation)
+		}
+		if walkRevocation == nil || walkRevocation.InheritedFrom == nil ||
+			revocation.RevokeAt != walkRevocation.RevokeAt ||
+			revocation.Message != walkRevocation.Message || revocation.Author != walkRevocation.Author ||
+			*revocation.InheritedFrom != *walkRevocation.InheritedFrom {
+			t.Fatalf("%s record-time row = %+v; want revoke-time row shape %+v",
+				child.BucketName, revocation, walkRevocation)
+		}
+	}
+
+	scheduledParent := createVersion("rt-scheduled-parent", true)
+	scheduledAt := at.Add(24 * time.Hour).Truncate(time.Microsecond)
+	revoke(scheduledParent, scheduledAt, "maintenance", "release")
+	scheduledChild := createVersion("rt-scheduled-child", false)
+	createBuild(scheduledChild, "scheduled", scheduledParent.ID.String())
+	if revocation := read(scheduledChild).Revocation(); revocation == nil ||
+		!revocation.RevokeAt.Equal(scheduledAt) || !revocation.RevokeAt.After(at) ||
+		revocation.InheritedFrom == nil {
+		t.Fatalf("scheduled child revocation = %+v", revocation)
+	}
+
+	manualChild := createVersion("rt-manual-child", false)
+	manualBuild := createBuild(manualChild, "manual", "")
+	revoke(manualChild, at.Add(2*time.Hour), "manual stands", "security")
+	updateParent(manualChild, manualBuild, parent.ID.String(), false)
+	if revocation := read(manualChild).Revocation(); revocation == nil ||
+		revocation.InheritedFrom != nil || revocation.Message != "manual stands" ||
+		revocation.Author != "security" {
+		t.Fatalf("manual child revocation = %+v; want original manual record", revocation)
+	}
+
+	ancestorA := createVersion("rt-ancestor-a", true)
+	ancestorB := createVersion("rt-ancestor-b", true)
+	revoke(ancestorA, at.Add(3*time.Hour), "first", "owner-a")
+	revoke(ancestorB, at.Add(time.Hour), "earlier but second", "owner-b")
+	diamondChild := createVersion("rt-diamond-child", false)
+	createBuild(diamondChild, "edge-a", ancestorA.ID.String())
+	createBuild(diamondChild, "edge-b", ancestorB.ID.String())
+	if revocation := read(diamondChild).Revocation(); revocation == nil ||
+		revocation.InheritedFrom == nil || revocation.InheritedFrom.VersionID != ancestorA.ID ||
+		revocation.Message != "first" {
+		t.Fatalf("diamond child revocation = %+v; first revocation must win", revocation)
+	}
+
+	foreignTenant := store.ParseTenant(orgB, projectB)
+	foreignAt := at.Add(47 * time.Hour)
+	if _, err := repository.CreateBucket(ctx, foreignTenant, store.Bucket{
+		ID: registry.NewID(foreignAt), Name: "rt-foreign-parent", Labels: map[string]string{},
+		CreatedAt: foreignAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	foreignParent, err := registry.RestoreVersion(registry.Version{
+		ID: registry.NewID(foreignAt.Add(time.Second)), BucketName: "rt-foreign-parent",
+		Fingerprint: "rt-foreign-parent-fp", TemplateType: registry.TemplateHCL2,
+		CreatedAt: foreignAt, UpdatedAt: foreignAt,
+	}, true, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateVersion(ctx, foreignTenant, foreignParent); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.RevokeVersion(
+		ctx, foreignTenant, foreignParent.BucketName, foreignParent.Fingerprint,
+		store.RevocationRequest{RevokeAt: effectAt, Author: "foreign"},
+		testVersionName, foreignAt.Add(time.Minute),
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name     string
+		parentID string
+	}{
+		{name: "dangling", parentID: registry.NewID(at.Add(48 * time.Hour)).String()},
+		{name: "foreign", parentID: foreignParent.ID.String()},
+		{name: "self"},
+	} {
+		child := createVersion("rt-"+tc.name, false)
+		parentID := tc.parentID
+		if parentID == "" {
+			parentID = child.ID.String()
+		}
+		createBuild(child, tc.name, parentID)
+		if revocation := read(child).Revocation(); revocation != nil {
+			t.Fatalf("%s parent inherited revocation %+v; want no-op", tc.name, revocation)
+		}
+	}
+
+	effectiveCompletion := createVersion("rt-effective-completion", false)
+	effectiveBuild := createBuild(effectiveCompletion, "effective", "")
+	updateParent(effectiveCompletion, effectiveBuild, parent.ID.String(), true)
+	effectiveLatest, err := repository.GetChannel(
+		ctx, tenant, effectiveCompletion.BucketName, "latest",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if effectiveLatest.Version != nil {
+		t.Fatalf("effective inherited completion assigned managed latest to %+v", effectiveLatest.Version)
+	}
+
+	scheduledCompletion := createVersion("rt-scheduled-completion", false)
+	scheduledBuild := createBuild(scheduledCompletion, "scheduled", "")
+	updateParent(scheduledCompletion, scheduledBuild, scheduledParent.ID.String(), true)
+	scheduledLatest, err := repository.GetChannel(
+		ctx, tenant, scheduledCompletion.BucketName, "latest",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scheduledLatest.Version == nil || scheduledLatest.Version.ID != scheduledCompletion.ID {
+		t.Fatalf("scheduled inherited completion latest = %+v; want child", scheduledLatest.Version)
+	}
+
+	if _, err := repository.RestoreRevokedVersion(
+		ctx, tenant, parent.BucketName, parent.Fingerprint, at.Add(72*time.Hour),
+	); err != nil {
+		t.Fatal(err)
+	}
+	for _, child := range []*registry.Version{walkChild, updateChild, createChild, effectiveCompletion} {
+		if revocation := read(child).Revocation(); revocation != nil {
+			t.Fatalf("%s revocation after parent restore = %+v; want cleared", child.BucketName, revocation)
+		}
 	}
 }

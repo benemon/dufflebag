@@ -298,6 +298,17 @@ Packer nor terraform-provider-hcp ever calls `UpdateVersion`, so the write
 side carries no bug-for-bug pressure. `complete` remains refused with code 3
 rather than silently ignored because completion is derived from builds here.
 
+**Record-time inheritance, served 2026-08-12 (probe A.14).** When a stored
+build first records an explicit `parent_version_id` whose in-tenant parent is
+already revoked or scheduled for revocation, the child version immediately
+receives the same effect time, message, and author as an inherited revocation
+naming that parent. This runs on both `CreateBuild` and `UpdateBuild`, inside
+the build transaction, and deliberately does not infer edges from
+`source_external_identifier`. A child that already carries any revocation
+keeps it. Completion still assigns a scheduled-future child to managed
+`latest`, but does not assign a child whose inherited revocation is already
+effective.
+
 **Version restore, served 2026-08-11.** `restore: true` clears a `REVOKED` or
 `REVOCATION_SCHEDULED` version and, in the same transaction, every descendant
 whose inherited revocation names that version. Manual descendant revocations
@@ -308,6 +319,8 @@ trailing space); combining restore with `revoke_at` or `revoke_in` returns code
 3. Restore does not forward-roll channel assignments. In the recorded diamond
 limit, a descendant also covered by a second still-revoked ancestor becomes
 active because inheritance is computed at revoke time only (duf-1hy6).
+Record-time inheritance likewise uses first-revocation-wins, deliberately
+diverging from HCP's documented but unprobed earliest-date rule for diamonds.
 As live-proven on 2026-08-12 (probe A.14), directly restoring an
 inherited-revoked version is refused with `Directly restoring this version does
 not apply. The revocation status is inherited from an ancestor version. To
@@ -657,6 +670,13 @@ re-proven on every `make test-packer` run):
 `UpdateBuild` body fields: `Artifacts[]`, `Labels`, `PackerRunUUID`,
 `ParentChannelID`, `ParentVersionID`, `Platform`, `SourceExternalIdentifier`,
 `Status`, `Metadata`.
+
+The two parent IDs are set-once fields. An empty stored value may be populated
+by the terminal `UpdateBuild`; repeating the stored value or omitting the field
+is a heartbeat-safe no-op. Changing a non-empty parent version or channel ID
+to a different non-empty value is refused with HTTP 400 / `google.rpc` code 6
+and the captured `You cannot override a build's … if it has already been set.`
+message family (probes A.9–A.11).
 
 **Probe 2026-07-31 — what completion does server-side.** When the last build
 reached `BUILD_DONE` (step 8), in the same instant (identical sub-second
