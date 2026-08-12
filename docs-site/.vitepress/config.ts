@@ -4,6 +4,7 @@ import { defineConfig } from 'vitepress'
 const guideSidebar = [
   { text: 'Installation', link: '/guides/installation' },
   { text: 'Getting started', link: '/guides/getting-started' },
+  { text: 'Revocation & channels', link: '/guides/revocation-channels' },
   { text: 'Platform API', link: '/guides/platform-api' },
 ]
 
