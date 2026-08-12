@@ -151,6 +151,12 @@ build-ui: ## Build the web console when npm is available
 		echo "npm not found; building with the checked-in placeholder web console"; \
 	fi
 
+.PHONY: docs
+docs: ## Build the documentation site and platform API reference
+	mkdir -p docs-site/public
+	./docs-site/node_modules/.bin/redocly build-docs spec/platform/openapi.yaml --output docs-site/public/platform-api.html
+	./docs-site/node_modules/.bin/vitepress build docs-site
+
 .PHONY: test-ui
 test-ui: ## Test user-visible web console states
 	@if command -v npm >/dev/null 2>&1; then \
