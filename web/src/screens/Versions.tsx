@@ -1,11 +1,11 @@
-import { useState, type ReactNode, type Ref } from 'react'
+import { useEffect, useState, type ReactNode, type Ref } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   Dropdown, DropdownItem, DropdownList, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, Form, FormGroup, FormSelect, FormSelectOption,
-  Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, TextInput,
-  Title, Tooltip,
+  Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, Pagination,
+  TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -118,7 +118,7 @@ export function Versions() {
   )
 }
 
-/** The most recent rows shown before "older versions" must be asked for. */
+/** The default page preserves the established recent-version window. */
 const RECENT = 30
 
 export function VersionsView({
@@ -454,12 +454,26 @@ export function VersionsFacet({
   versions: Version[]
   onOpenVersion: (fingerprint: string) => void
 }) {
-  // The design windows the spine ("16 older versions · show all") rather than
-  // paginating it; older rows stay one click away.
-  const [showAll, setShowAll] = useState(false)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(RECENT)
   const [expanded, setExpanded] = useState<string | null>(null)
-  const visibleVersions = showAll ? versions : versions.slice(0, RECENT)
-  const older = versions.length - visibleVersions.length
+  const lastPage = Math.max(1, Math.ceil(versions.length / perPage))
+  const first = (page - 1) * perPage
+  const visibleVersions = versionPage(versions, page, perPage)
+
+  useEffect(() => {
+    if (page > lastPage) setPage(lastPage)
+  }, [lastPage, page])
+
+  const setCurrentPage = (_event: unknown, nextPage: number) => {
+    setPage(nextPage)
+    setExpanded(null)
+  }
+  const selectPerPage = (_event: unknown, nextPerPage: number) => {
+    setPerPage(nextPerPage)
+    setPage(1)
+    setExpanded(null)
+  }
 
   return (
     <Card>
@@ -471,6 +485,20 @@ export function VersionsFacet({
             </EmptyState>
           ) : (
             <>
+              <Toolbar id="versions-toolbar">
+                <ToolbarContent>
+                  <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
+                    <Pagination
+                      itemCount={versions.length}
+                      page={page}
+                      perPage={perPage}
+                      onSetPage={setCurrentPage}
+                      onPerPageSelect={selectPerPage}
+                      isCompact
+                    />
+                  </ToolbarItem>
+                </ToolbarContent>
+              </Toolbar>
               <Table aria-label="Versions" variant="compact">
                 <Thead>
                   <Tr>
@@ -485,7 +513,7 @@ export function VersionsFacet({
                   <Tbody key={version.fingerprint} isExpanded={expanded === version.fingerprint}>
                     <Tr>
                       <Td expand={{
-                        rowIndex: index,
+                        rowIndex: first + index,
                         isExpanded: expanded === version.fingerprint,
                         onToggle: () => setExpanded(
                           expanded === version.fingerprint ? null : version.fingerprint,
@@ -552,16 +580,25 @@ export function VersionsFacet({
                   </Tbody>
                 ))}
               </Table>
-              {older > 0 && (
-                <Button variant="link" isInline onClick={() => setShowAll(true)}>
-                  {older} older {older === 1 ? 'version' : 'versions'} · show all
-                </Button>
-              )}
+              <Pagination
+                itemCount={versions.length}
+                page={page}
+                perPage={perPage}
+                onSetPage={setCurrentPage}
+                onPerPageSelect={selectPerPage}
+                variant="bottom"
+                dropDirection="up"
+              />
             </>
           )}
         </CardBody>
     </Card>
   )
+}
+
+export function versionPage(versions: Version[], page: number, perPage: number): Version[] {
+  const first = (page - 1) * perPage
+  return versions.slice(first, first + perPage)
 }
 
 export function BucketChannelsFacet({

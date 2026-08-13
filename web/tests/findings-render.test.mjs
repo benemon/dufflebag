@@ -163,6 +163,23 @@ test('the packages toolbar can select only rows with findings', async () => {
   assert.doesNotMatch(html, /Severity: critical/, 'a band nothing carries must not be offered')
 })
 
+test('packages paginate the filtered in-memory rows above and below the table', async () => {
+  const { PackagesCardForTest } = await vite.ssrLoadModule('/src/screens/Build.tsx')
+  const packages = Array.from({ length: 21 }, (_, index) => {
+    const number = String(index + 1).padStart(2, '0')
+    return {
+      name: `package-${number}`, version: '1.0.0',
+      purl: `pkg:a/package-${number}@1.0.0`, sboms: [],
+    }
+  })
+  const html = renderToStaticMarkup(React.createElement(PackagesCardForTest, {
+    build: { id: 'build-1', packageInventory: { status: 'parsed', packages } },
+  }))
+  assert.match(html, />package-20</)
+  assert.doesNotMatch(html, />package-21</)
+  assert.ok((html.match(/pf-v6-c-pagination/g) ?? []).length >= 2)
+})
+
 // PatternFly's compound expansion makes the cell interactive but draws no
 // marker, so the chips alone read as static. The caret is the affordance.
 test('an expandable findings cell carries a caret', () => {

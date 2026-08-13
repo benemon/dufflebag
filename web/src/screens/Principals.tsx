@@ -3,7 +3,7 @@ import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
-  PageSection, Radio, TextInput, Title,
+  PageSection, Pagination, Radio, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -462,13 +462,48 @@ type PrincipalTableProps = {
 
 function PrincipalTable(props: PrincipalTableProps) {
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
+  const lastPage = Math.max(1, Math.ceil(props.principals.length / perPage))
+  const currentPage = Math.min(page, lastPage)
+  const first = (currentPage - 1) * perPage
+  const visiblePrincipals = props.principals.slice(first, first + perPage)
+  const setCurrentPage = (_event: unknown, nextPage: number) => {
+    setPage(nextPage)
+    setExpanded(null)
+  }
+  const selectPerPage = (_event: unknown, nextPerPage: number) => {
+    setPerPage(nextPerPage)
+    setPage(1)
+    setExpanded(null)
+  }
 
   return (
-    <PrincipalTableView
-      {...props}
-      expanded={expanded}
-      onToggle={(principal) => setExpanded(expanded === principal.id ? null : principal.id)}
-    />
+    <>
+      <Pagination
+        itemCount={props.principals.length}
+        page={currentPage}
+        perPage={perPage}
+        onSetPage={setCurrentPage}
+        onPerPageSelect={selectPerPage}
+        isCompact
+      />
+      <PrincipalTableView
+        {...props}
+        principals={visiblePrincipals}
+        expanded={expanded}
+        onToggle={(principal) => setExpanded(expanded === principal.id ? null : principal.id)}
+      />
+      <Pagination
+        itemCount={props.principals.length}
+        page={currentPage}
+        perPage={perPage}
+        onSetPage={setCurrentPage}
+        onPerPageSelect={selectPerPage}
+        variant="bottom"
+        dropDirection="up"
+      />
+    </>
   )
 }
 

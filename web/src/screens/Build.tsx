@@ -3,7 +3,7 @@ import {
   Alert, Breadcrumb, BreadcrumbItem, Card, CardBody, CardTitle, CodeBlock,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, FormSelect, FormSelectOption, Label,
-  PageSection, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem,
+  PageSection, Pagination, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
@@ -297,6 +297,8 @@ function PackagesCard({ build }: { build: Build }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   // '' = every package, 'affected' = only those with findings, or one band.
   const [findingFilter, setFindingFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
   if (build.packageInventory.status === 'unparseable') {
     return (
       <Card>
@@ -334,6 +336,19 @@ function PackagesCard({ build }: { build: Build }) {
   const bands = SEVERITY_ORDER.filter((band) =>
     affected.some((pkg) => (pkg.findings ?? []).some((f) => (f.criticality ?? '').toLowerCase() === band)),
   ).reverse()
+  const lastPage = Math.max(1, Math.ceil(packages.length / perPage))
+  const currentPage = Math.min(page, lastPage)
+  const first = (currentPage - 1) * perPage
+  const visiblePackages = packages.slice(first, first + perPage)
+  const setCurrentPage = (_event: unknown, nextPage: number) => {
+    setPage(nextPage)
+    setExpanded(null)
+  }
+  const selectPerPage = (_event: unknown, nextPerPage: number) => {
+    setPerPage(nextPerPage)
+    setPage(1)
+    setExpanded(null)
+  }
 
   return (
     <Card>
@@ -350,14 +365,20 @@ function PackagesCard({ build }: { build: Build }) {
                 aria-label="Filter packages by name"
                 placeholder="Filter by name"
                 value={query}
-                onChange={(_event, value) => setQuery(value)}
+                onChange={(_event, value) => {
+                  setQuery(value)
+                  setPage(1)
+                }}
               />
             </ToolbarItem>
             <ToolbarItem>
               <FormSelect
                 aria-label="Filter packages by findings"
                 value={findingFilter}
-                onChange={(_event, value) => setFindingFilter(value)}
+                onChange={(_event, value) => {
+                  setFindingFilter(value)
+                  setPage(1)
+                }}
               >
                 <FormSelectOption value="" label="All packages" />
                 <FormSelectOption value="affected" label={`With findings (${affected.length})`} />
@@ -370,12 +391,37 @@ function PackagesCard({ build }: { build: Build }) {
             <ToolbarItem>
               <Content component="p">{packages.length} of {all.length}</Content>
             </ToolbarItem>
+            <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
+              <Pagination
+                itemCount={packages.length}
+                page={currentPage}
+                perPage={perPage}
+                onSetPage={setCurrentPage}
+                onPerPageSelect={selectPerPage}
+                isCompact
+              />
+            </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
         {packages.length === 0 ? (
           <Content component="p" style={{ marginTop: 14 }}>No package matches that search.</Content>
         ) : (
-          <PackageTable packages={packages} expanded={expanded} onToggle={setExpanded} />
+          <>
+            <PackageTable
+              packages={visiblePackages}
+              expanded={expanded}
+              onToggle={setExpanded}
+            />
+            <Pagination
+              itemCount={packages.length}
+              page={currentPage}
+              perPage={perPage}
+              onSetPage={setCurrentPage}
+              onPerPageSelect={selectPerPage}
+              variant="bottom"
+              dropDirection="up"
+            />
+          </>
         )}
       </CardBody>
     </Card>
