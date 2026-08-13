@@ -6,6 +6,7 @@ const guideSidebar = [
   { text: 'Getting started', link: '/guides/getting-started' },
   { text: 'Roles & principals', link: '/guides/roles-principals' },
   { text: 'The console', link: '/guides/console' },
+  { text: 'Terraform provider', link: '/guides/terraform' },
   { text: 'Revocation & channels', link: '/guides/revocation-channels' },
   { text: 'SBOMs & findings', link: '/guides/sbom-findings' },
   { text: 'Bag Drop', link: '/guides/bag-drop' },
