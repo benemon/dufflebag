@@ -46,6 +46,7 @@ let FacetRail
 let facetCountText
 let platformTenancyGap
 let TypedConfirmModalView
+let CopyableIdentifier
 const versionDataSource = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
 const versionScreenSource = readFileSync(new URL('../src/screens/Version.tsx', import.meta.url), 'utf8')
 const versionsScreenSource = readFileSync(new URL('../src/screens/Versions.tsx', import.meta.url), 'utf8')
@@ -78,6 +79,8 @@ before(async () => {
     deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
+  ;({ CopyableIdentifier } =
+    await vite.ssrLoadModule('/src/components/CopyableIdentifier.tsx'))
 })
 
 after(async () => {
@@ -422,6 +425,13 @@ test('the revoke modal builds immediate and scheduled options from its controls'
   }])
 })
 
+test('the revoke modal uses the medium PatternFly variant', () => {
+  assert.match(
+    versionScreenSource,
+    /title=\{`Revoke \$\{bucket\} \$\{version\.name\}`\}[\s\S]{0,80}variant="medium"/,
+  )
+})
+
 test('revoke, restore and delete clients send exact compat-plane requests', async () => {
   const originalFetch = globalThis.fetch
   const calls = []
@@ -477,7 +487,7 @@ test('delete version confirmation states permanence and renders server refusal v
     bucket: 'images', version: actionVersion(), callerRole: 'publisher', submitting: false,
     failure: refusal, onConfirm: async () => calls.push('delete'), onClose: () => {},
   }))
-  assert.match(markup, /Delete images v7/)
+  assert.match(markup, /Delete images — v7/)
   assert.match(markup, /Type <strong>v7<\/strong> to confirm/)
   assert.match(markup, /is permanent/)
   assert.match(markup, /builds, artifacts and SBOMs/)
@@ -642,10 +652,24 @@ test('delete confirmation names the channel, its expected string and its history
     bucket: 'images', channel: channelFixture(), callerRole: 'publisher', submitting: false,
     failure: null, onConfirm: async () => {}, onClose: () => {},
   }))
-  assert.match(markup, /Delete images production/)
+  assert.match(markup, /Delete images — production/)
   assert.match(markup, /Deleting production destroys its assignment history\./)
   assert.match(markup, /Type <strong>production<\/strong> to confirm/)
   assert.match(markup, />Delete production</)
+})
+
+test('delete, restore and assign titles separate their object identifiers', () => {
+  const restore = renderToStaticMarkup(React.createElement(RestoreModalView, {
+    bucket: 'images', version: actionVersion('revoked'), callerRole: 'publisher',
+    submitting: false, failure: null, onConfirm: async () => {}, onClose: () => {},
+  }))
+  const assign = renderToStaticMarkup(React.createElement(AssignChannelModalView, {
+    bucket: 'images', channel: channelFixture(), versions: channelVersions,
+    callerRole: 'publisher', fingerprint: 'fp-new', submitting: false, failure: null,
+    onFingerprintChange: () => {}, onConfirm: async () => {}, onClose: () => {},
+  }))
+  assert.match(restore, /Restore images — v7/)
+  assert.match(assign, /Assign images version — production/)
 })
 
 test('Promote is live for publisher, role-restricted below publisher, and absent unless active-complete', () => {
@@ -761,15 +785,24 @@ test('the Versions facet is one full-width card without a redundant summary', ()
   assert.doesNotMatch(markup, /Version summary|>Complete<|>Incomplete<|>Artifacts</)
 })
 
-test('long fingerprints remain complete and opt into wrapping', () => {
+test('fingerprint fields use the compact read-only copy control everywhere they render', () => {
   const fingerprint = `dufflebag-sbom-demo-${'1'.repeat(80)}`
+  const control = CopyableIdentifier({ value: fingerprint, label: 'Test fingerprint' })
+  assert.equal(control.props.variant, 'inline-compact')
+  assert.equal(control.props.isReadOnly, true)
+  assert.equal(control.props.isCode, true)
+  assert.equal(control.props.truncation, true)
+
   const markup = renderToStaticMarkup(React.createElement(VersionsFacet, {
     versions: [{ ...facetVersion, fingerprint }],
     onOpenVersion: () => {},
   }))
-  assert.match(markup, new RegExp(
-    `<code class="registry-fingerprint">${fingerprint}<\\/code>`,
-  ))
+  assert.match(markup, /pf-v6-c-clipboard-copy pf-m-inline pf-m-truncate/)
+  assert.match(markup, new RegExp(`<code[^>]*>[\\s\\S]{0,300}${fingerprint}[\\s\\S]{0,100}<\\/code>`))
+  assert.equal((versionsScreenSource.match(/<CopyableIdentifier/g) ?? []).length, 3)
+  assert.equal((versionScreenSource.match(/<CopyableIdentifier/g) ?? []).length, 2)
+  assert.equal((buildScreenSource.match(/<CopyableIdentifier/g) ?? []).length, 1)
+  assert.doesNotMatch(versionsScreenSource + versionScreenSource, /registry-fingerprint/)
 })
 
 test('an Overview facet with no count renders an empty count span', () => {

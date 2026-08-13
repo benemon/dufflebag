@@ -203,6 +203,20 @@ test('Issue secret opens the selected principal workflow in the modal view', () 
   assert.match(markup, /id="issue-secret-p-1-never"[^>]*checked/)
 })
 
+test('principal client IDs use the compact copy control and the issue modal is medium', () => {
+  const markup = renderToStaticMarkup(React.createElement(PrincipalTableView, {
+    principals: [principal()], selfID: null, callerRole: 'maintainer', expanded: null,
+    onToggle: () => {}, onOpenIssue: () => {}, onRevoke: () => {}, onDelete: () => {},
+  }))
+  assert.match(markup, /pf-v6-c-clipboard-copy pf-m-inline pf-m-truncate/)
+  assert.match(markup, /<code[^>]*>[\s\S]{0,200}client-1[\s\S]{0,100}<\/code>/)
+  assert.match(principalScreenSource, /<CopyableIdentifier value=\{principal\.client_id\}/)
+  assert.match(
+    principalScreenSource,
+    /aria-labelledby="issue-secret-modal-title"[\s\S]{0,100}variant="medium"/,
+  )
+})
+
 test('the 90-day choice supplies issueSecret with an expiry about 90 days from now', () => {
   let choice = 'never'
   const issueCalls = []

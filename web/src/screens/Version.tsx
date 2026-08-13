@@ -17,6 +17,7 @@ import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
@@ -225,7 +226,7 @@ export function VersionView({
             <DescriptionListGroup>
               <DescriptionListTerm>Fingerprint</DescriptionListTerm>
               <DescriptionListDescription>
-                <code className="registry-fingerprint">{version.fingerprint}</code>
+                <CopyableIdentifier value={version.fingerprint} label="Version fingerprint" />
               </DescriptionListDescription>
             </DescriptionListGroup>
             <DescriptionListGroup>
@@ -372,7 +373,7 @@ export function DeleteVersionModalView({
 }) {
   return (
     <TypedConfirmModal
-      title={`Delete ${bucket} ${version.name}`}
+      title={`Delete ${bucket} — ${version.name}`}
       expected={version.name}
       verb="Delete version"
       busy={submitting}
@@ -486,6 +487,7 @@ export function RevokeModalView({
   return (
     <TypedConfirmModal
       title={`Revoke ${bucket} ${version.name}`}
+      variant="medium"
       expected={version.name}
       verb={`Revoke ${bucket} ${version.name}`}
       busy={submitting}
@@ -619,7 +621,7 @@ export function RestoreModalView({
 }) {
   return (
     <>
-      <ModalHeader labelId="restore-version-modal-title" title={`Restore ${bucket} ${version.name}`} />
+      <ModalHeader labelId="restore-version-modal-title" title={`Restore ${bucket} — ${version.name}`} />
       <ModalBody>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
@@ -640,7 +642,7 @@ export function RestoreModalView({
           isDisabled={submitting}
           onClick={onConfirm}
         >
-          Restore {bucket} {version.name}
+          Restore {bucket} — {version.name}
         </RoleRestrictedButton>
         <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
       </ModalFooter>
@@ -983,7 +985,11 @@ function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>Run UUID</DescriptionListTerm>
-                    <DescriptionListDescription><code>{build.packerRunUUID || '—'}</code></DescriptionListDescription>
+                    <DescriptionListDescription>
+                      {build.packerRunUUID ? (
+                        <CopyableIdentifier value={build.packerRunUUID} label="Build Run UUID" />
+                      ) : '—'}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                 </DescriptionList>
                 <Button variant="link" isInline onClick={() => onOpenBuild(build.id)}>

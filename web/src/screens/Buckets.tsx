@@ -207,7 +207,22 @@ export function BucketsView({
                     </CardTitle>
                     <CardBody>
                       <Content component="p">
-                        Newest version: {bucket.newestVersion?.name ?? '—'}
+                        Newest version: {bucket.newestVersion?.name ?? '—'}{' '}
+                        {bucket.newestVersion ? (
+                          <VersionStateLabel state={bucket.newestVersion.state} />
+                        ) : null}
+                      </Content>
+                      <Content component="p">
+                        Parents:{' '}
+                        <RelationshipLabel
+                          relation={bucket.parents}
+                          inOlderVersions={bucket.parentsInOlderVersions}
+                        />
+                        {' · '}Children:{' '}
+                        <RelationshipLabel
+                          relation={bucket.children}
+                          inOlderVersions={bucket.childrenInOlderVersions}
+                        />
                       </Content>
                       <PlatformList platforms={bucket.platforms} />
                       <Content component="p">Last updated: <When iso={bucket.lastPushAt} /></Content>

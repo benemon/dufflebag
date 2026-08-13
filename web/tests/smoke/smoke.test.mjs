@@ -1817,8 +1817,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // Restore through its confirmation; active again on screen and at the wire.
     await clickByText('button', 'Restore')
-    await waitForText('Restore smoke-revocable v1')
-    await clickByText('button', 'Restore smoke-revocable v1')
+    await waitForText('Restore smoke-revocable — v1')
+    await clickByText('button', 'Restore smoke-revocable — v1')
     await until('the version to render active after restore', async () => {
       const text = await bodyText()
       return !/revoked/.test(text) && /complete/.test(text)
@@ -1871,7 +1871,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Channels')
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
-    await waitForText('Delete smoke-revocable staging')
+    await waitForText('Delete smoke-revocable — staging')
     await typeToConfirm('staging')
     await clickByText('.pf-v6-c-modal-box button', 'Delete staging')
     await until('the staging channel to leave the wire', async () => {
@@ -2353,7 +2353,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'v1')
     await waitForText('Lineage')
     await clickByText('button', 'Delete version')
-    await waitForText('Delete smoke-deletable v1')
+    await waitForText('Delete smoke-deletable — v1')
     await typeToConfirm('v1')
     await clickByText('.pf-v6-c-modal-box button', 'Delete version')
     await waitForText('Version is assigned by channels: hold')
@@ -2365,7 +2365,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       update_mask: 'versionFingerprint', version_fingerprint: '',
     })
     await clickByText('button', 'Delete version')
-    await waitForText('Delete smoke-deletable v1')
+    await waitForText('Delete smoke-deletable — v1')
     await typeToConfirm('v1')
     await clickByText('.pf-v6-c-modal-box button', 'Delete version')
     await until('the console to land on the bucket after deletion', async () =>
