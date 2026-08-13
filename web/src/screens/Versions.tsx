@@ -243,7 +243,7 @@ export function VersionsView({
             onSelect={setFacet}
             heading="This bucket"
             label="Bucket facets"
-            unmountOnExit={bucketData !== undefined && bucketData !== null}
+            unmountOnExit
             facets={[
               {
                 key: 'overview', label: 'Overview',

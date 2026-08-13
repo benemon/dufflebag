@@ -21,7 +21,10 @@ let RevokeModalView
 let RestoreModalView
 let DeleteVersionModalView
 let OperationsCard
+let BuildTable
 let BuildView
+let ArtifactsCard
+let PackagesCard
 let loadVersions
 let loadVersion
 let loadBucketPage
@@ -43,7 +46,6 @@ let createChannel
 let assignChannelVersion
 let deleteChannel
 let FacetRail
-let facetCountText
 let platformTenancyGap
 let TypedConfirmModalView
 let CopyableIdentifier
@@ -66,15 +68,16 @@ before(async () => {
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
-  ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard,
+  ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard, BuildTable,
     terraformConsumeSnippet, terraformPromotionSnippet, BuildStateLabel } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
-  ;({ BuildView, packerBuildCommand, sbomFileName } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
+  ;({ BuildView, ArtifactsCard, PackagesCard, packerBuildCommand, sbomFileName } =
+    await vite.ssrLoadModule('/src/screens/Build.tsx'))
   ;({ loadVersions, loadVersion, loadBucketPage, loadEnforcedProvisioners, loadChannelHistory,
     loadVersionDetail, loadBuildDetail } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
-  ;({ FacetRail, facetCountText } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
+  ;({ FacetRail } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
     deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({ TypedConfirmModalView } =
@@ -179,6 +182,12 @@ const listMarkup = (versions, extra = {}) =>
     onBack: () => {},
     onOpenVersion: () => {},
     ...extra,
+  }))
+
+const versionsFacetMarkup = (versions) =>
+  renderToStaticMarkup(React.createElement(VersionsFacet, {
+    versions,
+    onOpenVersion: () => {},
   }))
 
 const detailMarkup = (version, extra = {}) =>
@@ -301,7 +310,7 @@ test('a revoked version projects and renders its revocation state, not incomplet
       { name: 'v1', state: 'revocation-scheduled' },
     ],
   )
-  const markup = listMarkup(versions)
+  const markup = versionsFacetMarkup(versions)
   assert.match(markup, />revoked</)
   assert.match(markup, />revocation scheduled</)
   assert.doesNotMatch(markup, />incomplete</)
@@ -324,7 +333,7 @@ test('a restored version projects and renders as active again', async () => {
 	assert.deepEqual(versions.map(({ name, state }) => ({ name, state })), [
 		{ name: 'v1', state: 'complete' },
 	])
-	const markup = listMarkup(versions)
+	const markup = versionsFacetMarkup(versions)
 	assert.match(markup, />complete</)
 	assert.doesNotMatch(markup, />revoked</)
 })
@@ -756,7 +765,7 @@ test('an incomplete version renders as incomplete, not as broken', async () => {
     },
     () => loadVersions('token', { organizationID: 'org', projectID: 'project' }, 'images'),
   )
-  const markup = listMarkup(versions)
+  const markup = `${listMarkup(versions)}${versionsFacetMarkup(versions)}`
   assert.match(markup, /class="registry-facet-heading">This bucket<\/div>/)
   assert.match(markup, />v0</)
   assert.match(markup, />incomplete</)
@@ -805,10 +814,6 @@ test('fingerprint fields use the compact read-only copy control everywhere they 
   assert.doesNotMatch(versionsScreenSource + versionScreenSource, /registry-fingerprint/)
 })
 
-test('an Overview facet with no count renders an empty count span', () => {
-  assert.equal(facetCountText(), '')
-})
-
 test('enforced provisioners row distinguishes configured, empty, loading, and failure states', () => {
   const markup = (props) => renderToStaticMarkup(React.createElement(EnforcedProvisionersRow, props))
 
@@ -847,15 +852,7 @@ test('enforced provisioners load from the bucket endpoint and prefer names over 
   assert.deepEqual(provisioners, ['required-plugins', 'eb-02'])
 })
 
-test('an unknown facet count renders an empty count span', () => {
-  assert.equal(facetCountText({ status: 'unknown' }), '')
-})
-
-test('a known empty facet count renders zero', () => {
-  assert.equal(facetCountText({ status: 'known', value: 0 }), '0')
-})
-
-const facetRailMarkup = () =>
+const facetRailMarkup = (unmountOnExit = false) =>
   renderToStaticMarkup(React.createElement(FacetRail, {
     active: 'packages',
     heading: 'This build',
@@ -872,6 +869,7 @@ const facetRailMarkup = () =>
       },
     ],
     onSelect: () => {},
+    unmountOnExit,
   }))
 
 test('the facet rail keeps its natural mixed-case heading in the markup', () => {
@@ -879,17 +877,42 @@ test('the facet rail keeps its natural mixed-case heading in the markup', () => 
   assert.match(markup, /class="registry-facet-heading">This build<\/div>/)
 })
 
-test('the facet rail renders labels and counts in separate spans', () => {
+test('the facet rail renders badges only for known counts', () => {
   const markup = facetRailMarkup()
-  assert.match(markup, /aria-current="false"[^>]*><span class="registry-facet-label">Overview<\/span><span class="registry-facet-count"><\/span>/)
-  assert.match(markup, /<span class="registry-facet-label">Artifacts<\/span><span class="registry-facet-count">0<\/span>/)
-  assert.doesNotMatch(markup, /Overview \(|Artifacts \(|Packages \(/)
+  assert.match(markup, /pf-v6-c-tabs__item-text">Artifacts<\/span><span class="pf-v6-c-badge pf-m-read">0<\/span>/)
+  assert.match(markup, /pf-v6-c-tabs__item-text">Overview<\/span><\/button>/)
+  assert.match(markup, /pf-v6-c-tabs__item-text">Packages<\/span><\/button>/)
+  assert.equal((markup.match(/pf-v6-c-badge/g) ?? []).length, 1)
 })
 
-test('the facet rail marks only its active item as current', () => {
+test('the facet rail uses tab semantics and marks only its active tab selected', () => {
   const markup = facetRailMarkup()
-  assert.match(markup, /aria-current="false"[^>]*><span class="registry-facet-label">Overview/)
-  assert.match(markup, /aria-current="true"[^>]*><span class="registry-facet-label">Packages/)
+  assert.match(markup, /role="tablist"/)
+  assert.equal((markup.match(/role="tab"/g) ?? []).length, 3)
+  assert.equal((markup.match(/aria-selected="true"/g) ?? []).length, 1)
+  assert.equal((markup.match(/aria-selected="false"/g) ?? []).length, 2)
+  assert.match(markup, /role="tab" aria-selected="true"><span class="pf-v6-c-tabs__item-text">Packages/)
+  assert.equal((markup.match(/role="tabpanel"/g) ?? []).length, 3)
+})
+
+test('unmountOnExit keeps only the active facet panel mounted', () => {
+  const markup = facetRailMarkup(true)
+  assert.equal((markup.match(/role="tabpanel"/g) ?? []).length, 1)
+  assert.match(markup, /Package content/)
+  assert.doesNotMatch(markup, /Overview content|Artifact content/)
+})
+
+test('all three facet screens unmount inactive panels', () => {
+  for (const [source, label] of [
+    [versionsScreenSource, 'Bucket'],
+    [versionScreenSource, 'Version'],
+    [buildScreenSource, 'Build'],
+  ]) {
+    assert.match(
+      source,
+      new RegExp(`<FacetRail[\\s\\S]{0,180}label="${label} facets"[\\s\\S]{0,80}unmountOnExit`),
+    )
+  }
 })
 
 test('build and artifact details come through to the version page', async () => {
@@ -929,7 +952,9 @@ test('build and artifact details come through to the version page', async () => 
       packageInventory: { status: 'not-loaded' },
     },
   ])
-  const markup = detailMarkup(version)
+  const markup = `${detailMarkup(version)}${renderToStaticMarkup(React.createElement(BuildTable, {
+    builds: version.builds, onOpenBuild: () => {},
+  }))}`
   assert.match(markup, /class="registry-facet-heading">This version<\/div>/)
   assert.match(markup, /docker\.ubuntu/)
   assert.match(markup, />done</)
@@ -972,7 +997,9 @@ test('the build list renders metadata columns and expandable package detail', ()
       },
     }],
   }
-  const markup = detailMarkup(version)
+  const markup = renderToStaticMarkup(React.createElement(BuildTable, {
+    builds: version.builds, onOpenBuild: () => {},
+  }))
   assert.match(markup, />Packer runner OS</)
   for (const expected of [
     'Name', 'Status', 'Arch', 'Updated', 'docker.ubuntu',
@@ -1008,6 +1035,8 @@ test('build overview reconstructs masked options and the Artifacts facet names P
     bucket: 'images', detail, loading: false, failure: null,
     onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
   }))
+  const artifactsMarkup = renderToStaticMarkup(React.createElement(ArtifactsCard, { build: detail.build }))
+  const packagesMarkup = renderToStaticMarkup(React.createElement(PackagesCard, { build: detail.build }))
   assert.match(markup, /class="registry-facet-heading">This build<\/div>/)
   assert.match(markup, /Build options/)
   assert.match(markup, /Variable values are masked/)
@@ -1015,24 +1044,26 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   assert.match(markup, /Build labels/)
   assert.match(markup, /base_image=\*\*\*/)
   assert.match(markup, /ImageDigest/)
-  assert.match(markup, />Platform</)
-  assert.match(markup, />External ID</)
-  assert.match(markup, /sha256:abc123/)
-  assert.match(markup, />Packages<\/span><span class="registry-facet-count">1<\/span>/)
-  assert.match(markup, /openssl/)
-  assert.match(markup, /Reported by client-supplied SBOMs/)
-  assert.doesNotMatch(markup, />Artifact</)
+  assert.match(artifactsMarkup, />Platform</)
+  assert.match(artifactsMarkup, />External ID</)
+  assert.match(artifactsMarkup, /sha256:abc123/)
+  assert.match(markup, />Packages<\/span><span class="pf-v6-c-badge pf-m-read">1<\/span>/)
+  assert.match(packagesMarkup, /openssl/)
+  assert.match(packagesMarkup, /Reported by client-supplied SBOMs/)
+  assert.doesNotMatch(artifactsMarkup, />Artifact</)
 
   // The stored SBOM offers its download on the overview (duf-cse): one row
   // per document in the Security card's row idiom, saved as the DOCUMENT
   // under "<name>.json" exactly as live HCP serves it (probed 2026-08-08).
   assert.deepEqual(detail.sboms, [{ id: 'sb-1', name: 'fp-complete', format: 'SPDX' }])
   assert.match(markup, />SBOM</)
+  assert.match(markup, /aria-label="SBOM downloads"/)
+  assert.match(markup, /pf-v6-c-data-list__item pf-m-clickable/)
   assert.match(markup, /aria-label="Download fp-complete\.json"/)
   assert.match(markup, />SPDX</)
   assert.doesNotMatch(markup, /zstd/)
   assert.doesNotMatch(markup, /aria-label="Download format|Select SBOM/)
-  assert.match(markup, /pf-v6-c-pagination/)
+  assert.match(packagesMarkup, /pf-v6-c-pagination/)
   assert.equal(sbomFileName(detail.sboms[0]), 'fp-complete.json')
   // The wire names every format the same way — no format-suffix invention.
   assert.equal(sbomFileName({ id: 'x', name: 'inv', format: 'CYCLONEDX' }), 'inv.json')
@@ -1150,7 +1181,8 @@ test('an incomplete version page states the absence of builds plainly', async ()
   const markup = detailMarkup(version)
   assert.match(markup, />v0</)
   assert.match(markup, />incomplete</)
-  assert.match(markup, /No builds have been reported for this version/)
+  assert.equal(version.builds.length, 0)
+  assert.match(versionScreenSource, /No builds have been reported for this version/)
   assert.doesNotMatch(markup, /could not be loaded/)
 })
 
@@ -1180,7 +1212,7 @@ test('channel assignment context names the channels pointing at each version', a
       { fingerprint: 'fp-complete', channels: ['production', 'staging'] },
     ],
   )
-  const markup = listMarkup(versions)
+  const markup = versionsFacetMarkup(versions)
   assert.match(markup, />production</)
   assert.match(markup, />staging</)
 })
@@ -1198,7 +1230,7 @@ test('a version row expands to fingerprint, build summary, parent freshness, and
       bucket: 'derived-images', versionName: 'v3', fingerprint: 'descendant-fingerprint',
     }],
   }
-  const markup = listMarkup([version])
+  const markup = versionsFacetMarkup([version])
   for (const expected of [
     'child-fingerprint', '1 build · 2 artifacts', 'base-images v22',
     'bucket now at v24', 'derived-images v3', 'Open v14',
@@ -1271,9 +1303,9 @@ test('bucket status and rail counts come from the loaded newest version and face
     bucket: 'images', bucketData: bucket, loading: false, failure: null,
     onBack: () => {}, onOpenVersion: () => {},
   }))
-  assert.match(markup, />Versions<\/span><span class="registry-facet-count">2<\/span>/)
-  assert.match(markup, />Channels<\/span><span class="registry-facet-count">1<\/span>/)
-  assert.match(markup, /aria-current="true"><span[^>]*>Overview/)
+  assert.match(markup, />Versions<\/span><span class="pf-v6-c-badge pf-m-read">2<\/span>/)
+  assert.match(markup, />Channels<\/span><span class="pf-v6-c-badge pf-m-read">1<\/span>/)
+  assert.match(markup, /aria-selected="true"><span[^>]*>Overview/)
   assert.match(markup, /Bucket details[\s\S]*Newest version[\s\S]*v0[\s\S]*Status[\s\S]*incomplete/)
 })
 
@@ -1531,7 +1563,7 @@ test('versions paginate the 30-row recent window and expose the five older rows 
     children: [],
     created: '2026-07-31T10:00:00.000Z',
   }))
-  const markup = listMarkup(versions)
+  const markup = versionsFacetMarkup(versions)
   assert.match(markup, />v35</)
   assert.match(markup, />v6</)
   assert.doesNotMatch(markup, />v5</)
@@ -1544,7 +1576,7 @@ test('versions paginate the 30-row recent window and expose the five older rows 
 })
 
 test('empty and gap states are distinct, and list rows remain read-only', async () => {
-  const emptyMarkup = listMarkup([])
+  const emptyMarkup = versionsFacetMarkup([])
   assert.match(emptyMarkup, /<h2[^>]*>No versions in this bucket<\/h2>/)
   assert.match(emptyMarkup, /pf-v6-c-empty-state__body">Publish with packer build to create one\./)
 
@@ -1575,7 +1607,7 @@ test('empty and gap states are distinct, and list rows remain read-only', async 
   // production on both screens, so the safety action does not displace the
   // assignment context.
   assert.deepEqual(version.channels, ['production'])
-  const list = listMarkup([version])
+  const list = `${listMarkup([version])}${versionsFacetMarkup([version])}`
   const detail = detailMarkup(version, { callerRole: 'publisher' })
   for (const markup of [list, detail]) assert.match(markup, />production</)
   for (const unsupported of ['Promote', 'Assign', 'Create version', 'Schedule']) {

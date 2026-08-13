@@ -1,9 +1,10 @@
 import { useState, type CSSProperties } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Card, CardBody, CardTitle, CodeBlock,
-  CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
-  DescriptionListGroup, DescriptionListTerm, FormSelect, FormSelectOption, Label,
-  PageSection, Pagination, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Truncate,
+  CodeBlockCode, Content, DataList, DataListCell, DataListItem, DataListItemCells,
+  DataListItemRow, DescriptionList, DescriptionListDescription, DescriptionListGroup,
+  DescriptionListTerm, FormSelect, FormSelectOption, Label, PageSection, Pagination,
+  TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Truncate,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
@@ -144,6 +145,7 @@ export function BuildView({
             onSelect={setFacet}
             heading="This build"
             label="Build facets"
+            unmountOnExit
             facets={[
               {
                 key: 'overview', label: 'Overview',
@@ -265,7 +267,7 @@ function EnvironmentField({ label, value }: { label: string; value: string }) {
   )
 }
 
-function ArtifactsCard({ build }: { build: Build }) {
+export function ArtifactsCard({ build }: { build: Build }) {
   return (
     <Card>
       <CardTitle>Artifacts</CardTitle>
@@ -297,7 +299,7 @@ function ArtifactsCard({ build }: { build: Build }) {
   )
 }
 
-function PackagesCard({ build }: { build: Build }) {
+export function PackagesCard({ build }: { build: Build }) {
   const [query, setQuery] = useState('')
   // Keyed by purl: the identity the findings themselves are keyed by.
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -566,30 +568,38 @@ function SbomCard({
     <Card>
       <CardTitle>SBOM</CardTitle>
       <CardBody>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <DataList
+          aria-label="SBOM downloads"
+          onSelectDataListItem={(_event, sbomID) => {
+            const sbom = sboms.find((candidate) => candidate.id === sbomID)
+            if (sbom) void save(sbom)
+          }}
+        >
           {sboms.map((sbom) => (
-            <button
+            <DataListItem
               key={sbom.id || sbom.name}
-              type="button"
-              onClick={() => void save(sbom)}
+              id={sbom.id}
+              aria-labelledby={`sbom-${sbom.id}`}
               aria-label={`Download ${sbomFileName(sbom)}`}
-              style={{
-                font: 'inherit', textAlign: 'left', cursor: 'pointer', background: 'none',
-                width: '100%',
-                display: 'flex', alignItems: 'center', gap: 14, padding: '11px 14px',
-                border: '1px solid var(--pf-t--global--border--color--default)', borderRadius: 3, color: 'inherit',
-              }}
             >
-              <span style={{ flex: '0 1 auto', minWidth: 0 }}>
-                <Truncate content={sbomFileName(sbom)} />
-              </span>
-              <Label isCompact>{sbom.format}</Label>
-              <span style={{ marginLeft: 'auto', display: 'flex' }} aria-hidden="true">
-                <DownloadIcon />
-              </span>
-            </button>
+              <DataListItemRow>
+                <DataListItemCells dataListCells={[
+                  <DataListCell key="name">
+                    <span id={`sbom-${sbom.id}`}>
+                      <Truncate content={sbomFileName(sbom)} />
+                    </span>
+                  </DataListCell>,
+                  <DataListCell key="format">
+                    <Label isCompact>{sbom.format}</Label>
+                  </DataListCell>,
+                  <DataListCell key="download" isIcon alignRight>
+                    <DownloadIcon aria-hidden />
+                  </DataListCell>,
+                ]} />
+              </DataListItemRow>
+            </DataListItem>
           ))}
-        </div>
+        </DataList>
         {failure ? (
           <Alert
             variant="danger"

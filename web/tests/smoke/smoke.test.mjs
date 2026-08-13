@@ -224,20 +224,36 @@ const buildGroupText = (name) =>
   }, name)
 
 const facetItems = async (ariaLabel) => {
-  await page.waitForSelector(`nav[aria-label="${ariaLabel}"] button.registry-facet`)
+  await page.waitForSelector(`nav[aria-label="${ariaLabel}"] button[role="tab"]`)
   return page.$$eval(
-    `nav[aria-label="${ariaLabel}"] button.registry-facet`,
+    `nav[aria-label="${ariaLabel}"] button[role="tab"]`,
     (buttons) => buttons.map((button) => ({
-      label: button.querySelector('.registry-facet-label')?.textContent.trim() ?? '',
-      count: button.querySelector('.registry-facet-count')?.textContent.trim() ?? '',
+      label: button.querySelector('.pf-v6-c-tabs__item-text')?.textContent.trim() ?? '',
+      count: button.querySelector('.pf-v6-c-badge')?.textContent.trim() ?? '',
     })),
   )
 }
 
+// Retried as a unit: the rail's tabs paint after navigation, so a one-shot
+// query races the render (observed intermittently as "facet not found").
+const clickFacet = (ariaLabel, label) =>
+  until(`the "${label}" facet in ${ariaLabel}`, () =>
+    page.$$eval(
+      `nav[aria-label="${ariaLabel}"] button[role="tab"]`,
+      (buttons, needle) => {
+        const button = buttons.find((candidate) =>
+          candidate.querySelector('.pf-v6-c-tabs__item-text')?.textContent.trim() === needle)
+        if (!button) return false
+        button.click()
+        return true
+      },
+      label,
+    ))
+
 // The nav paints after a navigation; wait on it rather than racing the render
 // (the suite's no-fixed-sleeps rule — every wait is a condition with a deadline).
 const facetHeading = async (ariaLabel) => {
-  const selector = `nav[aria-label="${ariaLabel}"] .registry-facet-heading`
+  const selector = `nav[aria-label="${ariaLabel}"] > .registry-facet-heading`
   await page.waitForSelector(selector)
   return page.$eval(selector, (heading) => heading.textContent.trim())
 }
@@ -1583,11 +1599,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(bucketDetails, /Status\s+incomplete/)
     assert.doesNotMatch(bucketDetails, /Status\s+complete/)
     assert.equal(historyRequests.length, 0, 'collapsed channels fetched assignment history')
-    await clickByText('button', 'Versions')
+    await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     const versionsLayout = await page.$eval('table[aria-label="Versions"]', (table) => {
       const card = table.closest('.pf-v6-c-card')
-      const content = table.closest('.registry-facet-content')
+      const content = table.closest('[role="tabpanel"]')
       const cardRect = card.getBoundingClientRect()
       const contentRect = content.getBoundingClientRect()
       const contentPaddingLeft = Number.parseFloat(getComputedStyle(content).paddingLeft)
@@ -1652,7 +1668,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('version_fingerprint = "smoke-done"')
     await waitForText('Operations')
     await waitForText('resource "hcp_packer_channel_assignment" "production"')
-    await clickByText('button', 'Builds')
+    await clickFacet('Version facets', 'Builds')
     await waitForText('docker.smoke')
     await waitForText('Packer runner OS')
     await waitForText('linux')
@@ -1673,7 +1689,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // An unparseable inventory has an unknown count in the build rail. It is
     // never rewritten as the known-empty label Packages (0).
     await clickByText('button', 'docker.broken')
-    await clickByText('button', 'Packages')
+    await clickFacet('Build facets', 'Packages')
     await waitForText('Package inventory is unavailable')
     assert.equal(await facetHeading('Build facets'), 'This build')
     assert.deepEqual(await facetItems('Build facets'), [
@@ -1682,7 +1698,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       { label: 'Packages', count: '' },
     ])
     await clickByText('button', 'v1')
-    await clickByText('button', 'Builds')
+    await clickFacet('Version facets', 'Builds')
 
     // Opening the build proves the three approved overview cards, reconstructed
     // masking, and the Artifacts facet's corrected first-column label.
@@ -1701,11 +1717,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('smoke-run-1')
     await waitForText('Build labels')
     await waitForText('ImageDigest')
-    await clickByText('button', 'Packages')
+    await clickFacet('Build facets', 'Packages')
     await waitForText('Reported by client-supplied SBOMs')
     await waitForText('openssl')
     await waitForText('smoke-inventory')
-    await clickByText('button', 'Artifacts')
+    await clickFacet('Build facets', 'Artifacts')
     await waitForText('Platform')
     await waitForText('External ID')
     await waitForText('sha256:smoke-artifact')
@@ -1720,7 +1736,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The bucket Channels facet is lazy at row granularity. Neither the bucket
     // load nor selecting the facet fetches history; each expanded row adds one
     // request and renders its own source of management truth.
-    await clickByText('button', 'Channels')
+    await clickFacet('Bucket facets', 'Channels')
     await waitForText('Assigned time')
     assert.equal(historyRequests.length, 0, 'collapsed channel table fetched assignment history')
     await toggleRow('latest')
@@ -1799,7 +1815,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('a', 'Buckets')
     await clickByText('button', 'smoke-revocable')
-    await clickByText('button', 'Versions')
+    await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')
@@ -1836,7 +1852,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('a', 'Buckets')
     await clickByText('button', 'smoke-revocable')
-    await clickByText('button', 'Channels')
+    await clickFacet('Bucket facets', 'Channels')
     await waitForText('latest')
 
     // Create an unassigned channel through the modal; the opener and the
@@ -1853,7 +1869,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.ok(!staging.version, 'a fresh channel arrived assigned')
 
     // Promote this version onto it from the version screen's Operations card.
-    await clickByText('button', 'Versions')
+    await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Operations')
@@ -1868,7 +1884,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Delete it through the kebab's danger confirmation; history goes with it.
     await clickByText('a', 'Buckets')
     await clickByText('button', 'smoke-revocable')
-    await clickByText('button', 'Channels')
+    await clickFacet('Bucket facets', 'Channels')
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
     await waitForText('Delete smoke-revocable — staging')
@@ -2101,8 +2117,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(findingsText, /1 unknown/)
     await assertNoVerdicts()
 
-    await page.click(`button[data-build-link="${findings.build.id}"]`)
-    await clickByText('button', 'Packages')
+    await page.click(`[data-build-link="${findings.build.id}"]`)
+    await clickFacet('Build facets', 'Packages')
     await waitForText('github.com/go-jose/go-jose/v4')
     assert.equal(
       await rowCellText('github.com/go-jose/go-jose/v4', 'Name'),
@@ -2348,7 +2364,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The assigned version's delete is refused with the server's own words.
     await clickByText('a', 'Buckets')
     await clickByText('button', 'smoke-deletable')
-    await clickByText('button', 'Versions')
+    await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')

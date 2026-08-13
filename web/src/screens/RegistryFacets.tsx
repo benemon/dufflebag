@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { Badge, Tab, Tabs, TabTitleText } from '@patternfly/react-core'
 
 import './RegistryFacets.css'
 
@@ -32,40 +33,36 @@ export function FacetRail<Key extends string>({
     <div className="registry-facet-layout">
       <nav className="registry-facet-rail" aria-label={label}>
         <div className="registry-facet-heading">{heading}</div>
-        {facets.map((facet) => (
-          <button
-            key={facet.key}
-            type="button"
-            className="registry-facet"
-            aria-current={facet.key === active}
-            onClick={() => onSelect(facet.key)}
-          >
-            <span className="registry-facet-label">{facet.label}</span>
-            <span className="registry-facet-count">{facetCountText(facet.count)}</span>
-          </button>
-        ))}
+        <Tabs
+          activeKey={active}
+          onSelect={(_event, eventKey) => onSelect(eventKey as Key)}
+          isVertical
+          tabListAriaLabel={label}
+          unmountOnExit={unmountOnExit}
+          className="registry-facet-tabs"
+        >
+          {facets.map((facet) => (
+            <Tab
+              key={facet.key}
+              eventKey={facet.key}
+              title={(
+                <>
+                  <TabTitleText>{facet.label}</TabTitleText>
+                  {facet.count?.status === 'known' ? (
+                    <Badge isRead>{facet.count.value}</Badge>
+                  ) : null}
+                </>
+              )}
+            >
+              {facet.content}
+            </Tab>
+          ))}
+        </Tabs>
       </nav>
-      {facets
-        .filter((facet) => !unmountOnExit || facet.key === active)
-        .map((facet) => (
-          <div
-            key={facet.key}
-            className="registry-facet-content"
-            hidden={facet.key !== active}
-          >
-            {facet.content}
-          </div>
-        ))}
     </div>
   )
 }
 
 export function knownCount(value: number): FacetCount {
   return { status: 'known', value }
-}
-
-export function facetCountText(count?: FacetCount): string {
-  if (!count) return ''
-  if (count.status === 'unknown') return ''
-  return String(count.value)
 }

@@ -1,4 +1,8 @@
-import { Card, CardBody, CardTitle, Content, Label, Title, Truncate } from '@patternfly/react-core'
+import {
+  Card, CardBody, CardTitle, Content, DataList, DataListCell, DataListItem,
+  DataListItemCells, DataListItemRow, Label, Title, Truncate,
+} from '@patternfly/react-core'
+import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
 
 import {
   coverageSummary, hasCoverageGap, versionRollup, type BuildFindings,
@@ -106,58 +110,54 @@ export function VersionSecurityCard({
           <Title headingLevel="h3" size="md">
             By build
           </Title>
-          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <DataList
+            aria-label="Security by build"
+            onSelectDataListItem={(_event, buildID) => onOpenBuild(buildID)}
+            style={{ marginTop: 8 }}
+          >
             {summary.builds.map((build) => (
-              <button
+              <DataListItem
                 key={build.buildID}
-                type="button"
-                onClick={() => onOpenBuild(build.buildID)}
-                style={{
-                  font: 'inherit', textAlign: 'left', cursor: 'pointer', background: 'none',
-                  width: '100%',
-                  display: 'flex', alignItems: 'center', gap: 14, padding: '11px 14px',
-                  border: '1px solid var(--pf-t--global--border--color--default)', borderRadius: 3, textDecoration: 'none',
-                  color: 'inherit',
-                }}
+                id={build.buildID}
+                aria-labelledby={`security-build-${build.buildID}`}
                 data-build-link={build.buildID}
               >
-                <span style={{ flex: '0 1 auto', minWidth: 0 }}>
-                  <span style={{ display: 'block', fontWeight: 500 }}>{build.platform}</span>
-                  <code
-                    style={{
-                      display: 'block', color: 'var(--pf-t--global--text--color--subtle)',
-                    }}
-                  >
-                    <Truncate content={build.component || build.buildID} />
-                  </code>
-                </span>
-                <span style={{ flex: 'none' }}>
-                  <Label color={build.worst ? SEVERITY_COLOUR[build.worst] ?? 'grey' : 'grey'} isCompact>
-                    {/* Never "clean": a build with nothing found is reported as
-                        an absence of findings, not as a verdict of safety. */}
-                    {build.worst ?? 'no findings'}
-                  </Label>
-                </span>
-                <span
-                  style={{
-                    flex: '0 1 auto', marginLeft: 'auto', display: 'flex', gap: 6,
-                    flexWrap: 'wrap', justifyContent: 'flex-end',
-                  }}
-                >
-                  {build.counts.length > 0 ? (
-                    build.counts.map(({ severity, count }) => (
-                      <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
-                        {count} {severity}
+                <DataListItemRow>
+                  <DataListItemCells dataListCells={[
+                    <DataListCell key="build">
+                      <span id={`security-build-${build.buildID}`} style={{ display: 'block', fontWeight: 500 }}>
+                        {build.platform}
+                      </span>
+                      <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                        <Truncate content={build.component || build.buildID} />
+                      </code>
+                    </DataListCell>,
+                    <DataListCell key="severity">
+                      <Label color={build.worst ? SEVERITY_COLOUR[build.worst] ?? 'grey' : 'grey'} isCompact>
+                        {/* Never "clean": a build with nothing found is reported as
+                            an absence of findings, not as a verdict of safety. */}
+                        {build.worst ?? 'no findings'}
                       </Label>
-                    ))
-                  ) : (
-                    <Content component="small">{build.scanned} scanned</Content>
-                  )}
-                </span>
-                <span style={{ flex: 'none', color: 'var(--pf-t--global--text--color--subtle)' }}>›</span>
-              </button>
+                    </DataListCell>,
+                    <DataListCell key="counts" alignRight>
+                      {build.counts.length > 0 ? (
+                        build.counts.map(({ severity, count }) => (
+                          <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
+                            {count} {severity}
+                          </Label>
+                        ))
+                      ) : (
+                        <Content component="small">{build.scanned} scanned</Content>
+                      )}
+                    </DataListCell>,
+                    <DataListCell key="open" isIcon alignRight>
+                      <AngleRightIcon aria-hidden />
+                    </DataListCell>,
+                  ]} />
+                </DataListItemRow>
+              </DataListItem>
             ))}
-          </div>
+          </DataList>
         </div>
       </CardBody>
     </Card>

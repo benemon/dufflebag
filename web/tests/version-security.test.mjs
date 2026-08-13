@@ -10,17 +10,6 @@ let vite
 let VersionSecurityCard
 const themeSource = readFileSync(new URL('../src/theme.css', import.meta.url), 'utf8')
 
-const findElements = (node, predicate, found = []) => {
-  if (Array.isArray(node)) {
-    for (const child of node) findElements(child, predicate, found)
-    return found
-  }
-  if (!React.isValidElement(node)) return found
-  if (predicate(node)) found.push(node)
-  findElements(node.props.children, predicate, found)
-  return found
-}
-
 before(async () => {
   vite = await createServer({
     root: process.cwd(),
@@ -68,6 +57,14 @@ test('every build tile links to that build', () => {
   const html = render({ builds: [withLibcurl('b1', 'docker'), withLibcurl('b2', 'aws')] })
   assert.match(html, /data-build-link="b1"/)
   assert.match(html, /data-build-link="b2"/)
+})
+
+test('by-build rows use clickable DataList items and AngleRightIcon', () => {
+  const html = render({ builds: [withLibcurl('b1', 'docker')] })
+  assert.match(html, /pf-v6-c-data-list/)
+  assert.match(html, /pf-v6-c-data-list__item pf-m-clickable[^>]*data-build-link="b1"/)
+  assert.match(html, /<svg[^>]*aria-hidden="true"/)
+  assert.doesNotMatch(html, /›/)
 })
 
 // The mockup rendered "clean" for a build with nothing found. The ruling says
@@ -134,15 +131,12 @@ test('a build tile shows the build name, not its identifier', () => {
 
 test('a build tile keeps its full component in PatternFly truncation', () => {
   const component = 'docker.ubuntu-a-provider-component-that-does-not-fit'
-  const tree = VersionSecurityCard({
+  const html = render({
     builds: [{ ...withLibcurl('b1', 'docker'), component }],
-    onOpenBuild: () => {}, outOfScanSet: false,
   })
-  const truncation = findElements(tree, (element) => element.props.content === component)
-  assert.equal(truncation.length, 1)
-  assert.doesNotMatch(render({
-    builds: [{ ...withLibcurl('b1', 'docker'), component }],
-  }), /title=/)
+  assert.match(html, /pf-v6-c-truncate/)
+  assert.match(html, new RegExp(component))
+  assert.doesNotMatch(html, /title=/)
 })
 
 // Coverage counts are the difference between "nothing found" and "not looked
