@@ -32,9 +32,36 @@ const guideSidebar = [
   },
 ]
 
-for (const group of guideSidebar) {
+const deploymentSidebar = [
+  {
+    text: 'Deployment',
+    items: [
+      { text: 'Deploying dufflebag', link: '/deployment/' },
+      { text: 'Object storage', link: '/deployment/object-storage' },
+      { text: 'Encryption setup', link: '/deployment/encryption-setup' },
+      { text: 'Operations', link: '/deployment/operations' },
+    ],
+  },
+]
+
+const referenceSidebar = [
+  {
+    text: 'Reference',
+    items: [
+      { text: 'Architecture', link: '/reference/architecture' },
+      { text: 'Compatibility', link: '/reference/compatibility' },
+    ],
+  },
+]
+
+for (const group of [
+  ...guideSidebar,
+  ...deploymentSidebar,
+  ...referenceSidebar,
+]) {
   for (const item of group.items) {
-    if (!existsSync(new URL(`..${item.link}.md`, import.meta.url))) {
+    const page = item.link.endsWith('/') ? `${item.link}index` : item.link
+    if (!existsSync(new URL(`..${page}.md`, import.meta.url))) {
       throw new Error(`Sidebar page does not exist: ${item.link}`)
     }
   }
@@ -49,13 +76,12 @@ export default defineConfig({
     nav: [
       { text: 'Guides', link: '/guides/getting-started' },
       { text: 'API Reference', link: '/platform-api.html' },
-      {
-        text: 'Compatibility',
-        link: 'https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md',
-      },
+      { text: 'Compatibility', link: '/reference/compatibility' },
     ],
     sidebar: {
       '/guides/': guideSidebar,
+      '/deployment/': deploymentSidebar,
+      '/reference/': referenceSidebar,
     },
   },
 })

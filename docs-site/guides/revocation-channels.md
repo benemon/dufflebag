@@ -8,7 +8,7 @@ and rolls the channels that pointed at it back to their last valid target.
 
 This guide covers the day-to-day workflows through the console and the API.
 The exact wire contract, refusal messages and edge cases are recorded in the
-[compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md);
+[compatibility reference](../reference/compatibility.md);
 this guide links it rather than restating it.
 
 All the writes on this page require the `publisher` role on the project. The
@@ -37,7 +37,7 @@ API.
 The `restricted` flag is stored and rendered faithfully, but dufflebag does
 not enforce restricted-channel visibility — every channel is readable by every
 role that can read the bucket. This is a
-[recorded divergence](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md)
+[recorded divergence](../reference/compatibility.md)
 from HCP Packer's documented behaviour.
 
 On the wire, assignment is `UpdateChannel` with a field mask:
@@ -133,7 +133,7 @@ The rules to know:
 
 ## Where to go next
 
-- [Compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md)
+- [Compatibility reference](../reference/compatibility.md)
   — the full wire contract, including exact refusal codes and messages.
 - [Getting started](./getting-started.md) — pointing Packer and Terraform at
   the instance.

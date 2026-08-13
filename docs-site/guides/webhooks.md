@@ -48,13 +48,13 @@ minutes and then become `failed`; a target refused by the outbound-address
 policy becomes `refused` without retry.
 
 The operator controls egress and credential sealing. See the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#webhooks)
+[deployment guide](../deployment/operations.md#webhooks)
 for the default SSRF protections, the lab-only private-network escape hatch,
 timeouts, response bounds, and `DFBG_CREDENTIAL_KEY` migration rules.
 
 ## Where to go next
 
-- [Deployment guide — Webhooks](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#webhooks)
+- [Deployment guide — Webhooks](../deployment/operations.md#webhooks)
   — egress protection and credential keys.
 - [Platform API reference](/platform-api.html) — create, update, verify and
   delivery-history wire shapes.
