@@ -7,6 +7,7 @@ const guideSidebar = [
   { text: 'Roles & principals', link: '/guides/roles-principals' },
   { text: 'The console', link: '/guides/console' },
   { text: 'Revocation & channels', link: '/guides/revocation-channels' },
+  { text: 'SBOMs & findings', link: '/guides/sbom-findings' },
   { text: 'Bag Drop', link: '/guides/bag-drop' },
   { text: 'Audit & encryption', link: '/guides/audit-encryption' },
   { text: 'Platform API', link: '/guides/platform-api' },
