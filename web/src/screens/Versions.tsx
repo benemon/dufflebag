@@ -1,4 +1,4 @@
-import { useState, type CSSProperties, type ReactNode, type Ref } from 'react'
+import { useState, type ReactNode, type Ref } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
@@ -118,11 +118,6 @@ export function Versions() {
 
 /** The most recent rows shown before "older versions" must be asked for. */
 const RECENT = 30
-
-const cardStyle: CSSProperties = {
-  '--pf-v6-c-card--BorderRadius': '3px',
-  boxShadow: '0 .0625rem .125rem 0 rgba(3,3,3,.12), 0 0 .125rem 0 rgba(3,3,3,.06)',
-} as CSSProperties
 
 export function VersionsView({
   bucket,
@@ -322,7 +317,7 @@ function BucketOverview({
   return (
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 440px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-        <Card style={cardStyle}>
+        <Card>
           <CardTitle>Bucket details</CardTitle>
           <CardBody>
             <DescriptionList isHorizontal isCompact>
@@ -364,16 +359,16 @@ function BucketOverview({
             </DescriptionList>
           </CardBody>
         </Card>
-        <Card style={cardStyle}>
+        <Card>
           <CardTitle>Ancestry</CardTitle>
           <CardBody style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px' }}>
-              <Content component="h3" style={subheadingStyle}>Parents</Content>
+              <Title headingLevel="h3" size="md">Parents</Title>
               {bucket.parents.length === 0 ? <Content component="p">None</Content> :
                 bucket.parents.map((parent) => (
                   <div key={`${parent.bucket}/${parent.fingerprint}/${parent.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
                     <strong>{parent.bucket} {parent.versionName}</strong>
-                    <div style={{ color: parentColor(parent.freshness), fontSize: 13 }}>
+                    <div style={{ color: parentColor(parent.freshness) }}>
                       {parentFreshnessText(parent.freshness)}
                     </div>
                     <LocalVersionNote
@@ -385,7 +380,7 @@ function BucketOverview({
                 ))}
             </div>
             <div style={{ flex: '1 1 220px' }}>
-              <Content component="h3" style={subheadingStyle}>Children</Content>
+              <Title headingLevel="h3" size="md">Children</Title>
               {bucket.children.length === 0 ? <Content component="p">None</Content> :
                 bucket.children.map((child) => (
                   <div key={`${child.bucket}/${child.fingerprint}/${child.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
@@ -430,10 +425,6 @@ export function EnforcedProvisionersRow({
   )
 }
 
-const subheadingStyle = {
-  color: '#4d4d4d', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' as const,
-}
-
 /**
  * Which of THIS bucket's versions the relation belongs to, with "latest" said
  * explicitly (duf-okej.11) — the registry table's status columns follow the
@@ -450,7 +441,7 @@ function LocalVersionNote({
 }) {
   if (!versionName) return null
   return (
-    <div style={{ color: '#4d4d4d', fontSize: 13 }}>
+    <div style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
       {prefix} {versionName}{versionName === latestName ? ' (latest)' : ''}
     </div>
   )
@@ -471,7 +462,7 @@ export function VersionsFacet({
   const older = versions.length - visibleVersions.length
 
   return (
-    <Card style={cardStyle}>
+    <Card>
         <CardTitle>Versions</CardTitle>
         <CardBody>
           {versions.length === 0 ? (
@@ -513,7 +504,7 @@ export function VersionsFacet({
                       <Td dataLabel="Published">
                         <When iso={version.created} />
                         {version.assignments.map((assignment) => (
-                          <div key={assignment.channel} style={{ color: '#4d4d4d', fontSize: 13 }}>
+                          <div key={assignment.channel} style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
                             {assignment.author ? `by ${assignment.author}` : 'actor unavailable'}
                           </div>
                         ))}
@@ -600,7 +591,7 @@ export function BucketChannelsFacet({
   >(null)
   return (
     <>
-      <Card style={cardStyle}>
+      <Card>
         <CardTitle>
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Channels</span>
@@ -1134,9 +1125,9 @@ function LazyAssignmentHistory({ bucket, channel }: { bucket: string; channel: B
   }
   return (
     <div style={{ marginTop: 16 }}>
-      <Content component="h3" style={{ textTransform: 'uppercase', letterSpacing: '.04em', fontSize: 12 }}>
+      <Title headingLevel="h3" size="md">
         Assignment history
-      </Content>
+      </Title>
       {body}
     </div>
   )
@@ -1263,11 +1254,11 @@ export function parentFreshnessText(freshness: ParentFreshness): string {
 function parentColor(freshness: ParentFreshness): string {
   switch (freshness.status) {
     case 'newest':
-      return '#3d7317'
+      return 'var(--pf-t--global--text--color--status--success--default)'
     case 'behind':
-      return '#795600'
+      return 'var(--pf-t--global--text--color--status--warning--default)'
     case 'unknown':
-      return '#4d4d4d'
+      return 'var(--pf-t--global--text--color--subtle)'
   }
 }
 

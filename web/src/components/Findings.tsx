@@ -41,12 +41,12 @@ export function FindingCounts({
 }) {
   const counts = severityCounts(findings ?? [])
   if (counts.length === 0) {
-    return <span style={{ color: '#c7c7c7' }} data-findings="none">—</span>
+    return <span style={{ color: 'var(--pf-t--global--text--color--disabled)' }} data-findings="none">—</span>
   }
   return (
     <span style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }} data-findings="counts">
       {isExpanded !== undefined && (
-        <span data-caret={isExpanded ? 'open' : 'closed'} style={{ color: '#4d4d4d', display: 'inline-flex' }}>
+        <span data-caret={isExpanded ? 'open' : 'closed'} style={{ color: 'var(--pf-t--global--text--color--subtle)', display: 'inline-flex' }}>
           {isExpanded ? <AngleDownIcon /> : <AngleRightIcon />}
         </span>
       )}
@@ -81,7 +81,7 @@ export function PackageFindingsTable({ findings }: { findings: Finding[] }) {
       <Tbody>
         {ordered.map((finding) => (
           <Tr key={finding.identifier}>
-            <Td dataLabel="Advisory"><code style={{ fontSize: 13 }}>{finding.identifier}</code></Td>
+            <Td dataLabel="Advisory"><code>{finding.identifier}</code></Td>
             <Td dataLabel="Severity">
               <Label color={SEVERITY_COLOUR[finding.criticality as Severity] ?? 'grey'} isCompact>
                 {finding.criticality}
@@ -92,12 +92,12 @@ export function PackageFindingsTable({ findings }: { findings: Finding[] }) {
                 translated. Truncated with the full value on hover — it is a
                 tell-me-if-I-ask fact, not a scanning one. */}
             <Td dataLabel="Reported" modifier="truncate">
-              <code style={{ fontSize: 12, color: '#4d4d4d' }} title={finding.severity}>
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }} title={finding.severity}>
                 {finding.severity || '—'}
               </code>
             </Td>
             <Td dataLabel="Aliases" modifier="truncate">
-              <code style={{ fontSize: 12, color: '#4d4d4d' }} title={finding.aliases.join(', ')}>
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }} title={finding.aliases.join(', ')}>
                 {finding.aliases.length > 0 ? finding.aliases.join(', ') : '—'}
               </code>
             </Td>
@@ -116,11 +116,11 @@ export function PackageFindingsTable({ findings }: { findings: Finding[] }) {
  */
 function fixedVersions(finding: Finding) {
   const versions = finding.fixedVersion.split(',').map((v) => v.trim()).filter(Boolean)
-  if (versions.length === 0) return <span style={{ color: '#4d4d4d' }}>No fix available</span>
+  if (versions.length === 0) return <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>No fix available</span>
   return (
     <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {versions.map((version) => (
-        <code key={version} style={{ fontSize: 12, wordBreak: 'break-all' }}>{version}</code>
+        <code key={version} style={{ wordBreak: 'break-all' }}>{version}</code>
       ))}
     </span>
   )

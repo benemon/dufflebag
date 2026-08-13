@@ -2,10 +2,6 @@
   --pf-t--global--font--family--body: "Red Hat Text", Helvetica, Arial, sans-serif;
   --pf-t--global--font--family--heading: "Red Hat Display", Helvetica, Arial, sans-serif;
   --pf-t--global--font--family--mono: "Red Hat Mono", monospace;
-  --pf-t--global--font--size--body--default: 13.5px;
-  --pf-t--global--font--size--body--sm: 13px;
-  --pf-t--global--font--size--heading--xs: 18px;
-
   --pf-t--global--background--color--100: #fff;
   --pf-t--global--background--color--200: #f2f2f2;
   --pf-t--global--background--color--300: #e0e0e0;
@@ -70,7 +66,6 @@
   --pf-t--global--text--color--nonstatus--on-orange--default: #8f4700;
   --pf-t--global--border--color--nonstatus--orange--default: #8f4700;
 
-  --pf-t--global--border--radius--medium: 3px;
   --pf-t--global--box-shadow--sm: 0 0.0625rem 0.125rem 0 rgb(3 3 3 / 12%),
     0 0 0.125rem 0 rgb(3 3 3 / 6%);
 
@@ -79,10 +74,6 @@
   --tx1: var(--pf-t--global--text--color--200);
   --bd: var(--pf-t--global--border--color--100);
   --lk: var(--pf-t--global--text--color--link--default);
-}
-
-.pf-v6-c-card {
-  box-shadow: var(--pf-t--global--box-shadow--sm);
 }
 
 .pf-v6-c-page.app-page {
