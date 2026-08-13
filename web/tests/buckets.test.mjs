@@ -165,12 +165,24 @@ test('pinned bucket gallery renders joined cards and disappears when empty', () 
   assert.match(pinned, />images</)
   assert.match(pinned, /Newest version:.*v1/)
   assert.match(pinned, /aria-label="Buckets"/)
+  assert.match(pinned, /aria-label="Unpin images"/)
 
   const empty = renderToStaticMarkup(React.createElement(BucketsView, {
     buckets, total: 2, loading: false, failure: null, pins: [],
     openBucket: () => {}, canPin: true,
   }))
   assert.doesNotMatch(empty, /aria-label="Pinned buckets"/)
+})
+
+test('the pinned card offers Unpin only with pin authority', () => {
+  const buckets = [galleryBucket('images')]
+  const pins = [{ bucket_name: 'images', pinned_at: '2026-08-09T10:00:00Z' }]
+  const reader = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets, total: 1, loading: false, failure: null, pins,
+    openBucket: () => {}, canPin: false,
+  }))
+  assert.match(reader, /aria-label="Pinned buckets"/)
+  assert.doesNotMatch(reader, /aria-label="Unpin images"/)
 })
 
 test('reader sees the kebab pin item disabled with its builder reason', () => {
