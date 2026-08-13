@@ -174,6 +174,40 @@ test('pinned bucket gallery renders joined cards and disappears when empty', () 
   assert.doesNotMatch(empty, /aria-label="Pinned buckets"/)
 })
 
+test('an empty project owns the connect affordance and never doubles it with the build hint', () => {
+  const markup = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [], total: 0, loading: false, failure: null,
+    openBucket: () => {}, openInstance: () => {},
+  }))
+  assert.match(markup, /class="pf-v6-c-empty-state"/)
+  assert.match(markup, /<h2[^>]*>No buckets yet<\/h2>/)
+  assert.match(markup, /pf-v6-c-empty-state__body">Buckets appear when Packer publishes a version/)
+  assert.match(markup, /pf-v6-c-empty-state__actions">[\s\S]{0,500}Connect a client/)
+  assert.match(markup, /href="https:\/\/developer\.hashicorp\.com\/packer\/docs\/hcp"[^>]*target="_blank"/)
+  assert.doesNotMatch(markup, /Waiting on a first build/)
+})
+
+test('the first-build hint appears only when buckets exist without a completed newest version', () => {
+  const render = (buckets) => renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets, total: buckets.length, loading: false, failure: null,
+    openBucket: () => {}, openInstance: () => {},
+  }))
+  const waiting = render([
+    { ...galleryBucket('empty'), versionCount: 0, newestVersion: null },
+    {
+      ...galleryBucket('building'),
+      newestVersion: { name: 'v0', fingerprint: 'building-v0', state: 'incomplete' },
+    },
+  ])
+  assert.match(waiting, /class="pf-v6-c-hint"/)
+  assert.match(waiting, /Waiting on a first build/)
+  assert.match(waiting, /Open Instance/)
+  assert.match(waiting, /aria-label="Dismiss client connection hint"/)
+
+  const completed = render([galleryBucket('ready')])
+  assert.doesNotMatch(completed, /Waiting on a first build/)
+})
+
 test('the pinned card offers Unpin only with pin authority', () => {
   const buckets = [galleryBucket('images')]
   const pins = [{ bucket_name: 'images', pinned_at: '2026-08-09T10:00:00Z' }]

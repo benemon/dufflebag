@@ -4,7 +4,7 @@ import {
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   DualListSelector, DualListSelectorControl, DualListSelectorControlsWrapper,
   DualListSelectorList, DualListSelectorListItem, DualListSelectorPane,
-  Form, FormGroup, FormSelect, FormSelectOption, Label, PageSection, TextArea,
+  EmptyState, EmptyStateBody, Form, FormGroup, FormSelect, FormSelectOption, Label, PageSection, TextArea,
   TextInput, Title,
 } from '@patternfly/react-core'
 import AngleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-left-icon'
@@ -804,13 +804,15 @@ export function StatusZone({
         {loading ? (
           <Content component="p">Loading Bag Drop status…</Content>
         ) : failure ? null : !status?.configured ? (
-          <Alert variant="info" isInline title="Bag Drop is not configured">
-            <Content component="p">No buckets are being mirrored from this project.</Content>
-          </Alert>
+          <EmptyState titleText="Bag Drop is not configured" headingLevel="h2">
+            <EmptyStateBody>No buckets are being mirrored from this project.</EmptyStateBody>
+          </EmptyState>
         ) : status.associations.length === 0 ? (
-          <Alert variant="info" isInline title="No buckets are mirrored">
-            <Content component="p">The destination is configured, but it has no bucket associations.</Content>
-          </Alert>
+          <EmptyState titleText="No buckets are mirrored" headingLevel="h2">
+            <EmptyStateBody>
+              The destination is configured, but it has no bucket associations.
+            </EmptyStateBody>
+          </EmptyState>
         ) : (
           <BagDropStatusTable associations={status.associations} />
         )}

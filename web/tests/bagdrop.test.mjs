@@ -304,8 +304,15 @@ test('Bag Drop zones render honest loading, error, and empty states', () => {
     config: null, associations: [], status: { configured: false, associations: [] },
   })
   assert.match(empty, /Configure a destination before mirroring buckets/)
-  assert.match(empty, /Bag Drop is not configured/)
+  assert.match(empty, /<h2[^>]*>Bag Drop is not configured<\/h2>/)
+  assert.match(empty, /class="pf-v6-c-empty-state__body"/)
   assert.match(empty, /No buckets are being mirrored from this project/)
+
+  const noAssociations = renderView({
+    status: { configured: true, associations: [] },
+  })
+  assert.match(noAssociations, /<h2[^>]*>No buckets are mirrored<\/h2>/)
+  assert.match(noAssociations, /destination is configured, but it has no bucket associations/)
 })
 
 test('enable posts the draft configuration and 409 says nothing was saved', async () => {

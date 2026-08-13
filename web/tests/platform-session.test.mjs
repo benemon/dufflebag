@@ -375,5 +375,5 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
   }))
   assert.match(buckets, /No organisations exist/)
   assert.match(buckets, /Principals and Instance work/)
-  assert.doesNotMatch(buckets, /No buckets in this project/)
+  assert.doesNotMatch(buckets, /No buckets yet/)
 })

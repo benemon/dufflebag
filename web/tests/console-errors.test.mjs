@@ -43,7 +43,7 @@ test('bucket and channel failures are visible instead of empty successful data',
   }))
   assert.match(bucketMarkup, /Buckets could not be loaded/)
   assert.match(bucketMarkup, /500 from \/packer\/buckets/)
-  assert.doesNotMatch(bucketMarkup, /No buckets in this project/)
+  assert.doesNotMatch(bucketMarkup, /No buckets yet/)
 
   const projectMarkup = renderToStaticMarkup(React.createElement(ProjectLoadFailure, {
     failure: '503 from /resource-manager/projects',
@@ -190,7 +190,9 @@ test('empty results are distinct and unsupported actions are absent', () => {
     loading: false,
     failure: null,
   }))
-  assert.match(emptyMarkup, /No buckets in this project/)
+  assert.match(emptyMarkup, /<h2[^>]*>No buckets yet<\/h2>/)
+  assert.match(emptyMarkup, /class="pf-v6-c-empty-state__body"/)
+  assert.match(emptyMarkup, /Connect a client/)
 
   const buckets = Array.from({ length: 21 }, (_, index) => ({
     name: `bucket-${String(index + 1).padStart(2, '0')}`,

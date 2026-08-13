@@ -82,6 +82,19 @@ test('webhook actions are disabled with the required role for a reader', () => {
   assert.match(markup, /Requires maintainer/)
 })
 
+test('Create webhook moves between the empty state and populated header with its role gate', () => {
+  const emptyReader = view({ callerRole: 'reader' })
+  assert.match(emptyReader, /pf-v6-c-empty-state[\s\S]*Create webhook/)
+  assert.match(emptyReader, /Requires maintainer/)
+  assert.equal((emptyReader.match(/Create webhook/g) ?? []).length, 1)
+
+  const populatedReader = view({ callerRole: 'reader', webhooks: [webhook()] })
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Create webhook/)
+  assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
+  assert.match(populatedReader, /Requires maintainer/)
+  assert.equal((populatedReader.match(/Create webhook/g) ?? []).length, 1)
+})
+
 test('pending and active states are labelled distinctly', () => {
   const active = view({ webhooks: [webhook()] })
   assert.match(active, /active/)
@@ -90,7 +103,8 @@ test('pending and active states are labelled distinctly', () => {
 })
 
 test('the empty and failed states say so honestly', () => {
-  assert.match(view(), /No webhooks are configured/)
+  assert.match(view(), /<h2[^>]*>No webhooks are configured<\/h2>/)
+  assert.match(view(), /pf-v6-c-empty-state__body">Create a webhook to send signed project events\./)
   const failed = view({ failure: 'boom' })
   assert.match(failed, /Webhooks could not be loaded/)
   assert.doesNotMatch(failed, /No webhooks are configured/)

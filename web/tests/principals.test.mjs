@@ -420,7 +420,21 @@ test('failures are visible, and refusals are distinguished from absence', () => 
   assert.doesNotMatch(failed, /No service principals are visible/)
 
   const empty = view({ principals: [] })
-  assert.match(empty, /No service principals are visible/)
+  assert.match(empty, /<h2[^>]*>No service principals are visible to you<\/h2>/)
+  assert.match(empty, /class="pf-v6-c-empty-state__body"/)
+})
+
+test('Create principal moves between the empty state and populated header with its role gate', () => {
+  const emptyReader = view({ principals: [], callerRole: 'reader' })
+  assert.match(emptyReader, /pf-v6-c-empty-state[\s\S]*Create principal/)
+  assert.match(emptyReader, /Requires maintainer/)
+  assert.equal((emptyReader.match(/Create principal/g) ?? []).length, 1)
+
+  const populatedReader = view({ callerRole: 'reader' })
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Create principal/)
+  assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
+  assert.match(populatedReader, /Requires maintainer/)
+  assert.equal((populatedReader.match(/Create principal/g) ?? []).length, 1)
 })
 
 // duf-4qr: the listing is exactly the selection's scope, so an empty
@@ -428,8 +442,9 @@ test('failures are visible, and refusals are distinguished from absence', () => 
 // went — never a bare zero-row table.
 test('an empty organisation-level listing explains itself', () => {
   const atOrganization = view({ principals: [], projectID: null })
-  assert.match(atOrganization, /No organisation-scoped principals/)
+  assert.match(atOrganization, /<h2[^>]*>No organisation-scoped principals<\/h2>/)
   assert.match(atOrganization, /select one in the header/)
+  assert.match(atOrganization, /pf-v6-c-empty-state[\s\S]*Create principal/)
   assert.doesNotMatch(atOrganization, /No service principals are visible/)
 })
 
