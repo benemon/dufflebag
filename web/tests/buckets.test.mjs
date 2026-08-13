@@ -137,6 +137,8 @@ test('ancestry carried only by older versions renders as its own state, not as n
   }))
   assert.equal(markup.split('>other versions<').length - 1, 2)
   assert.match(markup, />up to date</)
+  assert.match(markup, /aria-label="Parents ancestry scope"/)
+  assert.match(markup, /aria-label="Children ancestry scope"/)
 })
 
 const galleryBucket = (name) => ({

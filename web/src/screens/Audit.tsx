@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, Content, Form, FormGroup, Label,
+  DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   PageSection, TextInput, Title,
 } from '@patternfly/react-core'
@@ -362,26 +363,23 @@ function MeasurementValue({
 
 function AuditTargetHealth({ target }: { target: AuditTarget }) {
   return (
-    <Table aria-label={`Health for ${target.path}`} variant="compact">
-      <Thead>
-        <Tr><Th>Health field</Th><Th>Value</Th></Tr>
-      </Thead>
-      <Tbody>
-        <Tr><Td dataLabel="Health field">Status</Td><Td dataLabel="Value">{target.status}</Td></Tr>
-        <Tr><Td dataLabel="Health field">Since</Td><Td dataLabel="Value"><When iso={target.since} /></Td></Tr>
-        <Tr>
-          <Td dataLabel="Health field">Consecutive failures</Td>
-          <Td dataLabel="Value">{target.consecutive_failures}</Td>
-        </Tr>
-        <Tr>
-          <Td dataLabel="Health field">Cumulative failures</Td>
-          <Td dataLabel="Value">{target.cumulative_failures}</Td>
-        </Tr>
-        <Tr>
-          <Td dataLabel="Health field">Last failure</Td>
-          <Td dataLabel="Value"><When iso={target.last_failure_at} /></Td>
-        </Tr>
-      </Tbody>
-    </Table>
+    <DescriptionList isHorizontal isCompact aria-label={`Health for ${target.path}`}>
+      <DescriptionListGroup>
+        <DescriptionListTerm>Since</DescriptionListTerm>
+        <DescriptionListDescription><When iso={target.since} /></DescriptionListDescription>
+      </DescriptionListGroup>
+      <DescriptionListGroup>
+        <DescriptionListTerm>Consecutive failures</DescriptionListTerm>
+        <DescriptionListDescription>{target.consecutive_failures}</DescriptionListDescription>
+      </DescriptionListGroup>
+      <DescriptionListGroup>
+        <DescriptionListTerm>Cumulative failures</DescriptionListTerm>
+        <DescriptionListDescription>{target.cumulative_failures}</DescriptionListDescription>
+      </DescriptionListGroup>
+      <DescriptionListGroup>
+        <DescriptionListTerm>Last failure</DescriptionListTerm>
+        <DescriptionListDescription><When iso={target.last_failure_at} /></DescriptionListDescription>
+      </DescriptionListGroup>
+    </DescriptionList>
   )
 }

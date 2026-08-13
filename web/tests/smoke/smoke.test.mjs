@@ -281,8 +281,8 @@ const toggleRow = (name) =>
 
 const visibleHealthText = (path) =>
   until(`visible health for ${path}`, () =>
-    page.$eval(`table[aria-label="Health for ${path}"]`, (table) =>
-      table.getBoundingClientRect().height > 0 ? table.innerText : ''),
+    page.$eval(`dl[aria-label="Health for ${path}"]`, (list) =>
+      list.getBoundingClientRect().height > 0 ? list.innerText : ''),
   )
 
 /** The role options the create form currently offers, in order. */
@@ -1077,7 +1077,6 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(await rowCellText(auditFull, 'Space remaining'), '0 B')
     await toggleRow(auditFull)
     let health = await visibleHealthText(auditFull)
-    assert.match(health, /Status\s+failing/)
     // Timestamps render locale-formatted (duf-fcg6.6); a real date carries a year.
     assert.match(health, /Since\s+.*\d{4}/)
     assert.match(health, /Consecutive failures\s+[1-9]\d*/)
@@ -1106,15 +1105,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.notEqual(await rowCellText(auditFull, 'Space remaining'), '0 B')
     await toggleRow(auditFull)
     health = await visibleHealthText(auditFull)
-    assert.match(health, /Status\s+healthy/)
     assert.match(health, /Since\s+—/)
     assert.match(health, /Consecutive failures\s+0/)
     assert.match(health, /Cumulative failures\s+[1-9]\d*/)
     assert.match(health, /Last failure\s+.*\d{4}/)
     await toggleRow(auditFull)
     await until('the full audit target health row to collapse', () =>
-      page.$eval(`table[aria-label="Health for ${auditFull}"]`, (table) =>
-        table.getBoundingClientRect().height === 0))
+      page.$eval(`dl[aria-label="Health for ${auditFull}"]`, (list) =>
+        list.getBoundingClientRect().height === 0))
 
     // With three targets the explanation is present; removing one makes both
     // it and the disabled state disappear together.

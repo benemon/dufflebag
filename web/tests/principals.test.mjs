@@ -298,6 +298,12 @@ test('principals paginate the in-memory table', () => {
   assert.ok((markup.match(/pf-v6-c-pagination/g) ?? []).length >= 2)
 })
 
+test('the principals table has a sticky header', () => {
+  const markup = view()
+  const table = markup.match(/<table[^>]*aria-label="Service principals"[^>]*>/)?.[0] ?? ''
+  assert.match(table, /pf-m-sticky-header/)
+})
+
 // ADR-0004 as amended 2026-08-02: a non-root principal's last secret CAN be
 // revoked, so nothing about it is disabled or explained.
 test('a non-root sole secret offers revoke, with no rule stated in prose', () => {

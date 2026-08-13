@@ -5,11 +5,12 @@ import {
   Dropdown, DropdownItem, DropdownList, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, Form, FormGroup, FormSelect, FormSelectOption,
   Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, Pagination,
-  TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
+  Popover, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
+import HelpIcon from '@patternfly/react-icons/dist/esm/icons/help-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
@@ -31,6 +32,8 @@ import {
 } from '../data/versions'
 import type { TenancyGap } from '../data/tenant'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
+
+const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions with ancestry show as "other versions".'
 
 /**
  * Bucket detail — version and channel facets for one registry bucket.
@@ -363,7 +366,19 @@ function BucketOverview({
           <CardTitle>Ancestry</CardTitle>
           <CardBody style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
             <div style={{ flex: '1 1 220px' }}>
-              <Title headingLevel="h3" size="md">Parents</Title>
+              <Title headingLevel="h3" size="md">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  Parents
+                  <Popover bodyContent={ANCESTRY_SCOPE}>
+                    <Button
+                      variant="plain"
+                      hasNoPadding
+                      aria-label="Parents ancestry scope"
+                      icon={<HelpIcon />}
+                    />
+                  </Popover>
+                </span>
+              </Title>
               {bucket.parents.length === 0 ? <Content component="p">None</Content> :
                 bucket.parents.map((parent) => (
                   <div key={`${parent.bucket}/${parent.fingerprint}/${parent.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
@@ -380,7 +395,19 @@ function BucketOverview({
                 ))}
             </div>
             <div style={{ flex: '1 1 220px' }}>
-              <Title headingLevel="h3" size="md">Children</Title>
+              <Title headingLevel="h3" size="md">
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                  Children
+                  <Popover bodyContent={ANCESTRY_SCOPE}>
+                    <Button
+                      variant="plain"
+                      hasNoPadding
+                      aria-label="Children ancestry scope"
+                      icon={<HelpIcon />}
+                    />
+                  </Popover>
+                </span>
+              </Title>
               {bucket.children.length === 0 ? <Content component="p">None</Content> :
                 bucket.children.map((child) => (
                   <div key={`${child.bucket}/${child.fingerprint}/${child.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
@@ -499,7 +526,7 @@ export function VersionsFacet({
                   </ToolbarItem>
                 </ToolbarContent>
               </Toolbar>
-              <Table aria-label="Versions" variant="compact">
+              <Table aria-label="Versions" variant="compact" isStickyHeader>
                 <Thead>
                   <Tr>
                     <Th screenReaderText="Row expansion" />

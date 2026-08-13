@@ -34,6 +34,7 @@ type BucketSortIndex = keyof typeof BUCKET_SORT_KEYS
 const VERSION_STATE_ORDER: NonNullable<Bucket['newestVersion']>['state'][] = [
   'complete', 'incomplete', 'revoked', 'revocation-scheduled',
 ]
+const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions with ancestry show as "other versions".'
 
 /**
  * Buckets — the registry landing screen.
@@ -392,8 +393,12 @@ export function BucketsView({
                       <Th sort={getSortParams(1)}>Bucket name</Th>
                       <Th>Channels</Th>
                       <Th sort={getSortParams(3)}>Newest version</Th>
-                      <Th>Parents</Th>
-                      <Th>Children</Th>
+                      <Th info={{ popover: ANCESTRY_SCOPE, ariaLabel: 'Parents ancestry scope' }}>
+                        Parents
+                      </Th>
+                      <Th info={{ popover: ANCESTRY_SCOPE, ariaLabel: 'Children ancestry scope' }}>
+                        Children
+                      </Th>
                       <Th>Platforms</Th>
                       <Th sort={getSortParams(7)}>Last updated</Th>
                       <Th screenReaderText="Actions" />

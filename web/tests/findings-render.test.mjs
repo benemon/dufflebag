@@ -6,7 +6,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
-let FindingCounts, PackageFindingsTable
+let FindingCounts, PackageFindingsTable, PackageTableForTest
 
 before(async () => {
   vite = await createServer({
@@ -18,6 +18,7 @@ before(async () => {
   })
   ;({ FindingCounts, PackageFindingsTable } =
     await vite.ssrLoadModule('/src/components/Findings.tsx'))
+  ;({ PackageTableForTest } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
 })
 
 after(async () => {
@@ -53,6 +54,14 @@ const scan = {
   observedAt: '2026-08-07T12:00:00Z',
   submitted: 40,
 }
+
+test('the Packages table has a sticky header', () => {
+  const html = render(React.createElement(PackageTableForTest, {
+    packages: [affected], expanded: null, onToggle: () => {},
+  }))
+  const table = html.match(/<table[^>]*aria-label="Packages"[^>]*>/)?.[0] ?? ''
+  assert.match(table, /pf-m-sticky-header/)
+})
 
 test('the findings cell shows counts per severity, not prose', () => {
   const html = render(React.createElement(FindingCounts, { findings: [
