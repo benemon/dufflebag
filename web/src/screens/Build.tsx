@@ -3,7 +3,7 @@ import {
   Alert, Breadcrumb, BreadcrumbItem, Card, CardBody, CardTitle, CodeBlock,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, FormSelect, FormSelectOption, Label,
-  PageSection, Pagination, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem,
+  PageSection, Pagination, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Truncate,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
@@ -574,14 +574,8 @@ function SbomCard({
                 border: '1px solid var(--pf-t--global--border--color--default)', borderRadius: 3, color: 'inherit',
               }}
             >
-              <span
-                style={{
-                  flex: '0 1 auto', minWidth: 0,
-                  overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                }}
-                title={sbomFileName(sbom)}
-              >
-                {sbomFileName(sbom)}
+              <span style={{ flex: '0 1 auto', minWidth: 0 }}>
+                <Truncate content={sbomFileName(sbom)} />
               </span>
               <Label isCompact>{sbom.format}</Label>
               <span style={{ marginLeft: 'auto', display: 'flex' }} aria-hidden="true">

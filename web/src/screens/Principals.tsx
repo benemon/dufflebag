@@ -3,7 +3,7 @@ import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
-  PageSection, Pagination, Radio, TextInput, Title,
+  PageSection, Pagination, Popover, Radio, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -15,6 +15,8 @@ import {
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
+
+const ROOT_KEYSTONE_REASON = 'A root principal must keep one secret that never expires'
 
 /**
  * Service principals — the console's only write surface (ADR-0012, amended).
@@ -108,10 +110,10 @@ export function PrincipalsView({
 
         {/*
           Rendered from the listing, not from standing: it appears exactly when
-          a disabled Revoke is on screen, and never otherwise. That coupling is
-          what lets the button carry no explanation of its own (Ben,
-          2026-08-02) — and it means the notice cannot become furniture, since
-          issuing a second root secret removes both at once.
+          a disabled Revoke is on screen, and never otherwise. The same
+          predicate also gives that control its local explanation, and it means
+          the notice cannot become furniture, since issuing a second root
+          secret removes both at once.
 
           The `loading` guard is part of that coupling, not decoration. Reload
           marks itself loading WITHOUT clearing the previous scope's principals,
@@ -124,7 +126,7 @@ export function PrincipalsView({
           <Alert
             variant="info"
             isInline
-            title="A root principal must keep one secret that never expires"
+            title={ROOT_KEYSTONE_REASON}
             style={{ marginBottom: 16 }}
           >
             <Content component="p">
@@ -768,8 +770,21 @@ function SecretSlots({
         </Tr>
       </Thead>
       <Tbody>
-        {principal.secrets.map((secret) => (
-          <Tr key={secret.id}>
+        {principal.secrets.map((secret) => {
+          const keystoneSecret = rootsKeystoneSecret(principal, secret)
+          const revoke = (
+            <RoleRestrictedButton
+              action="managePrincipals"
+              callerRole={callerRole}
+              variant="link"
+              isDanger
+              isDisabled={keystoneSecret}
+              onClick={() => onRevoke(secret)}
+            >
+              Revoke
+            </RoleRestrictedButton>
+          )
+          return <Tr key={secret.id}>
             <Td dataLabel="Secret">{secret.id}</Td>
             <Td dataLabel="Created"><When iso={secret.created_at} /></Td>
             <Td dataLabel="Last used">
@@ -792,26 +807,14 @@ function SecretSlots({
                 that proves it. Deleting this check would restore an error
                 dialog, not a hole.
 
-                Deliberately carries no tooltip or inline reason (Ben,
-                2026-08-02). The explanation is the alert above the listing,
-                which renders under exactly this condition — see
-                soleSecretRoot. The two must stay coupled: a disabled control
-                with nothing on screen explaining it is indistinguishable from
-                a bug.
+                The global alert and this control's local popover are both
+                derived from keystoneSecret, so neither can disagree with the
+                server predicate.
               */}
-              <RoleRestrictedButton
-                action="managePrincipals"
-                callerRole={callerRole}
-                variant="link"
-                isDanger
-                isDisabled={rootsKeystoneSecret(principal, secret)}
-                onClick={() => onRevoke(secret)}
-              >
-                Revoke
-              </RoleRestrictedButton>
+              {keystoneSecret ? <Popover bodyContent={ROOT_KEYSTONE_REASON}>{revoke}</Popover> : revoke}
             </Td>
           </Tr>
-        ))}
+        })}
       </Tbody>
     </Table>
   )

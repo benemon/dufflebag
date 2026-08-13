@@ -211,9 +211,9 @@ const keyringRows = () =>
 const rowCellBytes = (name, label) =>
   page.$$eval('tr', (rows, needle, dataLabel) => {
     const row = rows.find((candidate) => candidate.innerText.includes(needle))
-    const title = row?.querySelector(`td[data-label="${dataLabel}"] span`)?.getAttribute('title') ?? ''
-    const match = /^(\d+) bytes$/.exec(title)
-    return match ? Number(match[1]) : null
+    const raw = row?.querySelector(`td[data-label="${dataLabel}"] span[data-bytes]`)
+      ?.getAttribute('data-bytes') ?? ''
+    return /^\d+$/.test(raw) ? Number(raw) : null
   }, name, label)
 
 /** A build table uses one tbody per expandable row, so detail stays row-scoped. */
@@ -2134,6 +2134,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await openVersion(findings)
     await until('the prior findings to become visibly unmaintained', async () =>
       Boolean(await page.$('.dfbg-findings-unmaintained')))
+    await waitForText('not updated')
     const movedText = await securityText()
     assert.ok((await securityScanDate()).startsWith(findingsDate), 'moved scan date must render')
     assert.match(movedText, /2 findings across 1 package/)
@@ -2152,7 +2153,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       }
     })
     assert.deepEqual(movedStyle, {
-      visible: true, filter: 'saturate(0.35)', opacity: '0.85',
+      visible: true, filter: 'none', opacity: '1',
       borderLeftStyle: 'solid', borderLeftWidth: '2px',
     })
     await assertNoVerdicts()

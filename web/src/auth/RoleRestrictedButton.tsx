@@ -20,6 +20,10 @@ export function RoleRestrictedButton({
   )
   if (!refused) return button
   return (
+    // A natively disabled button dispatches no events, and PF's aria-disabled
+    // variant swallows injected handlers — so a click-triggered Popover on the
+    // control itself can never open. The focusable wrapper with a hover/focus
+    // Tooltip is PatternFly's canonical reachable pattern; keep it.
     <Tooltip content={reason}>
       <span tabIndex={0} aria-label={reason} style={{ display: 'inline-block' }}>
         {button}

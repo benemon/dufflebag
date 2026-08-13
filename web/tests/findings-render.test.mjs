@@ -27,6 +27,17 @@ after(async () => {
 
 const render = (element) => renderToStaticMarkup(element)
 
+const findElements = (node, predicate, found = []) => {
+  if (Array.isArray(node)) {
+    for (const child of node) findElements(child, predicate, found)
+    return found
+  }
+  if (!React.isValidElement(node)) return found
+  if (predicate(node)) found.push(node)
+  findElements(node.props.children, predicate, found)
+  return found
+}
+
 const affected = {
   name: 'openssl',
   version: '3.0.0',
@@ -97,6 +108,23 @@ test('the expanded region gives the CVSS vector its own column', () => {
   assert.match(html, /3\.0\.1/)
   assert.match(html, /GHSA-aaaa-bbbb-cccc/)
   assert.match(html, /data-findings-table="true"/, 'the detail is a table, not prose')
+})
+
+test('reported severity and aliases keep provider values in PatternFly truncation', () => {
+  const finding = {
+    ...affected.findings[0],
+    severity: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H',
+    aliases: ['GHSA-aaaa-bbbb-cccc', 'CVE-2026-0001'],
+  }
+  const truncations = findElements(
+    PackageFindingsTable({ findings: [finding] }),
+    (element) => typeof element.props.content === 'string',
+  )
+  assert.deepEqual(truncations.map((element) => element.props.content), [
+    finding.severity, finding.aliases.join(', '),
+  ])
+  const html = render(React.createElement(PackageFindingsTable, { findings: [finding] }))
+  assert.doesNotMatch(html, /title=/)
 })
 
 test('the expanded region orders findings worst first', () => {

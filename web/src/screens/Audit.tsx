@@ -3,7 +3,7 @@ import {
   Alert, Button, Card, CardBody, CardTitle, Content, Form, FormGroup, Label,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
-  PageSection, TextInput, Title,
+  PageSection, TextInput, Title, Tooltip,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -324,7 +324,7 @@ export function AuditTargetTable({
             </Td>
             <Td dataLabel="Last reopened"><When iso={target.last_reopened_at} emptyText="Never" /></Td>
             <Td dataLabel="Status">
-              <Label color={target.status === 'healthy' ? 'green' : 'red'} isCompact>
+              <Label status={target.status === 'healthy' ? 'success' : 'danger'} isCompact>
                 {target.status}
               </Label>
             </Td>
@@ -358,7 +358,14 @@ function MeasurementValue({
 }) {
   if (target.measurement.state === 'unavailable') return <>Unavailable</>
   const bytes = target.measurement[field]
-  return <span title={`${bytes} bytes`}>{formatBytes(bytes)}</span>
+  // data-bytes carries the raw descriptor-backed value: the smoke storage
+  // oracle compares it against the real file and filesystem, so it must stay
+  // machine-readable now that the human affordance is a Tooltip.
+  return (
+    <Tooltip content={`${bytes} bytes`}>
+      <span data-bytes={bytes}>{formatBytes(bytes)}</span>
+    </Tooltip>
+  )
 }
 
 function AuditTargetHealth({ target }: { target: AuditTarget }) {

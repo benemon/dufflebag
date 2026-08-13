@@ -629,34 +629,52 @@ function BucketActions({
         <DropdownItem
           isSelected={pinned}
           isDisabled={pinAction.disabled}
+          tooltipProps={pinAction.tooltipProps}
           onClick={() => { void togglePin(bucket, pinned) }}
         >
           {pinAction.label}
+          {pinAction.tooltipProps ? (
+            <span className="pf-v6-u-screen-reader"> — {pinAction.tooltipProps.content}</span>
+          ) : null}
         </DropdownItem>
         <DropdownItem
           isDanger
           isDisabled={deleteAction.disabled}
+          tooltipProps={deleteAction.tooltipProps}
           onClick={onDelete}
         >
           {deleteAction.label}
+          {deleteAction.tooltipProps ? (
+            <span className="pf-v6-u-screen-reader"> — {deleteAction.tooltipProps.content}</span>
+          ) : null}
         </DropdownItem>
       </DropdownList>
     </Dropdown>
   )
 }
 
-export function deleteBucketAction(callerRole: Role | null): { disabled: boolean; label: string } {
+export function deleteBucketAction(callerRole: Role | null): {
+  disabled: boolean
+  label: string
+  tooltipProps?: { content: string }
+} {
   const allowed = permitsAction(callerRole, 'deleteBuckets')
   return {
     disabled: !allowed,
-    label: `Delete bucket…${allowed ? '' : ` — ${requirementReason('deleteBuckets')}`}`,
+    label: 'Delete bucket…',
+    ...(!allowed ? { tooltipProps: { content: requirementReason('deleteBuckets') } } : {}),
   }
 }
 
-export function pinBucketAction(canPin: boolean): { disabled: boolean; label: string } {
+export function pinBucketAction(canPin: boolean): {
+  disabled: boolean
+  label: string
+  tooltipProps?: { content: string }
+} {
   return {
     disabled: !canPin,
-    label: `Pin bucket${canPin ? '' : ` — ${requirementReason('pinBuckets')}`}`,
+    label: 'Pin bucket',
+    ...(!canPin ? { tooltipProps: { content: requirementReason('pinBuckets') } } : {}),
   }
 }
 

@@ -1,4 +1,4 @@
-import { Label } from '@patternfly/react-core'
+import { Label, Truncate } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import AngleDownIcon from '@patternfly/react-icons/dist/esm/icons/angle-down-icon'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
@@ -92,13 +92,13 @@ export function PackageFindingsTable({ findings }: { findings: Finding[] }) {
                 translated. Truncated with the full value on hover — it is a
                 tell-me-if-I-ask fact, not a scanning one. */}
             <Td dataLabel="Reported" modifier="truncate">
-              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }} title={finding.severity}>
-                {finding.severity || '—'}
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {finding.severity ? <Truncate content={finding.severity} /> : '—'}
               </code>
             </Td>
             <Td dataLabel="Aliases" modifier="truncate">
-              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }} title={finding.aliases.join(', ')}>
-                {finding.aliases.length > 0 ? finding.aliases.join(', ') : '—'}
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {finding.aliases.length > 0 ? <Truncate content={finding.aliases.join(', ')} /> : '—'}
               </code>
             </Td>
             <Td dataLabel="Fixed in">{fixedVersions(finding)}</Td>

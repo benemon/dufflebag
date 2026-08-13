@@ -169,13 +169,10 @@
 
 /*
  * Figures that are no longer being maintained, because no channel selects the
- * version any more. Desaturated and outlined rather than labelled "stale":
- * the word is skimmed past, a visibly different treatment is not. The as-of
- * timestamp beside it carries the actual fact.
+ * version any more. The card keeps a harmless container cue while its title
+ * carries the explicit marker beside the as-of timestamp.
  */
 .dfbg-findings-unmaintained {
-  filter: saturate(0.35);
-  opacity: 0.85;
   border-left: 2px solid var(--pf-t--global--border--color--default, #c7c7c7);
   padding-left: 10px;
 }

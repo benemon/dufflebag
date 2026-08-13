@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -19,6 +20,7 @@ let lastTargetRemovalNeedsConfirmation
 let formatBytes
 let loginDestination
 let TypedConfirmModalView
+const auditScreenSource = readFileSync(new URL('../src/screens/Audit.tsx', import.meta.url), 'utf8')
 
 before(async () => {
   vite = await createServer({
@@ -181,6 +183,19 @@ test('audit health omits the parent status while preserving failure history', ()
   assert.match(health, /Consecutive failures[\s\S]{0,300}>0<\/div><\/dd>/)
 })
 
+test('audit health labels carry semantic status icons', () => {
+  const healthy = renderToStaticMarkup(React.createElement(AuditTargetTable, {
+    targets: [target()], callerRole: 'root', onRemove: () => {},
+  }))
+  const failing = renderToStaticMarkup(React.createElement(AuditTargetTable, {
+    targets: [target({ status: 'failing' })], callerRole: 'root', onRemove: () => {},
+  }))
+  const statusCell = (markup) =>
+    markup.match(/<td[^>]*data-label="Status"[^>]*>[\s\S]*?<\/td>/)?.[0] ?? ''
+  assert.match(statusCell(healthy), /pf-m-success/)
+  assert.match(statusCell(failing), /pf-m-danger/)
+})
+
 test('storage columns distinguish an empty current file from an unavailable measurement', () => {
   const markup = renderToStaticMarkup(React.createElement(AuditTargetTable, {
     targets: [
@@ -195,8 +210,10 @@ test('storage columns distinguish an empty current file from an unavailable meas
   }))
   assert.match(markup, /Current file/)
   assert.match(markup, /Space remaining/)
-  assert.match(markup, /title="0 bytes">0 B/)
-  assert.match(markup, /title="16777216 bytes">16 MiB/)
+  assert.match(markup, />0 B</)
+  assert.match(markup, />16 MiB</)
+  assert.doesNotMatch(markup, /title="(?:0|16777216) bytes"/)
+  assert.match(auditScreenSource, /<Tooltip content=\{`\$\{bytes\} bytes`\}>/)
   assert.match(markup, /<time[^>]*dateTime="2026-08-04T12:30:00Z"/)
   assert.match(markup, /Unavailable/)
   assert.match(markup, /Never/)

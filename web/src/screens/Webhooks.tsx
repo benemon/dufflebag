@@ -242,7 +242,7 @@ function WebhookTable({ webhooks, callerRole, onVerify, onDelete, onDeliveries }
               <Td expand={{ rowIndex: index, isExpanded: expanded === record.id, onToggle: () => toggle(record) }} />
               <Td dataLabel="Name">{record.name}</Td>
               <Td dataLabel="URL">{record.url}</Td>
-              <Td dataLabel="State"><Label color={record.state === 'active' ? 'green' : 'orange'} isCompact>{record.state}</Label></Td>
+              <Td dataLabel="State"><Label status={record.state === 'active' ? 'success' : 'warning'} isCompact>{record.state}</Label></Td>
               <Td dataLabel="Events">{record.events.length === 0 ? 'All' : record.events.length}</Td>
               <Td dataLabel="Actions">
                 <RoleRestrictedButton action="configureWebhooks" callerRole={callerRole} variant="link" onClick={() => onVerify(record.id)}>Verify</RoleRestrictedButton>
