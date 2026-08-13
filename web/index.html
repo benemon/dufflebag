@@ -4,6 +4,14 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>dufflebag</title>
+    <script>
+      (() => {
+        const stored = localStorage.getItem('dufflebag-theme')
+        const dark = stored === 'dark' ||
+          (stored !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.classList.toggle('pf-v6-theme-dark', dark)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>

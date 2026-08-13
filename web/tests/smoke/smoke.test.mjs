@@ -710,6 +710,11 @@ before(async () => {
   })
   page = await browser.newPage()
   page.setDefaultTimeout(30000)
+  // The harness browser's own prefers-color-scheme is environment-dependent
+  // (this machine's headless Chrome prefers dark). The suite's fixtures pin
+  // light-theme values, so the baseline is emulated deterministically; the
+  // theme-toggle steps then exercise the switch from a known state.
+  await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'light' }])
   // Wide enough that the sidebar navigation is expanded rather than behind the
   // hamburger toggle.
   await page.setViewport({ width: 1440, height: 900 })
@@ -813,6 +818,18 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       await globalNavItems(),
       ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
+    // The themed background paints on the PatternFly page element, not body.
+    const pageBackground = () => page.$eval(
+      '.pf-v6-c-page', (el) => getComputedStyle(el).backgroundColor)
+    const lightBackground = await pageBackground()
+    await page.click('button[aria-label="Switch to dark theme"]')
+    assert.equal(await page.evaluate(() =>
+      document.documentElement.classList.contains('pf-v6-theme-dark')), true)
+    assert.notEqual(await pageBackground(), lightBackground)
+    await page.click('button[aria-label="Switch to light theme"]')
+    assert.equal(await page.evaluate(() =>
+      document.documentElement.classList.contains('pf-v6-theme-dark')), false)
+    assert.equal(await pageBackground(), lightBackground)
   })
 
   await t.test('a reload keeps the session', async () => {
