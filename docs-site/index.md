@@ -13,33 +13,51 @@ or endorsed by IBM or HashiCorp.
 
 This documentation tracks the current development branch.
 
-Getting going:
+Getting started:
 
-- [Install an instance](./guides/installation.md) — run an instance with Helm,
+- [Install an instance](./getting-started/installation.md) — run an instance with Helm,
   on OpenShift, or as a container.
-- [Point Packer and Terraform at an instance](./guides/getting-started.md) —
+- [Point Packer and Terraform at an instance](./getting-started/first-use.md) —
   initialize an instance and connect the stock clients.
-- [Roles, principals and credentials](./guides/roles-principals.md) — the role
+
+Administration:
+
+- [Roles, principals and credentials](./administration/roles-principals.md) — the role
   ladder, service principals, secrets and recovery.
-
-Day to day:
-
-- [The console](./guides/console.md) — the web console's screens, role gates
+- [The console](./administration/console.md) — the web console's screens, role gates
   and confirmations.
-- [Manage the registry with Terraform](./guides/terraform.md) — manage buckets,
+- [Audit](./administration/audit.md) — audit targets.
+- [Encryption](./administration/encryption.md) — encryption at rest.
+- [Mirror to another registry with Bag Drop](./administration/bag-drop.md) — mirror a
+  project's registry data to another registry.
+- [Send project events with webhooks](./administration/webhooks.md) — deliver signed
+  project events to an HTTP endpoint.
+
+Using the registry:
+
+- [Manage the registry with Terraform](./using/terraform.md) — manage buckets,
   channels and assignments declaratively.
-- [Revocation, restore and channels](./guides/revocation-channels.md) —
+- [Revocation, restore and channels](./using/revocation-channels.md) —
   channels, promotion, and revoking and restoring versions.
-- [SBOMs and vulnerability findings](./guides/sbom-findings.md) — upload SBOMs
+- [SBOMs and vulnerability findings](./using/sbom-findings.md) — upload SBOMs
   and read package and vulnerability findings.
 
-Operating:
+Deployment:
 
-- [Mirror to another registry with Bag Drop](./guides/bag-drop.md) — mirror a
-  project's registry data to another registry.
-- [Send project events with webhooks](./guides/webhooks.md) — deliver signed
-  project events to an HTTP endpoint.
-- [Audit and encryption](./guides/audit-encryption.md) — audit targets and
-  encryption at rest.
-- [Use the platform API](./guides/platform-api.md) — authentication, tenancy
+- [Deploy an instance](./deployment/index.md) — configure PostgreSQL, TLS,
+  migrations and first run.
+- [Configure object storage](./deployment/object-storage.md) — store SBOMs and
+  vulnerability-scanning transcripts in an S3-compatible service.
+- [Configure encryption](./deployment/encryption-setup.md) — connect the key
+  service and operate the encrypted posture.
+- [Operate an instance](./deployment/operations.md) — configure scanning,
+  webhooks and Bag Drop.
+
+Reference:
+
+- [Architecture](./reference/architecture.md) — the boundaries a change must
+  respect.
+- [HCP Packer API compatibility](./reference/compatibility.md) — the external
+  client contract dufflebag serves.
+- [Use the platform API](./reference/platform-api.md) — authentication, tenancy
   and the platform endpoints.
