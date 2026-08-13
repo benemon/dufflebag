@@ -1,4 +1,4 @@
-import { Card, CardBody, CardTitle, Content, Label } from '@patternfly/react-core'
+import { Card, CardBody, CardTitle, Content, Label, Title } from '@patternfly/react-core'
 
 import {
   coverageSummary, hasCoverageGap, versionRollup, type BuildFindings,
@@ -89,20 +89,20 @@ export function VersionSecurityCard({
         )}
 
         {outOfScanSet && (
-          <Content component="p" style={{ marginTop: 12, color: '#4d4d4d' }}>
+          <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }}>
             No channel selects this version, so these figures are not being updated.
           </Content>
         )}
         {coverage.length > 0 && (
-          <Content component="p" style={{ color: '#4d4d4d' }} data-coverage="true">
+          <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
             Coverage: {coverage.join('; ')}.
           </Content>
         )}
 
         <div style={{ marginTop: 20 }}>
-          <Content component="small" style={{ textTransform: 'uppercase', letterSpacing: '.04em' }}>
+          <Title headingLevel="h3" size="md">
             By build
-          </Content>
+          </Title>
           <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
             {summary.builds.map((build) => (
               <button
@@ -113,7 +113,7 @@ export function VersionSecurityCard({
                   font: 'inherit', textAlign: 'left', cursor: 'pointer', background: 'none',
                   width: '100%',
                   display: 'flex', alignItems: 'center', gap: 14, padding: '11px 14px',
-                  border: '1px solid #e0e0e0', borderRadius: 3, textDecoration: 'none',
+                  border: '1px solid var(--pf-t--global--border--color--default)', borderRadius: 3, textDecoration: 'none',
                   color: 'inherit',
                 }}
                 data-build-link={build.buildID}
@@ -122,7 +122,7 @@ export function VersionSecurityCard({
                   <span style={{ display: 'block', fontWeight: 500 }}>{build.platform}</span>
                   <code
                     style={{
-                      display: 'block', fontSize: 12, color: '#4d4d4d',
+                      display: 'block', color: 'var(--pf-t--global--text--color--subtle)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}
                     title={build.component || build.buildID}
@@ -153,7 +153,7 @@ export function VersionSecurityCard({
                     <Content component="small">{build.scanned} scanned</Content>
                   )}
                 </span>
-                <span style={{ flex: 'none', color: '#4d4d4d' }}>›</span>
+                <span style={{ flex: 'none', color: 'var(--pf-t--global--text--color--subtle)' }}>›</span>
               </button>
             ))}
           </div>

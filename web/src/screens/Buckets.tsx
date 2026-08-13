@@ -400,7 +400,7 @@ function BucketDetail({ bucket }: { bucket: Bucket }) {
       <Content component="p">{bucket.description || 'No description has been recorded.'}</Content>
       <div style={{ display: 'flex', gap: 32, flexWrap: 'wrap', marginTop: 12 }}>
         <div style={{ flex: '1 1 300px' }}>
-          <Content component="h3" style={detailHeadingStyle}>Channels</Content>
+          <Title headingLevel="h3" size="md">Channels</Title>
           {bucket.channels.length === 0 ? (
             <Content component="p">None</Content>
           ) : bucket.channels.map((channel) => (
@@ -413,23 +413,23 @@ function BucketDetail({ bucket }: { bucket: Bucket }) {
                 {channel.restricted && <Label isCompact color="grey">restricted</Label>}
               </span>
               <span>{channel.versionName}</span>
-              <span style={{ color: '#4d4d4d', fontSize: 13 }}>
+              <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
                 {channelGap(channel.fingerprint, bucket)}
               </span>
             </div>
           ))}
         </div>
         <div style={{ flex: '0 1 260px' }}>
-          <Content component="h3" style={detailHeadingStyle}>Labels</Content>
+          <Title headingLevel="h3" size="md">Labels</Title>
           <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             {Object.entries(bucket.labels).length === 0 ? 'None' :
               Object.entries(bucket.labels).map(([key, value]) => (
                 <Label key={key} isCompact>{key}={value}</Label>
               ))}
           </span>
-          <Content component="h3" style={{ ...detailHeadingStyle, marginTop: 14 }}>
+          <Title headingLevel="h3" size="md" style={{ marginTop: 14 }}>
             Template type
-          </Content>
+          </Title>
           {bucket.templateTypes.length === 0 ? '—' : bucket.templateTypes.map((templateType) => (
             <Label key={templateType} isCompact>{templateType}</Label>
           ))}
@@ -437,10 +437,6 @@ function BucketDetail({ bucket }: { bucket: Bucket }) {
       </div>
     </>
   )
-}
-
-const detailHeadingStyle = {
-  color: '#4d4d4d', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' as const,
 }
 
 function channelGap(fingerprint: string, bucket: Bucket): string {

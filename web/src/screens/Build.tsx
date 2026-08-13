@@ -19,14 +19,8 @@ import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
 import { FindingCounts, PackageFindingsTable } from '../components/Findings'
 import { SEVERITY_ORDER } from '../data/findings'
 
-const cardStyle: CSSProperties = {
-  '--pf-v6-c-card--BorderRadius': '3px',
-  boxShadow: '0 .0625rem .125rem 0 rgba(3,3,3,.12), 0 0 .125rem 0 rgba(3,3,3,.06)',
-} as CSSProperties
-
 const darkCodeStyle: CSSProperties = {
-  '--pf-v6-c-code-block--BackgroundColor': '#151515',
-  '--pf-v6-c-code-block--BorderRadius': '3px',
+  '--pf-v6-c-code-block--BackgroundColor': 'var(--pf-t--color--gray--95)',
   '--pf-v6-c-code-block--BorderWidth': '0',
 } as CSSProperties
 
@@ -186,17 +180,17 @@ function BuildOverview({
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 440px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 24 }}>
         <SbomCard sboms={sboms} fetchSbom={fetchSbom} />
-        <Card style={cardStyle}>
+        <Card>
           <CardTitle>Build options</CardTitle>
           <CardBody>
             {command ? (
               <>
                 <CodeBlock style={darkCodeStyle}>
-                  <CodeBlockCode style={{ color: '#e0e0e0', whiteSpace: 'pre' }}>
+                  <CodeBlockCode style={{ color: 'var(--pf-t--color--gray--20)', whiteSpace: 'pre' }}>
                     {command}
                   </CodeBlockCode>
                 </CodeBlock>
-                <Content component="p" style={{ color: '#4d4d4d', fontSize: 13, marginTop: 8 }}>
+                <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)', marginTop: 8 }}>
                   Variable values are masked.
                 </Content>
               </>
@@ -206,7 +200,7 @@ function BuildOverview({
           </CardBody>
         </Card>
 
-        <Card style={cardStyle}>
+        <Card>
           <CardTitle>Packer runner environment</CardTitle>
           <CardBody>
             <DescriptionList isHorizontal isCompact>
@@ -223,7 +217,7 @@ function BuildOverview({
         </Card>
       </div>
 
-      <Card style={{ ...cardStyle, flex: '0 1 380px', minWidth: 300 }}>
+      <Card style={{ flex: '0 1 380px', minWidth: 300 }}>
         <CardTitle>Build labels</CardTitle>
         <CardBody>
           {Object.keys(build.labels).length === 0 ? (
@@ -233,13 +227,13 @@ function BuildOverview({
               {Object.entries(build.labels).map(([key, value]) => (
                 <DescriptionListGroup
                   key={key}
-                  style={{ padding: '8px 11px', background: '#f2f2f2', borderRadius: 3 }}
+                  style={{ padding: '8px 11px', background: 'var(--pf-t--global--background--color--200)', borderRadius: 3 }}
                 >
-                  <DescriptionListTerm style={{ fontFamily: 'Red Hat Mono, monospace', fontSize: 12 }}>
+                  <DescriptionListTerm style={{ fontFamily: 'Red Hat Mono, monospace' }}>
                     {key}
                   </DescriptionListTerm>
                   <DescriptionListDescription
-                    style={{ fontFamily: 'Red Hat Mono, monospace', fontSize: 12, wordBreak: 'break-all' }}
+                    style={{ fontFamily: 'Red Hat Mono, monospace', wordBreak: 'break-all' }}
                   >
                     {value}
                   </DescriptionListDescription>
@@ -264,7 +258,7 @@ function EnvironmentField({ label, value }: { label: string; value: string }) {
 
 function ArtifactsCard({ build }: { build: Build }) {
   return (
-    <Card style={cardStyle}>
+    <Card>
       <CardTitle>Artifacts</CardTitle>
       <CardBody>
         {build.artifacts.length === 0 ? (
@@ -302,7 +296,7 @@ function PackagesCard({ build }: { build: Build }) {
   const [findingFilter, setFindingFilter] = useState('')
   if (build.packageInventory.status === 'unparseable') {
     return (
-      <Card style={cardStyle}>
+      <Card>
         <CardTitle>Packages</CardTitle>
         <CardBody>
           <Alert variant="warning" isInline title="Package inventory is unavailable">
@@ -314,7 +308,7 @@ function PackagesCard({ build }: { build: Build }) {
   }
   if (build.packageInventory.status === 'not-loaded') {
     return (
-      <Card style={cardStyle}>
+      <Card>
         <CardTitle>Packages</CardTitle>
         <CardBody><Content component="p">Package inventory has not been loaded.</Content></CardBody>
       </Card>
@@ -339,10 +333,10 @@ function PackagesCard({ build }: { build: Build }) {
   ).reverse()
 
   return (
-    <Card style={cardStyle}>
+    <Card>
       <CardTitle>Packages</CardTitle>
       <CardBody>
-        <Content component="p" style={{ color: '#4d4d4d' }}>
+        <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
           Reported by client-supplied SBOMs; Dufflebag has not verified this inventory.
           {' '}{all.length} {all.length === 1 ? 'package' : 'packages'} · {affected.length} with findings.
         </Content>
@@ -514,7 +508,7 @@ function SbomCard({
   }
 
   return (
-    <Card style={cardStyle}>
+    <Card>
       <CardTitle>SBOM</CardTitle>
       <CardBody>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -528,7 +522,7 @@ function SbomCard({
                 font: 'inherit', textAlign: 'left', cursor: 'pointer', background: 'none',
                 width: '100%',
                 display: 'flex', alignItems: 'center', gap: 14, padding: '11px 14px',
-                border: '1px solid #e0e0e0', borderRadius: 3, color: 'inherit',
+                border: '1px solid var(--pf-t--global--border--color--default)', borderRadius: 3, color: 'inherit',
               }}
             >
               <span

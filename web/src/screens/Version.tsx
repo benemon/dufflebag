@@ -217,7 +217,7 @@ export function VersionView({
                 </RoleRestrictedButton>
               </div>
             </div>
-            <DescriptionList isHorizontal style={{ marginTop: 16 }}>
+            <DescriptionList isHorizontal isCompact style={{ marginTop: 16 }}>
               <DescriptionListGroup>
                 <DescriptionListTerm>Fingerprint</DescriptionListTerm>
                 <DescriptionListDescription>
@@ -729,7 +729,7 @@ function LineageSide({
 }) {
   return (
     <div style={{ flex: '1 1 220px' }}>
-      <Content component="h3" style={subheadingStyle}>{heading}</Content>
+      <Title headingLevel="h3" size="md">{heading}</Title>
       {entries.length === 0 ? <Content component="p">None.</Content> :
         entries.map((entry) => (
           <div key={`${entry.bucket}/${entry.fingerprint}`} style={{ padding: '5px 0' }}>
@@ -737,16 +737,12 @@ function LineageSide({
               {entry.bucket} {entry.versionName}
             </Button>
             {(entry.channels ?? []).length > 0 && (
-              <div style={{ color: '#4d4d4d', fontSize: 13 }}>{(entry.channels ?? []).join(', ')}</div>
+              <div style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{(entry.channels ?? []).join(', ')}</div>
             )}
           </div>
         ))}
     </div>
   )
-}
-
-const subheadingStyle = {
-  color: '#4d4d4d', fontSize: 12, letterSpacing: '.04em', textTransform: 'uppercase' as const,
 }
 
 function ConsumeCard({ bucket, version }: { bucket: string; version: VersionData }) {

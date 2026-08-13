@@ -16,10 +16,7 @@
 
 .registry-facet-heading {
   padding: 0 12px 8px;
-  color: var(--pf-t--global--text--color--200);
-  font: 400 12px "Red Hat Text", sans-serif;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+  font: 600 16px/1.5 "Red Hat Display", sans-serif;
 }
 
 .registry-facet {
