@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import {
-  Alert, Button, Content, Modal, ModalBody, ModalFooter, ModalHeader,
+  Alert, Content,
 } from '@patternfly/react-core'
 
-import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
+import { TypedConfirmModal } from './TypedConfirmModal'
 
 export function DeleteBucketModal({
   bucket, callerRole, onConfirm, onClose, checkMirrored,
@@ -46,23 +46,19 @@ export function DeleteBucketModal({
       setSubmitting(false)
     }
   }
-  return (
-    <Modal aria-labelledby="delete-bucket-modal-title" isOpen onClose={onClose} variant="small">
-      <DeleteBucketModalView
-        bucket={bucket}
-        callerRole={callerRole}
-        submitting={submitting}
-        failure={failure}
-        mirrored={mirrored}
-        onConfirm={confirm}
-        onClose={onClose}
-      />
-    </Modal>
-  )
+  return <DeleteBucketModalView
+    bucket={bucket}
+    callerRole={callerRole}
+    submitting={submitting}
+    failure={failure}
+    mirrored={mirrored}
+    onConfirm={confirm}
+    onClose={onClose}
+  />
 }
 
 export function DeleteBucketModalView({
-  bucket, callerRole, submitting, failure, mirrored = false, onConfirm, onClose,
+  bucket, submitting, failure, mirrored = false, onConfirm, onClose,
 }: {
   bucket: string
   callerRole: Role | null
@@ -73,9 +69,14 @@ export function DeleteBucketModalView({
   onClose: () => void
 }) {
   return (
-    <>
-      <ModalHeader labelId="delete-bucket-modal-title" title={`Delete ${bucket}`} />
-      <ModalBody>
+    <TypedConfirmModal
+      title={`Delete ${bucket}`}
+      expected={bucket}
+      verb="Delete bucket"
+      busy={submitting}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      body={<>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{failure}</Content>
@@ -92,20 +93,7 @@ export function DeleteBucketModalView({
             </Content>
           </Alert>
         ) : null}
-      </ModalBody>
-      <ModalFooter>
-        <RoleRestrictedButton
-          action="deleteBuckets"
-          callerRole={callerRole}
-          variant="danger"
-          isLoading={submitting}
-          isDisabled={submitting}
-          onClick={onConfirm}
-        >
-          Delete bucket
-        </RoleRestrictedButton>
-        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
-      </ModalFooter>
-    </>
+      </>}
+    />
   )
 }

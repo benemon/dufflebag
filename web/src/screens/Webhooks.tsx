@@ -7,6 +7,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   WEBHOOK_OPERATIONS, createWebhook, deleteWebhook, listWebhookDeliveries, listWebhooks,
   verifyWebhook, type Webhook, type WebhookDelivery, type WebhookOperation,
@@ -268,11 +269,15 @@ export function DeleteConfirmation({ webhook, onConfirm, onCancel }: {
   onCancel: () => void
 }) {
   return (
-    <Alert variant="warning" isInline title={`Delete ${webhook.name}?`} style={{ marginBottom: 16 }}>
-      <Content component="p">Delivery history for this webhook will also be deleted.</Content>
-      <Button variant="danger" onClick={onConfirm}>Delete webhook</Button>
-      <Button variant="link" onClick={onCancel}>Cancel</Button>
-    </Alert>
+    <TypedConfirmModal
+      title={`Delete ${webhook.name}?`}
+      body={<Content component="p">Delivery history for this webhook will also be deleted.</Content>}
+      expected={webhook.name}
+      verb="Delete webhook"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   )
 }
 

@@ -10,6 +10,7 @@ let BucketsView
 let pinBucketAction
 let deleteBucketAction
 let DeleteBucketModalView
+let TypedConfirmModalView
 let loadBuckets
 let toggleBucketPin
 let deleteBucket
@@ -27,6 +28,8 @@ before(async () => {
     await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
   ;({ DeleteBucketModalView } =
     await vite.ssrLoadModule('/src/components/DeleteBucketModal.tsx'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ loadBuckets, toggleBucketPin } = await vite.ssrLoadModule('/src/data/buckets.ts'))
   ;({ deleteBucket, ApiError } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
@@ -69,6 +72,11 @@ const findElement = (node, predicate) => {
   if (predicate(node)) return node
   return findElement(node.props.children, predicate)
 }
+
+const renderTyped = (element) => renderToStaticMarkup(React.createElement(
+  TypedConfirmModalView,
+  { ...element.props, confirmation: '', onConfirmationChange: () => {} },
+))
 
 // Fixtures follow the server's rendering (renderVersion/renderBucket in
 // internal/compat/hcp2023/handler.go): a version carries has_descendants and a
@@ -212,25 +220,26 @@ test('bucket deletion sends DELETE to the exact compat-plane path', async () => 
   assert.equal('body' in calls[0].init, false)
 })
 
-test('bucket deletion waits for the plain danger confirmation', async () => {
+test('bucket deletion waits for the typed confirmation and names its expected string', async () => {
   let deletes = 0
   const modal = DeleteBucketModalView({
     bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
     onConfirm: async () => { deletes++ }, onClose: () => {},
   })
   assert.equal(deletes, 0)
-  const danger = findElement(modal, (element) => element.props.variant === 'danger')
-  await danger.props.onClick()
+  assert.equal(modal.props.expected, 'images')
+  await modal.props.onConfirm()
   assert.equal(deletes, 1)
 })
 
 test('bucket deletion names every consequence and renders a server error verbatim', () => {
   const message = new ApiError(409, 'bucket is protected by registry policy').message
-  const markup = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+  const markup = renderTyped(DeleteBucketModalView({
     bucket: 'images', callerRole: 'publisher', submitting: false, failure: message,
     onConfirm: async () => {}, onClose: () => {},
   }))
   assert.match(markup, /Delete images/)
+  assert.match(markup, /Type <strong>images<\/strong> to confirm/)
   assert.match(
     markup,
     /Deleting images permanently removes the bucket and all its versions, builds, artifacts, channels and history\./,
@@ -240,14 +249,14 @@ test('bucket deletion names every consequence and renders a server error verbati
 })
 
 test('bucket deletion warns when Bag Drop mirrors the bucket, and only then', () => {
-  const mirrored = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+  const mirrored = renderTyped(DeleteBucketModalView({
     bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
     mirrored: true, onConfirm: async () => {}, onClose: () => {},
   }))
   assert.match(mirrored, /This bucket is mirrored by Bag Drop/)
   assert.match(mirrored, /also deletes the destination copy at the next reconcile/)
 
-  const plain = renderToStaticMarkup(React.createElement(DeleteBucketModalView, {
+  const plain = renderTyped(DeleteBucketModalView({
     bucket: 'images', callerRole: 'publisher', submitting: false, failure: null,
     onConfirm: async () => {}, onClose: () => {},
   }))

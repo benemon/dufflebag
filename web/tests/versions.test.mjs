@@ -44,6 +44,7 @@ let deleteChannel
 let FacetRail
 let facetCountText
 let platformTenancyGap
+let TypedConfirmModalView
 const versionDataSource = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
 const versionScreenSource = readFileSync(new URL('../src/screens/Version.tsx', import.meta.url), 'utf8')
 
@@ -70,6 +71,8 @@ before(async () => {
   ;({ FacetRail, facetCountText } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
     deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -235,8 +238,13 @@ const findElement = (node, predicate) => {
   }
   if (!React.isValidElement(node)) return null
   if (predicate(node)) return node
-  return findElement(node.props.children, predicate)
+  return findElement([node.props.children, node.props.body], predicate)
 }
+
+const renderTyped = (element) => renderToStaticMarkup(React.createElement(
+  TypedConfirmModalView,
+  { ...element.props, confirmation: '', onConfirmationChange: () => {} },
+))
 
 test('a complete version projects complete and a v0 projects incomplete', async () => {
   const versions = await withFetch(
@@ -359,10 +367,9 @@ test('the revoke modal builds immediate and scheduled options from its controls'
   const immediate = RevokeModalView(revokeModalProps({
     message: '   ', onConfirm: async (options) => immediateCalls.push(options),
   }))
-  await findElement(
-    immediate,
-    (element) => element.props.children?.join?.('') === 'Revoke images v7',
-  ).props.onClick()
+  assert.equal(immediate.props.expected, 'v7')
+  assert.match(renderTyped(immediate), /Type <strong>v7<\/strong> to confirm/)
+  await immediate.props.onConfirm()
   const after = Date.now()
   assert.equal(immediateCalls.length, 1)
   assert.deepEqual(Object.keys(immediateCalls[0]), ['revoke_at'])
@@ -391,10 +398,7 @@ test('the revoke modal builds immediate and scheduled options from its controls'
   assert.equal(disableRollback, true)
 
   const scheduled = RevokeModalView(props())
-  await findElement(
-    scheduled,
-    (element) => element.props.children?.join?.('') === 'Revoke images v7',
-  ).props.onClick()
+  await scheduled.props.onConfirm()
   assert.deepEqual(scheduledCalls, [{
     revoke_at: new Date('2099-04-03T12:30').toISOString(),
     revocation_message: 'retired image',
@@ -454,11 +458,12 @@ test('revoke, restore and delete clients send exact compat-plane requests', asyn
 test('delete version confirmation states permanence and renders server refusal verbatim', async () => {
   const refusal = 'Version is assigned by channels: production. Please, remove the channels assignment before deleting the version.'
   const calls = []
-  const markup = renderToStaticMarkup(React.createElement(DeleteVersionModalView, {
+  const markup = renderTyped(DeleteVersionModalView({
     bucket: 'images', version: actionVersion(), callerRole: 'publisher', submitting: false,
     failure: refusal, onConfirm: async () => calls.push('delete'), onClose: () => {},
   }))
   assert.match(markup, /Delete images v7/)
+  assert.match(markup, /Type <strong>v7<\/strong> to confirm/)
   assert.match(markup, /is permanent/)
   assert.match(markup, /builds, artifacts and SBOMs/)
   assert.match(markup, /Channels must be unassigned/)
@@ -468,7 +473,8 @@ test('delete version confirmation states permanence and renders server refusal v
     bucket: 'images', version: actionVersion(), callerRole: 'publisher', submitting: false,
     failure: null, onConfirm: async () => calls.push('delete'), onClose: () => {},
   })
-  await findElement(view, (element) => element.props.children === 'Delete version').props.onClick()
+  assert.equal(view.props.expected, 'v7')
+  await view.props.onConfirm()
   assert.deepEqual(calls, ['delete'])
 })
 
@@ -481,9 +487,7 @@ test('the Version container navigates to the bucket only after delete succeeds',
 
 test('a compat-plane ApiError message is rendered verbatim in either modal', () => {
   const message = new ApiError(409, 'restore refused by registry policy').message
-  const revoke = renderToStaticMarkup(React.createElement(
-    RevokeModalView, revokeModalProps({ failure: message }),
-  ))
+  const revoke = renderTyped(RevokeModalView(revokeModalProps({ failure: message })))
   const restore = renderToStaticMarkup(React.createElement(RestoreModalView, {
     bucket: 'images', version: actionVersion('revoked'), callerRole: 'publisher',
     submitting: false, failure: message, onConfirm: async () => {}, onClose: () => {},
@@ -562,13 +566,23 @@ test('channel modal failures preserve duplicate and managed-refusal messages', (
   assert.match(assign, /Can&#x27;t update channel assignment on channel &quot;latest&quot;\. This channel is managed by Dufflebag/)
 })
 
-test('delete confirmation names the channel and its history consequence', () => {
-  const markup = renderToStaticMarkup(React.createElement(DeleteChannelModalView, {
+test('delete confirmation names the channel, its expected string and its history consequence', async () => {
+  const calls = []
+  const view = DeleteChannelModalView({
+    bucket: 'images', channel: channelFixture(), callerRole: 'publisher', submitting: false,
+    failure: null, onConfirm: async () => calls.push('delete'), onClose: () => {},
+  })
+  assert.equal(calls.length, 0)
+  assert.equal(view.props.expected, 'production')
+  await view.props.onConfirm()
+  assert.deepEqual(calls, ['delete'])
+  const markup = renderTyped(DeleteChannelModalView({
     bucket: 'images', channel: channelFixture(), callerRole: 'publisher', submitting: false,
     failure: null, onConfirm: async () => {}, onClose: () => {},
   }))
   assert.match(markup, /Delete images production/)
   assert.match(markup, /Deleting production destroys its assignment history\./)
+  assert.match(markup, /Type <strong>production<\/strong> to confirm/)
   assert.match(markup, />Delete production</)
 })
 

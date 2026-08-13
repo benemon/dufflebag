@@ -21,6 +21,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 
 type DestinationDraft = {
   adapter: 'hcp-packer' | 'dufflebag'
@@ -314,6 +315,7 @@ export function DestinationZone({
   const [busy, setBusy] = useState<string | null>(null)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
   const [verification, setVerification] = useState<ApiBagDropVerificationResult | null>(null)
+  const [confirmingDelete, setConfirmingDelete] = useState(false)
 
   useEffect(() => {
     const next = draftForBagDropConfig(config)
@@ -367,15 +369,47 @@ export function DestinationZone({
               setBaseline(enabled)
             })}
             onDisable={() => run('disable', async () => { await onDisable() })}
-            onDelete={() => run('delete', onDelete)}
+            onDelete={() => setConfirmingDelete(true)}
           />
         )}
+        {config && confirmingDelete ? (
+          <DeleteBagDropConfigConfirmation
+            adapter={config.adapter}
+            busy={busy === 'delete'}
+            onCancel={() => setConfirmingDelete(false)}
+            onConfirm={() => {
+              setConfirmingDelete(false)
+              void run('delete', onDelete)
+            }}
+          />
+        ) : null}
         {verification && !actionFailure ? <VerificationResultView verification={verification} /> : null}
         {config?.last_verification ? (
           <LastVerificationView verification={config.last_verification} />
         ) : null}
       </CardBody>
     </Card>
+  )
+}
+
+export function DeleteBagDropConfigConfirmation({
+  adapter, busy, onConfirm, onCancel,
+}: {
+  adapter: string
+  busy: boolean
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <TypedConfirmModal
+      title="Delete Bag Drop configuration?"
+      body={<Content component="p">This removes the saved destination configuration.</Content>}
+      expected={adapter}
+      verb="Delete configuration"
+      busy={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   )
 }
 
@@ -713,14 +747,15 @@ export function BucketRemovalConfirmation({
   onCancel: () => void
 }) {
   return (
-    <Alert
-      variant="warning" isInline title={`Stop mirroring ${bucketName}?`}
-      style={{ marginBottom: 16 }}
-    >
-      <Content component="p">Its copy at the destination will be deleted.</Content>
-      <Button variant="danger" onClick={onConfirm}>Stop mirroring {bucketName}</Button>
-      <Button variant="link" onClick={onCancel}>Cancel</Button>
-    </Alert>
+    <TypedConfirmModal
+      title={`Stop mirroring ${bucketName}?`}
+      body={<Content component="p">Its copy at the destination will be deleted.</Content>}
+      expected={bucketName}
+      verb={`Stop mirroring ${bucketName}`}
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   )
 }
 

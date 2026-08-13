@@ -13,10 +13,12 @@ let AuditView
 let AuditTargetTable
 let CreateAuditTargetForm
 let LastTargetConfirmation
+let TargetRemovalConfirmation
 let auditTargetLimitReached
 let lastTargetRemovalNeedsConfirmation
 let formatBytes
 let loginDestination
+let TypedConfirmModalView
 
 before(async () => {
   vite = await createServer({
@@ -30,9 +32,12 @@ before(async () => {
   ;({ createAuditTarget, auditRefusalHint } = await vite.ssrLoadModule('/src/data/audit.ts'))
   ;({
     AuditView, AuditTargetTable, CreateAuditTargetForm, LastTargetConfirmation,
+    TargetRemovalConfirmation,
     auditTargetLimitReached, lastTargetRemovalNeedsConfirmation, formatBytes,
   } = await vite.ssrLoadModule('/src/screens/Audit.tsx'))
   ;({ loginDestination } = await vite.ssrLoadModule('/src/screens/Login.tsx'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -105,15 +110,31 @@ test('three targets couple the disabled Add control to its one visible explanati
   assert.equal(auditTargetLimitReached(three, true), false)
 })
 
-test('only the last target removal requires confirmation and states the consequence', () => {
+test('the last target requires its path while non-last removal gets a plain confirmation', () => {
   assert.equal(lastTargetRemovalNeedsConfirmation([target()]), true)
   assert.equal(lastTargetRemovalNeedsConfirmation([target(), target({ id: '2' })]), false)
-  const confirmation = renderToStaticMarkup(React.createElement(LastTargetConfirmation, {
-    target: target(), callerRole: 'root', onConfirm: () => {}, onCancel: () => {},
+  let removals = 0
+  const confirmation = LastTargetConfirmation({
+    target: target(), callerRole: 'root', onConfirm: () => { removals++ }, onCancel: () => {},
+  })
+  assert.equal(removals, 0)
+  assert.equal(confirmation.props.expected, '/var/log/dufflebag/audit.log')
+  confirmation.props.onConfirm()
+  assert.equal(removals, 1)
+  const lastMarkup = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
   }))
-  assert.match(confirmation, /Remove the last audit target/)
-  assert.match(confirmation, /stops this instance recording audit events entirely until/)
-  assert.match(confirmation, /Remove last target/)
+  assert.match(lastMarkup, /Remove the last audit target/)
+  assert.match(lastMarkup, /stops this instance recording audit events entirely until/)
+  assert.match(lastMarkup, /Type <strong>\/var\/log\/dufflebag\/audit\.log<\/strong> to confirm/)
+
+  const plain = renderToStaticMarkup(React.createElement(TargetRemovalConfirmation, {
+    target: target({ path: '/audit/two.log' }), callerRole: 'root',
+    onConfirm: () => {}, onCancel: () => {},
+  }))
+  assert.match(plain, /Remove \/audit\/two\.log\?/)
+  assert.match(plain, /Remove target/)
+  assert.doesNotMatch(plain, /Type <strong>/)
 })
 
 test('recovered health still renders cumulative and last-failure history', () => {

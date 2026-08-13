@@ -11,6 +11,7 @@ import {
 } from '../data/audit'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 
 export function Audit() {
   return <AuditView {...useAuditTargets()} />
@@ -36,13 +37,7 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
   }
 
   const remove = (target: AuditTarget) => {
-    if (lastTargetRemovalNeedsConfirmation(targets)) {
-      setConfirming(target)
-      return
-    }
-    void run(async () => {
-      if (token) await deleteAuditTarget(token, target.id)
-    })
+    setConfirming(target)
   }
 
   const atLimit = auditTargetLimitReached(targets, loading)
@@ -97,8 +92,21 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
           </Alert>
         ) : null}
 
-        {confirming ? (
+        {confirming && lastTargetRemovalNeedsConfirmation(targets) ? (
           <LastTargetConfirmation
+            target={confirming}
+            callerRole={callerRole}
+            onCancel={() => setConfirming(null)}
+            onConfirm={() => {
+              const target = confirming
+              setConfirming(null)
+              void run(async () => {
+                if (token) await deleteAuditTarget(token, target.id)
+              })
+            }}
+          />
+        ) : confirming ? (
+          <TargetRemovalConfirmation
             target={confirming}
             callerRole={callerRole}
             onCancel={() => setConfirming(null)}
@@ -166,6 +174,30 @@ export function formatBytes(bytes: number): string {
 }
 
 export function LastTargetConfirmation({
+  target, onConfirm, onCancel,
+}: {
+  target: AuditTarget
+  callerRole: Role | null
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <TypedConfirmModal
+      title="Remove the last audit target?"
+      expected={target.path}
+      verb="Remove last target"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      body={<Content component="p">
+        Removing {target.path} stops this instance recording audit events entirely until another
+        target is added.
+      </Content>}
+    />
+  )
+}
+
+export function TargetRemovalConfirmation({
   target, callerRole, onConfirm, onCancel,
 }: {
   target: AuditTarget
@@ -174,20 +206,11 @@ export function LastTargetConfirmation({
   onCancel: () => void
 }) {
   return (
-    <Alert
-      variant="warning"
-      isInline
-      title="Remove the last audit target?"
-      style={{ marginBottom: 16 }}
-    >
-      <Content component="p">
-        Removing {target.path} stops this instance recording audit events entirely until another
-        target is added.
-      </Content>
+    <Alert variant="warning" isInline title={`Remove ${target.path}?`} style={{ marginBottom: 16 }}>
       <RoleRestrictedButton
         action="configureAudit" callerRole={callerRole} variant="danger" onClick={onConfirm}
       >
-        Remove last target
+        Remove target
       </RoleRestrictedButton>
       <Button variant="link" onClick={onCancel}>Cancel</Button>
     </Alert>

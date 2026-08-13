@@ -37,6 +37,12 @@ Until the console has resolved who you are, it shows the reader-tier
 navigation as a safe default; a direct URL to a restricted screen still
 answers honestly.
 
+Destructive actions — deleting a bucket, version, channel, webhook,
+principal or Bag Drop configuration, revoking a version, stopping a mirror,
+or removing the last audit target — ask you to type the resource's name
+before the confirming button arms. Routine secret rotation stays a single
+confirmation click.
+
 ## The screens
 
 **Buckets** lists the project's registry. Builders can pin buckets they care

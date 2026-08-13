@@ -16,6 +16,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
   type BuildState, type Version as VersionData, type VersionDetail,
@@ -345,23 +346,19 @@ function DeleteVersionModal({
       setSubmitting(false)
     }
   }
-  return (
-    <Modal aria-labelledby="delete-version-modal-title" isOpen onClose={onClose} variant="small">
-      <DeleteVersionModalView
-        bucket={bucket}
-        version={version}
-        callerRole={callerRole}
-        submitting={submitting}
-        failure={failure}
-        onConfirm={confirm}
-        onClose={onClose}
-      />
-    </Modal>
-  )
+  return <DeleteVersionModalView
+    bucket={bucket}
+    version={version}
+    callerRole={callerRole}
+    submitting={submitting}
+    failure={failure}
+    onConfirm={confirm}
+    onClose={onClose}
+  />
 }
 
 export function DeleteVersionModalView({
-  bucket, version, callerRole, submitting, failure, onConfirm, onClose,
+  bucket, version, submitting, failure, onConfirm, onClose,
 }: {
   bucket: string
   version: VersionData
@@ -372,9 +369,14 @@ export function DeleteVersionModalView({
   onClose: () => void
 }) {
   return (
-    <>
-      <ModalHeader labelId="delete-version-modal-title" title={`Delete ${bucket} ${version.name}`} />
-      <ModalBody>
+    <TypedConfirmModal
+      title={`Delete ${bucket} ${version.name}`}
+      expected={version.name}
+      verb="Delete version"
+      busy={submitting}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      body={<>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{failure}</Content>
@@ -384,21 +386,8 @@ export function DeleteVersionModalView({
           Deleting {bucket} {version.name} is permanent. Its builds, artifacts and SBOMs
           are deleted with it. Channels must be unassigned from this version first.
         </Content>
-      </ModalBody>
-      <ModalFooter>
-        <RoleRestrictedButton
-          action="deleteVersions"
-          callerRole={callerRole}
-          variant="danger"
-          isLoading={submitting}
-          isDisabled={submitting}
-          onClick={onConfirm}
-        >
-          Delete version
-        </RoleRestrictedButton>
-        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
-      </ModalFooter>
-    </>
+      </>}
+    />
   )
 }
 
@@ -434,33 +423,29 @@ function RevokeModal({
     }
   }
 
-  return (
-    <Modal aria-labelledby="revoke-version-modal-title" isOpen onClose={onClose} variant="small">
-      <RevokeModalView
-        bucket={bucket}
-        version={version}
-        callerRole={callerRole}
-        message={message}
-        when={when}
-        scheduledAt={scheduledAt}
-        skipDescendants={skipDescendants}
-        disableRollback={disableRollback}
-        submitting={submitting}
-        failure={failure}
-        onMessageChange={setMessage}
-        onWhenChange={setWhen}
-        onScheduledAtChange={setScheduledAt}
-        onSkipDescendantsChange={setSkipDescendants}
-        onDisableRollbackChange={setDisableRollback}
-        onConfirm={confirm}
-        onClose={onClose}
-      />
-    </Modal>
-  )
+  return <RevokeModalView
+    bucket={bucket}
+    version={version}
+    callerRole={callerRole}
+    message={message}
+    when={when}
+    scheduledAt={scheduledAt}
+    skipDescendants={skipDescendants}
+    disableRollback={disableRollback}
+    submitting={submitting}
+    failure={failure}
+    onMessageChange={setMessage}
+    onWhenChange={setWhen}
+    onScheduledAtChange={setScheduledAt}
+    onSkipDescendantsChange={setSkipDescendants}
+    onDisableRollbackChange={setDisableRollback}
+    onConfirm={confirm}
+    onClose={onClose}
+  />
 }
 
 export function RevokeModalView({
-  bucket, version, callerRole, message, when, scheduledAt, skipDescendants,
+  bucket, version, message, when, scheduledAt, skipDescendants,
   disableRollback, submitting, failure, onMessageChange, onWhenChange,
   onScheduledAtChange, onSkipDescendantsChange, onDisableRollbackChange,
   onConfirm, onClose,
@@ -497,9 +482,20 @@ export function RevokeModalView({
   const idPrefix = `revoke-${version.fingerprint}`
 
   return (
-    <>
-      <ModalHeader labelId="revoke-version-modal-title" title={`Revoke ${bucket} ${version.name}`} />
-      <ModalBody>
+    <TypedConfirmModal
+      title={`Revoke ${bucket} ${version.name}`}
+      expected={version.name}
+      verb={`Revoke ${bucket} ${version.name}`}
+      busy={submitting}
+      confirmDisabled={scheduleFailure !== null}
+      onCancel={onClose}
+      onConfirm={() => onConfirm({
+        revoke_at: when === 'now' ? new Date().toISOString() : parsedSchedule!.toISOString(),
+        ...(message.trim() ? { revocation_message: message.trim() } : {}),
+        ...(skipDescendants ? { skip_descendants_revocation: true } : {}),
+        ...(disableRollback ? { disable_rollback_channels: true } : {}),
+      })}
+      body={<>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{failure}</Content>
@@ -563,26 +559,8 @@ export function RevokeModalView({
             onChange={(_event, checked) => onDisableRollbackChange(checked)}
           />
         </Form>
-      </ModalBody>
-      <ModalFooter>
-        <RoleRestrictedButton
-          action="revokeVersions"
-          callerRole={callerRole}
-          variant="danger"
-          isLoading={submitting}
-          isDisabled={submitting || scheduleFailure !== null}
-          onClick={() => onConfirm({
-            revoke_at: when === 'now' ? new Date().toISOString() : parsedSchedule!.toISOString(),
-            ...(message.trim() ? { revocation_message: message.trim() } : {}),
-            ...(skipDescendants ? { skip_descendants_revocation: true } : {}),
-            ...(disableRollback ? { disable_rollback_channels: true } : {}),
-          })}
-        >
-          Revoke {bucket} {version.name}
-        </RoleRestrictedButton>
-        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
-      </ModalFooter>
-    </>
+      </>}
+    />
   )
 }
 

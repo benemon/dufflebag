@@ -12,10 +12,12 @@ let BagDropStatusTableView
 let BagDropView
 let BucketRemovalConfirmation
 let DestinationActionFailure
+let DeleteBagDropConfigConfirmation
 let DestinationFormView
 let DestinationZone
 let bagDropWrite
 let enableFailureMessage
+let TypedConfirmModalView
 
 before(async () => {
   vite = await createServer({
@@ -28,9 +30,12 @@ before(async () => {
   ;({ enableBagDrop } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({
     AssociationSelectorView, BagDropStatusTableView, BagDropView, BucketRemovalConfirmation,
-    DestinationActionFailure, DestinationFormView, DestinationZone, bagDropWrite,
+    DeleteBagDropConfigConfirmation, DestinationActionFailure, DestinationFormView,
+    DestinationZone, bagDropWrite,
     enableFailureMessage,
   } = await vite.ssrLoadModule('/src/screens/BagDrop.tsx'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -110,6 +115,11 @@ const findElement = (node, predicate) => {
   return findElement(node.props.children, predicate)
 }
 
+const renderTyped = (element) => renderToStaticMarkup(React.createElement(
+  TypedConfirmModalView,
+  { ...element.props, confirmation: '', onConfirmationChange: () => {} },
+))
+
 test('reader renders the status zone only while maintainer renders all three zones', () => {
   const reader = renderView({ callerRole: 'reader', canConfigure: false })
   assert.doesNotMatch(reader, /aria-label="Destination"/)
@@ -168,17 +178,30 @@ test('moving out opens the destructive confirmation and Cancel never calls DELET
     onCancel: () => { confirming = null },
     onConfirm: () => { deletes++ },
   })
-  findElement(warning, (element) => element.props.children === 'Cancel').props.onClick()
+  assert.equal(warning.props.expected, 'images')
+  assert.match(renderTyped(warning), /Type <strong>images<\/strong> to confirm/)
+  warning.props.onCancel()
   assert.equal(confirming, null)
   assert.equal(deletes, 0)
 
   const confirmed = BucketRemovalConfirmation({
     bucketName: 'images', onCancel: () => {}, onConfirm: () => { deletes++ },
   })
-  findElement(
-    confirmed, (element) => element.props.variant === 'danger',
-  ).props.onClick()
+  confirmed.props.onConfirm()
   assert.equal(deletes, 1)
+})
+
+test('deleting a Bag Drop configuration requires its reported adapter name', () => {
+  let deletes = 0
+  const confirmation = DeleteBagDropConfigConfirmation({
+    adapter: 'hcp-packer', busy: false, onCancel: () => {}, onConfirm: () => { deletes++ },
+  })
+  assert.equal(deletes, 0)
+  assert.equal(confirmation.props.expected, 'hcp-packer')
+  confirmation.props.onConfirm()
+  assert.equal(deletes, 1)
+  const markup = renderTyped(confirmation)
+  assert.match(markup, /Type <strong>hcp-packer<\/strong> to confirm/)
 })
 
 test('pending_removal stays in the mirrored pane as Removing and can be resumed', () => {

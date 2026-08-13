@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -8,7 +9,10 @@ import { createServer } from 'vite'
 let vite
 let PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard
 let PrincipalTableView
+let DeletePrincipalConfirmation, RevokeSecretConfirmationView
+let TypedConfirmModalView
 let grantableRoles
+const principalScreenSource = readFileSync(new URL('../src/screens/Principals.tsx', import.meta.url), 'utf8')
 
 before(async () => {
   vite = await createServer({
@@ -20,10 +24,12 @@ before(async () => {
   })
   ;({
     PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard,
-    PrincipalTableView,
+    PrincipalTableView, DeletePrincipalConfirmation, RevokeSecretConfirmationView,
   } =
     await vite.ssrLoadModule('/src/screens/Principals.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -351,6 +357,51 @@ test('a principal may not delete itself, so the action is absent rather than dis
 
   const theirs = view({ selfID: 'someone-else' })
   assert.match(theirs, />Delete</)
+})
+
+test('principal deletion requires the typed modal before its action fires', () => {
+  let selected = null
+  let deletes = 0
+  const record = principal()
+  const table = PrincipalTableView({
+    principals: [record], selfID: null, callerRole: 'maintainer', expanded: null,
+    onToggle: () => {}, onOpenIssue: () => {}, onRevoke: () => {},
+    onDelete: (value) => { selected = value },
+  })
+  findElement(table, (element) => element.props.children === 'Delete').props.onClick()
+  assert.equal(selected, record)
+  assert.equal(deletes, 0)
+
+  const confirmation = DeletePrincipalConfirmation({
+    principal: selected, onCancel: () => {}, onConfirm: () => { deletes++ },
+  })
+  assert.equal(confirmation.props.expected, 'sp-packer-ci')
+  const markup = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
+  }))
+  assert.match(markup, /Type <strong>sp-packer-ci<\/strong> to confirm/)
+  assert.equal(deletes, 0)
+  confirmation.props.onConfirm()
+  assert.equal(deletes, 1)
+  assert.match(principalScreenSource, /onDelete=\{setDeleting\}/)
+  assert.match(principalScreenSource, /deleting \? \(\s*<DeletePrincipalConfirmation/)
+})
+
+test('secret revoke requires the new plain confirmation before its action fires', () => {
+  let revokes = 0
+  const record = principal()
+  const confirmation = RevokeSecretConfirmationView({
+    principal: record, secret: record.secrets[0], callerRole: 'maintainer', onCancel: () => {},
+    onConfirm: () => { revokes++ },
+  })
+  assert.equal(revokes, 0)
+  findElement(confirmation, (element) => element.props.children === 'Revoke secret').props.onClick()
+  assert.equal(revokes, 1)
+  const markup = renderToStaticMarkup(confirmation)
+  assert.match(markup, /Revoke secret for sp-packer-ci\?/)
+  assert.doesNotMatch(markup, /Type <strong>/)
+  assert.match(principalScreenSource, /onRevoke=\{\(principal, secret\) => setRevoking\(\{ principal, secret \}\)\}/)
+  assert.match(principalScreenSource, /revoking \? \(\s*<RevokeSecretConfirmation/)
 })
 
 // Finding 17: a failure must not render as a healthy empty state.
