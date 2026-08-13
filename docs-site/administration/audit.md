@@ -1,48 +1,56 @@
-# Audit and encryption
+# Audit trail
 
-Two operator concerns, deliberately independent: the **audit trail** records
-what the instance did, and **encryption at rest** protects what it stores.
-Both are managed from the console's root-only **Audit** and **Encryption**
-pages or the equivalent [platform API](/platform-api.html) endpoints; the
-deeper operational contract lives in the
-[deployment guide](../deployment/index.md).
+The **audit trail** records what the instance did. **Encryption at rest**
+protects what it stores. These operator concerns are independent. Roots manage
+both from the console's **Audit** and **Encryption** pages or the equivalent
+[platform API](/platform-api.html) endpoints. The
+[deployment guide](../deployment/index.md) defines the operational contract.
 
 ## The audit trail
 
-Every API request is audited as a request/response pair. The declared
-exemptions are UI asset serving, the health probe, and admission refusals on
-the anonymous surfaces (`/oauth2/token`, `/sys/recovery`), which are decided
-before the audit seam.
+Every API request is audited as a request and response pair. UI asset serving,
+the health probe, and admission refusals on the anonymous surfaces
+(`/oauth2/token`, `/sys/recovery`) are exempt. Those refusals are decided before
+the audit seam.
 
-Sensitive values never enter the trail directly — they are recorded as HMACs,
-so entries can be correlated (the same secret produces the same HMAC) without
-the trail holding a usable credential. Entries record the HMAC key version
-that produced them.
+Sensitive values never enter the trail directly. They are recorded as HMACs,
+so entries can be correlated without the trail holding a usable credential.
+The same secret produces the same HMAC. Each entry records the HMAC key version
+that produced it.
 
 ### File targets
 
-Audit entries go to **file targets**: up to three paths, created and removed
-by `root`. Each target reports its health — `healthy` or `failing`, with
-consecutive and cumulative failure counts, the last failure time, and the
-last successful reopen.
+Audit entries go to **file targets**. A `root` can create and remove up to three
+paths. Each target reports a `healthy` or `failing` status, consecutive and
+cumulative failure counts, the last failure time, and the last successful
+reopen.
 
-An instance with **no targets configured does not audit at all** — the
-console warns exactly that before letting you remove the last one.
+::: warning
+An instance with no targets configured does not audit. The console warns before
+allowing you to remove the last target.
+:::
 
-### Fail-closed
+### Fail-closed behavior
 
-Once auditing is enabled, it fails closed. While at least one configured
-target still accepts writes, requests proceed and the failing target is
-surfaced through its health. When **no** healthy target remains, the instance
-stops serving requests rather than serving them unrecorded, and
-`GET /sys/health` answers 503. Three targets on independent failure domains
-is the posture that makes this a property rather than a liability.
+Once auditing is enabled, it fails closed. Requests proceed while at least one
+configured target accepts writes. The health report identifies any failing
+target.
 
-### Log rotation
+::: warning
+When no healthy target remains, the instance stops serving requests instead of
+serving them unrecorded. `GET /sys/health` returns 503.
+:::
 
-Send the process `SIGHUP` and it reopens every file target in write order —
-the standard logrotate contract. A rename-then-reopen rotation is handled; a
-failed reopen keeps writing to the previous descriptor rather than dropping
-entries. `last_reopened_at` on the target tells you the rotation took.
+Configure three targets on independent storage, so that a single failure does not stop the instance from serving.
+
+### Rotate audit logs
+
+1. Send the process `SIGHUP`.
+
+The process reopens every file target in write order. This is the standard
+logrotate contract. Rename-then-reopen rotation is supported. If a reopen
+fails, the process continues writing to the previous descriptor instead of
+dropping entries. The target's `last_reopened_at` value confirms that the
+rotation took place.
 
 Related: [Encryption at rest](./encryption.md).

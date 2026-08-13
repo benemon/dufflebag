@@ -1,63 +1,92 @@
-## Encryption at rest
+# Encryption at rest
 
-Encryption at rest is optional and **decided at first boot**: configure
-`DFBG_KEY_PROVIDER=vault` (with the Vault address and auth settings) before
-the first start, or run unencrypted. The choice is a one-way door in both
-directions — a later boot whose configuration disagrees refuses to serve, and
-moving between postures means a fresh database.
+Encryption at rest is optional and decided at first boot. Configure
+`DFBG_KEY_PROVIDER=vault` with the Vault address and authentication settings
+before the first start, or run unencrypted.
 
-What the encrypted posture buys, beyond sealed payloads and SBOM bytes: the
-provenance and identity rows are MAC'd, so a row altered — or a principal
-inserted — by direct database access fails verification. **Database write
-access is not administration.** The corollary: the unencrypted break-glass
-procedure does not work here; the recovery-share ceremony is the only way
-back in, and losing both the root credentials and the recovery shares is
-unrecoverable by design.
+::: warning
+The encryption posture cannot be changed after first boot. A later boot refuses
+to serve if its configuration disagrees with the stored posture. Moving from
+encrypted to unencrypted, or from unencrypted to encrypted, requires a fresh
+database.
+:::
 
-Key material lives in a wrapped keyring in the database, not the environment:
-on an encrypted deployment `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`,
-`DFBG_CREDENTIAL_KEY`, and its `DFBG_BAGDROP_CREDENTIAL_KEY` alias must **not**
-be set. The key service is a
-startup dependency only — unreachable at boot means the process refuses to
-start ("sealed"), while running replicas keep serving through a key-service
-outage.
+The encrypted posture seals payloads and SBOM bytes. It also applies MACs to
+provenance and identity rows. A row altered through direct database access
+fails verification, as does a principal inserted through direct database
+access. Database write access does not grant administration.
 
-### Health
+The unencrypted break-glass procedure does not work on an encrypted instance.
+The recovery-share ceremony is the only recovery path. Losing both the root
+credentials and the recovery shares makes the instance unrecoverable.
 
-An encrypted instance heartbeats the key service about every five minutes
-with a real keyring unwrap. The result — `unconfigured`, `ok` or `degraded` —
-appears on `/sys/health`, `GET /api/v1/instance`, and the console's
-Encryption page. `degraded` never fails the readiness probe: serving is
-unaffected; what it threatens is the **next process start**. Alert on it and
-fix the cause — do not restart on it, because the restart is exactly what
-will fail.
+Key material lives in a wrapped keyring in the database, not in the
+environment. On an encrypted deployment, do not set
+`DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`, `DFBG_CREDENTIAL_KEY`, or its
+`DFBG_BAGDROP_CREDENTIAL_KEY` alias.
 
-### Rotation
+The key service is a startup dependency. If it is unreachable at boot, the
+process refuses to start and remains sealed. Running replicas continue serving
+during a key-service outage.
 
-Two rotations, deliberately separate, both root-only and audited, both on the
-Encryption page:
+## Health
 
-- **KEK rotation** (the key service's key): rotate at the key service, then
-  **Rewrap** the keyring rows, confirm every entry names the new version, and
-  only then retire the old version at the key service. Retiring it while any
-  row still names it is the seal-out trap — running replicas keep serving but
-  every restart refuses.
-- **Data-key rotation** (**Rotate**): mints fresh key versions for every
-  keyring purpose. New writes use them immediately; old versions stay in the
-  keyring forever, so nothing is re-encrypted and nothing stops verifying.
-  Tokens age out within their TTL, audit HMAC correlation becomes
-  per-key-version, and multi-replica peers adopt the new versions at their
-  next heartbeat — rotate in a quiet window.
+An encrypted instance heartbeats the key service about every five minutes by
+performing a real keyring unwrap. The result is `unconfigured`, `ok`, or
+`degraded`. It appears on `/sys/health`, `GET /api/v1/instance`, and the
+console's **Encryption** page. A `degraded` status does not fail the readiness
+probe. Alert when the status becomes `degraded`.
 
-The exact command sequences, the seal-out recovery procedure, and the
-Kubernetes-native Vault auth mode are in the
-[deployment guide](../deployment/encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot).
+::: warning
+A degraded status does not affect serving, but the process will fail to start while the key service is unreachable. Fix the key service before restarting the instance.
+:::
+
+## Rotation
+
+KEK rotation and data-key rotation are separate operations. Both require root,
+are audited, and are available on the **Encryption** page.
+
+### Rotate the KEK
+
+Prerequisites: Root access to the **Encryption** page and permission to rotate
+the key service's key.
+
+1. Rotate the key at the key service.
+
+2. Select **Rewrap** to rewrap the keyring rows.
+
+3. Confirm that every entry names the new key version.
+
+4. Retire the old version at the key service.
+
+::: warning
+Do not retire an old key version while any keyring row still names it. Running
+replicas continue serving, but every restart will refuse to start. The
+deployment guide documents the seal-out recovery procedure.
+:::
+
+### Rotate the data keys
+
+Prerequisites: Root access to the **Encryption** page. Perform the rotation in
+a quiet window.
+
+1. Select **Rotate**.
+
+The operation creates new key versions for every keyring purpose. New writes
+use them immediately. Old versions stay in the keyring permanently, so data is
+not re-encrypted and existing verification continues. Tokens expire within
+their TTL. Audit HMAC correlation becomes specific to each key version.
+Multi-replica peers adopt the new versions at their next heartbeat.
+
+The [deployment guide](../deployment/encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot)
+contains the command sequences, seal-out recovery procedure, and
+Kubernetes-native Vault authentication mode.
 
 ## Where to go next
 
-- [Deployment guide](../deployment/index.md)
-  — serving, health probes, first run, recovery.
-- [Roles and principals](./roles-principals.md) — the recovery shares and the
+- [Deployment guide](../deployment/index.md): serving, health probes, first run,
+  and recovery.
+- [Roles and principals](./roles-principals.md): the recovery shares and the
   root principal.
 
 Related: [The audit trail](./audit.md).
