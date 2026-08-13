@@ -351,6 +351,16 @@ test-smoke: $(if $(DUFFLEBAG_BIN),,build-ui) ## Drive the real console in a real
 	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" OSV_STUB_IMAGE="$(OSV_STUB_IMAGE)" \
 		node --test tests/smoke/smoke.test.mjs
 
+.PHONY: docs-shots
+# Parent-run only: this provisions the live backing stack and launches Chrome.
+# It is deliberately independent of both CI and the docs build.
+docs-shots: $(if $(DUFFLEBAG_BIN),,build-ui) ## Regenerate console screenshots against seeded data
+	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
+	$(resolve-server-bin); \
+	cd web && { [ -d node_modules ] || npm ci; } && \
+	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" \
+		node tests/shots/docs-shots.mjs
+
 .PHONY: test-kind
 test-kind: ## Validate the single-replica Kubernetes manifests on KIND
 	e2e/kubernetes/test-kind.sh
