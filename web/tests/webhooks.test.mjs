@@ -97,9 +97,11 @@ test('Create webhook moves between the empty state and populated header with its
 
 test('pending and active states are labelled distinctly', () => {
   const active = view({ webhooks: [webhook()] })
-  assert.match(active, /active/)
+  assert.match(active, /pf-m-success/)
+  assert.match(active, /pf-v6-c-label__text">active</)
   const pending = view({ webhooks: [webhook({ state: 'pending' })] })
-  assert.match(pending, /pending/)
+  assert.match(pending, /pf-m-warning/)
+  assert.match(pending, /pf-v6-c-label__text">pending</)
 })
 
 test('the empty and failed states say so honestly', () => {

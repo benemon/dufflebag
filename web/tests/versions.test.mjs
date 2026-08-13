@@ -48,6 +48,10 @@ let platformTenancyGap
 let TypedConfirmModalView
 const versionDataSource = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
 const versionScreenSource = readFileSync(new URL('../src/screens/Version.tsx', import.meta.url), 'utf8')
+const versionsScreenSource = readFileSync(new URL('../src/screens/Versions.tsx', import.meta.url), 'utf8')
+const buildScreenSource = readFileSync(new URL('../src/screens/Build.tsx', import.meta.url), 'utf8')
+let VersionStateLabel
+let BuildStateLabel
 
 before(async () => {
   vite = await createServer({
@@ -59,10 +63,10 @@ before(async () => {
   })
   ;({ VersionsView, VersionsFacet, versionPage, BucketChannelsFacet, CreateChannelModalView,
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
-    EnforcedProvisionersRow, channelVersionGap, parentFreshnessText } =
+    EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
   ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard,
-    terraformConsumeSnippet, terraformPromotionSnippet } =
+    terraformConsumeSnippet, terraformPromotionSnippet, BuildStateLabel } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
   ;({ BuildView, packerBuildCommand, sbomFileName } = await vite.ssrLoadModule('/src/screens/Build.tsx'))
   ;({ loadVersions, loadVersion, loadBucketPage, loadEnforcedProvisioners, loadChannelHistory,
@@ -522,6 +526,38 @@ test('channel actions are live for publisher and disabled with a reason below pu
   assert.match(publisher, /aria-label="Actions for production"/)
   assert.doesNotMatch(publisher, /Requires publisher/)
   assert.doesNotMatch(publisher, /<button[^>]*disabled[^>]*aria-label="Actions for production"/)
+})
+
+test('disabled channel menu items keep name-only labels and attach their publisher reason', () => {
+  assert.match(versionsScreenSource, /tooltipProps=\{refused \? \{ content: reason \} : undefined\}/)
+  assert.match(versionsScreenSource, />\s*Assign version…\s*\{refused \? <span/)
+  assert.match(versionsScreenSource, />\s*Delete channel\s*\{refused \? <span/)
+  assert.doesNotMatch(versionsScreenSource, /Assign version…\{refused \? ` — \$\{reason\}`/)
+  assert.doesNotMatch(versionsScreenSource, /Delete channel\{refused \? ` — \$\{reason\}`/)
+})
+
+test('version and build labels map lifecycle states to PatternFly status treatment', () => {
+  assert.deepEqual(
+    ['complete', 'incomplete', 'revoked', 'revocation-scheduled'].map((state) =>
+      [state, VersionStateLabel({ state }).props.status]),
+    [
+      ['complete', 'success'], ['incomplete', 'info'], ['revoked', 'danger'],
+      ['revocation-scheduled', 'warning'],
+    ],
+  )
+  assert.deepEqual(
+    ['done', 'running', 'failed', 'cancelled', 'pending'].map((state) =>
+      [state, BuildStateLabel({ state }).props.status]),
+    [
+      ['done', 'success'], ['running', 'info'], ['failed', 'danger'],
+      ['cancelled', 'warning'], ['pending', 'warning'],
+    ],
+  )
+})
+
+test('SBOM file names use PatternFly truncation instead of native title text', () => {
+  assert.match(buildScreenSource, /<Truncate content=\{sbomFileName\(sbom\)\} \/>/)
+  assert.doesNotMatch(buildScreenSource, /title=\{sbomFileName\(sbom\)\}/)
 })
 
 test('Create channel moves between the empty state and populated card header with its role gate', () => {

@@ -1,4 +1,4 @@
-import { Card, CardBody, CardTitle, Content, Label, Title } from '@patternfly/react-core'
+import { Card, CardBody, CardTitle, Content, Label, Title, Truncate } from '@patternfly/react-core'
 
 import {
   coverageSummary, hasCoverageGap, versionRollup, type BuildFindings,
@@ -56,9 +56,12 @@ export function VersionSecurityCard({
       <CardTitle>
         <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
           <span>Security</span>
-          <Content component="small">
-            {lastScanned ? <>Last scanned: <When iso={lastScanned} dateOnly /></> : 'Not yet scanned'}
-          </Content>
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {outOfScanSet ? <Label color="grey" variant="outline">not updated</Label> : null}
+            <Content component="small">
+              {lastScanned ? <>Last scanned: <When iso={lastScanned} dateOnly /></> : 'Not yet scanned'}
+            </Content>
+          </span>
         </span>
       </CardTitle>
       <CardBody>
@@ -123,11 +126,9 @@ export function VersionSecurityCard({
                   <code
                     style={{
                       display: 'block', color: 'var(--pf-t--global--text--color--subtle)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}
-                    title={build.component || build.buildID}
                   >
-                    {build.component || build.buildID}
+                    <Truncate content={build.component || build.buildID} />
                   </code>
                 </span>
                 <span style={{ flex: 'none' }}>

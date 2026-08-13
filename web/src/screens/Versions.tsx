@@ -851,11 +851,21 @@ function ChannelActions({
       ) : toggle(ref)}
     >
       <DropdownList>
-        <DropdownItem isDisabled={refused} onClick={onAssign}>
-          Assign version…{refused ? ` — ${reason}` : ''}
+        <DropdownItem
+          isDisabled={refused}
+          tooltipProps={refused ? { content: reason } : undefined}
+          onClick={onAssign}
+        >
+          Assign version…
+          {refused ? <span className="pf-v6-u-screen-reader"> — {reason}</span> : null}
         </DropdownItem>
-        <DropdownItem isDisabled={refused} onClick={onDelete}>
-          Delete channel{refused ? ` — ${reason}` : ''}
+        <DropdownItem
+          isDisabled={refused}
+          tooltipProps={refused ? { content: reason } : undefined}
+          onClick={onDelete}
+        >
+          Delete channel
+          {refused ? <span className="pf-v6-u-screen-reader"> — {reason}</span> : null}
         </DropdownItem>
       </DropdownList>
     </Dropdown>
@@ -1349,12 +1359,12 @@ export function VersionStateLabel({ state }: { state: Version['state'] }) {
   // while the revocation states carry the wire status packer itself refuses on.
   switch (state) {
     case 'complete':
-      return <Label isCompact color="green">complete</Label>
+      return <Label isCompact status="success">complete</Label>
     case 'incomplete':
-      return <Label isCompact color="grey">incomplete</Label>
+      return <Label isCompact status="info">incomplete</Label>
     case 'revoked':
-      return <Label isCompact color="red">revoked</Label>
+      return <Label isCompact status="danger">revoked</Label>
     case 'revocation-scheduled':
-      return <Label isCompact color="orange">revocation scheduled</Label>
+      return <Label isCompact status="warning">revocation scheduled</Label>
   }
 }

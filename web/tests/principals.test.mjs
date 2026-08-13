@@ -12,6 +12,7 @@ let PrincipalTableView
 let DeletePrincipalConfirmation, RevokeSecretConfirmation
 let TypedConfirmModalView
 let grantableRoles
+let RoleRestrictedButton
 const principalScreenSource = readFileSync(new URL('../src/screens/Principals.tsx', import.meta.url), 'utf8')
 
 before(async () => {
@@ -28,6 +29,7 @@ before(async () => {
   } =
     await vite.ssrLoadModule('/src/screens/Principals.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
+  ;({ RoleRestrictedButton } = await vite.ssrLoadModule('/src/auth/RoleRestrictedButton.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
@@ -64,6 +66,22 @@ const issueModalProps = (over = {}) => ({
   principal: principal(), callerRole: 'maintainer', credential: null, failure: null,
   choice: 'never', customDate: '', onChoiceChange: () => {},
   onCustomDateChange: () => {}, onConfirm: async () => {}, onClose: () => {}, ...over,
+})
+
+// A natively disabled button dispatches no events, so a click-triggered
+// Popover on the control can never open; the focusable wrapper with a
+// hover/focus Tooltip is the reachable pattern and is pinned here.
+test('role-restricted buttons explain refusal via a tooltip on a focusable wrapper', () => {
+  const restricted = RoleRestrictedButton({
+    action: 'managePrincipals', callerRole: 'reader', children: 'Create principal',
+  })
+  assert.equal(restricted.props.content, 'Requires maintainer')
+  const wrapper = restricted.props.children
+  assert.equal(wrapper.props.tabIndex, 0)
+  assert.equal(wrapper.props['aria-label'], 'Requires maintainer')
+  const button = wrapper.props.children
+  assert.equal(button.props.isDisabled, true)
+  assert.match(renderToStaticMarkup(button), /pf-v6-u-screen-reader"> — Requires maintainer/)
 })
 
 const findElement = (node, predicate) => {
@@ -319,17 +337,18 @@ const soleRoot = () => principal({
   organization_id: null, project_id: null, secrets: [secret('s-1')],
 })
 
-// Ben, 2026-08-02: disable the control rather than letting the operator hit a
-// server error, and explain it ONCE above the listing — nothing on the button.
-// Both halves are asserted together because either alone is a defect: a
-// disabled control with no explanation reads as a bug, and an explanation with
-// a live control is a lie.
+// The global explanation and the local disabled-control explanation are both
+// driven by the server-mirroring keystone predicate.
 test("a root's sole secret disables revoke and says why above the listing", () => {
   const markup = view({ principals: [soleRoot()] })
   assert.match(markup, /must keep one secret that never expires/)
   assert.match(markup, /Issue another never-expiring secret first/)
   const revoke = markup.slice(markup.indexOf('>Revoke<') - 200, markup.indexOf('>Revoke<'))
   assert.match(revoke, /disabled/)
+  assert.match(
+    principalScreenSource,
+    /keystoneSecret \? <Popover bodyContent=\{ROOT_KEYSTONE_REASON\}>\{revoke\}<\/Popover> : revoke/,
+  )
 })
 
 // Independent review of 8c7978d. A root holding NO secrets is a real state since

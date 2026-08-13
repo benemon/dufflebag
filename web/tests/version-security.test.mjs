@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -7,6 +8,18 @@ import { createServer } from 'vite'
 
 let vite
 let VersionSecurityCard
+const themeSource = readFileSync(new URL('../src/theme.css', import.meta.url), 'utf8')
+
+const findElements = (node, predicate, found = []) => {
+  if (Array.isArray(node)) {
+    for (const child of node) findElements(child, predicate, found)
+    return found
+  }
+  if (!React.isValidElement(node)) return found
+  if (predicate(node)) found.push(node)
+  findElements(node.props.children, predicate, found)
+  return found
+}
 
 before(async () => {
   vite = await createServer({
@@ -104,7 +117,12 @@ test('a version no channel selects keeps its figures under the unmaintained clas
   const html = render({ builds: [withLibcurl('b1', 'docker')], outOfScanSet: true })
   assert.match(html, /dfbg-findings-unmaintained/)
   assert.match(html, /critical/, 'the prior figures are retained')
+  assert.match(html, /pf-m-outline[\s\S]{0,500}>not updated</)
   assert.match(html, /not being updated/)
+  const rule = themeSource.match(/\.dfbg-findings-unmaintained\s*\{[^}]*\}/)?.[0] ?? ''
+  assert.doesNotMatch(rule, /filter\s*:/)
+  assert.doesNotMatch(rule, /opacity\s*:/)
+  assert.match(rule, /border-left:\s*2px solid/)
 })
 
 // The identifier means nothing to a reader; the build's own name does.
@@ -112,6 +130,19 @@ test('a build tile shows the build name, not its identifier', () => {
   const html = render({ builds: [withLibcurl('01KZF1QRA3BQ9K913VA8DP23RN', 'docker')] })
   assert.match(html, /docker\.distro/)
   assert.doesNotMatch(html, />01KZF1QRA3BQ9K913VA8DP23RN</, 'the ULID is not the label')
+})
+
+test('a build tile keeps its full component in PatternFly truncation', () => {
+  const component = 'docker.ubuntu-a-provider-component-that-does-not-fit'
+  const tree = VersionSecurityCard({
+    builds: [{ ...withLibcurl('b1', 'docker'), component }],
+    onOpenBuild: () => {}, outOfScanSet: false,
+  })
+  const truncation = findElements(tree, (element) => element.props.content === component)
+  assert.equal(truncation.length, 1)
+  assert.doesNotMatch(render({
+    builds: [{ ...withLibcurl('b1', 'docker'), component }],
+  }), /title=/)
 })
 
 // Coverage counts are the difference between "nothing found" and "not looked

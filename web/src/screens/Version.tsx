@@ -999,15 +999,15 @@ function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id
 export function BuildStateLabel({ state }: { state: BuildState }) {
   switch (state) {
     case 'done':
-      return <Label isCompact color="green">done</Label>
+      return <Label isCompact status="success">done</Label>
     case 'running':
-      return <Label isCompact color="blue">running</Label>
+      return <Label isCompact status="info">running</Label>
     case 'failed':
-      return <Label isCompact color="red">failed</Label>
+      return <Label isCompact status="danger">failed</Label>
     case 'cancelled':
-      return <Label isCompact color="orange">cancelled</Label>
+      return <Label isCompact status="warning">cancelled</Label>
     case 'pending':
-      return <Label isCompact color="grey">pending</Label>
+      return <Label isCompact status="warning">pending</Label>
   }
 }
 

@@ -290,22 +290,26 @@ test('the pinned card offers Unpin only with pin authority', () => {
 test('reader sees the kebab pin item disabled with its builder reason', () => {
   assert.deepEqual(pinBucketAction(false), {
     disabled: true,
-    label: 'Pin bucket — Requires builder',
+    label: 'Pin bucket',
+    tooltipProps: { content: 'Requires builder' },
   })
   assert.deepEqual(pinBucketAction(true), { disabled: false, label: 'Pin bucket' })
+  assert.match(bucketScreenSource, /tooltipProps=\{pinAction\.tooltipProps\}/)
 })
 
 test('bucket-list deletion is live for publisher and disabled with a reason below publisher', () => {
   for (const role of [null, 'reader', 'builder']) {
     assert.deepEqual(deleteBucketAction(role), {
       disabled: true,
-      label: 'Delete bucket… — Requires publisher',
+      label: 'Delete bucket…',
+      tooltipProps: { content: 'Requires publisher' },
     })
   }
   assert.deepEqual(deleteBucketAction('publisher'), {
     disabled: false,
     label: 'Delete bucket…',
   })
+  assert.match(bucketScreenSource, /tooltipProps=\{deleteAction\.tooltipProps\}/)
 })
 
 test('bucket deletion sends DELETE to the exact compat-plane path', async () => {
