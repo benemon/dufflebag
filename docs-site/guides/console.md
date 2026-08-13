@@ -33,6 +33,9 @@ Actions by role:
 | Manage principals and secrets, configure Bag Drop | `maintainer` |
 | Configure audit targets, manage encryption | `root` |
 
+Maintainers can create projects from the project context picker; platform-scoped roots can
+create organisations from the organisation context picker.
+
 Until the console has resolved who you are, it shows the reader-tier
 navigation as a safe default; a direct URL to a restricted screen still
 answers honestly.

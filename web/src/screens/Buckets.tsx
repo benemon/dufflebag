@@ -14,6 +14,7 @@ import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
+import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
 import { useAuth } from '../auth/AuthContext'
@@ -204,9 +205,7 @@ export function BucketsView({
                 <Content component="p">{failure}</Content>
               </Alert>
             ) : gap ? (
-              <Alert variant="info" isInline title={gap.title}>
-                <Content component="p">{gap.detail}</Content>
-              </Alert>
+              <TenancyGapEmptyState gap={gap} callerRole={callerRole} />
             ) : buckets.length === 0 ? (
               <EmptyState titleText="No buckets yet" headingLevel="h2">
                 <EmptyStateBody>

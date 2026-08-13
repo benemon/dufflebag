@@ -27,15 +27,27 @@ test('each role gets the nested console action snapshot declared by the server',
   assert.deepEqual(
     allowedActions('maintainer'),
     [
+      'createProjects',
       'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets',
       'managePrincipals', 'configureBagDrop', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
-    'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets', 'configureAudit',
-    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configureWebhooks',
+    'createOrganizations', 'createProjects', 'pinBuckets', 'revokeVersions', 'deleteVersions',
+    'manageChannels', 'deleteBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals',
+    'configureBagDrop', 'configureWebhooks',
   ])
   assert.deepEqual(allowedActions(null), [])
+})
+
+test('createOrganizations permission mapping requires root', () => {
+  assert.equal(allowedActions('maintainer').includes('createOrganizations'), false)
+  assert.equal(allowedActions('root').includes('createOrganizations'), true)
+})
+
+test('createProjects permission mapping requires maintainer', () => {
+  assert.equal(allowedActions('publisher').includes('createProjects'), false)
+  assert.equal(allowedActions('maintainer').includes('createProjects'), true)
 })
 
 test('pinBuckets permission mapping requires builder', () => {

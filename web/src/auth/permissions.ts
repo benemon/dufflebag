@@ -2,6 +2,10 @@ export const ROLES = ['reader', 'builder', 'publisher', 'maintainer', 'root'] as
 export type Role = (typeof ROLES)[number]
 
 export const ACTION_REQUIREMENTS = {
+  // internal/platform/v1/handler.go:343's CreateOrganization authorizes platform RoleRoot.
+  createOrganizations: 'root',
+  // internal/platform/v1/handler.go:463's CreateProject authorizes tenancy RoleMaintainer.
+  createProjects: 'maintainer',
   // internal/platform/v1/handler.go's SetPin and DeletePin authorize RoleBuilder.
   pinBuckets: 'builder',
   // Compatibility-plane registry safety operations authorize RolePublisher.

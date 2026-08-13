@@ -93,6 +93,8 @@ export function organizationRows(organizations: ApiOrganization[]): ApiOrganizat
 export type TenancyGap = {
   title: string
   detail: string
+  resource: 'organization' | 'project'
+  organizationID?: string
 }
 
 /**
@@ -122,6 +124,7 @@ export function platformTenancyGap({
     if (organizationCount === 0) {
       return {
         title: 'No organisations exist',
+        resource: 'organization',
         detail:
           'This session is platform-scoped and there is no organisation to view. ' +
           'Buckets and channels live inside an organisation’s project; ' +
@@ -131,6 +134,7 @@ export function platformTenancyGap({
     if (!selectedOrganization) {
       return {
         title: 'Choose an organisation',
+        resource: 'organization',
         detail:
           'This platform-scoped session can view any organisation. ' +
           'Pick one from the header to see its buckets and channels.',
@@ -140,12 +144,16 @@ export function platformTenancyGap({
   if (projectCount === 0) {
     return {
       title: 'No projects in this organisation',
+      resource: 'project',
+      organizationID: selectedOrganization ?? undefined,
       detail: 'Buckets live inside a project, and this organisation has none.',
     }
   }
   if (!selectedProject) {
     return {
       title: 'Choose a project',
+      resource: 'project',
+      organizationID: selectedOrganization ?? undefined,
       detail: 'Pick a project from the header to see what it holds.',
     }
   }

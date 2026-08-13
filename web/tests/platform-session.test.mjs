@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { createHmac } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -21,6 +22,10 @@ let refreshOrganizationsOnPickerOpen
 let grantableRoles
 let PrincipalsView
 let BucketsView
+const tenantSwitcherSource = readFileSync(
+  new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
+  'utf8',
+)
 
 before(async () => {
   vite = await createServer({
@@ -232,6 +237,7 @@ function session(over = {}) {
       token: 't',
       claims: { sub: 'p-1', organizationID: null, projectID: null, expiresAt: new Date(Date.now() + 900000) },
     },
+    self: { role: 'root' },
     signIn: async () => {}, signOut: () => {},
     organizations: [{ id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' }],
     boundOrganizationName: null,
@@ -241,6 +247,7 @@ function session(over = {}) {
     permittedProjects: [], projectNames: {},
     selectedProject: null, selectProject: () => {},
     projectsLoading: false, projectFailure: null,
+    refreshProjects: async () => [],
     ...over,
   }
 }
@@ -365,6 +372,19 @@ test('a tenancy session gets no dash row', () => {
   assert.doesNotMatch(markup, /—/)
 })
 
+test('both tenancy pickers render role-gated creation footers', () => {
+  assert.equal((tenantSwitcherSource.match(/<MenuFooter>/g) ?? []).length, 2)
+  assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="organization"/)
+  assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="project"/)
+})
+
+test('zero-organisation masthead keeps its compact recovery action', () => {
+  const markup = switcherMarkup(session({ organizations: [] }))
+  assert.match(markup, /No organisations exist/)
+  assert.match(markup, /Create organisation/)
+  assert.doesNotMatch(markup, /Requires root/)
+})
+
 test('the data screens render a tenancy gap instead of a healthy empty state', () => {
   const gap = platformTenancyGap({
     platform: true, organizationCount: 0,
@@ -375,5 +395,7 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
   }))
   assert.match(buckets, /No organisations exist/)
   assert.match(buckets, /Principals and Instance work/)
+  assert.match(buckets, /pf-v6-c-empty-state/)
+  assert.match(buckets, /Create organisation/)
   assert.doesNotMatch(buckets, /No buckets yet/)
 })
