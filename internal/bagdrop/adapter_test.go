@@ -758,3 +758,71 @@ func TestGetVersionNormalisesZeroRevokeAtToNotRevoked(t *testing.T) {
 		t.Fatalf("zero-time revoke_at must normalise to not-revoked, got %v", version.RevokeAt)
 	}
 }
+
+// The build source identifier must travel on the terminal update only: live
+// HCP refuses CreateBuild carrying source_external_identifier without a
+// parent_version_id (400/code-3, observed 2026-08-13 against the real
+// service), while accepting it alone on the terminal update — the sequence
+// Packer itself performs (compatibility.md §5.7).
+func TestHCPPackerSourceIdentifierTravelsOnTerminalUpdateOnly(t *testing.T) {
+	auth := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(tokenSuccessFixture))
+	}))
+	defer auth.Close()
+	bodies := make(map[string]map[string]any)
+	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		var body map[string]any
+		if err := json.NewDecoder(request.Body).Decode(&body); err != nil {
+			t.Error(err)
+		}
+		bodies[request.Method+" "+request.URL.Path] = body
+		if request.Method == http.MethodPost {
+			_, _ = w.Write([]byte(`{"build":{"id":"build-1","component_type":"docker.example","status":"BUILD_PENDING"}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{}`))
+	}))
+	defer api.Close()
+	run, err := NewHCPPackerAdapter(auth.URL, api.URL).BeginReconcile(context.Background(), adapterDestination())
+	if err != nil {
+		t.Fatal(err)
+	}
+	build := BuildSnapshot{
+		ComponentType: "docker.example", PackerRunUUID: "run-1", Platform: "docker",
+		Labels:                   map[string]string{},
+		SourceExternalIdentifier: "sha256:0d4ca43cdc07f2c4d260ea3a4143c8d8fecc35e0e1a02cee7a10ae263e78fdce",
+	}
+	buildsPath := "/packer/2023-01-01/organizations/hcp-org/projects/hcp-project/buckets/images/versions/fp-1/builds"
+	if _, err := run.CreateBuild(context.Background(), "images", "fp-1", build); err != nil {
+		t.Fatal(err)
+	}
+	created := bodies["POST "+buildsPath]
+	if created == nil {
+		t.Fatal("CreateBuild request was not observed")
+	}
+	if _, present := created["source_external_identifier"]; present {
+		t.Errorf("CreateBuild body carries source_external_identifier: %#v", created)
+	}
+	if err := run.UpdateBuild(context.Background(), "images", "fp-1", "build-1", build); err != nil {
+		t.Fatal(err)
+	}
+	updated := bodies["PATCH "+buildsPath+"/build-1"]
+	if updated == nil {
+		t.Fatal("UpdateBuild request was not observed")
+	}
+	if updated["source_external_identifier"] != build.SourceExternalIdentifier {
+		t.Errorf("terminal update body = %#v, want source_external_identifier %q", updated, build.SourceExternalIdentifier)
+	}
+	sourceless := build
+	sourceless.SourceExternalIdentifier = ""
+	if err := run.UpdateBuild(context.Background(), "images", "fp-1", "build-2", sourceless); err != nil {
+		t.Fatal(err)
+	}
+	bare := bodies["PATCH "+buildsPath+"/build-2"]
+	if bare == nil {
+		t.Fatal("sourceless UpdateBuild request was not observed")
+	}
+	if _, present := bare["source_external_identifier"]; present {
+		t.Errorf("sourceless terminal update carries an empty source_external_identifier: %#v", bare)
+	}
+}

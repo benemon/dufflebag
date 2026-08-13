@@ -389,10 +389,16 @@ func (r *destinationReconcileRun) CreateBuild(
 	var response struct {
 		Build *RemoteBuild `json:"build"`
 	}
+	// source_external_identifier is deliberately absent here: live HCP refuses
+	// CreateBuild carrying it without a parent_version_id (400/code-3, observed
+	// 2026-08-13), and the mirror correlates by names and fingerprints, never
+	// destination ids. Packer's own flow reports the source identifier on the
+	// terminal update only (compatibility.md §5.7), where HCP accepts it alone —
+	// UpdateBuild below carries it.
 	err := r.do(ctx, http.MethodPost, r.versionPath(bucket, fingerprint)+"/builds", map[string]any{
 		"component_type": build.ComponentType, "status": status,
 		"packer_run_uuid": build.PackerRunUUID, "platform": build.Platform,
-		"labels": build.Labels, "source_external_identifier": build.SourceExternalIdentifier,
+		"labels": build.Labels,
 	}, &response)
 	if remoteError(err, http.StatusConflict, 6) {
 		return "", nil
@@ -422,14 +428,21 @@ func (r *destinationReconcileRun) UpdateBuild(
 			"external_identifier": artifact.ExternalIdentifier, "region": artifact.Region,
 		})
 	}
-	// Only completion state is sent: platform, packer_run_uuid, labels and
-	// source_external_identifier were set at CreateBuild, and live HCP refuses
-	// re-setting platform on update with 409/code-6 ("You cannot override a
-	// build's Platform if it has already been set" — observed 2026-08-10,
-	// recorded in the probe evidence). The terminal update carries exactly
-	// what the probed Packer flow carries: status, artifacts, metadata.
+	// Completion state plus the source identifier: platform, packer_run_uuid and
+	// labels were set at CreateBuild, and live HCP refuses re-setting platform on
+	// update with 409/code-6 ("You cannot override a build's Platform if it has
+	// already been set" — observed 2026-08-10, recorded in the probe evidence).
+	// source_external_identifier travels HERE, not at create, because live HCP
+	// refuses the create-time combination without a parent_version_id (400/code-3,
+	// observed 2026-08-13) while accepting it alone on the terminal update — the
+	// exact sequence Packer itself performs (compatibility.md §5.7). The reconciler
+	// only calls this while the destination build is not BUILD_DONE, so the field
+	// is never re-set on an already-completed build.
 	body := map[string]any{
 		"status": "BUILD_DONE", "artifacts": artifacts,
+	}
+	if build.SourceExternalIdentifier != "" {
+		body["source_external_identifier"] = build.SourceExternalIdentifier
 	}
 	if len(build.Metadata) != 0 {
 		body["metadata"] = json.RawMessage(build.Metadata)
