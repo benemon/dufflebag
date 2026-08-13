@@ -488,6 +488,13 @@ async function captureSeededScreens() {
   await page.waitForSelector('section[aria-label="Pinned buckets"]')
   await capture('buckets.png')
 
+  // The bucket screen at its natural scroll: the facet rail (Overview /
+  // Versions / Channels with counts) beside the overview cards.
+  await page.goto(`${base}/buckets/base-images`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Bucket details')
+  await page.waitForSelector('nav[aria-label="Bucket facets"] button[role="tab"]')
+  await capture('bucket-facets.png')
+
   await page.goto(
     `${base}/buckets/base-images/versions/ubuntu-2404-2026-08`,
     { waitUntil: 'domcontentloaded' },
