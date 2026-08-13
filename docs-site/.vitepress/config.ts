@@ -1,38 +1,35 @@
 import { existsSync } from 'node:fs'
 import { defineConfig } from 'vitepress'
 
-// Grouped to match the landing page's three sections, so the sidebar carries
-// the same taxonomy a reader saw on arrival.
-const guideSidebar = [
+// Grouped to match the landing page, so the sidebar carries the same taxonomy
+// a reader saw on arrival.
+const sidebar = [
   {
-    text: 'Getting going',
+    text: 'Getting started',
     items: [
-      { text: 'Installation', link: '/guides/installation' },
-      { text: 'Getting started', link: '/guides/getting-started' },
-      { text: 'Roles & principals', link: '/guides/roles-principals' },
+      { text: 'Installation', link: '/getting-started/installation' },
+      { text: 'First use', link: '/getting-started/first-use' },
     ],
   },
   {
-    text: 'Day to day',
+    text: 'Administration',
     items: [
-      { text: 'The console', link: '/guides/console' },
-      { text: 'Terraform provider', link: '/guides/terraform' },
-      { text: 'Revocation & channels', link: '/guides/revocation-channels' },
-      { text: 'SBOMs & findings', link: '/guides/sbom-findings' },
+      { text: 'Roles & principals', link: '/administration/roles-principals' },
+      { text: 'The console', link: '/administration/console' },
+      { text: 'Audit', link: '/administration/audit' },
+      { text: 'Encryption', link: '/administration/encryption' },
+      { text: 'Bag Drop', link: '/administration/bag-drop' },
+      { text: 'Webhooks', link: '/administration/webhooks' },
     ],
   },
   {
-    text: 'Operating',
+    text: 'Using the registry',
     items: [
-      { text: 'Bag Drop', link: '/guides/bag-drop' },
-      { text: 'Webhooks', link: '/guides/webhooks' },
-      { text: 'Audit & encryption', link: '/guides/audit-encryption' },
-      { text: 'Platform API', link: '/guides/platform-api' },
+      { text: 'Terraform provider', link: '/using/terraform' },
+      { text: 'Revocation & channels', link: '/using/revocation-channels' },
+      { text: 'SBOMs & findings', link: '/using/sbom-findings' },
     ],
   },
-]
-
-const deploymentSidebar = [
   {
     text: 'Deployment',
     items: [
@@ -42,23 +39,17 @@ const deploymentSidebar = [
       { text: 'Operations', link: '/deployment/operations' },
     ],
   },
-]
-
-const referenceSidebar = [
   {
     text: 'Reference',
     items: [
       { text: 'Architecture', link: '/reference/architecture' },
       { text: 'Compatibility', link: '/reference/compatibility' },
+      { text: 'Platform API', link: '/reference/platform-api' },
     ],
   },
 ]
 
-for (const group of [
-  ...guideSidebar,
-  ...deploymentSidebar,
-  ...referenceSidebar,
-]) {
+for (const group of sidebar) {
   for (const item of group.items) {
     const page = item.link.endsWith('/') ? `${item.link}index` : item.link
     if (!existsSync(new URL(`..${page}.md`, import.meta.url))) {
@@ -74,14 +65,16 @@ export default defineConfig({
   ignoreDeadLinks: false,
   themeConfig: {
     nav: [
-      { text: 'Guides', link: '/guides/getting-started' },
+      { text: 'Guides', link: '/getting-started/installation' },
       { text: 'API Reference', link: '/platform-api.html' },
       { text: 'Compatibility', link: '/reference/compatibility' },
     ],
     sidebar: {
-      '/guides/': guideSidebar,
-      '/deployment/': deploymentSidebar,
-      '/reference/': referenceSidebar,
+      '/getting-started/': sidebar,
+      '/administration/': sidebar,
+      '/using/': sidebar,
+      '/deployment/': sidebar,
+      '/reference/': sidebar,
     },
   },
 })

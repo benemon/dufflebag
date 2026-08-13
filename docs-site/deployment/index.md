@@ -3,7 +3,7 @@
 This document brings up dufflebag from the published container image on
 infrastructure you own: PostgreSQL, TLS, the optional object store and key
 service, migrations and first run. Client configuration — pointing Packer and Terraform at the
-result — is covered in [Getting started](../guides/getting-started.md), and the
+result — is covered in [Getting started](../getting-started/first-use.md), and the
 server's environment variables are listed in its
 [configuration reference](#configuration-reference).
 
@@ -183,7 +183,7 @@ curl -sX POST https://registry.example.com/sys/init \
 
 From here the console (or the platform API) creates an organisation, a
 project, and a project-scoped service principal for Packer; the README's
-[Getting started](../guides/getting-started.md) section covers pointing the
+[Getting started](../getting-started/first-use.md) section covers pointing the
 stock client at the result.
 
 ## Configuration reference

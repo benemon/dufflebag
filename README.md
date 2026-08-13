@@ -54,7 +54,7 @@ covers runtime prerequisites, optional backing services and their availability t
 ## Getting started
 
 Follow [Deploying dufflebag](https://benemon.github.io/dufflebag/deployment/)
-to install and initialise an instance, then [Getting started](https://benemon.github.io/dufflebag/guides/getting-started)
+to install and initialise an instance, then [Getting started](https://benemon.github.io/dufflebag/getting-started/first-use)
 to point stock Packer and Terraform clients at it.
 
 ## Configuration reference
