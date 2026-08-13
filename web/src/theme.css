@@ -76,6 +76,11 @@
   --lk: var(--pf-t--global--text--color--link--default);
 }
 
+.dfbg-bootstrap .pf-v6-c-login__main {
+  /* The first-run wizard needs room for its step rail beside the active form. */
+  width: min(70rem, calc(100vw - 2rem));
+}
+
 .pf-v6-c-page.app-page {
   /* --Width is the one PatternFly's rules read; the other two are inputs it
      derives from and neither reaches the grid column or the element width. */

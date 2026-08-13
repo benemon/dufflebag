@@ -1,8 +1,8 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
-  ActionGroup, Alert, Button, Card, CardBody, CardFooter, CardTitle, Checkbox, ClipboardCopy,
-  ClipboardCopyVariant, Content, Form, FormGroup, PageSection, ProgressStep,
-  ProgressStepper, TextInput, Title,
+  Alert, Button, Checkbox, ClipboardCopy, ClipboardCopyVariant, Content, Form, FormGroup,
+  Login, LoginHeader, LoginMainBody, LoginMainHeader, TextInput, Title, Wizard,
+  WizardFooterWrapper, WizardStep,
 } from '@patternfly/react-core'
 
 import {
@@ -11,10 +11,179 @@ import {
 } from '../api/client'
 
 type Credentials = { client_id: string; client_secret: string }
-type Step = 'initialize' | 'organization' | 'project'
+type Step = 'initialize' | 'credentials' | 'organization' | 'project'
+
+const stepIndex: Record<Step, number> = {
+  initialize: 1,
+  credentials: 2,
+  organization: 3,
+  project: 4,
+}
+
+function BootstrapPage({ children, host }: { children: ReactNode; host: string }) {
+  return (
+    <Login className="dfbg-bootstrap" header={<LoginHeader />}>
+      <LoginMainHeader title="Dufflebag" subtitle={host} />
+      <LoginMainBody>{children}</LoginMainBody>
+    </Login>
+  )
+}
+
+export function credentialsFileContent(credentials: InitResponse) {
+  return [
+    '# dufflebag administrative credentials',
+    '# Store this file like the secret it contains.',
+    '# The recovery share must be stored offline, separately from the credentials.',
+    '# Recovery: POST /sys/recovery with the share mints a fresh root principal.',
+    `client_id: ${credentials.client_id}`,
+    `client_secret: ${credentials.client_secret}`,
+    ...credentials.recovery_shares.map((share, index) => `recovery_share_${index + 1}: ${share}`),
+    '',
+  ].join('\n')
+}
+
+function downloadCredentials(credentials: InitResponse) {
+  const blob = new Blob([credentialsFileContent(credentials)], { type: 'text/plain;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = 'dufflebag-credentials.txt'
+  try {
+    link.click()
+  } finally {
+    URL.revokeObjectURL(url)
+  }
+}
+
+export function StoreCredentials({
+  credentials,
+  stored,
+  onStoredChange,
+}: {
+  credentials: InitResponse
+  stored: boolean
+  onStoredChange: (stored: boolean) => void
+}) {
+  return (
+    <>
+      <Title headingLevel="h2" size="xl">Administrative credentials</Title>
+      <Content component="p">
+        Returned once in this response. They are never logged or retrievable again.
+      </Content>
+      <Alert
+        variant="danger"
+        isInline
+        title="Shown once. Store these before continuing."
+        style={{ marginTop: 16 }}
+      >
+        <Content component="p">
+          The credentials grant full administrative access and are hashed with argon2id on
+          write. If they are lost, presenting the recovery share to POST /sys/recovery
+          mints a fresh root principal — store it offline, separately from the
+          credentials. If both are lost, only the break-glass database procedure remains.
+          Use a client ID that has never authenticated against another registry; clients
+          cache tokens by client ID and a collision produces confusing 401s.
+        </Content>
+      </Alert>
+      <Form style={{ marginTop: 16 }}>
+        <FormGroup label="Client ID" fieldId="init-client-id">
+          <ClipboardCopy
+            id="init-client-id"
+            hoverTip="Copy"
+            clickTip="Copied"
+            variant={ClipboardCopyVariant.inlineCompact}
+          >
+            {credentials.client_id}
+          </ClipboardCopy>
+        </FormGroup>
+        <FormGroup label="Client secret" fieldId="init-client-secret">
+          <ClipboardCopy
+            id="init-client-secret"
+            hoverTip="Copy"
+            clickTip="Copied"
+            variant={ClipboardCopyVariant.expansion}
+            isReadOnly
+          >
+            {credentials.client_secret}
+          </ClipboardCopy>
+        </FormGroup>
+        <Button variant="secondary" onClick={() => downloadCredentials(credentials)}>
+          Download credentials
+        </Button>
+        <Content component="small" style={{ display: 'block', marginTop: 8 }}>
+          The file contains the secret in plain text — store it like one.
+        </Content>
+      </Form>
+
+      <Title headingLevel="h3" size="md" style={{ marginTop: 24 }}>Recovery</Title>
+      <Content component="p">
+        Store the recovery share offline, separately from the credentials.
+      </Content>
+      <Form style={{ marginTop: 16 }}>
+        {credentials.recovery_shares.map((share, index) => (
+          <FormGroup
+            key={share}
+            label={credentials.recovery_shares.length === 1
+              ? 'Recovery share'
+              : `Recovery share ${index + 1} of ${credentials.recovery_shares.length}`}
+            fieldId={`init-recovery-share-${index}`}
+          >
+            <ClipboardCopy
+              id={`init-recovery-share-${index}`}
+              hoverTip="Copy"
+              clickTip="Copied"
+              variant={ClipboardCopyVariant.expansion}
+              isExpanded
+              isReadOnly
+            >
+              {share}
+            </ClipboardCopy>
+          </FormGroup>
+        ))}
+      </Form>
+
+      <Checkbox
+        id="init-stored"
+        label="I have stored these credentials and the recovery share"
+        isChecked={stored}
+        onChange={(_event, checked) => onStoredChange(checked)}
+        style={{ marginTop: 16 }}
+      />
+    </>
+  )
+}
+
+export function StoreCredentialsFooter({
+  stored,
+  submitting,
+  onContinue,
+}: {
+  stored: boolean
+  submitting: boolean
+  onContinue: () => void
+}) {
+  return (
+    <WizardFooterWrapper>
+      <Button
+        variant="primary"
+        isLoading={submitting}
+        isDisabled={!stored || submitting}
+        onClick={onContinue}
+      >
+        Continue to organization
+      </Button>
+    </WizardFooterWrapper>
+  )
+}
 
 /** First-run bootstrap through the same public APIs available to automation. */
-export function Initialize({ onDone }: { onDone: (credentials: Credentials) => void }) {
+export function Initialize({
+  host,
+  onDone,
+}: {
+  host: string
+  onDone: (credentials: Credentials) => void
+}) {
   const [step, setStep] = useState<Step>('initialize')
   const [credentials, setCredentials] = useState<InitResponse | null>(null)
   const [token, setToken] = useState<string | null>(null)
@@ -29,7 +198,9 @@ export function Initialize({ onDone }: { onDone: (credentials: Credentials) => v
     setSubmitting(true)
     setFailure(null)
     try {
-      setCredentials(await initialize())
+      const minted = await initialize()
+      setCredentials(minted)
+      setStep('credentials')
     } catch (err) {
       setFailure(err instanceof ApiError ? err.message : 'Initialization failed.')
     } finally {
@@ -79,247 +250,155 @@ export function Initialize({ onDone }: { onDone: (credentials: Credentials) => v
   }
 
   return (
-    // Full screen, outside the app shell, like the sign-in page beside it: a
-    // session mid-bootstrap can use no shell affordance — nav needs a session,
-    // the tenant switcher needs claims that do not exist yet — so offering
-    // them would advertise controls that cannot work. Top-aligned rather than
-    // vertically centred because the wizard grows as steps complete, and
-    // centring would push the later steps off a short viewport.
-    <PageSection
-      variant="default"
-      style={{ maxWidth: 760, margin: '0 auto', minHeight: '100vh', paddingBlock: '3rem' }}
-    >
+    <BootstrapPage host={host}>
       <Title headingLevel="h1" size="2xl">Initialize dufflebag</Title>
       <Content component="p">
-        Three steps: mint the administrative principal, create the organization, and create the
-        first project. Automation uses these same public APIs.
+        Mint the administrative principal, store its credentials, then create the organization
+        and first project. Automation uses these same public APIs.
       </Content>
-
-      {!credentials && (
-        <Alert
-          variant="warning"
-          isInline
-          title="This instance is uninitialized"
-          style={{ marginTop: 16 }}
-        >
-          <Content component="p">
-            Whoever completes this flow first owns the deployment. Do not expose an uninitialized
-            instance publicly.
-          </Content>
-        </Alert>
-      )}
-
-      <Card style={{ marginTop: 16 }}>
-        <CardBody>
-          <ProgressStepper aria-label="Initialization progress" isCenterAligned>
-            <ProgressStep
-              id="initialize-step"
-              titleId="initialize-step-title"
-              variant={step === 'initialize' ? 'info' : 'success'}
-              isCurrent={step === 'initialize'}
-              aria-label={step === 'initialize' ? 'Initialize, current step' : 'Initialize, completed'}
-            >
-              Initialize
-            </ProgressStep>
-            <ProgressStep
-              id="organization-step"
-              titleId="organization-step-title"
-              variant={step === 'organization' ? 'info' : step === 'project' ? 'success' : 'pending'}
-              isCurrent={step === 'organization'}
-              aria-label={step === 'organization' ? 'Organization, current step' : 'Organization'}
-            >
-              Organization
-            </ProgressStep>
-            <ProgressStep
-              id="project-step"
-              titleId="project-step-title"
-              variant={step === 'project' ? 'info' : 'pending'}
-              isCurrent={step === 'project'}
-              aria-label={step === 'project' ? 'Project, current step' : 'Project'}
-            >
-              Project
-            </ProgressStep>
-          </ProgressStepper>
-        </CardBody>
-      </Card>
 
       {failure && <Alert variant="danger" isInline title={failure} style={{ marginTop: 16 }} />}
 
-      {step === 'initialize' && !credentials && (
-        <Card style={{ marginTop: 16 }}>
-          <CardTitle>Before you continue</CardTitle>
-          <CardBody>
+      <Wizard
+        key={step}
+        startIndex={stepIndex[step]}
+        navAriaLabel="Initialization progress"
+        height="auto"
+        width="100%"
+        style={{ marginTop: 16 }}
+      >
+        <WizardStep
+          id="initialize-step"
+          name="Initialize"
+          isDisabled={step !== 'initialize'}
+          footer={(
+            <WizardFooterWrapper>
+              <Button
+                variant="primary"
+                isLoading={submitting}
+                isDisabled={submitting}
+                onClick={() => void claim()}
+              >
+                Initialize this instance
+              </Button>
+            </WizardFooterWrapper>
+          )}
+        >
+          <Alert variant="warning" isInline title="This instance is uninitialized">
             <Content component="p">
-              Initialization happens once and cannot be repeated or undone. It creates only the
-              first root principal; you will name the first tenancy in the next two steps.
+              Whoever completes this flow first owns the deployment. Do not expose an uninitialized
+              instance publicly.
             </Content>
-            <Button
-              variant="primary"
-              isLoading={submitting}
-              isDisabled={submitting}
-              onClick={() => void claim()}
-              style={{ marginTop: 16 }}
-            >
-              Initialize this instance
-            </Button>
-          </CardBody>
-        </Card>
-      )}
+          </Alert>
+          <Title headingLevel="h2" size="xl" style={{ marginTop: 16 }}>Before you continue</Title>
+          <Content component="p">
+            Initialization happens once and cannot be repeated or undone. It creates only the
+            first root principal; you will name the first tenancy in the next two steps.
+          </Content>
+        </WizardStep>
 
-      {step === 'initialize' && credentials && (
-        <Card style={{ marginTop: 16 }}>
-          <CardTitle>Administrative credentials</CardTitle>
-          <CardBody>
-            <Content component="p">
-              Returned once in this response. They are never logged or retrievable again.
-            </Content>
-            <Form style={{ marginTop: 16 }}>
-              <FormGroup label="Client ID" fieldId="init-client-id">
-                <ClipboardCopy
-                  id="init-client-id"
-                  hoverTip="Copy"
-                  clickTip="Copied"
-                  variant={ClipboardCopyVariant.inlineCompact}
-                >
-                  {credentials.client_id}
-                </ClipboardCopy>
-              </FormGroup>
-              <FormGroup label="Client secret" fieldId="init-client-secret">
-                <ClipboardCopy
-                  id="init-client-secret"
-                  hoverTip="Copy"
-                  clickTip="Copied"
-                  variant={ClipboardCopyVariant.expansion}
-                  isReadOnly
-                >
-                  {credentials.client_secret}
-                </ClipboardCopy>
-              </FormGroup>
-              {credentials.recovery_shares.map((share, index) => (
-                <FormGroup
-                  key={share}
-                  label={credentials.recovery_shares.length === 1
-                    ? 'Recovery share'
-                    : `Recovery share ${index + 1} of ${credentials.recovery_shares.length}`}
-                  fieldId={`init-recovery-share-${index}`}
-                >
-                  <ClipboardCopy
-                    id={`init-recovery-share-${index}`}
-                    hoverTip="Copy"
-                    clickTip="Copied"
-                    variant={ClipboardCopyVariant.expansion}
-                    isReadOnly
-                  >
-                    {share}
-                  </ClipboardCopy>
-                </FormGroup>
-              ))}
-            </Form>
-            <Alert
-              variant="danger"
-              isInline
-              title="Shown once. Store these before continuing."
-              style={{ marginTop: 16 }}
-            >
-              <Content component="p">
-                The credentials grant full administrative access and are hashed with argon2id on
-                write. If they are lost, presenting the recovery share to POST /sys/recovery
-                mints a fresh root principal — store it offline, separately from the
-                credentials. If both are lost, only the break-glass database procedure remains.
-                Use a client ID that has never authenticated against another registry; clients
-                cache tokens by client ID and a collision produces confusing 401s.
-              </Content>
-            </Alert>
-            <Checkbox
-              id="init-stored"
-              label="I have stored these credentials and the recovery share"
-              isChecked={stored}
-              onChange={(_e, checked) => setStored(checked)}
-              style={{ marginTop: 16 }}
+        <WizardStep
+          id="credentials-step"
+          name="Store credentials"
+          isDisabled={step !== 'credentials'}
+          footer={(
+            <StoreCredentialsFooter
+              stored={stored}
+              submitting={submitting}
+              onContinue={() => void continueToOrganization()}
             />
-          </CardBody>
-          <CardFooter>
-            <Button
-              variant="primary"
-              isLoading={submitting}
-              isDisabled={!stored || submitting}
-              onClick={() => void continueToOrganization()}
-            >
-              Continue to organization
-            </Button>
-          </CardFooter>
-        </Card>
-      )}
+          )}
+        >
+          {credentials && (
+            <StoreCredentials
+              credentials={credentials}
+              stored={stored}
+              onStoredChange={setStored}
+            />
+          )}
+        </WizardStep>
 
-      {step === 'organization' && (
-        <Card style={{ marginTop: 16 }}>
-          <CardTitle>Name your organization</CardTitle>
-          <CardBody>
-            <Form
-              onSubmit={(event) => {
-                event.preventDefault()
-                void submitOrganization()
-              }}
-            >
-              <FormGroup label="Organization name" isRequired fieldId="organization-name">
-                <TextInput
-                  id="organization-name"
-                  value={organizationName}
-                  onChange={(_event, value) => setOrganizationName(value)}
-                  autoFocus
-                />
-              </FormGroup>
-              <ActionGroup>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  isLoading={submitting}
-                  isDisabled={submitting || organizationName.trim() === ''}
-                >
-                  Create organization and continue
-                </Button>
-              </ActionGroup>
-            </Form>
-          </CardBody>
-        </Card>
-      )}
+        <WizardStep
+          id="organization-step"
+          name="Organization"
+          isDisabled={step !== 'organization'}
+          footer={(
+            <WizardFooterWrapper>
+              <Button
+                type="submit"
+                form="initialize-organization"
+                variant="primary"
+                isLoading={submitting}
+                isDisabled={submitting || organizationName.trim() === ''}
+              >
+                Create organization and continue
+              </Button>
+            </WizardFooterWrapper>
+          )}
+        >
+          <Title headingLevel="h2" size="xl">Name your organization</Title>
+          <Form
+            id="initialize-organization"
+            style={{ marginTop: 16 }}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitOrganization()
+            }}
+          >
+            <FormGroup label="Organization name" isRequired fieldId="organization-name">
+              <TextInput
+                id="organization-name"
+                value={organizationName}
+                onChange={(_event, value) => setOrganizationName(value)}
+                autoFocus
+              />
+            </FormGroup>
+          </Form>
+        </WizardStep>
 
-      {step === 'project' && organization && (
-        <Card style={{ marginTop: 16 }}>
-          <CardTitle>Name your first project</CardTitle>
-          <CardBody>
+        <WizardStep
+          id="project-step"
+          name="Project"
+          isDisabled={step !== 'project'}
+          footer={(
+            <WizardFooterWrapper>
+              <Button
+                type="submit"
+                form="initialize-project"
+                variant="primary"
+                isLoading={submitting}
+                isDisabled={submitting || projectName.trim() === ''}
+              >
+                Create project and open the console
+              </Button>
+            </WizardFooterWrapper>
+          )}
+        >
+          <Title headingLevel="h2" size="xl">Name your first project</Title>
+          {organization && (
             <Content component="p">
               This project will belong to {organization.name}.
             </Content>
-            <Form
-              style={{ marginTop: 16 }}
-              onSubmit={(event) => {
-                event.preventDefault()
-                void submitProject()
-              }}
-            >
-              <FormGroup label="Project name" isRequired fieldId="project-name">
-                <TextInput
-                  id="project-name"
-                  value={projectName}
-                  onChange={(_event, value) => setProjectName(value)}
-                  autoFocus
-                />
-              </FormGroup>
-              <ActionGroup>
-                <Button
-                  type="submit"
-                  variant="primary"
-                  isLoading={submitting}
-                  isDisabled={submitting || projectName.trim() === ''}
-                >
-                  Create project and open the console
-                </Button>
-              </ActionGroup>
-            </Form>
-          </CardBody>
-        </Card>
-      )}
-    </PageSection>
+          )}
+          <Form
+            id="initialize-project"
+            style={{ marginTop: 16 }}
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitProject()
+            }}
+          >
+            <FormGroup label="Project name" isRequired fieldId="project-name">
+              <TextInput
+                id="project-name"
+                value={projectName}
+                onChange={(_event, value) => setProjectName(value)}
+                autoFocus
+              />
+            </FormGroup>
+          </Form>
+        </WizardStep>
+      </Wizard>
+    </BootstrapPage>
   )
 }

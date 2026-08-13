@@ -81,6 +81,7 @@ export function Login() {
   if (destination === 'initialize' && minted === null) {
     return (
       <Initialize
+        host={window.location.host}
         onDone={async (credentials) => {
           // The wizard just proved these credentials against /oauth2/token to
           // create the organization and project, so the operator lands in the
