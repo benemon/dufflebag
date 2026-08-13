@@ -140,6 +140,27 @@
   font: 500 20px/1 "Red Hat Display", sans-serif;
 }
 
+.tenant-switcher-item,
+.tenant-switchers,
+.tenant-picker {
+  display: flex;
+  align-items: center;
+}
+
+.tenant-switcher-item,
+.tenant-switchers {
+  gap: 16px;
+}
+
+.tenant-picker {
+  gap: 6px;
+}
+
+.tenant-picker-caption {
+  color: var(--pf-t--global--text--color--subtle, #4f5255);
+  font-size: var(--pf-t--global--font--size--sm, 0.875rem);
+}
+
 .registry-fingerprint {
   overflow-wrap: anywhere;
   word-break: break-word;

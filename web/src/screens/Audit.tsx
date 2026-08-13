@@ -3,7 +3,7 @@ import {
   Alert, Button, Card, CardBody, CardTitle, Content, Form, FormGroup, Label,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
-  PageSection, TextInput, Title, Tooltip,
+  PageSection, TextInput, Tooltip,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -12,6 +12,7 @@ import {
   type AuditTarget,
 } from '../data/audit'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { ScreenHeader } from '../components/ScreenHeader'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
@@ -47,28 +48,26 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
 
   return (
     <>
-      <PageSection variant="default">
-        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1 }}>
-            <Title headingLevel="h1" size="2xl">Audit</Title>
-            <Content component="p">
-              Audit targets are append-only files that receive every request and response record.
-              Up to three can be active at once. This configuration is visible only to root.
-            </Content>
-          </div>
-          {!creating && !loading && (failure || targets.length > 0) ? (
-            <RoleRestrictedButton
-              action="configureAudit"
-              callerRole={callerRole}
-              variant="primary"
-              isDisabled={atLimit}
-              onClick={() => setCreating(true)}
-            >
-              Add target
-            </RoleRestrictedButton>
-          ) : null}
-        </div>
-      </PageSection>
+      <ScreenHeader
+        title="Audit"
+        description={(
+          <>
+            Audit targets are append-only files that receive every request and response record.
+            Up to three can be active at once. This configuration is visible only to root.
+          </>
+        )}
+        actions={!creating && !loading && (failure || targets.length > 0) ? (
+          <RoleRestrictedButton
+            action="configureAudit"
+            callerRole={callerRole}
+            variant="primary"
+            isDisabled={atLimit}
+            onClick={() => setCreating(true)}
+          >
+            Add target
+          </RoleRestrictedButton>
+        ) : null}
+      />
 
       <PageSection variant="secondary" isFilled>
         {failure ? (

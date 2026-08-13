@@ -61,6 +61,13 @@ export function selectionAfterOrganizationRefresh(
   return current
 }
 
+export function selectionAfterInitialOrganizationLoad(
+  current: string | null,
+  organizations: ApiOrganization[],
+): string | null {
+  return current ?? (organizations.length === 1 ? (organizations[0]?.id ?? null) : null)
+}
+
 type OrganizationRefreshFlight<T> = { current: Promise<T> | null }
 
 export function startOrganizationRefresh<T>(
@@ -105,7 +112,7 @@ type AuthContextValue = {
   refreshOrganizations: () => Promise<ApiOrganization[] | null>
   /**
    * The organisation in effect: chosen for a platform session, the token's
-   * otherwise. '' is the dash row — a platform session that deliberately
+   * otherwise. '' is the platform row — a platform session that deliberately
    * stepped back up to platform standing (ADR-0014's "nothing selected").
    */
   selectedOrganization: string | null
@@ -286,7 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Switching organisation drops the project selection: carrying one across
   // would scope queries to a project the new organisation does not contain.
-  // '' — the dash row — is the deliberate step back up to platform standing
+  // '' — the platform row — is the deliberate step back up to platform standing
   // (ADR-0014), so it clears the pair the same way and lists nothing.
   const selectOrganization = useCallback((organizationID: string) => {
     setSelectedOrganization(organizationID)
@@ -340,7 +347,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // be scoped. Exactly one is selected automatically — the contract the
   // unpinned CLI applies ("exactly one or it errors", ADR-0003) — while several
   // stay unselected until the operator chooses, and zero stays honestly empty.
-  // The auto-select only ever fills a null: a deliberate '' — the dash row,
+  // The auto-select only ever fills a null: a deliberate '' — the platform row,
   // platform standing — is not nullish, so it is never silently undone.
   useEffect(() => {
     if (!state || state.claims.organizationID !== null) {
@@ -355,7 +362,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .then((listed) => {
         if (cancelled) return
         setOrganizationRefresh({ organizations: listed, failure: null })
-        setSelectedOrganization((current) => current ?? (listed.length === 1 ? (listed[0]?.id ?? null) : null))
+        setSelectedOrganization((current) => selectionAfterInitialOrganizationLoad(current, listed))
         // The auto-selection above means projects are about to load; saying so
         // now keeps "listed and empty" unclaimable until it is true.
         if (listed.length === 1) setProjectsLoading(true)

@@ -5,7 +5,7 @@ import {
   DualListSelector, DualListSelectorControl, DualListSelectorControlsWrapper,
   DualListSelectorList, DualListSelectorListItem, DualListSelectorPane,
   EmptyState, EmptyStateBody, Form, FormGroup, FormSelect, FormSelectOption, Label, PageSection, TextArea,
-  TextInput, Title,
+  TextInput,
 } from '@patternfly/react-core'
 import AngleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-left-icon'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
@@ -22,6 +22,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
 
 type DestinationDraft = {
@@ -282,12 +283,10 @@ type BagDropViewProps = {
 export function BagDropView(props: BagDropViewProps) {
   return (
     <>
-      <PageSection variant="default">
-        <Title headingLevel="h1" size="2xl">Bag Drop</Title>
-        <Content component="p">
-          Mirror selected buckets to another registry while keeping this project authoritative.
-        </Content>
-      </PageSection>
+      <ScreenHeader
+        title="Bag Drop"
+        description="Mirror selected buckets to another registry while keeping this project authoritative."
+      />
       <PageSection variant="secondary" isFilled hasBodyWrapper={false}>
         {/* MUTATION_ROLE_GATE: configuration is maintainer-only. */}
         {props.canConfigure ? (

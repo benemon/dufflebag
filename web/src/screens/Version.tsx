@@ -17,6 +17,7 @@ import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import {
@@ -158,81 +159,82 @@ export function VersionView({
   const restores = version?.state === 'revoked' || version?.state === 'revocation-scheduled'
   return (
     <>
-      <PageSection variant="default">
-        <Breadcrumb>
-          <BreadcrumbItem component="button" onClick={onBackToRegistry}>
-            Registry
-          </BreadcrumbItem>
-          <BreadcrumbItem component="button" onClick={onBackToBucket}>
-            {bucket}
-          </BreadcrumbItem>
-          <BreadcrumbItem isActive>{version?.name ?? '…'}</BreadcrumbItem>
-        </Breadcrumb>
-        {version && (
-          <>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 24 }}>
-              <Title headingLevel="h1" size="2xl">
-                <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                  {version.name}
-                  <VersionStateLabel state={version.state} />
-                  {version.channels.map((channel) => (
-                    <Label key={channel} isCompact>{channel}</Label>
-                  ))}
-                  {version.templateType && <Label isCompact>{version.templateType}</Label>}
-                </span>
-              </Title>
-              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-                {restores ? (
-                  <div>
-                    <RoleRestrictedButton
-                      action="revokeVersions"
-                      callerRole={callerRole}
-                      variant="secondary"
-                      onClick={() => setAction('restore')}
-                    >
-                      Restore
-                    </RoleRestrictedButton>
-                    {version.state === 'revocation-scheduled' ? (
-                      <Content component="p" style={{ marginTop: 4 }}>
-                        Restoring cancels the scheduled revocation.
-                      </Content>
-                    ) : null}
-                  </div>
-                ) : (
-                  <RoleRestrictedButton
-                    action="revokeVersions"
-                    callerRole={callerRole}
-                    variant="danger"
-                    onClick={() => setAction('revoke')}
-                  >
-                    Revoke
-                  </RoleRestrictedButton>
-                )}
-                <RoleRestrictedButton
-                  action="deleteVersions"
-                  callerRole={callerRole}
-                  variant="danger"
-                  onClick={() => setAction('delete')}
-                >
-                  Delete version
-                </RoleRestrictedButton>
-              </div>
-            </div>
-            <DescriptionList isHorizontal isCompact style={{ marginTop: 16 }}>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Fingerprint</DescriptionListTerm>
-                <DescriptionListDescription>
-                  <code className="registry-fingerprint">{version.fingerprint}</code>
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-              <DescriptionListGroup>
-                <DescriptionListTerm>Created</DescriptionListTerm>
-                <DescriptionListDescription><When iso={version.created} /></DescriptionListDescription>
-              </DescriptionListGroup>
-            </DescriptionList>
-          </>
+      <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>
+              Registry
+            </BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToBucket}>
+              {bucket}
+            </BreadcrumbItem>
+            <BreadcrumbItem isActive>{version?.name ?? '…'}</BreadcrumbItem>
+          </Breadcrumb>
         )}
-      </PageSection>
+        title={version ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {version.name}
+            <VersionStateLabel state={version.state} />
+            {version.channels.map((channel) => (
+              <Label key={channel} isCompact>{channel}</Label>
+            ))}
+            {version.templateType && <Label isCompact>{version.templateType}</Label>}
+          </span>
+        ) : null}
+        actions={version ? (
+          <>
+            {restores ? (
+              <div>
+                <RoleRestrictedButton
+                  action="revokeVersions"
+                  callerRole={callerRole}
+                  variant="secondary"
+                  onClick={() => setAction('restore')}
+                >
+                  Restore
+                </RoleRestrictedButton>
+                {version.state === 'revocation-scheduled' ? (
+                  <Content component="p" style={{ marginTop: 4 }}>
+                    Restoring cancels the scheduled revocation.
+                  </Content>
+                ) : null}
+              </div>
+            ) : (
+              <RoleRestrictedButton
+                action="revokeVersions"
+                callerRole={callerRole}
+                variant="danger"
+                onClick={() => setAction('revoke')}
+              >
+                Revoke
+              </RoleRestrictedButton>
+            )}
+            <RoleRestrictedButton
+              action="deleteVersions"
+              callerRole={callerRole}
+              variant="danger"
+              onClick={() => setAction('delete')}
+            >
+              Delete version
+            </RoleRestrictedButton>
+          </>
+        ) : null}
+      >
+        {version ? (
+          <DescriptionList isHorizontal isCompact style={{ marginTop: 16 }}>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Fingerprint</DescriptionListTerm>
+              <DescriptionListDescription>
+                <code className="registry-fingerprint">{version.fingerprint}</code>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Created</DescriptionListTerm>
+              <DescriptionListDescription><When iso={version.created} /></DescriptionListDescription>
+            </DescriptionListGroup>
+          </DescriptionList>
+        ) : null}
+      </ScreenHeader>
 
       {/* The rail sits flush against the header and left edge; only the facet
           content carries the grey well's padding. Alert states have no rail,

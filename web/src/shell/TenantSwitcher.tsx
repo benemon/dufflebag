@@ -1,6 +1,9 @@
-import { useState } from 'react'
-import { Content, MenuFooter, MenuToggle, Select, SelectList, SelectOption } from '@patternfly/react-core'
+import { useState, type ReactNode } from 'react'
+import {
+  Button, Content, MenuFooter, MenuToggle, Popover, Select, SelectList, SelectOption, Skeleton,
+} from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
+import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon'
 
 import { useAuth } from '../auth/AuthContext'
 import { CreateTenancyButton } from '../components/TenancyCreation'
@@ -16,7 +19,7 @@ import { organizationRows, useTenant } from '../data/tenant'
  * organisation is the token's and is never a choice. A platform-scoped session
  * (the bootstrap root, duf-tkw) chooses the organisation first, so it gets two:
  * organisation, then project within it — and the organisation select carries
- * the dash row back to platform standing, because ADR-0014's "nothing
+ * an explicit platform row, because ADR-0014's "nothing
  * selected" must stay reachable after the sole-organisation auto-select.
  */
 export function TenantSwitcher() {
@@ -32,27 +35,32 @@ export function TenantSwitcher() {
   // Settled truths render as text, not as an empty menu pretending to offer
   // something: an empty listing and a failed one are different facts.
   if (organizationsLoading) {
-    return <Content component="p">Loading organisations…</Content>
+    return (
+      <PickerField label="Organisation">
+        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading organisations…" />
+      </PickerField>
+    )
   }
   if (organizationFailure) {
-    return <Content component="p">Organisations could not be loaded</Content>
+    return (
+      <PickerField label="Organisation">
+        <Content component="p" style={{ margin: 0 }}>Organisations could not be loaded</Content>
+      </PickerField>
+    )
   }
   if (organizations.length === 0) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <Content component="p">No organisations exist</Content>
+      <PickerField label="Organisation">
+        <Content component="p" style={{ margin: 0 }}>No organisations exist</Content>
         <CreateTenancyButton kind="organization" callerRole={self?.role ?? null} variant="link" />
-      </div>
+      </PickerField>
     )
   }
   return (
-    <>
-      <OrganizationSelect />
-      {organizationRefreshFailure ? (
-        <span role="alert">Organisations could not be refreshed: {organizationRefreshFailure}</span>
-      ) : null}
+    <span className="tenant-switchers">
+      <OrganizationSelect refreshFailure={organizationRefreshFailure} />
       {selectedOrganization ? <ProjectSelect /> : null}
-    </>
+    </span>
   )
 }
 
@@ -63,17 +71,24 @@ export function refreshOrganizationsOnPickerOpen(
   if (open) void refreshOrganizations()
 }
 
-function OrganizationSelect() {
+function PickerField({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <span className="tenant-picker">
+      <span className="tenant-picker-caption">{label}:</span>
+      {children}
+    </span>
+  )
+}
+
+function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null }) {
   const {
     self, organizations, selectedOrganization, selectOrganization, refreshOrganizations,
   } = useAuth()
   const [open, setOpen] = useState(false)
-  // The dash row ahead of the real organisations: the deliberate step back up
-  // to platform standing (ADR-0014's "nothing selected"), matching the blank
-  // project row (duf-4qr). One list feeds the options and the toggle both, so
-  // the dash cannot exist in one and not the other. Selecting it stores '' —
-  // which the sole-organisation auto-select cannot undo — and clears the
-  // project selection with it; the data screens state the platform gap.
+  // The platform row ahead of the real organisations is the deliberate step
+  // back up to platform standing (ADR-0014's "nothing selected"). Selecting it
+  // stores '' — which the sole-organisation auto-select cannot undo — and
+  // clears the project selection with it; the data screens state the gap.
   const rows = organizationRows(organizations)
   const selected = rows.find((candidate) => candidate.id === selectedOrganization)
   const setPickerOpen = (nextOpen: boolean) => {
@@ -82,41 +97,60 @@ function OrganizationSelect() {
   }
 
   return (
-    <Select
-      isOpen={open}
-      selected={selectedOrganization ?? undefined}
-      onSelect={(_e, value) => {
-        if (typeof value === 'string') selectOrganization(value)
-        setOpen(false)
-      }}
-      onOpenChange={setPickerOpen}
-      toggle={(ref: React.Ref<MenuToggleElement>) => (
-        <MenuToggle
-          id="tenant-organization"
-          ref={ref}
-          isExpanded={open}
-          onClick={() => setPickerOpen(!open)}
-          variant="plainText"
+    <PickerField label="Organisation">
+      <Select
+        isOpen={open}
+        selected={selectedOrganization ?? undefined}
+        onSelect={(_e, value) => {
+          if (typeof value === 'string') selectOrganization(value)
+          setOpen(false)
+        }}
+        onOpenChange={setPickerOpen}
+        toggle={(ref: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            id="tenant-organization"
+            ref={ref}
+            isExpanded={open}
+            onClick={() => setPickerOpen(!open)}
+            variant="plainText"
+          >
+            {selected?.name ?? 'Choose an organisation'}
+          </MenuToggle>
+        )}
+      >
+        <SelectList>
+          {rows.map((organization) => (
+            <SelectOption key={organization.id} value={organization.id}>
+              {organization.name}
+            </SelectOption>
+          ))}
+        </SelectList>
+        <MenuFooter>
+          <CreateTenancyButton
+            kind="organization"
+            callerRole={self?.role ?? null}
+            variant="link"
+          />
+        </MenuFooter>
+      </Select>
+      {refreshFailure ? (
+        <Popover
+          aria-label="Organisation refresh failure"
+          alertSeverityVariant="danger"
+          bodyContent={(
+            <span role="alert">Organisations could not be refreshed: {refreshFailure}</span>
+          )}
         >
-          {selected?.name ?? 'Choose an organisation'}
-        </MenuToggle>
-      )}
-    >
-      <SelectList>
-        {rows.map((organization) => (
-          <SelectOption key={organization.id} value={organization.id}>
-            {organization.name}
-          </SelectOption>
-        ))}
-      </SelectList>
-      <MenuFooter>
-        <CreateTenancyButton
-          kind="organization"
-          callerRole={self?.role ?? null}
-          variant="link"
-        />
-      </MenuFooter>
-    </Select>
+          <Button
+            variant="plain"
+            size="sm"
+            hasNoPadding
+            aria-label="Show organisation refresh failure"
+            icon={<ExclamationCircleIcon />}
+          />
+        </Popover>
+      ) : null}
+    </PickerField>
   )
 }
 
@@ -133,42 +167,44 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
   const label = (t: typeof tenant) => (combined ? `${t.organization} / ${t.project}` : t.project)
 
   return (
-    <Select
-      isOpen={open}
-      selected={tenant.id}
-      onSelect={(_e, value) => {
-        const next = tenants.find((t) => t.id === value)
-        if (next) setTenant(next)
-        setOpen(false)
-      }}
-      onOpenChange={setOpen}
-      toggle={(ref: React.Ref<MenuToggleElement>) => (
-        <MenuToggle
-          id="tenant-project"
-          ref={ref}
-          isExpanded={open}
-          onClick={() => setOpen(!open)}
-          variant="plainText"
-        >
-          {label(tenant)}
-        </MenuToggle>
-      )}
-    >
-      <SelectList>
-        {tenants.map((t) => (
-          <SelectOption key={t.id} value={t.id}>
-            {label(t)}
-          </SelectOption>
-        ))}
-      </SelectList>
-      <MenuFooter>
-        <CreateTenancyButton
-          kind="project"
-          callerRole={self?.role ?? null}
-          organizationID={selectedOrganization ?? undefined}
-          variant="link"
-        />
-      </MenuFooter>
-    </Select>
+    <PickerField label="Project">
+      <Select
+        isOpen={open}
+        selected={tenant.id}
+        onSelect={(_e, value) => {
+          const next = tenants.find((t) => t.id === value)
+          if (next) setTenant(next)
+          setOpen(false)
+        }}
+        onOpenChange={setOpen}
+        toggle={(ref: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            id="tenant-project"
+            ref={ref}
+            isExpanded={open}
+            onClick={() => setOpen(!open)}
+            variant="plainText"
+          >
+            {label(tenant)}
+          </MenuToggle>
+        )}
+      >
+        <SelectList>
+          {tenants.map((t) => (
+            <SelectOption key={t.id} value={t.id}>
+              {label(t)}
+            </SelectOption>
+          ))}
+        </SelectList>
+        <MenuFooter>
+          <CreateTenancyButton
+            kind="project"
+            callerRole={self?.role ?? null}
+            organizationID={selectedOrganization ?? undefined}
+            variant="link"
+          />
+        </MenuFooter>
+      </Select>
+    </PickerField>
   )
 }

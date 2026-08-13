@@ -14,6 +14,7 @@ let organizationRows
 let AuthContext
 let TenantSwitcher
 let applyOrganizationRefresh
+let selectionAfterInitialOrganizationLoad
 let selectionAfterOrganizationRefresh
 let startOrganizationRefresh
 let scheduleSessionRenewal
@@ -38,7 +39,8 @@ before(async () => {
   ;({ decodeClaims } = await vite.ssrLoadModule('/src/auth/token.ts'))
   ;({ platformTenancyGap, organizationRows } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({
-    AuthContext, applyOrganizationRefresh, selectionAfterOrganizationRefresh,
+    AuthContext, applyOrganizationRefresh, selectionAfterInitialOrganizationLoad,
+    selectionAfterOrganizationRefresh,
     startOrganizationRefresh, scheduleSessionRenewal, renewConsoleSession,
   } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
   ;({
@@ -258,16 +260,42 @@ const switcherMarkup = (value) =>
     React.createElement(TenantSwitcher),
   ))
 
-// The organisation select in a PLATFORM session leads with the dash row — the
-// same treatment as the blank project row (duf-4qr) — so the root can always
-// step back up to platform standing instead of being trapped by the
-// sole-organisation auto-select. It stores '', which the auto-select cannot
-// undo ('' is not nullish).
-test('the organisation rows lead with the dash row back to platform standing', () => {
+// The organisation select in a PLATFORM session leads with an explicit
+// platform row so the root can always step back up instead of being trapped by
+// the sole-organisation auto-select. It stores '', which the auto-select cannot
+// undo ('' is not nullish). The project row keeps its deliberate dash marker.
+test('the organisation rows lead with the labelled platform row', () => {
   const rows = organizationRows([{ id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' }])
   assert.equal(rows[0].id, '')
-  assert.equal(rows[0].name, '—')
+  assert.equal(rows[0].name, 'All organisations (platform)')
   assert.deepEqual(rows.slice(1).map((row) => row.id), ['org-1'])
+})
+
+test('sole-organisation auto-select preserves deliberate platform standing', () => {
+  const listed = [{ id: 'org-1', name: 'default', created_at: '2026-07-01T00:00:00Z' }]
+  assert.equal(selectionAfterInitialOrganizationLoad(null, listed), 'org-1')
+  assert.equal(selectionAfterInitialOrganizationLoad('', listed), '')
+})
+
+test('masthead pickers carry visible captions and loading uses a compact skeleton', () => {
+  const markup = switcherMarkup(session({
+    selectedOrganization: 'org-1',
+    selectedProject: 'proj-1',
+    permittedProjects: ['proj-1'],
+    projectNames: { 'proj-1': 'widgets' },
+  }))
+  assert.match(markup, /Organisation:[\s\S]*tenant-organization/)
+  assert.match(markup, /Project:[\s\S]*tenant-project/)
+
+  const loading = switcherMarkup(session({ organizationsLoading: true }))
+  assert.match(loading, /Organisation:/)
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /Loading organisations…/)
+  assert.doesNotMatch(loading, /Organisations could not be loaded|No organisations exist/)
+
+  const failed = switcherMarkup(session({ organizationFailure: 'network unavailable' }))
+  assert.match(failed, /Organisation:[\s\S]*Organisations could not be loaded/)
+  assert.doesNotMatch(failed, /pf-v6-c-skeleton|No organisations exist/)
 })
 
 test('opening the organisation picker refreshes once, while closing it does not', async () => {
@@ -315,7 +343,11 @@ test('a failed organisation refresh keeps the loaded list and reports the failur
     selectedOrganization: 'org-1',
   }))
   assert.match(markup, /default/)
-  assert.match(markup, /Organisations could not be refreshed: network unavailable/)
+  assert.match(markup, /Show organisation refresh failure/)
+  assert.match(
+    tenantSwitcherSource,
+    /alertSeverityVariant="danger"[\s\S]*?<span role="alert">Organisations could not be refreshed:/,
+  )
 })
 
 test('refresh selection changes only when the selected organisation disappeared', () => {
@@ -329,12 +361,12 @@ test('refresh selection changes only when the selected organisation disappeared'
   assert.equal(selectionAfterOrganizationRefresh('deleted-org', listed), '')
 })
 
-test('a platform session at the dash row stands at the platform: root only', () => {
-  // The toggle names the dash — the step up reads as deliberate, not as an
+test('a platform session at the labelled platform row stands at the platform: root only', () => {
+  // The toggle names the platform row — the step up reads as deliberate, not as an
   // unanswered prompt — and no project select renders beneath a non-organisation.
   const markup = switcherMarkup(session({ selectedOrganization: '' }))
   assert.match(markup, /tenant-organization/)
-  assert.match(markup, /—/)
+  assert.match(markup, /All organisations \(platform\)/)
   assert.doesNotMatch(markup, /Choose an organisation/)
   assert.doesNotMatch(markup, /tenant-project/)
 

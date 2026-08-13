@@ -29,6 +29,17 @@ after(async () => {
 
 const labels = ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
 const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
+const screenHeaderSource = readFileSync(
+  new URL('../src/components/ScreenHeader.tsx', import.meta.url),
+  'utf8',
+)
+const headerScreenSources = [
+  'Principals', 'Audit', 'Webhooks', 'Versions', 'Version', 'Buckets', 'Instance', 'Encryption',
+  'BagDrop',
+].map((name) => [
+  name,
+  readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
+])
 
 const view = (role, pathname = '/buckets') => renderToStaticMarkup(React.createElement(
   MemoryRouter,
@@ -75,4 +86,29 @@ test('router links carry PatternFly native current navigation state', () => {
 test('the masthead uses the PatternFly brand slot for the lowercase wordmark', () => {
   assert.match(shellSource, /<MastheadLogo className="app-wordmark">dufflebag<\/MastheadLogo>/)
   assert.doesNotMatch(shellSource, /<span style=\{\{ fontSize:/)
+})
+
+test('the masthead keeps the labelled tenancy pickers in one toolbar item', () => {
+  assert.match(
+    shellSource,
+    /<ToolbarItem className="tenant-switcher-item">[\s\S]*?<TenantSwitcher \/>/,
+  )
+})
+
+test('settled screen headers cannot drift back to inline header shapes', () => {
+  assert.match(screenHeaderSource, /<PageSection variant="default">/)
+  assert.match(screenHeaderSource, /<Title headingLevel="h1" size="2xl">/)
+  assert.match(screenHeaderSource, /display: 'flex', gap: 8, alignItems: 'flex-start'/)
+  for (const [name, source] of headerScreenSources) {
+    assert.equal((source.match(/<ScreenHeader\b/g) ?? []).length, 1, `${name}: shared header`)
+    assert.doesNotMatch(source, /<PageSection[^>]*variant="default"/, `${name}: inline header`)
+  }
+})
+
+test('tenancy context stays in the masthead, not top-level screen breadcrumbs', () => {
+  const sources = Object.fromEntries(headerScreenSources)
+  assert.doesNotMatch(sources.Buckets, /Project registry|<Breadcrumb/)
+  for (const name of ['Principals', 'Audit', 'Webhooks', 'Instance', 'Encryption', 'BagDrop']) {
+    assert.doesNotMatch(sources[name], /<Breadcrumb/, `${name}: top-level destination`)
+  }
 })

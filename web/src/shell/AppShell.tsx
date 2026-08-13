@@ -60,7 +60,7 @@ function AppMasthead() {
       <MastheadContent>
         <Toolbar isStatic isFullHeight>
           <ToolbarContent>
-            <ToolbarItem>
+            <ToolbarItem className="tenant-switcher-item">
               <TenantSwitcher />
             </ToolbarItem>
             <ToolbarItem align={{ default: 'alignEnd' }}>

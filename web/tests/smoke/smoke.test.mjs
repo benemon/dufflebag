@@ -961,9 +961,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       await page.$eval('#tenant-organization', (el) => el.innerText.trim()),
       wizardOrganizationName,
     )
-    await clickOptionExact('—')
-    await until('the organisation toggle to show the platform dash', async () =>
-      (await page.$eval('#tenant-organization', (el) => el.innerText.trim())) === '—')
+    await clickOptionExact('All organisations (platform)')
+    await until('the organisation toggle to show platform standing', async () =>
+      (await page.$eval('#tenant-organization', (el) => el.innerText.trim())) ===
+        'All organisations (platform)')
     // The data screen states the gap rather than showing a silent empty table.
     await clickByText('a', 'Buckets')
     await waitForText('can view any organisation')

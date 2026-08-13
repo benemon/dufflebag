@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, Checkbox, Content, Form, FormGroup,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
-  Label, PageSection, Pagination, TextArea, TextInput, Title,
+  Label, PageSection, Pagination, TextArea, TextInput,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
 import {
@@ -102,22 +103,16 @@ export function WebhooksView({
 
   return (
     <>
-      <PageSection variant="default">
-        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1 }}>
-            <Title headingLevel="h1" size="2xl">Webhooks</Title>
-            <Content component="p">
-              Send signed project events to an HTTP endpoint after its activation handshake succeeds.
-            </Content>
-          </div>
-          {!creating && (loading || failure || webhooks.length > 0) ? (
-            <RoleRestrictedButton
-              action="configureWebhooks" callerRole={callerRole} variant="primary"
-              onClick={() => setCreating(true)}
-            >Create webhook</RoleRestrictedButton>
-          ) : null}
-        </div>
-      </PageSection>
+      <ScreenHeader
+        title="Webhooks"
+        description="Send signed project events to an HTTP endpoint after its activation handshake succeeds."
+        actions={!creating && (loading || failure || webhooks.length > 0) ? (
+          <RoleRestrictedButton
+            action="configureWebhooks" callerRole={callerRole} variant="primary"
+            onClick={() => setCreating(true)}
+          >Create webhook</RoleRestrictedButton>
+        ) : null}
+      />
       <PageSection variant="secondary" isFilled>
         {failure ? <Alert variant="danger" isInline title="Webhooks could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         {actionFailure ? <Alert variant="danger" isInline title="The action failed"><Content component="p">{actionFailure}</Content></Alert> : null}
