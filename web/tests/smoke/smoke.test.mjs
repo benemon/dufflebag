@@ -1396,8 +1396,15 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('a', 'Buckets')
     await waitForText('smoke-images')
-    await openPinMenu()
-    await clickOptionExact('Pin bucket')
+    // Un-pin through the card's own affordance (duf-fcg6.4), not the row menu.
+    await until('the card Unpin control to accept the click', () =>
+      page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) => {
+        const unpin = buttons.find(
+          (button) => button.getAttribute('aria-label') === 'Unpin smoke-images')
+        if (!unpin) return false
+        unpin.click()
+        return true
+      }))
     await until('the pinned gallery to empty', () =>
       page.$('section[aria-label="Pinned buckets"]').then((section) => section === null))
   })

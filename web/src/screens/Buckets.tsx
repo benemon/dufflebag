@@ -1,6 +1,6 @@
 import { useEffect, useState, type Ref } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content, Gallery, GalleryItem, Label,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardFooter, CardTitle, Content, Gallery, GalleryItem, Label,
   Dropdown, DropdownItem, DropdownList, FormSelect, FormSelectOption, MenuToggle,
   PageSection, Pagination, TextInput, Title, Toolbar,
   ToolbarContent, ToolbarItem,
@@ -167,6 +167,16 @@ export function BucketsView({
                       <PlatformList platforms={bucket.platforms} />
                       <Content component="p">Last updated: {bucket.lastPush}</Content>
                     </CardBody>
+                    {canPin ? (
+                      <CardFooter>
+                        <Button
+                          variant="link" isInline aria-label={`Unpin ${bucket.name}`}
+                          onClick={() => { void togglePin(bucket.name, true) }}
+                        >
+                          Unpin
+                        </Button>
+                      </CardFooter>
+                    ) : null}
                   </Card>
                 </GalleryItem>
               ))}

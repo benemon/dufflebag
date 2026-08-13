@@ -46,8 +46,9 @@ confirmation click.
 ## The screens
 
 **Buckets** lists the project's registry. Builders can pin buckets they care
-about; publishers can delete a bucket — with a warning when Bag Drop
-currently mirrors it, since the deletion propagates to the destination.
+about, and un-pin them from the pinned card itself; publishers can delete a
+bucket — with a warning when Bag Drop currently mirrors it, since the
+deletion propagates to the destination.
 
 **A bucket** opens onto its versions and channels. The versions table shows
 completion and revocation state; the channels tab is where publishers create
