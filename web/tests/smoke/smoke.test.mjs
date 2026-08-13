@@ -752,10 +752,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         return clientID && secret ? { clientID, secret } : null
       }),
     )
-    // The recovery share is displayed in the same shown-once card, behind the
+    // The recovery share is displayed in the same shown-once step, behind the
     // same acknowledgement (ADR-0024, duf-9rr).
     const share = await page.evaluate(() =>
-      [...document.querySelectorAll('input')]
+      [...document.querySelectorAll('input, textarea')]
         .map((i) => i.value)
         .find((v) => v && v.startsWith('dfbg-recovery-1:')),
     )
@@ -770,14 +770,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Continue to organization')
   })
 
-  await t.test('step 2 creates the named organization with the minted credential', async () => {
+  await t.test('step 3 creates the named organization with the minted credential', async () => {
     await waitForText('Name your organization')
     assert.equal(await buttonDisabled('Create organization and continue'), true)
     await page.type('#organization-name', wizardOrganizationName)
     await clickByText('button', 'Create organization and continue')
   })
 
-  await t.test('step 3 creates the named project in that organization', async () => {
+  await t.test('step 4 creates the named project in that organization', async () => {
     await waitForText('Name your first project')
     await waitForText(wizardOrganizationName)
     assert.equal(await buttonDisabled('Create project and open the console'), true)
