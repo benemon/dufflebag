@@ -2,12 +2,14 @@ import { useEffect, useState, type Ref } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardFooter, CardTitle, Content, Gallery, GalleryItem, Label,
   Dropdown, DropdownItem, DropdownList, FormSelect, FormSelectOption, MenuToggle,
+  EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, Hint, HintBody,
   PageSection, Pagination, TextInput, Title, Toolbar,
   ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
+import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
 import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
@@ -39,6 +41,7 @@ export function Buckets() {
       {...bucketData}
       callerRole={self?.role ?? null}
       openBucket={(bucket) => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
+      openInstance={() => navigate('/instance')}
       onDeleteBucket={async (bucket) => {
         if (!state || !tenant) throw new Error('No session.')
         try {
@@ -74,6 +77,7 @@ export function BucketsView({
   callerRole = null,
   gap,
   openBucket,
+  openInstance = () => {},
   onDeleteBucket = () => Promise.reject(new Error('No session.')),
   onCheckMirrored,
 }: {
@@ -91,6 +95,8 @@ export function BucketsView({
   gap?: TenancyGap | null
   /** Navigation into a bucket's versions; a callback so the view stays router-free. */
   openBucket: (bucket: string) => void
+  /** Navigation to the client connection details; a callback so the view stays router-free. */
+  openInstance?: () => void
   onDeleteBucket?: (bucket: string) => Promise<void>
   onCheckMirrored?: (bucket: string) => Promise<boolean>
 }) {
@@ -103,6 +109,7 @@ export function BucketsView({
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [deletingBucket, setDeletingBucket] = useState<string | null>(null)
+  const [showConnectionHint, setShowConnectionHint] = useState(true)
   const platforms = [...new Set(buckets.flatMap((bucket) => bucket.platforms))].sort()
   const filteredBuckets = buckets
     .filter((bucket) => bucket.name.toLowerCase().includes(nameFilter.trim().toLowerCase()))
@@ -117,6 +124,9 @@ export function BucketsView({
     const bucket = buckets.find((candidate) => candidate.name === pin.bucket_name)
     return bucket ? [bucket] : []
   })
+  const awaitingFirstCompletedVersion = buckets.length > 0 && buckets.every(
+    (bucket) => !bucket.newestVersion || bucket.newestVersion.state === 'incomplete',
+  )
 
   useEffect(() => {
     if (page > lastPage) setPage(lastPage)
@@ -198,9 +208,46 @@ export function BucketsView({
                 <Content component="p">{gap.detail}</Content>
               </Alert>
             ) : buckets.length === 0 ? (
-              <Alert variant="info" isInline title="No buckets in this project" />
+              <EmptyState titleText="No buckets yet" headingLevel="h2">
+                <EmptyStateBody>
+                  Buckets appear when Packer publishes a version to this project.
+                </EmptyStateBody>
+                <EmptyStateFooter>
+                  <EmptyStateActions>
+                    <Button variant="primary" onClick={openInstance}>Connect a client</Button>
+                  </EmptyStateActions>
+                  <EmptyStateActions>
+                    <Button
+                      component="a"
+                      href="https://developer.hashicorp.com/packer/docs/hcp"
+                      target="_blank"
+                      variant="link"
+                    >
+                      Packer HCP docs
+                    </Button>
+                  </EmptyStateActions>
+                </EmptyStateFooter>
+              </EmptyState>
             ) : (
               <>
+                {showConnectionHint && awaitingFirstCompletedVersion ? (
+                  <Hint
+                    actions={(
+                      <Button
+                        variant="plain"
+                        aria-label="Dismiss client connection hint"
+                        icon={<TimesIcon />}
+                        onClick={() => setShowConnectionHint(false)}
+                      />
+                    )}
+                  >
+                    <HintBody>
+                      Waiting on a first build? The Instance screen has the client environment block
+                      that points Packer here.{' '}
+                      <Button variant="link" isInline onClick={openInstance}>Open Instance</Button>
+                    </HintBody>
+                  </Hint>
+                ) : null}
                 <Toolbar id="buckets-toolbar">
                   <ToolbarContent>
                     <ToolbarItem>
@@ -283,7 +330,26 @@ export function BucketsView({
                 </Toolbar>
 
                 {filteredTotal === 0 ? (
-                  <Alert variant="info" isInline title="No buckets match these filters" />
+                  <EmptyState titleText="No buckets match these filters" headingLevel="h2">
+                    <EmptyStateBody>
+                      No buckets match the filters currently applied.
+                    </EmptyStateBody>
+                    <EmptyStateFooter>
+                      <EmptyStateActions>
+                        <Button
+                          variant="primary"
+                          onClick={() => {
+                            setNameFilter('')
+                            setPlatformFilter('')
+                            setStatusFilter('')
+                            setPage(1)
+                          }}
+                        >
+                          Clear all filters
+                        </Button>
+                      </EmptyStateActions>
+                    </EmptyStateFooter>
+                  </EmptyState>
                 ) : <Table aria-label="Buckets" variant="compact">
                   <Thead>
                     <Tr>

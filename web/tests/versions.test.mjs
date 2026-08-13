@@ -202,14 +202,14 @@ const channelVersions = [
   { ...actionVersion('revocation-scheduled'), name: 'v5', fingerprint: 'fp-scheduled' },
 ]
 
-const channelFacetMarkup = (callerRole) => renderToStaticMarkup(React.createElement(
+const channelFacetMarkup = (callerRole, channels = [
+  channelFixture({ name: 'latest', managed: true, restricted: true }),
+  channelFixture(),
+]) => renderToStaticMarkup(React.createElement(
   BucketChannelsFacet,
   {
     bucket: 'images',
-    channels: [
-      channelFixture({ name: 'latest', managed: true, restricted: true }),
-      channelFixture(),
-    ],
+    channels,
     versions: channelVersions,
     latestVersion: { name: 'v8', fingerprint: 'fp-new' },
     callerRole,
@@ -521,6 +521,21 @@ test('channel actions are live for publisher and disabled with a reason below pu
   assert.match(publisher, /aria-label="Actions for production"/)
   assert.doesNotMatch(publisher, /Requires publisher/)
   assert.doesNotMatch(publisher, /<button[^>]*disabled[^>]*aria-label="Actions for production"/)
+})
+
+test('Create channel moves between the empty state and populated card header with its role gate', () => {
+  const emptyReader = channelFacetMarkup('reader', [])
+  assert.match(emptyReader, /<h2[^>]*>No channels in this bucket<\/h2>/)
+  assert.match(emptyReader, /pf-v6-c-empty-state__body">A channel names a version consumers can resolve/)
+  assert.match(emptyReader, /pf-v6-c-empty-state[\s\S]*Create channel/)
+  assert.match(emptyReader, /Requires publisher/)
+  assert.equal((emptyReader.match(/Create channel/g) ?? []).length, 1)
+
+  const populatedReader = channelFacetMarkup('reader')
+  assert.match(populatedReader, /pf-v6-c-card__title[\s\S]{0,1000}Create channel/)
+  assert.doesNotMatch(populatedReader, /No channels in this bucket/)
+  assert.match(populatedReader, /Requires publisher/)
+  assert.equal((populatedReader.match(/Create channel/g) ?? []).length, 1)
 })
 
 test('managed channel rows never render a kebab', () => {
@@ -1452,7 +1467,8 @@ test('the list windows old versions instead of hiding them', () => {
 
 test('empty and gap states are distinct, and list rows remain read-only', async () => {
   const emptyMarkup = listMarkup([])
-  assert.match(emptyMarkup, /No versions in this bucket/)
+  assert.match(emptyMarkup, /<h2[^>]*>No versions in this bucket<\/h2>/)
+  assert.match(emptyMarkup, /pf-v6-c-empty-state__body">Publish with packer build to create one\./)
 
   const gap = platformTenancyGap({
     platform: true, organizationCount: 1,

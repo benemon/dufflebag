@@ -2,7 +2,8 @@ import { useState, type ReactNode, type Ref } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
-  Dropdown, DropdownItem, DropdownList, Form, FormGroup, FormSelect, FormSelectOption,
+  Dropdown, DropdownItem, DropdownList, EmptyState, EmptyStateActions, EmptyStateBody,
+  EmptyStateFooter, Form, FormGroup, FormSelect, FormSelectOption,
   Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, TextInput,
   Title, Tooltip,
 } from '@patternfly/react-core'
@@ -466,7 +467,9 @@ export function VersionsFacet({
         <CardTitle>Versions</CardTitle>
         <CardBody>
           {versions.length === 0 ? (
-            <Alert variant="info" isInline title="No versions in this bucket" />
+            <EmptyState titleText="No versions in this bucket" headingLevel="h2">
+              <EmptyStateBody>Publish with packer build to create one.</EmptyStateBody>
+            </EmptyState>
           ) : (
             <>
               <Table aria-label="Versions" variant="compact">
@@ -595,19 +598,35 @@ export function BucketChannelsFacet({
         <CardTitle>
           <span style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span>Channels</span>
-            <RoleRestrictedButton
-              action="manageChannels"
-              callerRole={callerRole}
-              variant="primary"
-              onClick={() => setAction({ kind: 'create' })}
-            >
-              Create channel
-            </RoleRestrictedButton>
+            {channels.length > 0 ? (
+              <RoleRestrictedButton
+                action="manageChannels"
+                callerRole={callerRole}
+                variant="primary"
+                onClick={() => setAction({ kind: 'create' })}
+              >
+                Create channel
+              </RoleRestrictedButton>
+            ) : null}
           </span>
         </CardTitle>
         <CardBody style={{ padding: '16px 0 0' }}>
           {channels.length === 0 ? (
-            <Alert variant="info" isInline title="No channels in this bucket" />
+            <EmptyState titleText="No channels in this bucket" headingLevel="h2">
+              <EmptyStateBody>A channel names a version consumers can resolve.</EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  <RoleRestrictedButton
+                    action="manageChannels"
+                    callerRole={callerRole}
+                    variant="primary"
+                    onClick={() => setAction({ kind: 'create' })}
+                  >
+                    Create channel
+                  </RoleRestrictedButton>
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
           ) : (
             <Table aria-label={`${bucket} channels`} variant="compact">
             <Thead>

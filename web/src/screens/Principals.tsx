@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
+  EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
   PageSection, Radio, TextInput, Title,
 } from '@patternfly/react-core'
@@ -82,7 +83,7 @@ export function PrincipalsView({
               New ones are created in the context selected above.
             </Content>
           </div>
-          {!creating && (
+          {!creating && (loading || failure || principals.length > 0) && (
             <RoleRestrictedButton
               action="managePrincipals" callerRole={callerRole}
               variant="primary" onClick={() => setCreating(true)}
@@ -160,14 +161,42 @@ export function PrincipalsView({
           // needs to say which scope answered empty — an organisation with no
           // org-scoped principals is not an organisation with no principals.
           standing === 'organization' ? (
-            <Alert variant="info" isInline title="No organisation-scoped principals">
-              <Content component="p">
+            <EmptyState titleText="No organisation-scoped principals" headingLevel="h2">
+              <EmptyStateBody>
                 Principals bound to a project are listed at that project — select one in the header
                 to see its principals.
-              </Content>
-            </Alert>
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  {!creating ? (
+                    <RoleRestrictedButton
+                      action="managePrincipals" callerRole={callerRole}
+                      variant="primary" onClick={() => setCreating(true)}
+                    >
+                      Create principal
+                    </RoleRestrictedButton>
+                  ) : null}
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
           ) : (
-            <Alert variant="info" isInline title="No service principals are visible to you" />
+            <EmptyState titleText="No service principals are visible to you" headingLevel="h2">
+              <EmptyStateBody>
+                Create a service principal in the selected context.
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  {!creating ? (
+                    <RoleRestrictedButton
+                      action="managePrincipals" callerRole={callerRole}
+                      variant="primary" onClick={() => setCreating(true)}
+                    >
+                      Create principal
+                    </RoleRestrictedButton>
+                  ) : null}
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
           )
         ) : (
           <Card>

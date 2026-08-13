@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import {
   Alert, Button, Card, CardBody, CardTitle, Content, Form, FormGroup, Label,
+  EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   PageSection, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -54,7 +55,7 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
               Up to three can be active at once. This configuration is visible only to root.
             </Content>
           </div>
-          {!creating && !loading ? (
+          {!creating && !loading && (failure || targets.length > 0) ? (
             <RoleRestrictedButton
               action="configureAudit"
               callerRole={callerRole}
@@ -137,9 +138,25 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
         {loading ? (
           <Content component="p">Loading audit targets…</Content>
         ) : targets.length === 0 && !failure ? (
-          <Alert variant="info" isInline title="No audit targets are configured">
-            <Content component="p">This instance is not recording audit events to a file.</Content>
-          </Alert>
+          <EmptyState titleText="No audit targets are configured" headingLevel="h2">
+            <EmptyStateBody>
+              This instance is not recording audit events to a file.
+            </EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                {!creating ? (
+                  <RoleRestrictedButton
+                    action="configureAudit"
+                    callerRole={callerRole}
+                    variant="primary"
+                    onClick={() => setCreating(true)}
+                  >
+                    Add target
+                  </RoleRestrictedButton>
+                ) : null}
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         ) : (
           <Card>
             <CardBody>

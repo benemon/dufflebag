@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, Checkbox, Content, Form, FormGroup,
+  EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   Label, PageSection, TextArea, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -109,7 +110,7 @@ export function WebhooksView({
               Send signed project events to an HTTP endpoint after its activation handshake succeeds.
             </Content>
           </div>
-          {!creating ? (
+          {!creating && (loading || failure || webhooks.length > 0) ? (
             <RoleRestrictedButton
               action="configureWebhooks" callerRole={callerRole} variant="primary"
               onClick={() => setCreating(true)}
@@ -137,7 +138,19 @@ export function WebhooksView({
           />
         ) : null}
         {loading ? <Content component="p">Loading webhooks…</Content> : webhooks.length === 0 && !failure ? (
-          <Alert variant="info" isInline title="No webhooks are configured" />
+          <EmptyState titleText="No webhooks are configured" headingLevel="h2">
+            <EmptyStateBody>Create a webhook to send signed project events.</EmptyStateBody>
+            <EmptyStateFooter>
+              <EmptyStateActions>
+                {!creating ? (
+                  <RoleRestrictedButton
+                    action="configureWebhooks" callerRole={callerRole} variant="primary"
+                    onClick={() => setCreating(true)}
+                  >Create webhook</RoleRestrictedButton>
+                ) : null}
+              </EmptyStateActions>
+            </EmptyStateFooter>
+          </EmptyState>
         ) : (
           <WebhookTable
             webhooks={webhooks} callerRole={callerRole} onVerify={(id) => run(() => onVerify(id))}

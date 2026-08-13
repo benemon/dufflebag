@@ -817,7 +817,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the data screens show the real, scoped state', async () => {
-    await waitForText('No buckets in this project')
+    await waitForText('No buckets yet')
   })
 
   await t.test('the Instance build card matches the authenticated endpoint', async () => {
@@ -859,8 +859,19 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('No service principals are visible to you')
     assert.doesNotMatch(await bodyText(), /initial administrator/)
     // At project standing the form offers the four tenancy roles, never root.
-    await clickByText('button', 'Create principal')
-    await waitForText('New service principal')
+    // Click-and-check as one retried unit: the empty-state button re-renders
+    // across the listing's settle cycle, and a click landing in that window
+    // can be lost (observed intermittently).
+    await until('the create-principal form to open', async () => {
+      if ((await bodyText()).includes('New service principal')) return true
+      await page.$$eval('button', (buttons) => {
+        const button = buttons.find(
+          (candidate) => candidate.innerText.trim() === 'Create principal' && !candidate.disabled,
+        )
+        if (button) button.click()
+      })
+      return (await bodyText()).includes('New service principal')
+    })
     assert.deepEqual(await roleOptions(), ['reader', 'builder', 'publisher', 'maintainer'])
     await clickByText('button', 'Cancel')
   })
@@ -875,8 +886,17 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('select one in the header')
     assert.doesNotMatch(await bodyText(), /initial administrator/)
     // Organisation standing still never offers root.
-    await clickByText('button', 'Create principal')
-    await waitForText('New service principal')
+    // Same retried click-and-check as the project-standing step above.
+    await until('the create-principal form to open', async () => {
+      if ((await bodyText()).includes('New service principal')) return true
+      await page.$$eval('button', (buttons) => {
+        const button = buttons.find(
+          (candidate) => candidate.innerText.trim() === 'Create principal' && !candidate.disabled,
+        )
+        if (button) button.click()
+      })
+      return (await bodyText()).includes('New service principal')
+    })
     assert.deepEqual(await roleOptions(), ['reader', 'builder', 'publisher', 'maintainer'])
     await clickByText('button', 'Cancel')
   })

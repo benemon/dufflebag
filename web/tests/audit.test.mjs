@@ -85,9 +85,23 @@ test('audit mutations are disabled with a root requirement for a reader', () => 
   assert.doesNotMatch(root.slice(Math.max(0, remove - 300), remove), /disabled/)
 })
 
+test('Add target moves between the empty state and populated header with its role gate', () => {
+  const emptyReader = view({ callerRole: 'reader' })
+  assert.match(emptyReader, /pf-v6-c-empty-state[\s\S]*Add target/)
+  assert.match(emptyReader, /Requires root/)
+  assert.equal((emptyReader.match(/Add target/g) ?? []).length, 1)
+
+  const populatedReader = view({ callerRole: 'reader', targets: [target()] })
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Add target/)
+  assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
+  assert.match(populatedReader, /Requires root/)
+  assert.equal((populatedReader.match(/Add target/g) ?? []).length, 1)
+})
+
 test('audit screen has honest loading, empty, and root-refusal states', () => {
   assert.match(view({ loading: true }), /Loading audit targets/)
-  assert.match(view(), /No audit targets are configured/)
+  assert.match(view(), /<h2[^>]*>No audit targets are configured<\/h2>/)
+  assert.match(view(), /class="pf-v6-c-empty-state__body"/)
   assert.match(view(), /not recording audit events to a file/)
 
   const refused = view({ failure: 'Only a platform root can view or change audit targets.' })
