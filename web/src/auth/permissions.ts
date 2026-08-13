@@ -20,6 +20,8 @@ export const ACTION_REQUIREMENTS = {
   managePrincipals: 'maintainer',
   // internal/platform/v1/bagdrop.go:16's admitBagDrop authorizes RoleMaintainer.
   configureBagDrop: 'maintainer',
+  // internal/platform/v1/webhooks.go uses admitBagDrop's maintainer disclosure funnel.
+  configureWebhooks: 'maintainer',
 } as const satisfies Record<string, Role>
 
 export type ConsoleAction = keyof typeof ACTION_REQUIREMENTS
@@ -35,6 +37,8 @@ export const NAV_REQUIREMENTS = {
   encryption: 'root',
   // internal/platform/v1/bagdrop.go:37's admitBagDropStatus authorizes RoleReader.
   bagdrop: 'reader',
+  // internal/platform/v1/webhooks.go gates the conventional screen at maintainer.
+  webhooks: 'maintainer',
   // internal/platform/v1/handler.go:1214 authorizes GetInstance at reader.
   instance: 'reader',
 } as const satisfies Record<string, Role>

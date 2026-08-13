@@ -23,12 +23,14 @@ import (
 	"github.com/benemon/dufflebag/internal/compat/hcp2023"
 	"github.com/benemon/dufflebag/internal/compat/hcpauth"
 	"github.com/benemon/dufflebag/internal/compat/rm2019"
+	"github.com/benemon/dufflebag/internal/credseal"
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/keyring"
 	platform "github.com/benemon/dufflebag/internal/platform/v1"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/benemon/dufflebag/internal/webhook"
 	"github.com/benemon/dufflebag/web"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/prometheus/client_golang/prometheus"
@@ -86,10 +88,16 @@ func main() {
 	// process env, one rotation mechanism. An env copy alongside the keyring
 	// would be a second source of truth, so it is refused rather than ignored.
 	signingKey := os.Getenv("DFBG_TOKEN_SIGNING_KEY")
+	credentialKey, err := credseal.ResolveEnvironmentKey(
+		os.Getenv(credseal.CredentialKeyEnv), os.Getenv(bagdrop.CredentialKeyEnv), bagdrop.CredentialKeyEnv,
+	)
+	if err != nil {
+		log.Fatal(err)
+	}
 	if os.Getenv(keyring.ProviderEnv) != "" {
 		for _, variable := range []string{
 			"DFBG_TOKEN_SIGNING_KEY", "DFBG_AUDIT_HMAC_KEY", "DFBG_AUDIT_HMAC_KEY_VERSION",
-			bagdrop.CredentialKeyEnv,
+			credseal.CredentialKeyEnv, bagdrop.CredentialKeyEnv,
 		} {
 			if os.Getenv(variable) != "" {
 				log.Fatalf("%s must not be set when %s is configured: on an encrypted deployment this key lives in the wrapped keyring", variable, keyring.ProviderEnv)
@@ -127,6 +135,10 @@ func main() {
 		log.Fatal(err)
 	}
 	bagDropReconcileInterval, err := configuredBagDropReconcileInterval()
+	if err != nil {
+		log.Fatal(err)
+	}
+	allowPrivateWebhooks, err := configuredWebhookAllowPrivate()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -249,7 +261,7 @@ func main() {
 	if scannerService != nil {
 		platformScanner = scannerService
 	}
-	bagDropSealer := bagdrop.NewCredentialSealer(ring, os.Getenv(bagdrop.CredentialKeyEnv))
+	bagDropSealer := bagdrop.NewCredentialSealer(ring, credentialKey)
 	bagDropAdapters := bagdrop.Registry{
 		bagdrop.AdapterHCPPacker: bagdrop.NewHCPPackerAdapter(bagDropAuthBase, bagDropAPIBase),
 		bagdrop.AdapterDufflebag: bagdrop.NewDufflebagAdapterFactory(),
@@ -270,9 +282,24 @@ func main() {
 		bagDropReconciler.Run(bagDropCtx)
 	}()
 	<-bagDropReconciler.Started()
+	credentialSealer := credseal.New(ring, credentialKey)
+	webhookClient := webhook.NewHTTPClient(allowPrivateWebhooks, nil, nil)
+	webhookService := webhook.NewService(repository, credentialSealer, webhookClient)
+	webhookDispatcher, err := webhook.NewDispatcher(repository, credentialSealer, webhookClient, time.Second, time.Minute, logger)
+	if err != nil {
+		log.Fatalf("webhook dispatcher initialization: %v", err)
+	}
+	webhookCtx, cancelWebhooks := context.WithCancel(context.Background())
+	defer cancelWebhooks()
+	webhookDone := make(chan struct{})
+	go func() {
+		defer close(webhookDone)
+		webhookDispatcher.Run(webhookCtx)
+	}()
+	<-webhookDispatcher.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropRuntime, build,
+		encryptionService, platformScanner, bagDropRuntime, webhookService, build,
 	)
 	applicationHandler := composeHandler(
 		broker,
@@ -342,12 +369,18 @@ func main() {
 			cancelProvider()
 			cancelScanner()
 			cancelBagDrop()
+			cancelWebhooks()
 			cancelHeartbeat()
 			deadline := time.Now().Add(shutdownGracePeriod)
 			select {
 			case <-bagDropDone:
 			case <-time.After(time.Until(deadline)):
 				logger.Warn("Bag Drop reconciler did not stop before the shutdown deadline")
+			}
+			select {
+			case <-webhookDone:
+			case <-time.After(time.Until(deadline)):
+				logger.Warn("webhook dispatcher did not stop before the shutdown deadline")
 			}
 			if err := shutdown(server, metricsServer, broker, deadline); err != nil {
 				logger.Warn("shutdown did not fully drain", "error", err)
@@ -479,6 +512,18 @@ func scannerDuration(name string, fallback time.Duration) (time.Duration, error)
 
 func configuredBagDropReconcileInterval() (time.Duration, error) {
 	return scannerDuration("DFBG_BAGDROP_RECONCILE_INTERVAL", 5*time.Minute)
+}
+
+func configuredWebhookAllowPrivate() (bool, error) {
+	configured := os.Getenv("DFBG_WEBHOOK_ALLOW_PRIVATE")
+	if configured == "" {
+		return false, nil
+	}
+	allow, err := strconv.ParseBool(configured)
+	if err != nil {
+		return false, errors.New("DFBG_WEBHOOK_ALLOW_PRIVATE must be true or false")
+	}
+	return allow, nil
 }
 
 func scannerHTTPClient(config scannerRuntimeConfig) (*http.Client, error) {

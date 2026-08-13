@@ -972,6 +972,10 @@ export async function platformPut<T>(token: string, path: string, body?: unknown
   return (await request<T>(token, 'PUT', `${PLATFORM_BASE}${path}`, body)) as T
 }
 
+export async function platformPatch<T>(token: string, path: string, body: unknown): Promise<T> {
+  return (await request<T>(token, 'PATCH', `${PLATFORM_BASE}${path}`, body)) as T
+}
+
 export async function platformDelete(token: string, path: string): Promise<void> {
   await request<null>(token, 'DELETE', `${PLATFORM_BASE}${path}`)
 }

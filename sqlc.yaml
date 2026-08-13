@@ -20,6 +20,7 @@ sql:
       - internal/store/postgres/migrations/000023_bagdrop_configs.up.sql
       - internal/store/postgres/migrations/000024_bagdrop_associations.up.sql
       - internal/store/postgres/migrations/000025_bagdrop_reconcile_status.up.sql
+      - internal/store/postgres/migrations/000026_webhooks.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:
@@ -29,6 +30,10 @@ sql:
         emit_json_tags: true
         overrides:
           - column: bagdrop_configs.last_verification
+            go_type:
+              type: byte
+              slice: true
+          - column: webhooks.sealed_secret
             go_type:
               type: byte
               slice: true

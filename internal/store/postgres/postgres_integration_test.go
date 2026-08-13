@@ -120,6 +120,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// than from application predicates.
 	rlsTables := []string{
 		"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "pending_scans",
 	}
@@ -204,6 +205,7 @@ func TestTenantIsolation(t *testing.T) {
 		}
 		for _, table := range []string{
 			"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+			"webhooks", "webhook_outbox", "webhook_deliveries",
 			"scan_runs", "scan_findings", "scan_transcripts", "build_scan_state",
 			"scan_run_counters", "pending_scans",
 		} {
@@ -534,6 +536,20 @@ func insertAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, project
 			(organization_id, project_id, bucket_name, state, created_at, updated_at)
 			VALUES ($1,$2,'images','active',$3,$3)`,
 			[]any{org, project, now}},
+		{`INSERT INTO webhooks
+			(organization_id, project_id, id, name, url, events, state, created_at, updated_at)
+			VALUES ($1,$2,$3,'events','https://example.com/webhook','{}','active',$4,$4)`,
+			[]any{org, project, "10000000-0000-4000-8000-00000000000" + suffix, now}},
+		{`INSERT INTO webhook_outbox
+			(organization_id, project_id, event_id, occurred_at, operation, target, actor, payload, available_at)
+			VALUES ($1,$2,$3,$4,'bucket.created','{"type":"bucket"}','{"principal_id":"p","name":"n"}','{}',$4)`,
+			[]any{org, project, "01K0000000000000000000000" + suffix, now}},
+		{`INSERT INTO webhook_deliveries
+			(organization_id, project_id, id, webhook_id, event_id, operation, status, created_at)
+			VALUES ($1,$2,$3,$4,$5,'bucket.created','pending',$6)`,
+			[]any{org, project, "20000000-0000-4000-8000-00000000000" + suffix,
+				"10000000-0000-4000-8000-00000000000" + suffix,
+				"01K0000000000000000000000" + suffix, now}},
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {

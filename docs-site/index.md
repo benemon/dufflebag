@@ -27,5 +27,6 @@ Day to day:
 Operating:
 
 - [Mirror to another registry with Bag Drop](./guides/bag-drop.md)
+- [Send project events with webhooks](./guides/webhooks.md)
 - [Audit and encryption](./guides/audit-encryption.md)
 - [Use the platform API](./guides/platform-api.md)

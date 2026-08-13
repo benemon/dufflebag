@@ -64,6 +64,13 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"DeleteBagDropAssociation": {"bagdrop.association.delete", "bagdrop_association", "bucketName"},
 		"GetBagDropStatus":         {"bagdrop.status.read", "bagdrop_status", ""},
 		"ReconcileBagDrop":         {"bagdrop.reconcile", "bagdrop_config", ""},
+		"ListWebhooks":             {"webhook.list", "webhook_collection", ""},
+		"CreateWebhook":            {"webhook.create", "webhook", ""},
+		"GetWebhook":               {"webhook.read", "webhook", "webhookId"},
+		"UpdateWebhook":            {"webhook.update", "webhook", "webhookId"},
+		"DeleteWebhook":            {"webhook.delete", "webhook", "webhookId"},
+		"VerifyWebhook":            {"webhook.verify", "webhook", "webhookId"},
+		"ListWebhookDeliveries":    {"webhook.delivery.list", "webhook", "webhookId"},
 	}
 	generated := generatedOperationIDs(t)
 	described := make([]string, 0, len(operationDescriptors))
@@ -100,6 +107,7 @@ func TestPlatformDescriptorRoutesCrossCheckStrictOperationIDs(t *testing.T) {
 				"{secretId}", "bbbbbbbb-cccc-4ddd-8eee-ffffffffffff",
 				"{bucketName}", "images",
 				"{targetId}", "cccccccc-dddd-4eee-8fff-000000000000",
+				"{webhookId}", "dddddddd-eeee-4fff-8000-111111111111",
 			).Replace(descriptor.path)
 			request := httptest.NewRequest(descriptor.method, path, strings.NewReader("{}"))
 			request.Header.Set("Content-Type", "application/json")

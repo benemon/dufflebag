@@ -29,6 +29,7 @@ const NAV: readonly NavGroupModel[] = [
     { key: 'audit', to: '/audit', label: 'Audit' },
     { key: 'encryption', to: '/encryption', label: 'Encryption' },
     { key: 'bagdrop', to: '/bagdrop', label: 'Bag Drop' },
+    { key: 'webhooks', to: '/webhooks', label: 'Webhooks' },
     { key: 'instance', to: '/instance', label: 'Instance' },
   ]},
 ]

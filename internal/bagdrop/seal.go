@@ -3,6 +3,7 @@ package bagdrop
 import (
 	"fmt"
 
+	"github.com/benemon/dufflebag/internal/credseal"
 	"github.com/benemon/dufflebag/internal/keyring"
 )
 
@@ -12,71 +13,30 @@ const credentialAADKind = "bagdrop_credential"
 const credentialRowID = "bagdrop_config"
 
 type CredentialSealer struct {
-	ring           *keyring.Keyring
-	environmentKey []byte
+	sealer *credseal.Sealer
 }
 
 func NewCredentialSealer(ring *keyring.Keyring, environmentKey string) *CredentialSealer {
-	return &CredentialSealer{ring: ring, environmentKey: []byte(environmentKey)}
+	return &CredentialSealer{sealer: credseal.New(ring, environmentKey)}
 }
 
 // Mode reports which deployment key protects Bag Drop credentials.
 func (s *CredentialSealer) Mode() string {
-	if s.ring != nil {
-		return "keyring"
-	}
-	return "env_key"
-}
-
-func credentialAAD(organizationID, projectID string) []byte {
-	return []byte(organizationID + "|" + projectID + "|" + credentialAADKind + "|" + credentialRowID)
+	return s.sealer.Mode()
 }
 
 func (s *CredentialSealer) Seal(organizationID, projectID, secret string) ([]byte, error) {
-	aad := credentialAAD(organizationID, projectID)
-	if s.ring != nil {
-		sealed, err := s.ring.Encrypt([]byte(secret), aad)
-		if err != nil {
-			return nil, fmt.Errorf("%w: seal credential: %v", ErrCredentialSeal, err)
-		}
-		return sealed, nil
-	}
-	if err := s.requireEnvironmentKey(); err != nil {
-		return nil, err
-	}
-	sealed, err := keyring.EncryptWithKey([]byte(secret), aad, s.environmentKey)
+	sealed, err := s.sealer.Seal(organizationID, projectID, credentialAADKind, credentialRowID, secret)
 	if err != nil {
-		return nil, fmt.Errorf("%w: seal credential: %v", ErrCredentialSeal, err)
+		return nil, fmt.Errorf("%w: %v (%s is the supported alias)", ErrCredentialSeal, err, CredentialKeyEnv)
 	}
 	return sealed, nil
 }
 
 func (s *CredentialSealer) Unseal(organizationID, projectID string, sealed []byte) (string, error) {
-	aad := credentialAAD(organizationID, projectID)
-	var (
-		plaintext []byte
-		err       error
-	)
-	if s.ring != nil {
-		plaintext, err = s.ring.Decrypt(sealed, aad)
-	} else {
-		if err := s.requireEnvironmentKey(); err != nil {
-			return "", err
-		}
-		plaintext, err = keyring.DecryptWithKey(sealed, aad, s.environmentKey)
-	}
+	plaintext, err := s.sealer.Unseal(organizationID, projectID, credentialAADKind, credentialRowID, sealed)
 	if err != nil {
-		return "", fmt.Errorf("%w: unseal credential: %v", ErrCredentialSeal, err)
+		return "", fmt.Errorf("%w: %v (%s is the supported alias)", ErrCredentialSeal, err, CredentialKeyEnv)
 	}
-	return string(plaintext), nil
-}
-
-func (s *CredentialSealer) requireEnvironmentKey() error {
-	if len(s.environmentKey) == 0 {
-		return fmt.Errorf("%w: %s is required to seal and unseal Bag Drop credentials on an unencrypted deployment", ErrCredentialSeal, CredentialKeyEnv)
-	}
-	if len(s.environmentKey) != 32 {
-		return fmt.Errorf("%w: %s must be exactly 32 bytes for AES-256-GCM", ErrCredentialSeal, CredentialKeyEnv)
-	}
-	return nil
+	return plaintext, nil
 }

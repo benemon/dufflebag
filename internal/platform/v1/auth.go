@@ -352,6 +352,27 @@ func (response refusalResponse) write(w http.ResponseWriter) error {
 func (response refusalResponse) VisitGetScannerHealthResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitListWebhooksResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitCreateWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitGetWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitUpdateWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDeleteWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitVerifyWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitListWebhookDeliveriesResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitRescanBuildResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

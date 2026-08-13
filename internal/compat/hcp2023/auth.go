@@ -164,6 +164,7 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 		ctx := context.WithValue(r.Context(), tenantKey{}, parsed)
 		ctx = context.WithValue(ctx, principalIDKey{}, principal.ID)
 		ctx = context.WithValue(ctx, principalNameKey{}, principal.Name)
+		ctx = identity.WithActor(ctx, principal.ID, principal.Name)
 		next(w, r.WithContext(ctx))
 	}
 }

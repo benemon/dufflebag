@@ -400,7 +400,7 @@ func TestBagDropAssociationRendersReconcileStatusFields(t *testing.T) {
 		LastAttemptAt: &attemptedAt, LastSyncedAt: &syncedAt, LastSyncError: &failure,
 	})
 	if rendered.LastAttemptAt == nil || rendered.LastSyncError == nil || *rendered.LastSyncError != failure ||
-		rendered.SyncStatus != Pending {
+		rendered.SyncStatus != BagDropSyncStatusPending {
 		t.Fatalf("rendered association = %#v", rendered)
 	}
 }

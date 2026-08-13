@@ -10,6 +10,7 @@ import (
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
+	"github.com/benemon/dufflebag/internal/webhook"
 	"github.com/google/uuid"
 )
 
@@ -414,6 +415,20 @@ func (r *Repository) CreateChannel(
 	if err != nil {
 		return nil, err
 	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelCreated,
+		webhook.Target{Type: "channel", Bucket: channel.BucketName, Name: channel.Name},
+		channelWebhookPayload(created, nil), channel.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
+	if versionFingerprint != "" {
+		if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+			webhook.Target{Type: "channel", Bucket: channel.BucketName, Name: channel.Name},
+			channelWebhookPayload(created, nil), channel.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit create channel: %w", err)
 	}
@@ -564,6 +579,14 @@ func (r *Repository) UpdateChannel(
 	if err != nil {
 		return nil, err
 	}
+	if updateVersion {
+		if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+			webhook.Target{Type: "channel", Bucket: bucketName, Name: channelName},
+			channelWebhookPayload(updated, channel), at,
+		); err != nil {
+			return nil, err
+		}
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit update channel: %w", err)
 	}
@@ -590,6 +613,7 @@ func (r *Repository) AssignChannelVersion(
 	if err != nil {
 		return nil, nil, err
 	}
+	previous := *target
 	// Defence in depth with the handler: callers other than the HTTP adapter
 	// must not be able to rotate a version into the service-managed channel.
 	// Live probe 40 settles this endpoint's refusal as 400/code 9 with
@@ -609,6 +633,12 @@ func (r *Repository) AssignChannelVersion(
 	if err != nil {
 		return nil, nil, err
 	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+		webhook.Target{Type: "channel", Bucket: bucketName, Name: targetName},
+		channelWebhookPayload(target, &previous), at,
+	); err != nil {
+		return nil, nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, nil, fmt.Errorf("commit assign channel version: %w", err)
 	}
@@ -620,11 +650,16 @@ func (r *Repository) DeleteChannel(
 	tenant Tenant,
 	bucketName, channelName string,
 ) error {
-	tx, _, err := r.begin(ctx, tenant)
+	at := time.Now().UTC()
+	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	channel, err := r.getChannel(ctx, tx, q, tenant, bucketName, channelName)
+	if err != nil {
+		return err
+	}
 
 	var id string
 	err = tx.QueryRowContext(ctx, `
@@ -637,6 +672,12 @@ func (r *Repository) DeleteChannel(
 	`, bucketName, channelName).Scan(&id)
 	if err != nil {
 		return mapNotFound("delete channel", err)
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelDeleted,
+		webhook.Target{Type: "channel", Bucket: bucketName, Name: channelName},
+		channelWebhookPayload(channel, nil), at,
+	); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete channel: %w", err)

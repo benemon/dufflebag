@@ -39,6 +39,8 @@ tags:
     description: Per-project pinned buckets.
   - name: bagdrop
     description: Per-project outbound registry destination configuration.
+  - name: webhooks
+    description: Per-project outbound event notifications.
   - name: session
     description: The console's cookie-backed session.
   - name: audit
@@ -1292,6 +1294,166 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+    get:
+      tags: [webhooks]
+      operationId: listWebhooks
+      summary: List a project's webhooks
+      description: Requires maintainer on this project. Secrets are never returned.
+      responses:
+        "200":
+          description: Webhooks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Webhook" }
+                required: [webhooks]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [webhooks]
+      operationId: createWebhook
+      summary: Create and verify a project webhook
+      description: |
+        Stores the write-only secret sealed at rest and immediately attempts a
+        signed verification handshake. A failed or refused handshake leaves the
+        webhook pending; pending webhooks receive no events. Requires maintainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookCreate" }
+      responses:
+        "201":
+          description: Created. The returned state reflects the handshake result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The configured secret cannot be sealed on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      tags: [webhooks]
+      operationId: getWebhook
+      summary: Read a project webhook
+      description: Requires maintainer. The secret is never returned.
+      responses:
+        "200":
+          description: Webhook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [webhooks]
+      operationId: updateWebhook
+      summary: Update a project webhook
+      description: |
+        Replaces only supplied fields. A supplied secret replaces the sealed
+        secret. Changing the URL returns the webhook to pending and immediately
+        re-attempts verification. Requires maintainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookUpdate" }
+      responses:
+        "200":
+          description: Updated webhook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The supplied secret cannot be sealed on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [webhooks]
+      operationId: deleteWebhook
+      summary: Delete a project webhook
+      description: Requires maintainer.
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/WebhookId"
+    post:
+      tags: [webhooks]
+      operationId: verifyWebhook
+      summary: Re-attempt a webhook activation handshake
+      description: |
+        Sends the signed verification payload. A 2xx response activates the
+        webhook; failure leaves it pending and records the failure. Requires maintainer.
+      responses:
+        "200":
+          description: Webhook with its resulting activation state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      tags: [webhooks]
+      operationId: listWebhookDeliveries
+      summary: List the webhook's last 100 deliveries
+      description: Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+      responses:
+        "200":
+          description: Newest-first delivery history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: "#/components/schemas/WebhookDelivery" }
+                required: [deliveries]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -1326,10 +1488,21 @@ components:
       required: true
       description: ULID.
       schema: { type: string }
+    WebhookId:
+      name: webhookId
+      in: path
+      required: true
+      description: UUID.
+      schema: { type: string, format: uuid }
 
   responses:
     Unauthorized:
       description: Missing or invalid token.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    BadRequest:
+      description: Invalid request.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -1974,3 +2147,167 @@ components:
         message: { type: string }
         verification: { $ref: "#/components/schemas/BagDropVerificationResult" }
       required: [message]
+
+    WebhookOperation:
+      type: string
+      enum:
+        - version.created
+        - version.completed
+        - version.revoked
+        - version.revocation_scheduled
+        - version.restored
+        - version.deleted
+        - channel.created
+        - channel.deleted
+        - channel.assigned
+        - bucket.created
+        - bucket.deleted
+
+    WebhookState:
+      type: string
+      enum: [pending, active]
+
+    WebhookCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        url:
+          type: string
+          format: uri
+          pattern: "^https?://"
+        description:
+          type: string
+          maxLength: 1000
+        secret:
+          type: string
+          description: Write-only. Never returned.
+          writeOnly: true
+        events:
+          type: array
+          uniqueItems: true
+          description: Empty subscribes to every operation.
+          items: { $ref: "#/components/schemas/WebhookOperation" }
+      required: [name, url, events]
+
+    WebhookUpdate:
+      type: object
+      minProperties: 1
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        url:
+          type: string
+          format: uri
+          pattern: "^https?://"
+        description:
+          type: string
+          maxLength: 1000
+        secret:
+          type: string
+          description: Write-only replacement. Never returned.
+          writeOnly: true
+        events:
+          type: array
+          uniqueItems: true
+          description: Empty subscribes to every operation.
+          items: { $ref: "#/components/schemas/WebhookOperation" }
+
+    Webhook:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        url: { type: string, format: uri }
+        description: { type: string }
+        has_secret:
+          type: boolean
+          description: Whether a write-only signing secret is configured.
+        events:
+          type: array
+          description: Empty subscribes to every operation.
+          items: { $ref: "#/components/schemas/WebhookOperation" }
+        state: { $ref: "#/components/schemas/WebhookState" }
+        last_verification_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_verification_error:
+          type: string
+          nullable: true
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+      required:
+        [id, name, url, description, has_secret, events, state,
+         last_verification_at, last_verification_error, created_at, updated_at]
+
+    WebhookDeliveryStatus:
+      type: string
+      enum: [pending, retrying, delivered, failed, refused]
+
+    WebhookDelivery:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        event_id: { type: string, description: ULID. }
+        operation:
+          type: string
+          description: A catalogue operation, or webhook.verification for an activation handshake.
+        status: { $ref: "#/components/schemas/WebhookDeliveryStatus" }
+        attempt_count: { type: integer, minimum: 0, maximum: 5 }
+        first_attempted_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_attempted_at:
+          type: string
+          format: date-time
+          nullable: true
+        response_code:
+          type: integer
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+          description: Bounded response snippet or terse failure detail.
+        created_at: { type: string, format: date-time }
+      required:
+        [id, event_id, operation, status, attempt_count, first_attempted_at,
+         last_attempted_at, response_code, detail, created_at]
+
+    WebhookTarget:
+      type: object
+      properties:
+        type: { type: string, enum: [version, channel, bucket] }
+        bucket: { type: string }
+        fingerprint: { type: string }
+        name: { type: string }
+      required: [type]
+
+    WebhookActor:
+      type: object
+      properties:
+        principal_id: { type: string }
+        name: { type: string }
+      required: [principal_id, name]
+
+    WebhookEnvelope:
+      type: object
+      properties:
+        event_id: { type: string, description: ULID. }
+        occurred_at: { type: string, format: date-time }
+        organization_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid }
+        operation: { $ref: "#/components/schemas/WebhookOperation" }
+        target: { $ref: "#/components/schemas/WebhookTarget" }
+        actor: { $ref: "#/components/schemas/WebhookActor" }
+        payload:
+          type: object
+          additionalProperties: true
+          description: Operation-specific compatibility-plane wire data.
+      required:
+        [event_id, occurred_at, organization_id, project_id, operation, target, actor, payload]

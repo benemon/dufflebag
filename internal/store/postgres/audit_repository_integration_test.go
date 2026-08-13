@@ -90,7 +90,7 @@ func TestAuditAttributionSurvivesPrincipalDeletion(t *testing.T) {
 	platformHandler := platform.NewHandler(
 		repository, repository,
 		auditAPIAuthenticator{principalID: actor.ID, secretID: secretID},
-		repository, logger, repository, broker, nil, nil, nil, platform.BuildInfo{},
+		repository, logger, repository, broker, nil, nil, nil, nil, platform.BuildInfo{},
 	)
 	resolver, ok := platformHandler.(audit.Resolver)
 	if !ok {
@@ -172,7 +172,7 @@ func TestAuditTargetAPIAllocatesLowestFreeSlotsAndReturnsConflictAtThree(t *test
 		repository, repository,
 		auditAPIAuthenticator{principalID: principal.ID, secretID: secretID},
 		auditAPIPrincipals{principal: principal},
-		slog.New(slog.NewTextHandler(io.Discard, nil)), repository, broker, nil, nil, nil, platform.BuildInfo{},
+		slog.New(slog.NewTextHandler(io.Discard, nil)), repository, broker, nil, nil, nil, nil, platform.BuildInfo{},
 	)
 
 	createdIDs := make([]string, 0, 2)

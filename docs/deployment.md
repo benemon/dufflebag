@@ -232,8 +232,10 @@ cadence tick; the ordinary API and compatibility serving paths remain
 available because reconciliation runs outside them.
 
 The destination client secret is always stored in an AES-256-GCM envelope. On
-an unencrypted deployment, set `DFBG_BAGDROP_CREDENTIAL_KEY` to exactly 32
-random bytes. Without it, ordinary reads and deletion of a disabled existing
+an unencrypted deployment, set the general `DFBG_CREDENTIAL_KEY` to exactly 32
+random bytes. `DFBG_BAGDROP_CREDENTIAL_KEY` remains a supported migration
+alias with the same behaviour it had before webhooks existed. If both are set,
+they must be identical; different values refuse startup. Without either, ordinary reads and deletion of a disabled existing
 configuration still work, but writes that seal a secret and verify/enable
 operations that unseal one refuse and name the missing variable. There is no
 plaintext fallback.
@@ -244,9 +246,39 @@ environment, or a process that can read the key. Treat it as credential
 material and source it from the deployment's secret manager.
 
 On a deployment with [encryption at rest](#encryption-at-rest-optional-decided-at-first-boot),
-Bag Drop credentials use the wrapped keyring instead. In that posture
-`DFBG_BAGDROP_CREDENTIAL_KEY` must not be set; the process refuses to start
+Bag Drop credentials use the wrapped keyring instead. In that posture neither
+`DFBG_CREDENTIAL_KEY` nor `DFBG_BAGDROP_CREDENTIAL_KEY` may be set; the process refuses to start
 rather than accepting a second source of truth.
+
+## Webhooks
+
+Webhooks make outbound HTTP requests to project-configured URLs. By default
+dufflebag resolves the target and refuses loopback, link-local (including the
+cloud metadata address `169.254.169.254`), RFC1918, unspecified, and multicast
+addresses. The checked address is the address dialled, which prevents a second
+DNS lookup from rebinding the connection after admission. Redirects are never
+followed, requests time out after ten seconds, and response reads are capped at
+64 KiB; only a bounded snippet is retained in the last-100 delivery history.
+
+`DFBG_WEBHOOK_ALLOW_PRIVATE=true` disables the private/local address refusal
+for isolated labs whose receiver deliberately lives on a private network. It
+defaults to `false`; do not enable it on a deployment where project maintainers
+must not reach internal services. A refused address is recorded once as a
+refused delivery and is not retried.
+
+Signing secrets are write-only and use the same credential protection as Bag
+Drop: the wrapped keyring on encrypted deployments, or the 32-byte
+`DFBG_CREDENTIAL_KEY` on unencrypted deployments. The legacy
+`DFBG_BAGDROP_CREDENTIAL_KEY` alias can supply this general key during
+migration, including for webhook secrets. If the general key and alias are both
+set, they must be byte-for-byte identical. Encrypted deployments refuse either
+environment variable.
+
+Delivery runs outside the serving path. A failed request is retried at most
+five times with exponential backoff over roughly fifteen minutes, then marked
+failed and dropped. The transactional outbox means a domain write and its event
+commit or roll back together; endpoint latency and failure never delay that
+write.
 
 Scan transcripts are written to object storage tagged
 `dufflebag-class=transcript`. dufflebag deletes each referenced transcript
@@ -351,7 +383,8 @@ What to know before choosing it:
   no migration between postures — moving means a fresh database.
 - **Keys live in a wrapped keyring, not the environment.**
   `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`,
-  `DFBG_AUDIT_HMAC_KEY_VERSION` and `DFBG_BAGDROP_CREDENTIAL_KEY` must NOT be
+  `DFBG_AUDIT_HMAC_KEY_VERSION`, `DFBG_CREDENTIAL_KEY` and
+  `DFBG_BAGDROP_CREDENTIAL_KEY` must NOT be
   set — data keys are generated locally, stored wrapped by the key
   service's key, and unwrapped once at startup. KEK rotation rewraps keyring
   rows only; payloads are never re-encrypted (see
