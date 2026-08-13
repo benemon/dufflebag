@@ -43,8 +43,8 @@ test('the headline counts a shared finding once and the builds say where it live
     builds: [withLibcurl('b1', 'docker'), withLibcurl('b2', 'aws'), withLibcurl('b3', 'azure')],
   })
   assert.match(html, /1 finding across 1 package/, 'three builds, one problem')
-  assert.match(html, /Last scanned: 2026-08-07/, 'a plain date, not a timestamp')
-  assert.doesNotMatch(html, /21:23|\.\d\d\dZ/, 'the full timestamp is noise')
+  assert.match(html, /Last scanned:/)
+  assert.match(html, /<time[^>]*dateTime="2026-08-07T12:00:00Z"/)
   assert.doesNotMatch(html, /database revision/, 'adapter detail is a root-level concern')
   assert.match(html, /docker/)
   assert.match(html, /aws/)
@@ -78,7 +78,8 @@ test('a build with nothing found reports what it scanned', () => {
   })
   assert.match(html, /no findings/)
   assert.match(html, /205 scanned/)
-  assert.match(html, /Last scanned: 2026-08-07/, 'the zero state still says when')
+  assert.match(html, /Last scanned:/, 'the zero state still says when')
+  assert.match(html, /<time[^>]*dateTime="2026-08-07T12:00:00Z"/)
 })
 
 test('an unscanned version says so rather than reporting zero', () => {

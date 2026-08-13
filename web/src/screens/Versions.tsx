@@ -14,6 +14,7 @@ import { useNavigate, useParams } from 'react-router'
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 
 import {
   assignChannelVersion, createChannel, deleteBucket, deleteChannel, getBagDropStatus,
@@ -343,7 +344,7 @@ function BucketOverview({
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>Published</DescriptionListTerm>
-                <DescriptionListDescription>{newest?.created ?? '—'}</DescriptionListDescription>
+                <DescriptionListDescription><When iso={newest?.created} /></DescriptionListDescription>
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>Platforms</DescriptionListTerm>
@@ -510,7 +511,7 @@ export function VersionsFacet({
                         ))}
                       </Td>
                       <Td dataLabel="Published">
-                        {version.created}
+                        <When iso={version.created} />
                         {version.assignments.map((assignment) => (
                           <div key={assignment.channel} style={{ color: '#4d4d4d', fontSize: 13 }}>
                             {assignment.author ? `by ${assignment.author}` : 'actor unavailable'}
@@ -656,7 +657,7 @@ export function BucketChannelsFacet({
                   <Td dataLabel="Assigned by">
                     {channel.fingerprint ? (channel.author ?? 'Unknown') : '—'}
                   </Td>
-                  <Td dataLabel="Assigned time">{channel.assignedAt}</Td>
+                  <Td dataLabel="Assigned time"><When iso={channel.assignedAt} /></Td>
                   <Td dataLabel="Actions">
                     {channel.managed ? null : (
                       <ChannelActions
@@ -1175,7 +1176,7 @@ export function AssignmentHistoryTable({
             </Td>
             <Td dataLabel="Parent status">{parentStatusText(assignment.parentStatus)}</Td>
             <Td dataLabel="Assigned by">{assignment.author ?? 'Unknown'}</Td>
-            <Td dataLabel="Assigned time">{assignment.assignedAt}</Td>
+            <Td dataLabel="Assigned time"><When iso={assignment.assignedAt} /></Td>
           </Tr>
         ))}
       </Tbody>

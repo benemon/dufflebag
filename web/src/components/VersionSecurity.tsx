@@ -4,6 +4,7 @@ import {
   coverageSummary, hasCoverageGap, versionRollup, type BuildFindings,
 } from '../data/findings'
 import { OUT_OF_SCAN_SET_CLASS } from './Findings'
+import { When } from './When'
 
 const SEVERITY_COLOUR: Record<string, 'red' | 'orange' | 'yellow' | 'blue' | 'grey'> = {
   critical: 'red', high: 'orange', medium: 'yellow', low: 'blue',
@@ -49,8 +50,6 @@ export function VersionSecurityCard({
   // preserve.
   const coverage = hasCoverageGap(attribution) ? coverageSummary(attribution) : []
   const lastScanned = attribution?.observedAt
-    ? new Date(attribution.observedAt).toISOString().slice(0, 10)
-    : null
 
   return (
     <Card className={outOfScanSet ? OUT_OF_SCAN_SET_CLASS : undefined}>
@@ -58,7 +57,7 @@ export function VersionSecurityCard({
         <span style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 12 }}>
           <span>Security</span>
           <Content component="small">
-            {lastScanned ? `Last scanned: ${lastScanned}` : 'Not yet scanned'}
+            {lastScanned ? <>Last scanned: <When iso={lastScanned} dateOnly /></> : 'Not yet scanned'}
           </Content>
         </span>
       </CardTitle>

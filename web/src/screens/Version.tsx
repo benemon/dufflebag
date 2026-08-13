@@ -17,6 +17,7 @@ import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 import {
   useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
   type BuildState, type Version as VersionData, type VersionDetail,
@@ -225,7 +226,7 @@ export function VersionView({
               </DescriptionListGroup>
               <DescriptionListGroup>
                 <DescriptionListTerm>Created</DescriptionListTerm>
-                <DescriptionListDescription>{version.created}</DescriptionListDescription>
+                <DescriptionListDescription><When iso={version.created} /></DescriptionListDescription>
               </DescriptionListGroup>
             </DescriptionList>
           </>
@@ -958,7 +959,7 @@ function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id
             <Td dataLabel="Status"><BuildStateLabel state={build.state} /></Td>
             <Td dataLabel="Packer runner OS">{build.runnerOS || '—'}</Td>
             <Td dataLabel="Arch">{build.arch || '—'}</Td>
-            <Td dataLabel="Updated">{build.updated}</Td>
+            <Td dataLabel="Updated"><When iso={build.updated} /></Td>
           </Tr>
           <Tr isExpanded={expanded === build.id}>
             <Td />

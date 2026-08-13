@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, type ReactNode } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
@@ -22,6 +22,7 @@ import {
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 
 type DestinationDraft = {
   adapter: 'hcp-packer' | 'dufflebag'
@@ -559,12 +560,12 @@ function LastVerificationView({
       <Description label="Last verification" value={verification.outcome} />
       <Description label="Reason" value={verification.reason ?? '—'} />
       <Description label="Message" value={verification.message ?? '—'} />
-      <Description label="Verified at" value={verification.verified_at} />
+      <Description label="Verified at" value={<When iso={verification.verified_at} />} />
     </DescriptionList>
   )
 }
 
-function Description({ label, value }: { label: string; value: string }) {
+function Description({ label, value }: { label: string; value: ReactNode }) {
   return (
     <DescriptionListGroup>
       <DescriptionListTerm>{label}</DescriptionListTerm>
@@ -871,8 +872,8 @@ export function BagDropStatusTableView({
                   }}>{association.last_sync_error}</span></>
                 ) : null}
               </Td>
-              <Td dataLabel="Last synced">{association.last_synced_at ?? 'Never'}</Td>
-              <Td dataLabel="Last attempt">{association.last_attempt_at ?? 'Never'}</Td>
+              <Td dataLabel="Last synced"><When iso={association.last_synced_at} emptyText="Never" /></Td>
+              <Td dataLabel="Last attempt"><When iso={association.last_attempt_at} emptyText="Never" /></Td>
             </Tr>
             {hasError ? (
               <Tr isExpanded={isExpanded}>

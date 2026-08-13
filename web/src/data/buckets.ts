@@ -60,7 +60,6 @@ export type Bucket = {
   channels: ChannelRef[]
   drift: Drift
   platforms: string[]
-  lastPush: string
   lastPushAt: string
 }
 
@@ -265,7 +264,6 @@ function toBucket(bucket: ApiBucket, versions: ApiVersion[], channels: ApiChanne
     // same as being up to date.
     drift: driftOf(channels, versions),
     platforms: [...(bucket.platforms ?? [])].sort(),
-    lastPush: lastPushAt ? lastPushAt.slice(0, 10) : '—',
     lastPushAt,
   }
 }

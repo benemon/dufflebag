@@ -9,6 +9,7 @@ let vite
 let CreateWebhookForm
 let DeleteConfirmation
 let WebhooksView
+let DeliveryTable
 let TypedConfirmModalView
 
 before(async () => {
@@ -19,7 +20,7 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ CreateWebhookForm, DeleteConfirmation, WebhooksView } =
+  ;({ CreateWebhookForm, DeleteConfirmation, WebhooksView, DeliveryTable } =
     await vite.ssrLoadModule('/src/screens/Webhooks.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
@@ -93,4 +94,20 @@ test('the empty and failed states say so honestly', () => {
   const failed = view({ failure: 'boom' })
   assert.match(failed, /Webhooks could not be loaded/)
   assert.doesNotMatch(failed, /No webhooks are configured/)
+})
+
+test('delivery attempts render as semantic timestamps and retain the empty dash', () => {
+  const markup = renderToStaticMarkup(React.createElement(DeliveryTable, { deliveries: [{
+    id: 'delivery-1', event_id: 'event-1', operation: 'version.completed',
+    status: 'delivered', attempt_count: 1, first_attempted_at: '2026-08-13T07:41:00Z',
+    last_attempted_at: '2026-08-13T07:41:30.702958Z', response_code: 204,
+    detail: null, created_at: '2026-08-13T07:41:00Z',
+  }, {
+    id: 'delivery-2', event_id: 'event-2', operation: 'version.created',
+    status: 'pending', attempt_count: 0, first_attempted_at: null,
+    last_attempted_at: null, response_code: null, detail: null,
+    created_at: '2026-08-13T07:42:00Z',
+  }] }))
+  assert.match(markup, /<time[^>]*dateTime="2026-08-13T07:41:30.702958Z"/)
+  assert.match(markup, /data-label="Last attempt"[^>]*>—</)
 })

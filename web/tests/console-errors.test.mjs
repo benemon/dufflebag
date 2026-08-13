@@ -201,7 +201,6 @@ test('empty results are distinct and unsupported actions are absent', () => {
     channels: [],
     drift: { kind: 'absent', channel: 'channels' },
     platforms: [],
-    lastPush: '—',
     lastPushAt: '',
   }))
   const firstPage = renderToStaticMarkup(React.createElement(BucketsView, {
@@ -224,7 +223,7 @@ test('empty results are distinct and unsupported actions are absent', () => {
   }
 })
 
-test('buckets default to full-timestamp newest-first order without adding time to the display', () => {
+test('buckets default to full-timestamp newest-first order and render semantic timestamps', () => {
   const buckets = [
     { name: 'alpha', lastPushAt: '2026-08-05T09:00:00Z' },
     { name: 'zulu', lastPushAt: '2026-08-05T18:00:00Z' },
@@ -232,15 +231,15 @@ test('buckets default to full-timestamp newest-first order without adding time t
     ...bucket,
     description: '', labels: {}, templateTypes: [], versionCount: 0, newestVersion: null,
     parents: null, children: null, channels: [], drift: { kind: 'absent', channel: 'channels' },
-    platforms: [], lastPush: '2026-08-05',
+    platforms: [],
   }))
   const markup = renderToStaticMarkup(React.createElement(BucketsView, {
     buckets, total: buckets.length, loading: false, failure: null,
   }))
 
   assert.ok(markup.indexOf('>zulu<') < markup.indexOf('>alpha<'), markup)
-  assert.equal((markup.match(/2026-08-05/g) ?? []).length, 2)
-  assert.doesNotMatch(markup, /09:00|18:00/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-05T09:00:00Z"/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-05T18:00:00Z"/)
 })
 
 test('tenant selection passes the project UUID, not its display name', () => {

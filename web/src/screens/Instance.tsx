@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, ClipboardCopyButton, CodeBlock, CodeBlockAction,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
@@ -8,6 +8,7 @@ import {
 import type { ApiInstance } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useInstance } from '../data/instance'
+import { When } from '../components/When'
 
 /**
  * Instance — what a client needs to point at this registry.
@@ -143,7 +144,7 @@ export function BuildCard({
             <BuildField label="Version" value={instance?.version} />
             <BuildField label="Commit" value={instance?.commit} />
             <BuildField label="API versions" value={instance?.api_versions?.join(', ')} />
-            <BuildField label="Initialized" value={instance?.initialized_at} />
+            <BuildField label="Initialized" value={<When iso={instance?.initialized_at} />} />
             <BuildField
               label="Store"
               value={typeof instance?.store === 'boolean'
@@ -160,7 +161,7 @@ export function BuildCard({
   )
 }
 
-function BuildField({ label, value }: { label: string; value?: string | null }) {
+function BuildField({ label, value }: { label: string; value?: ReactNode }) {
   return (
     <DescriptionListGroup>
       <DescriptionListTerm>{label}</DescriptionListTerm>

@@ -121,7 +121,7 @@ test('the keyring collapses to one row per purpose whose values update in place'
   assert.match(markup, /payload/)
   assert.match(markup, /data-label="Active"[^>]*>2</)
   assert.match(markup, /data-label="Retained"[^>]*>2</)
-  assert.match(markup, /2026-08-05T09:30:00Z/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-05T09:30:00Z"/)
   assert.doesNotMatch(markup, /2026-08-05T09:00:00Z/)
   assert.match(markup, /token_signing/)
   assert.match(markup, /data-label="Active"[^>]*>4</)

@@ -837,9 +837,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('a', 'Instance')
     await waitForText('Build')
-    for (const supplied of ['dev', 'unknown', '/packer/2023-01-01', instance.initialized_at]) {
+    for (const supplied of ['dev', 'unknown', '/packer/2023-01-01']) {
       await waitForText(supplied)
     }
+    // Initialized renders formatted (duf-fcg6.6); the semantic time element
+    // still carries the API's full-precision value.
+    await until('the initialized time element to carry the API value', () =>
+      page.$$eval('time', (times, iso) =>
+        times.some((t) => t.getAttribute('datetime') === iso), instance.initialized_at))
     await waitForText('Scanner')
     await waitForText('Adapter')
     await waitForText('osv')
@@ -963,7 +968,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // shows a timestamp where it once said "never used".
     await until('the root secret shows its last use', async () => {
       const text = await bodyText()
-      return !/never used/.test(text) && /last used|20\d\d-/.test(text)
+      return !/never used/.test(text) && /20\d\d/.test(text)
     })
     assert.equal(
       await buttonDisabled('Revoke'), true,
@@ -1053,10 +1058,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await toggleRow(auditFull)
     let health = await visibleHealthText(auditFull)
     assert.match(health, /Status\s+failing/)
-    assert.match(health, /Since\s+\d{4}-/)
+    // Timestamps render locale-formatted (duf-fcg6.6); a real date carries a year.
+    assert.match(health, /Since\s+.*\d{4}/)
     assert.match(health, /Consecutive failures\s+[1-9]\d*/)
     assert.match(health, /Cumulative failures\s+[1-9]\d*/)
-    assert.match(health, /Last failure\s+\d{4}-/)
+    assert.match(health, /Last failure\s+.*\d{4}/)
 
     // Freeing the isolated filesystem makes the next ordinary audited request
     // recover it. The current streak resets, while lifetime history stays.
@@ -1084,7 +1090,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(health, /Since\s+—/)
     assert.match(health, /Consecutive failures\s+0/)
     assert.match(health, /Cumulative failures\s+[1-9]\d*/)
-    assert.match(health, /Last failure\s+\d{4}-/)
+    assert.match(health, /Last failure\s+.*\d{4}/)
     await toggleRow(auditFull)
     await until('the full audit target health row to collapse', () =>
       page.$eval(`table[aria-label="Health for ${auditFull}"]`, (table) =>
@@ -2009,6 +2015,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     }
     const securityText = () => page.$$eval('.pf-v6-c-card', (cards) =>
       cards.find((card) => card.innerText.trim().startsWith('Security'))?.innerText ?? '')
+    // The scan date renders formatted (duf-fcg6.6); the card's time element
+    // keeps the real observation date for exact assertion.
+    const securityScanDate = () => page.$$eval('.pf-v6-c-card', (cards) => {
+      const card = cards.find((c) => c.innerText.trim().startsWith('Security'))
+      return card?.querySelector('time')?.getAttribute('datetime') ?? ''
+    })
     const assertNoVerdicts = async () => {
       const visible = (await bodyText()).toLowerCase()
       assert.doesNotMatch(visible, /\bclean\b/)
@@ -2029,9 +2041,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await openVersion(full)
     const fullDate = new Date(fullScan.observedAt).toISOString().slice(0, 10)
     await until('the full-coverage figures', async () =>
-      (await securityText()).includes(`Last scanned: ${fullDate}`))
+      (await securityScanDate()).startsWith(fullDate))
     const fullText = await securityText()
-    assert.match(fullText, new RegExp(`Last scanned: ${fullDate}`))
+    assert.match(fullText, /Last scanned:/)
     assert.match(fullText, /No known findings/)
     assert.match(fullText, /1 scanned/)
     assert.doesNotMatch(fullText, /Coverage:/)
@@ -2047,7 +2059,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the coverage-gap figures', async () =>
       (await securityText()).includes(gapCoverage))
     const gapText = await securityText()
-    assert.match(gapText, new RegExp(`Last scanned: ${gapDate}`))
+    assert.ok((await securityScanDate()).startsWith(gapDate), 'gap scan date must render')
     assert.match(gapText, /No known findings/)
     assert.match(gapText, /3 scanned/)
     assert.ok(gapText.includes(gapCoverage), `coverage text was:\n${gapText}`)
@@ -2059,7 +2071,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the findings figures', async () =>
       (await securityText()).includes('2 findings across 1 package'))
     const findingsText = await securityText()
-    assert.match(findingsText, new RegExp(`Last scanned: ${findingsDate}`))
+    assert.ok((await securityScanDate()).startsWith(findingsDate), 'findings scan date must render')
     assert.match(findingsText, /2 findings across 1 package/)
     assert.match(findingsText, /1 high/)
     assert.match(findingsText, /1 unknown/)
@@ -2102,7 +2114,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the prior findings to become visibly unmaintained', async () =>
       Boolean(await page.$('.dfbg-findings-unmaintained')))
     const movedText = await securityText()
-    assert.match(movedText, new RegExp(`Last scanned: ${findingsDate}`))
+    assert.ok((await securityScanDate()).startsWith(findingsDate), 'moved scan date must render')
     assert.match(movedText, /2 findings across 1 package/)
     assert.match(movedText, /1 high/)
     assert.match(movedText, /1 unknown/)

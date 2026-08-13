@@ -150,7 +150,6 @@ const galleryBucket = (name) => ({
   channels: [],
   drift: { kind: 'current' },
   platforms: ['linux/amd64'],
-  lastPush: '2026-08-09',
   lastPushAt: '2026-08-09T10:00:00Z',
 })
 
@@ -164,6 +163,7 @@ test('pinned bucket gallery renders joined cards and disappears when empty', () 
   assert.match(pinned, /aria-label="Pinned buckets"/)
   assert.match(pinned, />images</)
   assert.match(pinned, /Newest version:.*v1/)
+  assert.match(pinned, /<time[^>]*dateTime="2026-08-09T10:00:00Z"/)
   assert.match(pinned, /aria-label="Buckets"/)
   assert.match(pinned, /aria-label="Unpin images"/)
 

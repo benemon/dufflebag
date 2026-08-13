@@ -140,6 +140,7 @@ test('the last target requires its path while non-last removal gets a plain conf
 test('recovered health still renders cumulative and last-failure history', () => {
   const recovered = target({
     status: 'healthy',
+    since: '2026-08-03T10:00:00.123456Z',
     cumulative_failures: 7,
     last_failure_at: '2026-08-03T10:30:00Z',
   })
@@ -148,7 +149,8 @@ test('recovered health still renders cumulative and last-failure history', () =>
   }))
   assert.match(markup, /Cumulative failures<\/td><td[^>]*>7<\/td>/)
   assert.match(markup, /Last failure/)
-  assert.match(markup, /2026-08-03T10:30:00Z/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-03T10:00:00.123456Z"/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-03T10:30:00Z"/)
   assert.match(markup, /Consecutive failures<\/td><td[^>]*>0<\/td>/)
 })
 
@@ -168,9 +170,17 @@ test('storage columns distinguish an empty current file from an unavailable meas
   assert.match(markup, /Space remaining/)
   assert.match(markup, /title="0 bytes">0 B/)
   assert.match(markup, /title="16777216 bytes">16 MiB/)
-  assert.match(markup, /2026-08-04T12:30:00Z/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-04T12:30:00Z"/)
   assert.match(markup, /Unavailable/)
   assert.match(markup, /Never/)
+})
+
+test('an audit target created time renders through the shared timestamp', () => {
+  const markup = renderToStaticMarkup(React.createElement(AuditTargetTable, {
+    targets: [target({ created_at: '2026-08-03T09:00:00.654321Z' })],
+    callerRole: 'root', onRemove: () => {},
+  }))
+  assert.match(markup, /data-label="Created"[^>]*><div[^>]*><span[^>]*><time[^>]*dateTime="2026-08-03T09:00:00.654321Z"/)
 })
 
 test('byte formatting keeps file and filesystem values readable', () => {

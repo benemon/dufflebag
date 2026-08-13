@@ -12,6 +12,7 @@ import {
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 
 export function Audit() {
   return <AuditView {...useAuditTargets()} />
@@ -294,14 +295,14 @@ export function AuditTargetTable({
               }}
             />
             <Td dataLabel="Path">{target.path}</Td>
-            <Td dataLabel="Created">{target.created_at}</Td>
+            <Td dataLabel="Created"><When iso={target.created_at} /></Td>
             <Td dataLabel="Current file">
               <MeasurementValue target={target} field="current_file_size_bytes" />
             </Td>
             <Td dataLabel="Space remaining">
               <MeasurementValue target={target} field="filesystem_free_bytes" />
             </Td>
-            <Td dataLabel="Last reopened">{target.last_reopened_at ?? 'Never'}</Td>
+            <Td dataLabel="Last reopened"><When iso={target.last_reopened_at} emptyText="Never" /></Td>
             <Td dataLabel="Status">
               <Label color={target.status === 'healthy' ? 'green' : 'red'} isCompact>
                 {target.status}
@@ -348,7 +349,7 @@ function AuditTargetHealth({ target }: { target: AuditTarget }) {
       </Thead>
       <Tbody>
         <Tr><Td dataLabel="Health field">Status</Td><Td dataLabel="Value">{target.status}</Td></Tr>
-        <Tr><Td dataLabel="Health field">Since</Td><Td dataLabel="Value">{target.since ?? '—'}</Td></Tr>
+        <Tr><Td dataLabel="Health field">Since</Td><Td dataLabel="Value"><When iso={target.since} /></Td></Tr>
         <Tr>
           <Td dataLabel="Health field">Consecutive failures</Td>
           <Td dataLabel="Value">{target.consecutive_failures}</Td>
@@ -359,7 +360,7 @@ function AuditTargetHealth({ target }: { target: AuditTarget }) {
         </Tr>
         <Tr>
           <Td dataLabel="Health field">Last failure</Td>
-          <Td dataLabel="Value">{target.last_failure_at ?? '—'}</Td>
+          <Td dataLabel="Value"><When iso={target.last_failure_at} /></Td>
         </Tr>
       </Tbody>
     </Table>

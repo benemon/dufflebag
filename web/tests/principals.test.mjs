@@ -432,7 +432,7 @@ test('an expired secret is labelled with its date and stops counting against the
       expires_at: '2026-07-01T00:00:00Z' },
     { id: 's-new', created_at: '2026-07-02T00:00:00Z', last_used_at: null, expires_at: null },
   ] })] })
-  assert.match(markup, /expired 2026-07-01T00:00:00Z/)
+  assert.match(markup, /expired <div[^>]*><span[^>]*><time[^>]*dateTime="2026-07-01T00:00:00Z"/)
   // One usable of two: the expired secret no longer counts, so Issue stays offered.
   assert.match(markup, /1 of 2/)
   assert.match(markup, />Issue secret</)

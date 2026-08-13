@@ -12,6 +12,7 @@ import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
+import { When } from '../components/When'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, requirementReason, type Role } from '../auth/permissions'
@@ -165,7 +166,7 @@ export function BucketsView({
                         Newest version: {bucket.newestVersion?.name ?? '—'}
                       </Content>
                       <PlatformList platforms={bucket.platforms} />
-                      <Content component="p">Last updated: {bucket.lastPush}</Content>
+                      <Content component="p">Last updated: <When iso={bucket.lastPushAt} /></Content>
                     </CardBody>
                     {canPin ? (
                       <CardFooter>
@@ -349,7 +350,7 @@ export function BucketsView({
                           />
                         </Td>
                         <Td dataLabel="Platforms"><PlatformList platforms={bucket.platforms} /></Td>
-                        <Td dataLabel="Last updated">{bucket.lastPush}</Td>
+                        <Td dataLabel="Last updated"><When iso={bucket.lastPushAt} /></Td>
                         <Td dataLabel="Actions">
                           <BucketActions
                             bucket={bucket.name}
