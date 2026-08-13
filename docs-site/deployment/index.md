@@ -212,17 +212,21 @@ Optional, chosen at the first boot and permanent for the instance's lifetime —
 see the [encryption setup](./encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot)
 before setting it. The Vault connection itself uses the Vault SDK's own
 environment (`VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_NAMESPACE`, `VAULT_CACERT`, ...);
-dufflebag's variables select native Kubernetes login when required.
+dufflebag's variables select the native login method when required.
 
 | Variable | Default | Description |
 |---|---|---|
 | `DFBG_KEY_PROVIDER` | — | Key service wrapping the keyring. `vault` (transit) is the only provider; unset means no encryption at rest |
 | `DFBG_VAULT_TRANSIT_MOUNT` | `transit` | Transit engine mount path |
 | `DFBG_VAULT_TRANSIT_KEY` | `dufflebag` | Transit key name; created on first use |
-| `DFBG_VAULT_AUTH_METHOD` | `env` | Vault authentication: `env` uses `VAULT_TOKEN` or an agent/proxy address; `kubernetes` performs native login |
+| `DFBG_VAULT_AUTH_METHOD` | `token` | Vault authentication: `token` uses the SDK's ambient credential; `kubernetes` and `approle` perform native login |
+| `DFBG_VAULT_AUTH_NAMESPACE` | — | Namespace for native login and token renewal; unset uses the operating `VAULT_NAMESPACE`; invalid with `token` |
 | `DFBG_VAULT_K8S_ROLE` | — | Vault Kubernetes auth role; required when `DFBG_VAULT_AUTH_METHOD=kubernetes` |
 | `DFBG_VAULT_K8S_MOUNT` | `kubernetes` | Vault Kubernetes auth mount path |
 | `DFBG_VAULT_K8S_TOKEN_PATH` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | Projected service-account token path; override for non-standard projections |
+| `DFBG_VAULT_APPROLE_ROLE_ID` | — | Vault AppRole role ID; required when `DFBG_VAULT_AUTH_METHOD=approle` |
+| `DFBG_VAULT_APPROLE_SECRET_ID_FILE` | — | AppRole secret-id file; required for AppRole and read at every login |
+| `DFBG_VAULT_APPROLE_MOUNT` | `approle` | Vault AppRole auth mount path |
 
 ### Object storage
 

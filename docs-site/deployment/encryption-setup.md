@@ -19,30 +19,44 @@ DFBG_KEY_PROVIDER=vault          # the only provider currently implemented
 VAULT_ADDR=https://vault.example.com:8200
 # plus the Vault SDK's own environment: VAULT_TOKEN, VAULT_NAMESPACE,
 # VAULT_CACERT, ...
-DFBG_VAULT_AUTH_METHOD=env       # default: token, Agent or proxy ambient auth
+DFBG_VAULT_AUTH_METHOD=token     # default
 DFBG_VAULT_TRANSIT_MOUNT=transit # default
 DFBG_VAULT_TRANSIT_KEY=dufflebag # default; created on first use
 ```
 
-`DFBG_VAULT_AUTH_METHOD=env` is the default and preserves the Vault SDK's
+`DFBG_VAULT_AUTH_METHOD=token` is the default and uses the Vault SDK's
 ambient contract: `VAULT_TOKEN`, or `VAULT_AGENT_ADDR`/`VAULT_PROXY_ADDR`
-pointing at a co-located agent or proxy, supplies the credential. This is also
-the VM answer: Vault Agent covers that workload, so dufflebag deliberately has
-no AppRole mode. dufflebag does not renew credentials in `env` mode.
+pointing at a co-located agent or proxy, supplies the credential. dufflebag
+does not renew this token; the operator owns its rotation.
 
-In a cluster, `DFBG_VAULT_AUTH_METHOD=kubernetes` is recommended. It performs
-native Kubernetes login, requires `DFBG_VAULT_K8S_ROLE`, and automatically
-renews its Vault token and logs in again when renewal is exhausted or fails.
-The auth mount defaults to `kubernetes` and can be changed with
+`DFBG_VAULT_AUTH_METHOD=kubernetes` performs native Kubernetes login. It
+requires `DFBG_VAULT_K8S_ROLE`, renews its Vault token, and logs in again when
+renewal is exhausted or fails. The auth mount defaults to `kubernetes` and can
+be changed with
 `DFBG_VAULT_K8S_MOUNT`; the projected service-account token defaults to
 `/var/run/secrets/kubernetes.io/serviceaccount/token` and can be changed with
 `DFBG_VAULT_K8S_TOKEN_PATH` for non-standard projections.
 
-`VAULT_ADDR` is required: with no address configured (and, in `env` mode, no
+`DFBG_VAULT_AUTH_METHOD=approle` performs native AppRole login. It requires
+`DFBG_VAULT_APPROLE_ROLE_ID` and `DFBG_VAULT_APPROLE_SECRET_ID_FILE`. The
+secret-id file is read at every login, so rotating the secret ID means replacing
+that file. The auth mount defaults to `approle` and can be changed with
+`DFBG_VAULT_APPROLE_MOUNT`. AppRole renews its Vault token and logs in again on
+the same lifecycle as Kubernetes authentication.
+
+`VAULT_ADDR` is required: with no address configured (and, in `token` mode, no
 `VAULT_AGENT_ADDR`/`VAULT_PROXY_ADDR`), the process refuses to start with a
 message naming it rather than silently targeting the SDK's localhost default.
-Kubernetes mode always requires `VAULT_ADDR`; an agent or proxy address does
-not satisfy it because dufflebag performs the login itself.
+Kubernetes and AppRole modes always require `VAULT_ADDR`; an agent or proxy
+address does not satisfy it because dufflebag performs the login itself.
+
+::: info
+`VAULT_NAMESPACE` is the operating namespace and governs transit.
+`DFBG_VAULT_AUTH_NAMESPACE` scopes only the login and the token renewal that
+follows it. Set it when a Vault Enterprise auth mount lives in a different
+namespace from the transit engine. When it is unset, login happens in the
+operating namespace.
+:::
 
 What to know before choosing it:
 
