@@ -23,6 +23,7 @@ import {
   RevokeVersionOptionsForm, revokeOptions, revokeScheduleFailure, type RevokeWhen,
 } from '../components/RevokeVersionOptionsForm'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
+import { updateBulkSelection } from '../components/BulkSelection'
 import { When } from '../components/When'
 
 import {
@@ -576,7 +577,7 @@ export function VersionsFacet({
                       onOpenChange={setBulkSelectOpen}
                       onSelect={(_event, value) => {
                         if (value === 'none') setSelected([])
-                        if (value === 'page') setSelected((current) => updateVersionSelection(
+                        if (value === 'page') setSelected((current) => updateBulkSelection(
                           current, visibleFingerprints, !allVisibleSelected,
                         ))
                         if (value === 'all') setSelected(
@@ -659,7 +660,7 @@ export function VersionsFacet({
                         isSelected: allVisibleSelected,
                         isIndeterminate: visibleSelected.length > 0 && !allVisibleSelected,
                         onSelect: (_event, isSelecting) => setSelected((current) =>
-                          updateVersionSelection(current, visibleFingerprints, isSelecting)),
+                          updateBulkSelection(current, visibleFingerprints, isSelecting)),
                       }}
                     />
                     <Th>Version</Th>
@@ -686,7 +687,7 @@ export function VersionsFacet({
                         rowIndex: first + index,
                         isSelected: selected.includes(version.fingerprint),
                         onSelect: (_event, isSelecting) => setSelected((current) =>
-                          updateVersionSelection(current, [version.fingerprint], isSelecting)),
+                          updateBulkSelection(current, [version.fingerprint], isSelecting)),
                       }} />
                       <Td dataLabel="Version">
                         <Button variant="link" isInline onClick={() => onOpenVersion(version.fingerprint)}>
@@ -805,15 +806,7 @@ export function partitionBulkVersions(versions: Version[], action: BulkVersionAc
   return { included, excluded }
 }
 
-export function updateVersionSelection(
-  current: string[], fingerprints: string[], isSelecting: boolean,
-): string[] {
-  if (!isSelecting) {
-    const removed = new Set(fingerprints)
-    return current.filter((fingerprint) => !removed.has(fingerprint))
-  }
-  return [...new Set([...current, ...fingerprints])]
-}
+export const updateVersionSelection = updateBulkSelection
 
 export type BulkVersionResult = {
   version: Version
