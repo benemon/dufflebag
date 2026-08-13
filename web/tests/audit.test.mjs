@@ -110,7 +110,7 @@ test('three targets couple the disabled Add control to its one visible explanati
   assert.equal(auditTargetLimitReached(three, true), false)
 })
 
-test('the last target requires its path while non-last removal gets a plain confirmation', () => {
+test('every audit target removal requires its path before the danger action arms', () => {
   assert.equal(lastTargetRemovalNeedsConfirmation([target()]), true)
   assert.equal(lastTargetRemovalNeedsConfirmation([target(), target({ id: '2' })]), false)
   let removals = 0
@@ -128,13 +128,21 @@ test('the last target requires its path while non-last removal gets a plain conf
   assert.match(lastMarkup, /stops this instance recording audit events entirely until/)
   assert.match(lastMarkup, /Type <strong>\/var\/log\/dufflebag\/audit\.log<\/strong> to confirm/)
 
-  const plain = renderToStaticMarkup(React.createElement(TargetRemovalConfirmation, {
-    target: target({ path: '/audit/two.log' }), callerRole: 'root',
-    onConfirm: () => {}, onCancel: () => {},
+  const nonLast = TargetRemovalConfirmation({
+    target: target({ path: '/audit/two.log' }), onConfirm: () => {}, onCancel: () => {},
+  })
+  assert.equal(nonLast.props.expected, '/audit/two.log')
+  const nonLastBlocked = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...nonLast.props, confirmation: '', onConfirmationChange: () => {},
   }))
-  assert.match(plain, /Remove \/audit\/two\.log\?/)
-  assert.match(plain, /Remove target/)
-  assert.doesNotMatch(plain, /Type <strong>/)
+  assert.match(nonLastBlocked, /Remove \/audit\/two\.log\?/)
+  assert.match(nonLastBlocked, /Events stop being recorded to \/audit\/two\.log/)
+  assert.match(nonLastBlocked, /Type <strong>\/audit\/two\.log<\/strong> to confirm/)
+  assert.match(nonLastBlocked, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Remove target/)
+  const nonLastArmed = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...nonLast.props, confirmation: '/audit/two.log', onConfirmationChange: () => {},
+  }))
+  assert.doesNotMatch(nonLastArmed, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Remove target/)
 })
 
 test('recovered health still renders cumulative and last-failure history', () => {

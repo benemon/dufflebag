@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import {
-  Alert, Button, Card, CardBody, CardTitle, Content, PageSection, Title,
+  Alert, Card, CardBody, CardTitle, Content, PageSection, Title,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
 import {
   encryptionRefusalHint, rewrapEncryption, rotateEncryption, useEncryption,
@@ -22,6 +23,7 @@ export function EncryptionView({
   encryption, loading, failure, reload, token, callerRole,
 }: ViewProps) {
   const [actionFailure, setActionFailure] = useState<string | null>(null)
+  const [confirmingRewrap, setConfirmingRewrap] = useState(false)
   const [confirmingRotation, setConfirmingRotation] = useState(false)
 
   async function run(work: () => Promise<void>) {
@@ -62,8 +64,12 @@ export function EncryptionView({
           <KeyringCard
             encryption={encryption}
             callerRole={callerRole}
+            confirmingRewrap={confirmingRewrap}
             confirmingRotation={confirmingRotation}
-            onRewrap={() => {
+            onRewrap={() => setConfirmingRewrap(true)}
+            onCancelRewrap={() => setConfirmingRewrap(false)}
+            onConfirmRewrap={() => {
+              setConfirmingRewrap(false)
               void run(async () => {
                 if (token) await rewrapEncryption(token)
               })
@@ -110,14 +116,17 @@ export function EncryptionAlerts({
 }
 
 export function KeyringCard({
-  encryption, callerRole, confirmingRotation, onRewrap, onRotate,
-  onCancelRotation, onConfirmRotation,
+  encryption, callerRole, confirmingRewrap, confirmingRotation, onRewrap, onRotate,
+  onCancelRewrap, onConfirmRewrap, onCancelRotation, onConfirmRotation,
 }: {
   encryption: EncryptionData
   callerRole: Role | null
+  confirmingRewrap: boolean
   confirmingRotation: boolean
   onRewrap: () => void
   onRotate: () => void
+  onCancelRewrap: () => void
+  onConfirmRewrap: () => void
   onCancelRotation: () => void
   onConfirmRotation: () => void
 }) {
@@ -126,9 +135,11 @@ export function KeyringCard({
       <CardTitle>Keyring</CardTitle>
       <CardBody>
         {encryption.state === 'degraded' ? <DegradedEncryptionWarning /> : null}
+        {confirmingRewrap ? (
+          <RewrapConfirmation onConfirm={onConfirmRewrap} onCancel={onCancelRewrap} />
+        ) : null}
         {confirmingRotation ? (
           <RotationConfirmation
-            callerRole={callerRole}
             onConfirm={onConfirmRotation}
             onCancel={onCancelRotation}
           />
@@ -170,31 +181,48 @@ export function DegradedEncryptionWarning() {
 }
 
 export function RotationConfirmation({
-  callerRole, onConfirm, onCancel,
+  onConfirm, onCancel,
 }: {
-  callerRole: Role | null
   onConfirm: () => void
   onCancel: () => void
 }) {
   return (
-    <Alert
-      variant="warning"
-      isInline
+    <TypedConfirmModal
       title="Rotate every encryption key?"
-      style={{ marginBottom: 16 }}
-    >
-      <Content component="p">
+      expected="rotate"
+      verb="Rotate keys"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      body={<Content component="p">
         Existing data stays readable forever. Tokens signed with the old key age out within 15
         minutes. Audit HMAC correlation across the rotation boundary changes by design. On
         multi-replica deployments, peers adopt the new keys within about five minutes.
-      </Content>
-      <RoleRestrictedButton
-        action="manageEncryption" callerRole={callerRole} variant="danger" onClick={onConfirm}
-      >
-        Rotate keys
-      </RoleRestrictedButton>
-      <Button variant="link" onClick={onCancel}>Cancel</Button>
-    </Alert>
+      </Content>}
+    />
+  )
+}
+
+export function RewrapConfirmation({
+  onConfirm, onCancel,
+}: {
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <TypedConfirmModal
+      title="Rewrap the keyring?"
+      expected="rewrap"
+      verb="Rewrap keyring"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      body={<Content component="p">
+        Every keyring entry is re-wrapped under the key service's current KEK version. Stored
+        data is not re-encrypted and stays readable throughout. If the key service refuses or is
+        unreachable, the rewrap fails and the keyring is unchanged.
+      </Content>}
+    />
   )
 }
 

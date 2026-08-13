@@ -109,7 +109,6 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
         ) : confirming ? (
           <TargetRemovalConfirmation
             target={confirming}
-            callerRole={callerRole}
             onCancel={() => setConfirming(null)}
             onConfirm={() => {
               const target = confirming
@@ -199,22 +198,25 @@ export function LastTargetConfirmation({
 }
 
 export function TargetRemovalConfirmation({
-  target, callerRole, onConfirm, onCancel,
+  target, onConfirm, onCancel,
 }: {
   target: AuditTarget
-  callerRole: Role | null
   onConfirm: () => void
   onCancel: () => void
 }) {
   return (
-    <Alert variant="warning" isInline title={`Remove ${target.path}?`} style={{ marginBottom: 16 }}>
-      <RoleRestrictedButton
-        action="configureAudit" callerRole={callerRole} variant="danger" onClick={onConfirm}
-      >
-        Remove target
-      </RoleRestrictedButton>
-      <Button variant="link" onClick={onCancel}>Cancel</Button>
-    </Alert>
+    <TypedConfirmModal
+      title={`Remove ${target.path}?`}
+      expected={target.path}
+      verb="Remove target"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      body={<Content component="p">
+        Events stop being recorded to {target.path}. The remaining targets continue to receive
+        every event.
+      </Content>}
+    />
   )
 }
 

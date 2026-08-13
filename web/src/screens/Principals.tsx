@@ -234,7 +234,6 @@ export function PrincipalsView({
         <RevokeSecretConfirmation
           principal={revoking.principal}
           secret={revoking.secret}
-          callerRole={callerRole}
           onCancel={() => setRevoking(null)}
           onConfirm={() => {
             const selected = revoking
@@ -271,51 +270,25 @@ export function DeletePrincipalConfirmation({
 }
 
 export function RevokeSecretConfirmation({
-  principal, secret, callerRole, onConfirm, onCancel,
+  principal, secret, onConfirm, onCancel,
 }: {
   principal: Principal
   secret: SecretMetadata
-  callerRole: Role | null
   onConfirm: () => void
   onCancel: () => void
 }) {
   return (
-    <Modal aria-labelledby="revoke-secret-modal-title" isOpen onClose={onCancel} variant="small">
-      <RevokeSecretConfirmationView
-        principal={principal}
-        secret={secret}
-        callerRole={callerRole}
-        onConfirm={onConfirm}
-        onCancel={onCancel}
-      />
-    </Modal>
-  )
-}
-
-export function RevokeSecretConfirmationView({
-  principal, secret, callerRole, onConfirm, onCancel,
-}: {
-  principal: Principal
-  secret: SecretMetadata
-  callerRole: Role | null
-  onConfirm: () => void
-  onCancel: () => void
-}) {
-  return (
-    <>
-      <ModalHeader labelId="revoke-secret-modal-title" title={`Revoke secret for ${principal.name}?`} />
-      <ModalBody>
-        <Content component="p">Secret {secret.id} will stop authenticating immediately.</Content>
-      </ModalBody>
-      <ModalFooter>
-        <RoleRestrictedButton
-          action="managePrincipals" callerRole={callerRole} variant="danger" onClick={onConfirm}
-        >
-          Revoke secret
-        </RoleRestrictedButton>
-        <Button variant="link" onClick={onCancel}>Cancel</Button>
-      </ModalFooter>
-    </>
+    <TypedConfirmModal
+      title={`Revoke secret for ${principal.name}?`}
+      expected="revoke"
+      verb="Revoke secret"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+      body={<Content component="p">
+        Secret {secret.id} will stop authenticating immediately.
+      </Content>}
+    />
   )
 }
 

@@ -14,7 +14,9 @@ let rotateEncryption
 let EncryptionView
 let EncryptionAlerts
 let RotationConfirmation
+let RewrapConfirmation
 let encryptionIsUnconfigured
+let TypedConfirmModalView
 
 before(async () => {
   vite = await createServer({
@@ -29,8 +31,11 @@ before(async () => {
     encryptionRefusalHint, loadEncryption, rewrapEncryption, rotateEncryption,
   } = await vite.ssrLoadModule('/src/data/encryption.ts'))
   ;({
-    EncryptionView, EncryptionAlerts, RotationConfirmation, encryptionIsUnconfigured,
+    EncryptionView, EncryptionAlerts, RotationConfirmation, RewrapConfirmation,
+    encryptionIsUnconfigured,
   } = await vite.ssrLoadModule('/src/screens/Encryption.tsx'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -154,20 +159,48 @@ test('non-root encryption controls show the root requirement and are disabled ne
   }
 })
 
-test('rotation confirmation states every consequence before invoking the action', () => {
+test('rotation requires rotate and states every consequence before invoking the action', () => {
   let fired = false
-  const markup = renderToStaticMarkup(React.createElement(RotationConfirmation, {
-    callerRole: 'root',
+  const confirmation = RotationConfirmation({
     onConfirm: () => { fired = true },
     onCancel: () => {},
-  }))
+  })
   assert.equal(fired, false)
-  assert.match(markup, /Rotate every encryption key/)
-  assert.match(markup, /Existing data stays readable forever/)
-  assert.match(markup, /old key age out within 15 minutes/)
-  assert.match(markup, /Audit HMAC correlation across the rotation boundary changes by design/)
-  assert.match(markup, /peers adopt the new keys within about five minutes/)
-  assert.match(markup, />Rotate keys</)
+  assert.equal(confirmation.props.expected, 'rotate')
+  const blocked = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
+  }))
+  assert.match(blocked, /Rotate every encryption key/)
+  assert.match(blocked, /Existing data stays readable forever/)
+  assert.match(blocked, /old key age out within 15 minutes/)
+  assert.match(blocked, /Audit HMAC correlation across the rotation boundary changes by design/)
+  assert.match(blocked, /peers adopt the new keys within about five minutes/)
+  assert.match(blocked, /Type <strong>rotate<\/strong> to confirm/)
+  assert.match(blocked, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Rotate keys/)
+  const armed = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: 'rotate', onConfirmationChange: () => {},
+  }))
+  assert.doesNotMatch(armed, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Rotate keys/)
+  confirmation.props.onConfirm()
+  assert.equal(fired, true)
+})
+
+test('rewrap requires rewrap and explains its atomic failure behaviour', () => {
+  const confirmation = RewrapConfirmation({ onConfirm: () => {}, onCancel: () => {} })
+  assert.equal(confirmation.props.expected, 'rewrap')
+  const blocked = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
+  }))
+  assert.match(blocked, /Rewrap the keyring\?/)
+  assert.match(blocked, /Every keyring entry is re-wrapped under the key service&#x27;s current KEK version\./)
+  assert.match(blocked, /Stored data is not re-encrypted and stays readable throughout\./)
+  assert.match(blocked, /the rewrap fails and the keyring is unchanged\./)
+  assert.match(blocked, /Type <strong>rewrap<\/strong> to confirm/)
+  assert.match(blocked, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Rewrap keyring/)
+  const armed = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: 'rewrap', onConfirmationChange: () => {},
+  }))
+  assert.doesNotMatch(armed, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Rewrap keyring/)
 })
 
 test('encryption refusals map to safe operator guidance', () => {

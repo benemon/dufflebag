@@ -37,11 +37,12 @@ Until the console has resolved who you are, it shows the reader-tier
 navigation as a safe default; a direct URL to a restricted screen still
 answers honestly.
 
-Destructive actions — deleting a bucket, version, channel, webhook,
-principal or Bag Drop configuration, revoking a version, stopping a mirror,
-or removing the last audit target — ask you to type the resource's name
-before the confirming button arms. Routine secret rotation stays a single
-confirmation click.
+Every destructive action confirms in a modal that arms only after you type a confirmation:
+deleting a bucket, version, channel, webhook, principal or Bag Drop configuration, revoking
+a version, or stopping a mirror asks for the resource's name; removing an audit target asks
+for the target path; revoking a secret, rotating encryption keys, or rewrapping the keyring
+asks for the action word itself. Restoring a version is recovery, not destruction, and
+confirms with a single click.
 
 ## The screens
 

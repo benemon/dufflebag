@@ -1099,9 +1099,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // With three targets the explanation is present; removing one makes both
     // it and the disabled state disappear together.
     await clickInRow(auditGoodTwo, 'Remove')
-    // Non-last removal now confirms plainly (duf-fcg6.5) before acting.
+    // Non-last removal confirms in the typed modal like every other
+    // destructive action (duf-et4h.4): the target path arms the button.
     await waitForText(`Remove ${auditGoodTwo}?`)
-    await clickByText('button', 'Remove target')
+    await typeToConfirm(auditGoodTwo)
+    await clickInModal('Remove target')
     await until('the second target to disappear', async () => !(await bodyText()).includes(auditGoodTwo))
     // Removal triggers a reload, and while it is in flight the form is not
     // rendered at all — so the re-enabled Add control is a condition to wait
@@ -1115,7 +1117,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     exhaustAuditVolume()
     await clickInRow(auditGoodOne, 'Remove')
     await waitForText(`Remove ${auditGoodOne}?`)
-    await clickByText('button', 'Remove target')
+    await typeToConfirm(auditGoodOne)
+    await clickInModal('Remove target')
     await until('the Audit screen to report its degraded load failure', async () => {
       await page.click('a[href="/principals"]')
       await page.waitForFunction(
@@ -1224,6 +1227,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await vaultWrite('/v1/transit/keys/dufflebag/rotate', {})
     await clickByText('button', 'Rewrap keyring')
+    await typeToConfirm('rewrap')
+    await clickInModal('Rewrap keyring')
     await until('every keyring row to be rewrapped under v2', async () => {
       const rows = await keyringRows()
       return rows.length === 4 && rows.every((row) => row.kekRef === 'v2')
@@ -1231,14 +1236,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('button', 'Rotate keys')
     await waitForText('Rotate every encryption key?')
-    await until('the scoped rotation confirmation', () =>
-      page.$$eval('.pf-v6-c-alert button', (buttons) => {
-        const confirm = buttons.find((button) =>
-          button.innerText.trim() === 'Rotate keys' && !button.disabled)
-        if (!confirm) return false
-        confirm.click()
-        return true
-      }))
+    await typeToConfirm('rotate')
+    await clickInModal('Rotate keys')
     await until('rotation to bump the active version in place', async () => {
       const rows = await keyringRows()
       return rows.length === 4 && hasPurposes(rows) &&
@@ -1248,6 +1247,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await vaultWrite('/v1/transit/keys/dufflebag/rotate', {})
     await vaultWrite('/v1/transit/keys/dufflebag/config', { min_decryption_version: 3 })
     await clickByText('button', 'Rewrap keyring')
+    await typeToConfirm('rewrap')
+    await clickInModal('Rewrap keyring')
     await waitForText('The action was refused')
     await waitForText('The key service refused or was unreachable')
     await page.reload({ waitUntil: 'domcontentloaded' })
@@ -1259,6 +1260,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await vaultWrite('/v1/transit/keys/dufflebag/config', { min_decryption_version: 1 })
     await clickByText('button', 'Rewrap keyring')
+    await typeToConfirm('rewrap')
+    await clickInModal('Rewrap keyring')
     await until('every retained keyring row to be rewrapped under v3', async () => {
       const rows = await keyringRows()
       return rows.length === 4 &&
@@ -2454,7 +2457,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await toggleRow('doomed-builder')
     await revokeFirstSecretOf('doomed-builder')
-    // Rotation stays plain-confirm by design: no typed field, one deliberate click.
+    await typeToConfirm('revoke')
     await clickInModal('Revoke secret')
     await until('the revoked secret to leave the listing', async () =>
       (await rowText('doomed-builder')).includes('1 of 2'))
