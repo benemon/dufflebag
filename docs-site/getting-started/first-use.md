@@ -20,36 +20,70 @@ For a self-contained alternative, use its [Helm section](../deployment/index.md#
 
 ## Initialize the instance
 
-Complete initialization before exposing the instance publicly. Use the console
-wizard, or call the one-shot endpoint directly:
+Prerequisites: A running dufflebag instance that has not been initialized.
+
+::: warning
+Complete initialization before exposing the instance publicly. `POST /sys/init`
+works once. Its response is shown once and cannot be retrieved later.
+:::
+
+1. Open the console wizard.
+
+![Dufflebag first-run initialization screen](/screenshots/first-run.png)
+
+   For a headless setup, call the one-shot endpoint directly:
 
 ```sh
 curl -sX POST https://registry.example.com/sys/init \
   -H 'content-type: application/json' -d '{}'
 ```
 
-`POST /sys/init` works once. Its response contains the initial root client ID
-and client secret, recovery shares, and the recovery threshold. They are shown
-once and cannot be retrieved later. Put the credentials in a secret manager and
-store the recovery shares separately before continuing.
+2. Copy the initial root client ID and client secret, recovery shares, and
+   recovery threshold from the response.
+
+3. Put the credentials in a secret manager and store the recovery shares
+   separately before continuing.
 
 ## Create an organisation and project
 
-Continue through the console wizard to create an organisation and a project.
-For a headless setup, use the organisation and project operations in the
-[platform API reference](/platform-api.html).
+Prerequisites: The initial root client ID and client secret from initialization.
+
+1. Sign in to the console with the initial root client credentials.
+
+![Dufflebag service principal sign-in screen](/screenshots/login.png)
+
+2. Continue through the console wizard to create an organisation and a project.
+   For a headless setup, use the organisation and project operations in the
+   [platform API reference](/platform-api.html).
 
 ## Mint a builder principal
 
-Create a project-scoped service principal with the `builder` role, then issue
-its first secret. Retain the client ID and the one-time secret for the client
-environment. The console supports this flow; the equivalent principal and
-secret operations are in the [platform API reference](/platform-api.html).
+Prerequisites: An organisation and project.
+
+1. Create a project-scoped service principal with the `builder` role. The
+   console supports this operation. The equivalent principal operation is in
+   the [platform API reference](/platform-api.html).
+
+2. Issue the principal's first secret. The equivalent secret operation is also
+   in the [platform API reference](/platform-api.html).
+
+3. Retain the client ID and the one-time secret for the client environment.
 
 ## Point Packer at dufflebag
 
-Open the console's **Instance** screen after selecting the organisation and
-project. It generates this environment block for the selected tenancy:
+Prerequisites: A selected organisation and project, and the builder principal's
+client ID and secret.
+
+::: warning
+Use a client ID that has not been used against another service. The SDK caches
+tokens in `~/.config/hcp/creds-cache.json`, keyed by client ID and geography.
+Reusing an ID can cause a cached token to be sent to the wrong endpoint.
+:::
+
+1. Open the console's **Instance** screen after selecting the organisation and
+   project.
+
+2. Export the environment block that it generates for the selected tenancy:
 
 ```sh
 export HCP_API_ADDRESS=registry.example.com
@@ -64,15 +98,15 @@ export HCP_PROJECT_ID='<project UUID>'
 HTTPS. Set `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` together for deterministic
 selection; if they are omitted, the clients use discovery. For a disposable
 self-signed deployment, `HCP_API_TLS=insecure` and `HCP_AUTH_TLS=insecure` skip
-certificate verification. `HCP_API_TLS=disabled` selects plain HTTP for API
-traffic, but authentication still requires an HTTPS URL;
-`HCP_AUTH_TLS=disabled` does not disable authentication TLS.
+certificate verification.
 
-Use a client ID that has not been used against another service. The SDK caches
-tokens in `~/.config/hcp/creds-cache.json`, keyed by client ID and geography,
-so reusing an ID can cause a cached token to be sent to the wrong endpoint.
+::: info
+`HCP_API_TLS=disabled` selects plain HTTP for API traffic, but authentication
+still requires an HTTPS URL. `HCP_AUTH_TLS=disabled` does not disable
+authentication TLS.
+:::
 
-An ordinary HCL2 template can publish registry metadata:
+3. Create an ordinary HCL2 template to publish registry metadata:
 
 ```hcl
 packer {
@@ -99,13 +133,17 @@ build {
 }
 ```
 
-Run `packer init example.pkr.hcl`, then `packer build example.pkr.hcl` with the
-environment above.
+4. Run `packer init example.pkr.hcl`, then `packer build example.pkr.hcl` with
+   the environment above.
 
 ## Point terraform-provider-hcp at dufflebag
 
-The provider reads the same `HCP_*` environment variables. Configure it to skip
-the external status check, then resolve the managed `latest` channel:
+The provider reads the same `HCP_*` environment variables.
+
+Prerequisites: The same `HCP_*` environment variables used by Packer.
+
+1. Configure the provider to skip the external status check, then resolve the
+   managed `latest` channel:
 
 ```hcl
 terraform {
