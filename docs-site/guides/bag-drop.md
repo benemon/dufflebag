@@ -5,8 +5,8 @@ buckets, completed versions, builds, artifacts, channels, SBOMs — to a
 destination registry. The local registry stays authoritative; the destination
 converges toward it. Nothing ever flows back in.
 
-This guide covers the workflow: configuring a destination, verifying it,
-enabling the mirror, associating buckets, and reading sync status. The
+This guide covers the workflow: enabling a destination in one step,
+associating buckets, and reading sync status. The
 [deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)
 covers the operator concerns (egress, credential keys, reconcile cadence), and
 the [architecture document](https://github.com/benemon/dufflebag/blob/main/docs/architecture.md)
@@ -49,20 +49,28 @@ See the
 [deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)
 for the full credential-protection contract.
 
-## Configure, verify, enable
+## Configure and enable
 
 The console's **Bag Drop** screen drives the whole flow. Selecting the adapter
-gates which fields appear; saving stores the configuration disabled.
+gates which fields appear, and **Enable** is the single write action: the
+server validates the configuration, resolves the destination with the supplied
+credential, and only if that succeeds stores the configuration and turns the
+mirror on — one step, nothing to click afterwards.
 
-**Verify** is a read-only resolution check: dufflebag authenticates against
-the destination with the stored credential and confirms the configured project
-resolves. The result is `resolved`, or `failed` with a reason —
-`credential_refused`, `project_not_found`, `unreachable`, or `tls_failure` —
-and the underlying message. Verification changes nothing on either side.
+A failed resolution stores **nothing**. No configuration is created, and if
+one already existed it is left untouched — still enabled if it was. There is
+no half-saved state to recover from; correct the fields and enable again. The
+failure names its reason — `credential_refused`, `project_not_found`,
+`unreachable`, or `tls_failure` — and the underlying message.
 
-**Enable** re-runs exactly the same resolution check server-side and only
-turns the mirror on if it passes. **Disable** stops the reconciler for the
-project without discarding configuration or associations.
+The client secret is required the first time; when editing an existing
+configuration it may be left blank to keep the stored credential.
+
+**Verify** is a read-only re-check of the *stored* configuration: the same
+resolution the server runs on enable, changing nothing on either side. Use it
+to confirm a destination is still reachable without editing anything.
+**Disable** stops the reconciler for the project without discarding
+configuration or associations; enabling again re-runs the resolution check.
 
 Deleting the configuration is guarded twice: while enabled it is refused
 (`409 — Bag Drop is enabled; disable it first`), and it stays refused with
@@ -113,9 +121,12 @@ revoked version whose local source is active is restored.
 The Bag Drop screen (and `GET …/bagdrop/status`) reports whether the project
 is configured, which adapter, whether it is enabled, the last verification
 result, and one row per association: its state (`active` or
-`pending_removal`), its sync status (`pending`, `synced`, or `removing`),
-when it last synced, and the last sync error if the most recent attempt
-failed.
+`pending_removal`), its sync status (`pending`, `synced`, `error`, or
+`removing`), when it last synced, and the last sync error if the most recent
+attempt failed. `error` marks an association whose most recent attempt
+failed: the console shows it as a red label with the error text beside it in
+the row, so a destination that keeps refusing work reads as exactly that
+rather than as `pending` forever.
 
 The reconciler runs on a level basis (default every five minutes, with
 per-project backoff on failure) and never sits on the serving path — a slow or

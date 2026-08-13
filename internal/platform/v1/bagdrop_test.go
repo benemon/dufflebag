@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -94,7 +95,7 @@ func TestBagDropConfigWriteAuditsClientSecretByHMACOnly(t *testing.T) {
 	handler, trail := auditedPlatform(t, bagDropHandler(identity.RoleMaintainer, &fakeBagDropService{}))
 	body := bagDropWriteBody()
 	body["hcp_packer"].(map[string]any)["client_secret"] = secret
-	response := call(t, handler, http.MethodPut, bagDropPath(""), body, testToken)
+	response := call(t, handler, http.MethodPost, bagDropPath("enable"), body, testToken)
 	if response.Code != http.StatusOK {
 		t.Fatalf("status = %d: %s", response.Code, response.Body)
 	}
@@ -138,6 +139,100 @@ func TestBagDropHandlerEnableRefusesUnresolvableFakeAdapter(t *testing.T) {
 	}
 }
 
+func TestBagDropHandlerEnableWithConfigIsAtomicOnResolutionFailure(t *testing.T) {
+	sealer := bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef")
+	sealed, err := sealer.Seal(testOrgID, testProjID, "old-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	previous := &bagdrop.Record{
+		OrganizationID: testOrgID, ProjectID: testProjID, Adapter: bagdrop.AdapterHCPPacker,
+		HCPPacker: bagdrop.HCPPackerConfig{
+			OrganizationID: "old-org", ProjectID: "old-project", ClientID: "old-client",
+		},
+		SealedSecret: sealed, Enabled: true, CreatedAt: initTestTime, UpdatedAt: initTestTime,
+	}
+	for _, test := range []struct {
+		name     string
+		previous *bagdrop.Record
+	}{
+		{name: "without prior config"},
+		{name: "with prior enabled config", previous: previous},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			repository := &handlerBagDropRepository{record: test.previous}
+			adapter := &handlerBagDropAdapter{result: bagdrop.VerificationResult{
+				Outcome: bagdrop.OutcomeFailed, Reason: bagdrop.ReasonUnreachable,
+			}}
+			service := bagdrop.NewService(
+				repository, sealer, bagdrop.Registry{bagdrop.AdapterHCPPacker: adapter},
+			)
+			response := call(
+				t, bagDropHandler(identity.RoleMaintainer, service), http.MethodPost,
+				bagDropPath("enable"), bagDropWriteBody(), testToken,
+			)
+			if response.Code != http.StatusConflict || repository.putCalls != 0 {
+				t.Fatalf("response = %d, persistence calls=%d: %s",
+					response.Code, repository.putCalls, response.Body)
+			}
+			if !reflect.DeepEqual(repository.record, test.previous) {
+				t.Fatalf("failed enable changed record:\n got %#v\nwant %#v", repository.record, test.previous)
+			}
+			if test.previous != nil && !repository.record.Enabled {
+				t.Fatal("failed replacement disabled the previous configuration")
+			}
+		})
+	}
+}
+
+func TestBagDropHandlerEnableWithConfigRetainsSecretOnUpdate(t *testing.T) {
+	sealer := bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef")
+	sealed, err := sealer.Seal(testOrgID, testProjID, "retained-secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &handlerBagDropRepository{record: &bagdrop.Record{
+		OrganizationID: testOrgID, ProjectID: testProjID, Adapter: bagdrop.AdapterHCPPacker,
+		HCPPacker: bagdrop.HCPPackerConfig{
+			OrganizationID: "old-org", ProjectID: "old-project", ClientID: "old-client",
+		},
+		SealedSecret: sealed, CreatedAt: initTestTime, UpdatedAt: initTestTime,
+	}}
+	adapter := &handlerBagDropAdapter{result: bagdrop.VerificationResult{Outcome: bagdrop.OutcomeResolved}}
+	service := bagdrop.NewService(
+		repository, sealer, bagdrop.Registry{bagdrop.AdapterHCPPacker: adapter},
+	)
+	body := bagDropWriteBody()
+	delete(body["hcp_packer"].(map[string]any), "client_secret")
+	response := call(
+		t, bagDropHandler(identity.RoleMaintainer, service), http.MethodPost,
+		bagDropPath("enable"), body, testToken,
+	)
+	if response.Code != http.StatusOK || repository.putCalls != 1 ||
+		adapter.destination.ClientSecret != "retained-secret" || !repository.record.Enabled {
+		t.Fatalf("response = %d, persistence calls=%d, destination=%#v, record=%#v: %s",
+			response.Code, repository.putCalls, adapter.destination, repository.record, response.Body)
+	}
+}
+
+func TestBagDropHandlerEnableWithConfigRequiresSecretOnCreate(t *testing.T) {
+	service := bagdrop.NewService(
+		&handlerBagDropRepository{},
+		bagdrop.NewCredentialSealer(nil, "0123456789abcdef0123456789abcdef"),
+		bagdrop.Registry{},
+	)
+	body := bagDropWriteBody()
+	delete(body["hcp_packer"].(map[string]any), "client_secret")
+	response := call(
+		t, bagDropHandler(identity.RoleMaintainer, service), http.MethodPost,
+		bagDropPath("enable"), body, testToken,
+	)
+	if response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "client_secret is required") {
+		t.Fatalf("response = %d: %s", response.Code, response.Body)
+	}
+}
+
 func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T) {
 	const secret = "SECRET-ECHO-GATE-known-client-secret"
 	service := &fakeBagDropService{}
@@ -151,8 +246,8 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 		path   string
 		body   any
 	}{
-		{http.MethodPut, bagDropPath(""), body},
-		{http.MethodPut, bagDropPath(""), dufflebagBody},
+		{http.MethodPost, bagDropPath("enable"), body},
+		{http.MethodPost, bagDropPath("enable"), dufflebagBody},
 		{http.MethodGet, bagDropPath(""), nil},
 		{http.MethodPost, bagDropPath("verify"), nil},
 		{http.MethodPost, bagDropPath("enable"), nil},
@@ -215,7 +310,7 @@ func TestBagDropHandlerRefusesAdapterConnectionBlockMismatch(t *testing.T) {
 			},
 		},
 	} {
-		response := call(t, handler, http.MethodPut, bagDropPath(""), body, testToken)
+		response := call(t, handler, http.MethodPost, bagDropPath("enable"), body, testToken)
 		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), "requires exactly") {
 			t.Fatalf("mismatch response = %d: %s", response.Code, response.Body)
 		}
@@ -400,7 +495,7 @@ func TestBagDropAssociationRendersReconcileStatusFields(t *testing.T) {
 		LastAttemptAt: &attemptedAt, LastSyncedAt: &syncedAt, LastSyncError: &failure,
 	})
 	if rendered.LastAttemptAt == nil || rendered.LastSyncError == nil || *rendered.LastSyncError != failure ||
-		rendered.SyncStatus != BagDropSyncStatusPending {
+		rendered.SyncStatus != BagDropSyncStatusError {
 		t.Fatalf("rendered association = %#v", rendered)
 	}
 }
@@ -414,10 +509,10 @@ type bagDropOperation struct {
 func bagDropOperations() []bagDropOperation {
 	return append([]bagDropOperation{
 		{"get", http.MethodGet, bagDropPath(""), "bagdrop.config.read", nil, http.StatusOK},
-		{"put", http.MethodPut, bagDropPath(""), "bagdrop.config.write", bagDropWriteBody(), http.StatusOK},
 		{"delete", http.MethodDelete, bagDropPath(""), "bagdrop.config.delete", nil, http.StatusNoContent},
 		{"verify", http.MethodPost, bagDropPath("verify"), "bagdrop.verify", nil, http.StatusOK},
-		{"enable", http.MethodPost, bagDropPath("enable"), "bagdrop.enable", nil, http.StatusOK},
+		{"enable-stored", http.MethodPost, bagDropPath("enable"), "bagdrop.enable", nil, http.StatusOK},
+		{"enable-with-config", http.MethodPost, bagDropPath("enable"), "bagdrop.enable", bagDropWriteBody(), http.StatusOK},
 		{"disable", http.MethodPost, bagDropPath("disable"), "bagdrop.disable", nil, http.StatusOK},
 	}, bagDropAssociationOperations()...)
 }
@@ -520,12 +615,6 @@ func (s *fakeBagDropService) Get(context.Context, string, string) (*bagdrop.Conf
 	return s.config(), nil
 }
 
-func (s *fakeBagDropService) Put(
-	context.Context, string, string, bagdrop.Write,
-) (*bagdrop.Config, *bagdrop.VerificationResult, error) {
-	return s.config(), nil, nil
-}
-
 func (s *fakeBagDropService) Delete(context.Context, string, string) error { return s.deleteErr }
 
 func (*fakeBagDropService) Verify(context.Context, string, string) (bagdrop.VerificationResult, error) {
@@ -533,7 +622,7 @@ func (*fakeBagDropService) Verify(context.Context, string, string) (bagdrop.Veri
 }
 
 func (s *fakeBagDropService) Enable(
-	context.Context, string, string,
+	context.Context, string, string, *bagdrop.Write,
 ) (*bagdrop.Config, *bagdrop.VerificationResult, error) {
 	config := s.config()
 	config.Enabled = true
@@ -579,12 +668,14 @@ func (s *fakeBagDropService) Status(context.Context, string, string) (*bagdrop.S
 }
 
 type handlerBagDropAdapter struct {
-	result bagdrop.VerificationResult
-	calls  int
+	result      bagdrop.VerificationResult
+	destination bagdrop.Destination
+	calls       int
 }
 
-func (a *handlerBagDropAdapter) Resolve(context.Context, bagdrop.Destination) bagdrop.VerificationResult {
+func (a *handlerBagDropAdapter) Resolve(_ context.Context, destination bagdrop.Destination) bagdrop.VerificationResult {
 	a.calls++
+	a.destination = destination
 	return a.result
 }
 
@@ -597,6 +688,7 @@ func (*handlerBagDropAdapter) BeginReconcile(
 type handlerBagDropRepository struct {
 	record      *bagdrop.Record
 	enableCalls int
+	putCalls    int
 }
 
 func (*handlerBagDropRepository) ListBagDropAssociations(
@@ -641,6 +733,7 @@ func (r *handlerBagDropRepository) GetBagDropConfig(context.Context, string, str
 func (r *handlerBagDropRepository) PutBagDropConfig(
 	_ context.Context, record *bagdrop.Record,
 ) (*bagdrop.Record, error) {
+	r.putCalls++
 	r.record = record
 	return r.GetBagDropConfig(context.Background(), record.OrganizationID, record.ProjectID)
 }

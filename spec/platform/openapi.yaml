@@ -1047,43 +1047,6 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
-    put:
-      tags: [bagdrop]
-      operationId: putBagDropConfig
-      summary: Create or replace a project's Bag Drop destination configuration
-      description: |
-        `client_secret` is required when no configuration exists. On update it
-        may be omitted to retain the existing sealed secret.
-
-        A disabled configuration is stored without contacting the destination.
-        Changing connection details while enabled re-runs destination resolution
-        inline. A failed resolution answers 409 with the result and leaves the
-        stored configuration unchanged, preserving the invariant that enabled
-        means last-known-resolvable.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: { $ref: "#/components/schemas/BagDropConfigWrite" }
-      responses:
-        "200":
-          description: Created or replaced configuration.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/BagDropConfig" }
-        "400":
-          description: Invalid configuration, including a missing create credential.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/Error" }
-        "401": { $ref: "#/components/responses/Unauthorized" }
-        "403": { $ref: "#/components/responses/Forbidden" }
-        "404": { $ref: "#/components/responses/NotFound" }
-        "409":
-          description: Credential sealing is unavailable, or an enabled replacement did not resolve.
-          content:
-            application/json:
-              schema: { $ref: "#/components/schemas/BagDropConflict" }
     delete:
       tags: [bagdrop]
       operationId: deleteBagDropConfig
@@ -1228,15 +1191,35 @@ paths:
       operationId: enableBagDrop
       summary: Verify and enable the configured destination
       description: |
-        Always re-runs destination resolution server-side. Success records the
-        resolved result and enables the configuration. Failure answers 409 with
-        the verification result and leaves the configuration unchanged.
+        Without a body, re-runs destination resolution against the stored
+        configuration and enables it on success. Resolution failure answers 409
+        with the verification result and leaves the stored configuration unchanged.
+
+        With a body, validates the supplied configuration and resolves the
+        destination against it before writing anything. On success the supplied
+        configuration is persisted and enabled atomically. Resolution failure
+        answers 409 with the verification result and persists nothing: no
+        configuration is created, and any existing configuration is left
+        byte-for-byte unchanged and remains enabled if it was enabled.
+
+        `client_secret` is required when no configuration exists. On update it
+        may be omitted to retain the existing sealed secret.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/BagDropConfigWrite" }
       responses:
         "200":
           description: Enabled configuration.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/BagDropConfig" }
+        "400":
+          description: Invalid configuration, including a missing create credential.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
@@ -2099,7 +2082,7 @@ components:
 
     BagDropSyncStatus:
       type: string
-      enum: [pending, synced, removing]
+      enum: [pending, synced, error, removing]
 
     BagDropAssociation:
       type: object

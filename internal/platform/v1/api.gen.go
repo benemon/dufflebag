@@ -152,6 +152,7 @@ func (e BagDropConfigCredentialProtection) Valid() bool {
 
 // Defines values for BagDropSyncStatus.
 const (
+	BagDropSyncStatusError    BagDropSyncStatus = "error"
 	BagDropSyncStatusPending  BagDropSyncStatus = "pending"
 	BagDropSyncStatusRemoving BagDropSyncStatus = "removing"
 	BagDropSyncStatusSynced   BagDropSyncStatus = "synced"
@@ -160,6 +161,8 @@ const (
 // Valid indicates whether the value is a known member of the BagDropSyncStatus enum.
 func (e BagDropSyncStatus) Valid() bool {
 	switch e {
+	case BagDropSyncStatusError:
+		return true
 	case BagDropSyncStatusPending:
 		return true
 	case BagDropSyncStatusRemoving:
@@ -1344,8 +1347,8 @@ type CreateOrganizationJSONRequestBody CreateOrganizationJSONBody
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody CreateProjectJSONBody
 
-// PutBagDropConfigJSONRequestBody defines body for PutBagDropConfig for application/json ContentType.
-type PutBagDropConfigJSONRequestBody = BagDropConfigWrite
+// EnableBagDropJSONRequestBody defines body for EnableBagDrop for application/json ContentType.
+type EnableBagDropJSONRequestBody = BagDropConfigWrite
 
 // CreateWebhookJSONRequestBody defines body for CreateWebhook for application/json ContentType.
 type CreateWebhookJSONRequestBody = WebhookCreate
@@ -1709,38 +1712,6 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
 	GetBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// PutBagDropConfigWithBody Create or replace a project's Bag Drop destination configuration
-	//
-	// `client_secret` is required when no configuration exists. On update it
-	// may be omitted to retain the existing sealed secret.
-	//
-	// A disabled configuration is stored without contacting the destination.
-	// Changing connection details while enabled re-runs destination resolution
-	// inline. A failed resolution answers 409 with the result and leaves the
-	// stored configuration unchanged, preserving the invariant that enabled
-	// means last-known-resolvable.
-	//
-	// Takes any type of body and a specified content type.
-	//
-	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-	PutBagDropConfigWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
-
-	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
-	//
-	// `client_secret` is required when no configuration exists. On update it
-	// may be omitted to retain the existing sealed secret.
-	//
-	// A disabled configuration is stored without contacting the destination.
-	// Changing connection details while enabled re-runs destination resolution
-	// inline. A failed resolution answers 409 with the result and leaves the
-	// stored configuration unchanged, preserving the invariant that enabled
-	// means last-known-resolvable.
-	//
-	// Takes a body of the `application/json` content type.
-	//
-	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-	PutBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// ListBagDropAssociations List buckets selected for Bag Drop
 	//
 	// Requires maintainer on this project.
@@ -1771,14 +1742,47 @@ type ClientInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
 	DisableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
-	// EnableBagDrop Verify and enable the configured destination
+	// EnableBagDropWithBody Verify and enable the configured destination
 	//
-	// Always re-runs destination resolution server-side. Success records the
-	// resolved result and enables the configuration. Failure answers 409 with
-	// the verification result and leaves the configuration unchanged.
+	// Without a body, re-runs destination resolution against the stored
+	// configuration and enables it on success. Resolution failure answers 409
+	// with the verification result and leaves the stored configuration unchanged.
+	//
+	// With a body, validates the supplied configuration and resolves the
+	// destination against it before writing anything. On success the supplied
+	// configuration is persisted and enabled atomically. Resolution failure
+	// answers 409 with the verification result and persists nothing: no
+	// configuration is created, and any existing configuration is left
+	// byte-for-byte unchanged and remains enabled if it was enabled.
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// Takes any type of body and a specified content type.
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
-	EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+	EnableBagDropWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// EnableBagDrop Verify and enable the configured destination
+	//
+	// Without a body, re-runs destination resolution against the stored
+	// configuration and enables it on success. Resolution failure answers 409
+	// with the verification result and leaves the stored configuration unchanged.
+	//
+	// With a body, validates the supplied configuration and resolves the
+	// destination against it before writing anything. On success the supplied
+	// configuration is persisted and enabled atomically. Resolution failure
+	// answers 409 with the verification result and persists nothing: no
+	// configuration is created, and any existing configuration is left
+	// byte-for-byte unchanged and remains enabled if it was enabled.
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+	EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body EnableBagDropJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ReconcileBagDrop Request prompt reconciliation of a project's Bag Drop associations
 	//
@@ -2651,58 +2655,6 @@ func (c *Client) GetBagDropConfig(ctx context.Context, organizationId Organizati
 	return c.Client.Do(req)
 }
 
-// PutBagDropConfigWithBody Create or replace a project's Bag Drop destination configuration
-//
-// `client_secret` is required when no configuration exists. On update it
-// may be omitted to retain the existing sealed secret.
-//
-// A disabled configuration is stored without contacting the destination.
-// Changing connection details while enabled re-runs destination resolution
-// inline. A failed resolution answers 409 with the result and leaves the
-// stored configuration unchanged, preserving the invariant that enabled
-// means last-known-resolvable.
-//
-// Takes any type of body and a specified content type.
-//
-// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-func (c *Client) PutBagDropConfigWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPutBagDropConfigRequestWithBody(c.Server, organizationId, projectId, contentType, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
-// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
-//
-// `client_secret` is required when no configuration exists. On update it
-// may be omitted to retain the existing sealed secret.
-//
-// A disabled configuration is stored without contacting the destination.
-// Changing connection details while enabled re-runs destination resolution
-// inline. A failed resolution answers 409 with the result and leaves the
-// stored configuration unchanged, preserving the invariant that enabled
-// means last-known-resolvable.
-//
-// Takes a body of the `application/json` content type.
-//
-// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-func (c *Client) PutBagDropConfig(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewPutBagDropConfigRequest(c.Server, organizationId, projectId, body)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
-}
-
 // ListBagDropAssociations List buckets selected for Bag Drop
 //
 // Requires maintainer on this project.
@@ -2773,15 +2725,58 @@ func (c *Client) DisableBagDrop(ctx context.Context, organizationId Organization
 	return c.Client.Do(req)
 }
 
-// EnableBagDrop Verify and enable the configured destination
+// EnableBagDropWithBody Verify and enable the configured destination
 //
-// Always re-runs destination resolution server-side. Success records the
-// resolved result and enables the configuration. Failure answers 409 with
-// the verification result and leaves the configuration unchanged.
+// Without a body, re-runs destination resolution against the stored
+// configuration and enables it on success. Resolution failure answers 409
+// with the verification result and leaves the stored configuration unchanged.
+//
+// With a body, validates the supplied configuration and resolves the
+// destination against it before writing anything. On success the supplied
+// configuration is persisted and enabled atomically. Resolution failure
+// answers 409 with the verification result and persists nothing: no
+// configuration is created, and any existing configuration is left
+// byte-for-byte unchanged and remains enabled if it was enabled.
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// Takes any type of body and a specified content type.
 //
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
-func (c *Client) EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewEnableBagDropRequest(c.Server, organizationId, projectId)
+func (c *Client) EnableBagDropWithBody(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnableBagDropRequestWithBody(c.Server, organizationId, projectId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// EnableBagDrop Verify and enable the configured destination
+//
+// Without a body, re-runs destination resolution against the stored
+// configuration and enables it on success. Resolution failure answers 409
+// with the verification result and leaves the stored configuration unchanged.
+//
+// With a body, validates the supplied configuration and resolves the
+// destination against it before writing anything. On success the supplied
+// configuration is persisted and enabled atomically. Resolution failure
+// answers 409 with the verification result and persists nothing: no
+// configuration is created, and any existing configuration is left
+// byte-for-byte unchanged and remains enabled if it was enabled.
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+func (c *Client) EnableBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body EnableBagDropJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnableBagDropRequest(c.Server, organizationId, projectId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -4222,60 +4217,6 @@ func NewGetBagDropConfigRequest(server string, organizationId OrganizationId, pr
 	return req, nil
 }
 
-// NewPutBagDropConfigRequest calls the generic PutBagDropConfig builder with application/json body
-func NewPutBagDropConfigRequest(server string, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody) (*http.Request, error) {
-	var bodyReader io.Reader
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return nil, err
-	}
-	bodyReader = bytes.NewReader(buf)
-	return NewPutBagDropConfigRequestWithBody(server, organizationId, projectId, "application/json", bodyReader)
-}
-
-// NewPutBagDropConfigRequestWithBody constructs an http.Request for the PutBagDropConfig method, with any body, and a specified content type
-func NewPutBagDropConfigRequestWithBody(server string, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader) (*http.Request, error) {
-	var err error
-
-	var pathParam0 string
-
-	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
-	if err != nil {
-		return nil, err
-	}
-
-	var pathParam1 string
-
-	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
-	if err != nil {
-		return nil, err
-	}
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/bagdrop", pathParam0, pathParam1)
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
-	if err != nil {
-		return nil, err
-	}
-
-	req.Header.Add("Content-Type", contentType)
-
-	return req, nil
-}
-
 // NewListBagDropAssociationsRequest constructs an http.Request for the ListBagDropAssociations method
 func NewListBagDropAssociationsRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
 	var err error
@@ -4454,8 +4395,19 @@ func NewDisableBagDropRequest(server string, organizationId OrganizationId, proj
 	return req, nil
 }
 
-// NewEnableBagDropRequest constructs an http.Request for the EnableBagDrop method
-func NewEnableBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId) (*http.Request, error) {
+// NewEnableBagDropRequest calls the generic EnableBagDrop builder with application/json body
+func NewEnableBagDropRequest(server string, organizationId OrganizationId, projectId ProjectId, body EnableBagDropJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewEnableBagDropRequestWithBody(server, organizationId, projectId, "application/json", bodyReader)
+}
+
+// NewEnableBagDropRequestWithBody constructs an http.Request for the EnableBagDrop method, with any body, and a specified content type
+func NewEnableBagDropRequestWithBody(server string, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
 
 	var pathParam0 string
@@ -4487,10 +4439,12 @@ func NewEnableBagDropRequest(server string, organizationId OrganizationId, proje
 		return nil, err
 	}
 
-	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
 	if err != nil {
 		return nil, err
 	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -5896,38 +5850,6 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `GetBagDropConfig` operationId).
 	GetBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*GetBagDropConfigResponse, error)
 
-	// PutBagDropConfigWithBodyWithResponse Create or replace a project's Bag Drop destination configuration
-	//
-	// `client_secret` is required when no configuration exists. On update it
-	// may be omitted to retain the existing sealed secret.
-	//
-	// A disabled configuration is stored without contacting the destination.
-	// Changing connection details while enabled re-runs destination resolution
-	// inline. A failed resolution answers 409 with the result and leaves the
-	// stored configuration unchanged, preserving the invariant that enabled
-	// means last-known-resolvable.
-	//
-	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-	PutBagDropConfigWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error)
-
-	// PutBagDropConfigWithResponse Create or replace a project's Bag Drop destination configuration
-	//
-	// `client_secret` is required when no configuration exists. On update it
-	// may be omitted to retain the existing sealed secret.
-	//
-	// A disabled configuration is stored without contacting the destination.
-	// Changing connection details while enabled re-runs destination resolution
-	// inline. A failed resolution answers 409 with the result and leaves the
-	// stored configuration unchanged, preserving the invariant that enabled
-	// means last-known-resolvable.
-	//
-	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
-	//
-	// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-	PutBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error)
-
 	// ListBagDropAssociationsWithResponse List buckets selected for Bag Drop
 	//
 	// Requires maintainer on this project.
@@ -5966,16 +5888,47 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable (the `DisableBagDrop` operationId).
 	DisableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*DisableBagDropResponse, error)
 
-	// EnableBagDropWithResponse Verify and enable the configured destination
+	// EnableBagDropWithBodyWithResponse Verify and enable the configured destination
 	//
-	// Always re-runs destination resolution server-side. Success records the
-	// resolved result and enables the configuration. Failure answers 409 with
-	// the verification result and leaves the configuration unchanged.
+	// Without a body, re-runs destination resolution against the stored
+	// configuration and enables it on success. Resolution failure answers 409
+	// with the verification result and leaves the stored configuration unchanged.
 	//
-	// Returns a wrapper object for the known response body format(s).
+	// With a body, validates the supplied configuration and resolves the
+	// destination against it before writing anything. On success the supplied
+	// configuration is persisted and enabled atomically. Resolution failure
+	// answers 409 with the verification result and persists nothing: no
+	// configuration is created, and any existing configuration is left
+	// byte-for-byte unchanged and remains enabled if it was enabled.
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
-	EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
+	EnableBagDropWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
+
+	// EnableBagDropWithResponse Verify and enable the configured destination
+	//
+	// Without a body, re-runs destination resolution against the stored
+	// configuration and enables it on success. Resolution failure answers 409
+	// with the verification result and leaves the stored configuration unchanged.
+	//
+	// With a body, validates the supplied configuration and resolves the
+	// destination against it before writing anything. On success the supplied
+	// configuration is persisted and enabled atomically. Resolution failure
+	// answers 409 with the verification result and persists nothing: no
+	// configuration is created, and any existing configuration is left
+	// byte-for-byte unchanged and remains enabled if it was enabled.
+	//
+	// `client_secret` is required when no configuration exists. On update it
+	// may be omitted to retain the existing sealed secret.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+	EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body EnableBagDropJSONRequestBody, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error)
 
 	// ReconcileBagDropWithResponse Request prompt reconciliation of a project's Bag Drop associations
 	//
@@ -7568,82 +7521,6 @@ func (r GetBagDropConfigResponse) ContentType() string {
 	return ""
 }
 
-type PutBagDropConfigResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	// JSON200 the response for an HTTP 200 `application/json` response
-	JSON200 *BagDropConfig
-	// JSON400 the response for an HTTP 400 `application/json` response
-	JSON400 *Error
-	// JSON401 the response for an HTTP 401 `application/json` response
-	JSON401 *Unauthorized
-	// JSON403 the response for an HTTP 403 `application/json` response
-	JSON403 *Forbidden
-	// JSON404 the response for an HTTP 404 `application/json` response
-	JSON404 *NotFound
-	// JSON409 the response for an HTTP 409 `application/json` response
-	JSON409 *BagDropConflict
-}
-
-// GetJSON200 returns the response for an HTTP 200 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON200() *BagDropConfig {
-	return r.JSON200
-}
-
-// GetJSON400 returns the response for an HTTP 400 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON400() *Error {
-	return r.JSON400
-}
-
-// GetJSON401 returns the response for an HTTP 401 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON401() *Unauthorized {
-	return r.JSON401
-}
-
-// GetJSON403 returns the response for an HTTP 403 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON403() *Forbidden {
-	return r.JSON403
-}
-
-// GetJSON404 returns the response for an HTTP 404 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON404() *NotFound {
-	return r.JSON404
-}
-
-// GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r PutBagDropConfigResponse) GetJSON409() *BagDropConflict {
-	return r.JSON409
-}
-
-// GetBody returns the raw response body bytes
-func (r PutBagDropConfigResponse) GetBody() []byte {
-	return r.Body
-}
-
-// Status returns HTTPResponse.Status
-func (r PutBagDropConfigResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r PutBagDropConfigResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
-}
-
-// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
-func (r PutBagDropConfigResponse) ContentType() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Header.Get("Content-Type")
-	}
-	return ""
-}
-
 type ListBagDropAssociationsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -7894,6 +7771,8 @@ type EnableBagDropResponse struct {
 	HTTPResponse *http.Response
 	// JSON200 the response for an HTTP 200 `application/json` response
 	JSON200 *BagDropConfig
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
 	// JSON401 the response for an HTTP 401 `application/json` response
 	JSON401 *Unauthorized
 	// JSON403 the response for an HTTP 403 `application/json` response
@@ -7907,6 +7786,11 @@ type EnableBagDropResponse struct {
 // GetJSON200 returns the response for an HTTP 200 `application/json` response
 func (r EnableBagDropResponse) GetJSON200() *BagDropConfig {
 	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r EnableBagDropResponse) GetJSON400() *Error {
+	return r.JSON400
 }
 
 // GetJSON401 returns the response for an HTTP 401 `application/json` response
@@ -9982,50 +9866,6 @@ func (c *ClientWithResponses) GetBagDropConfigWithResponse(ctx context.Context, 
 	return ParseGetBagDropConfigResponse(rsp)
 }
 
-// PutBagDropConfigWithBodyWithResponse Create or replace a project's Bag Drop destination configuration
-//
-// `client_secret` is required when no configuration exists. On update it
-// may be omitted to retain the existing sealed secret.
-//
-// A disabled configuration is stored without contacting the destination.
-// Changing connection details while enabled re-runs destination resolution
-// inline. A failed resolution answers 409 with the result and leaves the
-// stored configuration unchanged, preserving the invariant that enabled
-// means last-known-resolvable.
-//
-// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
-//
-// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-func (c *ClientWithResponses) PutBagDropConfigWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error) {
-	rsp, err := c.PutBagDropConfigWithBody(ctx, organizationId, projectId, contentType, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePutBagDropConfigResponse(rsp)
-}
-
-// PutBagDropConfigWithResponse Create or replace a project's Bag Drop destination configuration
-//
-// `client_secret` is required when no configuration exists. On update it
-// may be omitted to retain the existing sealed secret.
-//
-// A disabled configuration is stored without contacting the destination.
-// Changing connection details while enabled re-runs destination resolution
-// inline. A failed resolution answers 409 with the result and leaves the
-// stored configuration unchanged, preserving the invariant that enabled
-// means last-known-resolvable.
-//
-// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
-//
-// Corresponds with PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop (the `PutBagDropConfig` operationId).
-func (c *ClientWithResponses) PutBagDropConfigWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body PutBagDropConfigJSONRequestBody, reqEditors ...RequestEditorFn) (*PutBagDropConfigResponse, error) {
-	rsp, err := c.PutBagDropConfig(ctx, organizationId, projectId, body, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParsePutBagDropConfigResponse(rsp)
-}
-
 // ListBagDropAssociationsWithResponse List buckets selected for Bag Drop
 //
 // Requires maintainer on this project.
@@ -10088,17 +9928,54 @@ func (c *ClientWithResponses) DisableBagDropWithResponse(ctx context.Context, or
 	return ParseDisableBagDropResponse(rsp)
 }
 
-// EnableBagDropWithResponse Verify and enable the configured destination
+// EnableBagDropWithBodyWithResponse Verify and enable the configured destination
 //
-// Always re-runs destination resolution server-side. Success records the
-// resolved result and enables the configuration. Failure answers 409 with
-// the verification result and leaves the configuration unchanged.
+// Without a body, re-runs destination resolution against the stored
+// configuration and enables it on success. Resolution failure answers 409
+// with the verification result and leaves the stored configuration unchanged.
 //
-// Returns a wrapper object for the known response body format(s).
+// With a body, validates the supplied configuration and resolves the
+// destination against it before writing anything. On success the supplied
+// configuration is persisted and enabled atomically. Resolution failure
+// answers 409 with the verification result and persists nothing: no
+// configuration is created, and any existing configuration is left
+// byte-for-byte unchanged and remains enabled if it was enabled.
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
-func (c *ClientWithResponses) EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error) {
-	rsp, err := c.EnableBagDrop(ctx, organizationId, projectId, reqEditors...)
+func (c *ClientWithResponses) EnableBagDropWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error) {
+	rsp, err := c.EnableBagDropWithBody(ctx, organizationId, projectId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEnableBagDropResponse(rsp)
+}
+
+// EnableBagDropWithResponse Verify and enable the configured destination
+//
+// Without a body, re-runs destination resolution against the stored
+// configuration and enables it on success. Resolution failure answers 409
+// with the verification result and leaves the stored configuration unchanged.
+//
+// With a body, validates the supplied configuration and resolves the
+// destination against it before writing anything. On success the supplied
+// configuration is persisted and enabled atomically. Resolution failure
+// answers 409 with the verification result and persists nothing: no
+// configuration is created, and any existing configuration is left
+// byte-for-byte unchanged and remains enabled if it was enabled.
+//
+// `client_secret` is required when no configuration exists. On update it
+// may be omitted to retain the existing sealed secret.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/enable (the `EnableBagDrop` operationId).
+func (c *ClientWithResponses) EnableBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, body EnableBagDropJSONRequestBody, reqEditors ...RequestEditorFn) (*EnableBagDropResponse, error) {
+	rsp, err := c.EnableBagDrop(ctx, organizationId, projectId, body, reqEditors...)
 	if err != nil {
 		return nil, err
 	}
@@ -11650,67 +11527,6 @@ func ParseGetBagDropConfigResponse(rsp *http.Response) (*GetBagDropConfigRespons
 	return response, nil
 }
 
-// ParsePutBagDropConfigResponse parses an HTTP response from a PutBagDropConfigWithResponse call
-func ParsePutBagDropConfigResponse(rsp *http.Response) (*PutBagDropConfigResponse, error) {
-	bodyBytes, err := io.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &PutBagDropConfigResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest BagDropConfig
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
-		var dest Error
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON400 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
-		var dest Unauthorized
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON401 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
-		var dest Forbidden
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON403 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
-		var dest NotFound
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON404 = &dest
-
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest BagDropConflict
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON409 = &dest
-
-	}
-
-	return response, nil
-}
-
 // ParseListBagDropAssociationsResponse parses an HTTP response from a ListBagDropAssociationsWithResponse call
 func ParseListBagDropAssociationsResponse(rsp *http.Response) (*ListBagDropAssociationsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -11917,6 +11733,13 @@ func ParseEnableBagDropResponse(rsp *http.Response) (*EnableBagDropResponse, err
 			return nil, err
 		}
 		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -13299,9 +13122,6 @@ type ServerInterface interface {
 	// GetBagDropConfig Read a project's Bag Drop destination configuration
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
 	GetBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
-	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
-	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
-	PutBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
 	// ListBagDropAssociations List buckets selected for Bag Drop
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets)
 	ListBagDropAssociations(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
@@ -13785,41 +13605,6 @@ func (siw *ServerInterfaceWrapper) GetBagDropConfig(w http.ResponseWriter, r *ht
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetBagDropConfig(w, r, organizationId, projectId)
-	}))
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler.ServeHTTP(w, r)
-}
-
-// PutBagDropConfig operation middleware
-func (siw *ServerInterfaceWrapper) PutBagDropConfig(w http.ResponseWriter, r *http.Request) {
-
-	var err error
-	_ = err
-
-	// ------------- Path parameter "organizationId" -------------
-	var organizationId OrganizationId
-
-	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
-		return
-	}
-
-	// ------------- Path parameter "projectId" -------------
-	var projectId ProjectId
-
-	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
-	if err != nil {
-		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
-		return
-	}
-
-	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.PutBagDropConfig(w, r, organizationId, projectId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15024,7 +14809,6 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", wrapper.SetPin)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.DeleteBagDropConfig)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.GetBagDropConfig)
-	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop", wrapper.PutBagDropConfig)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets", wrapper.ListBagDropAssociations)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", wrapper.DeleteBagDropAssociation)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", wrapper.SetBagDropAssociation)
@@ -16137,100 +15921,6 @@ func (response GetBagDropConfig404JSONResponse) VisitGetBagDropConfigResponse(w 
 	return err
 }
 
-type PutBagDropConfigRequestObject struct {
-	OrganizationId OrganizationId `json:"organizationId"`
-	ProjectId      ProjectId      `json:"projectId"`
-	Body           *PutBagDropConfigJSONRequestBody
-}
-
-type PutBagDropConfigResponseObject interface {
-	VisitPutBagDropConfigResponse(w http.ResponseWriter) error
-}
-
-type PutBagDropConfig200JSONResponse BagDropConfig
-
-func (response PutBagDropConfig200JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(200)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PutBagDropConfig400JSONResponse Error
-
-func (response PutBagDropConfig400JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(400)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PutBagDropConfig401JSONResponse struct{ UnauthorizedJSONResponse }
-
-func (response PutBagDropConfig401JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(401)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PutBagDropConfig403JSONResponse struct{ ForbiddenJSONResponse }
-
-func (response PutBagDropConfig403JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(403)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PutBagDropConfig404JSONResponse struct{ NotFoundJSONResponse }
-
-func (response PutBagDropConfig404JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(404)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
-type PutBagDropConfig409JSONResponse BagDropConflict
-
-func (response PutBagDropConfig409JSONResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-
-	var buf bytes.Buffer
-	if err := json.NewEncoder(&buf).Encode(response); err != nil {
-		return err
-	}
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(409)
-	_, err := buf.WriteTo(w)
-	return err
-}
-
 type ListBagDropAssociationsRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
@@ -16492,6 +16182,7 @@ func (response DisableBagDrop404JSONResponse) VisitDisableBagDropResponse(w http
 type EnableBagDropRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
+	Body           *EnableBagDropJSONRequestBody
 }
 
 type EnableBagDropResponseObject interface {
@@ -16508,6 +16199,20 @@ func (response EnableBagDrop200JSONResponse) VisitEnableBagDropResponse(w http.R
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnableBagDrop400JSONResponse Error
+
+func (response EnableBagDrop400JSONResponse) VisitEnableBagDropResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -18409,9 +18114,6 @@ type StrictServerInterface interface {
 	// GetBagDropConfig Read a project's Bag Drop destination configuration
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
 	GetBagDropConfig(ctx context.Context, request GetBagDropConfigRequestObject) (GetBagDropConfigResponseObject, error)
-	// PutBagDropConfig Create or replace a project's Bag Drop destination configuration
-	// (PUT /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop)
-	PutBagDropConfig(ctx context.Context, request PutBagDropConfigRequestObject) (PutBagDropConfigResponseObject, error)
 	// ListBagDropAssociations List buckets selected for Bag Drop
 	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets)
 	ListBagDropAssociations(ctx context.Context, request ListBagDropAssociationsRequestObject) (ListBagDropAssociationsResponseObject, error)
@@ -19003,40 +18705,6 @@ func (sh *strictHandler) GetBagDropConfig(w http.ResponseWriter, r *http.Request
 	}
 }
 
-// PutBagDropConfig operation middleware
-func (sh *strictHandler) PutBagDropConfig(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
-	var request PutBagDropConfigRequestObject
-
-	request.OrganizationId = organizationId
-	request.ProjectId = projectId
-
-	var body PutBagDropConfigJSONRequestBody
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
-		return
-	}
-	request.Body = &body
-
-	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
-		return sh.ssi.PutBagDropConfig(ctx, request.(PutBagDropConfigRequestObject))
-	}
-	for _, middleware := range sh.middlewares {
-		handler = middleware(handler, "PutBagDropConfig")
-	}
-
-	response, err := handler(r.Context(), w, r, request)
-
-	if err != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, err)
-	} else if validResponse, ok := response.(PutBagDropConfigResponseObject); ok {
-		if err := validResponse.VisitPutBagDropConfigResponse(w); err != nil {
-			sh.options.ResponseErrorHandlerFunc(w, r, err)
-		}
-	} else if response != nil {
-		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
-	}
-}
-
 // ListBagDropAssociations operation middleware
 func (sh *strictHandler) ListBagDropAssociations(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId) {
 	var request ListBagDropAssociationsRequestObject
@@ -19153,6 +18821,16 @@ func (sh *strictHandler) EnableBagDrop(w http.ResponseWriter, r *http.Request, o
 
 	request.OrganizationId = organizationId
 	request.ProjectId = projectId
+
+	var body EnableBagDropJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		if !errors.Is(err, io.EOF) {
+			sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+			return
+		}
+	} else {
+		request.Body = &body
+	}
 
 	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
 		return sh.ssi.EnableBagDrop(ctx, request.(EnableBagDropRequestObject))

@@ -49,7 +49,7 @@ test('the create form carries the approved fields and event subscriptions', () =
     callerRole: 'maintainer', onCreate: async () => {}, onCancel: () => {},
   }))
   assert.match(markup, /Create and verify/)
-  assert.match(markup, /Signing secret/)
+  assert.match(markup, /HMAC key/)
   assert.match(markup, /version\.created/)
   assert.match(markup, /bucket\.deleted/)
   assert.match(markup, /Leave every box clear to subscribe to all operations\./)

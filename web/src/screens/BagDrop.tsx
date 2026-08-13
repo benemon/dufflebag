@@ -5,7 +5,7 @@ import {
   DualListSelector, DualListSelectorControl, DualListSelectorControlsWrapper,
   DualListSelectorList, DualListSelectorListItem, DualListSelectorPane,
   Form, FormGroup, FormSelect, FormSelectOption, Label, PageSection, TextArea,
-  TextInput, Title, Tooltip,
+  TextInput, Title,
 } from '@patternfly/react-core'
 import AngleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-left-icon'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
@@ -14,7 +14,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import {
   ApiError, deleteBagDropAssociation, deleteBagDropConfig, disableBagDrop, enableBagDrop,
   getBagDropConfig, getBagDropStatus, listBagDropAssociations, listBuckets,
-  putBagDropConfig, reconcileBagDrop, setBagDropAssociation, verifyBagDrop,
+  reconcileBagDrop, setBagDropAssociation, verifyBagDrop,
   type ApiBagDropAssociation, type ApiBagDropConfig, type ApiBagDropConfigWrite,
   type ApiBagDropEnableResult, type ApiBagDropStatus, type ApiBagDropVerificationResult,
   type ApiBucket,
@@ -197,21 +197,14 @@ export function BagDrop() {
     <BagDropView
       callerRole={callerRole} canConfigure={canConfigure}
       config={config} configLoading={configLoading} configFailure={configFailure}
-      onSave={async (write) => {
-        const stored = await putBagDropConfig(token, tenant, write)
-        setConfig(stored)
-        await loadMaintainer()
-        await loadStatus(true)
-        return stored
-      }}
       onVerify={async () => {
         const result = await verifyBagDrop(token, tenant)
         await loadMaintainer()
         await loadStatus(true)
         return result
       }}
-      onEnable={async () => {
-        const result = await enableBagDrop(token, tenant)
+      onEnable={async (write) => {
+        const result = await enableBagDrop(token, tenant, write)
         if (result.kind === 'enabled') {
           setConfig(result.config)
           await loadStatus(true)
@@ -244,6 +237,7 @@ export function BagDrop() {
       onReconcile={async () => {
         await reconcileBagDrop(token, tenant)
         setPollAfterReconcile(true)
+        await loadStatus(true)
       }}
     />
   )
@@ -253,15 +247,22 @@ function messageFor(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
+export function enableFailureMessage(config: ApiBagDropConfig | null, message: string): string {
+  const unchanged = config
+    ? `Nothing was saved. The previous configuration remains in place untouched${
+      config.enabled ? ' and is still enabled' : ''}.`
+    : 'Nothing was saved. No configuration was created.'
+  return `${unchanged} ${message}`
+}
+
 type BagDropViewProps = {
   callerRole: Role | null
   canConfigure: boolean
   config: ApiBagDropConfig | null
   configLoading: boolean
   configFailure: string | null
-  onSave: (write: ApiBagDropConfigWrite) => Promise<ApiBagDropConfig>
   onVerify: () => Promise<ApiBagDropVerificationResult>
-  onEnable: () => Promise<ApiBagDropEnableResult>
+  onEnable: (write: ApiBagDropConfigWrite) => Promise<ApiBagDropEnableResult>
   onDisable: () => Promise<ApiBagDropConfig>
   onDelete: () => Promise<void>
   buckets: ApiBucket[]
@@ -304,9 +305,9 @@ export function BagDropView(props: BagDropViewProps) {
 }
 
 export function DestinationZone({
-  config, configLoading, configFailure, onSave, onVerify, onEnable, onDisable, onDelete,
+  config, configLoading, configFailure, onVerify, onEnable, onDisable, onDelete,
 }: Pick<BagDropViewProps,
-  'config' | 'configLoading' | 'configFailure' | 'onSave' | 'onVerify' | 'onEnable' |
+  'config' | 'configLoading' | 'configFailure' | 'onVerify' | 'onEnable' |
   'onDisable' | 'onDelete'>) {
   const [draft, setDraft] = useState<DestinationDraft>(() => draftForBagDropConfig(config))
   const [baseline, setBaseline] = useState<DestinationDraft>(() => draftForBagDropConfig(config))
@@ -353,19 +354,17 @@ export function DestinationZone({
           <DestinationFormView
             config={config} draft={draft} dirty={dirty} busy={busy}
             onDraftChange={setDraft}
-            onSave={() => run('save', async () => {
-              const stored = await onSave(bagDropWrite(draft))
-              const saved = draftForBagDropConfig(stored)
-              setDraft(saved)
-              setBaseline(saved)
-            })}
             onVerify={() => run('verify', async () => setVerification(await onVerify()))}
             onEnable={() => run('enable', async () => {
-              const result = await onEnable()
+              const result = await onEnable(bagDropWrite(draft))
               if (result.kind === 'refused') {
-                setActionFailure(result.message)
+                setActionFailure(enableFailureMessage(config, result.message))
                 setVerification(result.verification ?? null)
+                return
               }
+              const enabled = draftForBagDropConfig(result.config)
+              setDraft(enabled)
+              setBaseline(enabled)
             })}
             onDisable={() => run('disable', async () => { await onDisable() })}
             onDelete={() => run('delete', onDelete)}
@@ -409,30 +408,19 @@ export function DestinationActionFailure({
 }
 
 export function DestinationFormView({
-  config, draft, dirty, busy, onDraftChange, onSave, onVerify, onEnable, onDisable, onDelete,
+  config, draft, dirty, busy, onDraftChange, onVerify, onEnable, onDisable, onDelete,
 }: {
   config: ApiBagDropConfig | null
   draft: DestinationDraft
   dirty: boolean
   busy: string | null
   onDraftChange: (draft: DestinationDraft) => void
-  onSave: () => void
   onVerify: () => void
   onEnable: () => void
   onDisable: () => void
   onDelete: () => void
 }) {
   const update = (fields: Partial<DestinationDraft>) => onDraftChange({ ...draft, ...fields })
-  const verify = (
-    <Button
-      variant="secondary"
-      /* MUTATION_VERIFY_DIRTY: verify always resolves the stored configuration. */
-      isDisabled={dirty || !config || busy !== null}
-      isLoading={busy === 'verify'} onClick={onVerify}
-    >
-      Verify
-    </Button>
-  )
   return (
     <Form>
       <FormGroup label="Adapter" isRequired fieldId="bagdrop-adapter">
@@ -489,24 +477,17 @@ export function DestinationFormView({
       </FormGroup>
       <ActionGroup>
         <Button
-          variant="primary" isDisabled={!dirty || !draftIsValid(draft, config) || busy !== null}
-          isLoading={busy === 'save'} onClick={onSave}
+          variant="primary" isDisabled={!draftIsValid(draft, config) || busy !== null}
+          isLoading={busy === 'enable'} onClick={onEnable}
         >
-          Save
+          Enable
         </Button>
-        {dirty ? (
-          <Tooltip content="Save these changes before verifying; Verify checks the stored configuration.">
-            <span tabIndex={0} aria-label="Save changes before verifying" style={{ display: 'inline-block' }}>
-              {verify}
-            </span>
-          </Tooltip>
-        ) : verify}
-        {config && !config.enabled ? (
-          <Button
-            variant="secondary" isDisabled={dirty || busy !== null}
-            isLoading={busy === 'enable'} onClick={onEnable}
-          >Enable</Button>
-        ) : null}
+        <Button
+          variant="secondary"
+          /* MUTATION_VERIFY_DIRTY: verify always resolves the stored configuration. */
+          isDisabled={dirty || !config || busy !== null}
+          isLoading={busy === 'verify'} onClick={onVerify}
+        >Verify</Button>
         {config?.enabled ? (
           <Button
             variant="secondary" isDisabled={dirty || busy !== null}
@@ -772,6 +753,7 @@ export function StatusZone({
         {canConfigure && !loading && !failure && status?.configured ? (
           <Button
             variant="secondary" isLoading={reconciling} isDisabled={reconciling}
+            spinnerAriaValueText="Requesting Bag Drop reconciliation"
             onClick={() => {
               setReconciling(true)
               setActionFailure(null)
@@ -842,7 +824,18 @@ export function BagDropStatusTableView({
                 }} />
               ) : <Td />}
               <Td dataLabel="Bucket">{association.bucket_name}</Td>
-              <Td dataLabel="Sync status"><Label isCompact>{association.sync_status}</Label></Td>
+              <Td dataLabel="Sync status">
+                <Label
+                  isCompact status={association.sync_status === 'error' ? 'danger' : undefined}
+                >{association.sync_status}</Label>
+                {association.sync_status === 'error' && association.last_sync_error ? (
+                  <> <span style={{
+                    color: 'var(--pf-t--global--color--status--danger--default)',
+                    display: 'inline-block', maxWidth: '24rem', overflow: 'hidden',
+                    textOverflow: 'ellipsis', verticalAlign: 'middle', whiteSpace: 'nowrap',
+                  }}>{association.last_sync_error}</span></>
+                ) : null}
+              </Td>
               <Td dataLabel="Last synced">{association.last_synced_at ?? 'Never'}</Td>
               <Td dataLabel="Last attempt">{association.last_attempt_at ?? 'Never'}</Td>
             </Tr>

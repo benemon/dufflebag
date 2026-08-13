@@ -24,19 +24,29 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status:",
 		"/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile:",
-		"operationId: getBagDropConfig", "operationId: putBagDropConfig",
+		"operationId: getBagDropConfig",
 		"operationId: deleteBagDropConfig", "operationId: verifyBagDrop",
 		"operationId: enableBagDrop", "operationId: disableBagDrop",
 		"operationId: listBagDropAssociations", "operationId: setBagDropAssociation",
 		"operationId: deleteBagDropAssociation", "operationId: getBagDropStatus",
 		"operationId: reconcileBagDrop",
 		"enum: [hcp-packer, dufflebag]", "enum: [resolved, failed]",
-		"enum: [active, pending_removal]", "enum: [pending, synced, removing]",
+		"enum: [active, pending_removal]", "enum: [pending, synced, error, removing]",
 		"enum: [credential_refused, project_not_found, unreachable, tls_failure]",
 	} {
 		if !strings.Contains(spec, required) {
 			t.Errorf("platform spec lacks %q", required)
 		}
+	}
+	if strings.Contains(spec, "operationId: putBagDropConfig") {
+		t.Error("platform spec still exposes putBagDropConfig")
+	}
+	enableStart := strings.Index(spec, "operationId: enableBagDrop")
+	enableEnd := strings.Index(spec[enableStart:], "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/disable:")
+	enable := spec[enableStart : enableStart+enableEnd]
+	if !strings.Contains(enable, "requestBody:") || !strings.Contains(enable, "required: false") ||
+		!strings.Contains(enable, `$ref: "#/components/schemas/BagDropConfigWrite"`) {
+		t.Error("enableBagDrop lacks the optional BagDropConfigWrite request body")
 	}
 
 	generatedBytes, err := os.ReadFile("../internal/platform/v1/api.gen.go")
@@ -86,7 +96,7 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		}
 	}
 	for _, response := range []string{
-		"GetBagDropConfig200JSONResponse", "PutBagDropConfig200JSONResponse",
+		"GetBagDropConfig200JSONResponse", "EnableBagDrop200JSONResponse",
 		"DeleteBagDropConfig409JSONResponse", "VerifyBagDrop200JSONResponse",
 		"EnableBagDrop409JSONResponse", "DisableBagDrop200JSONResponse",
 		"ListBagDropAssociations200JSONResponse", "SetBagDropAssociation200JSONResponse",

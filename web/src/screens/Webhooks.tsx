@@ -172,7 +172,7 @@ export function CreateWebhookForm({ callerRole, onCreate, onCancel }: {
           <FormGroup label="Description" fieldId="webhook-description">
             <TextArea id="webhook-description" value={draft.description} onChange={(_event, value) => setDraft({ ...draft, description: value })} />
           </FormGroup>
-          <FormGroup label="Signing secret" fieldId="webhook-secret">
+          <FormGroup label="HMAC key" fieldId="webhook-secret">
             <TextInput id="webhook-secret" type="password" value={draft.secret} onChange={(_event, value) => setDraft({ ...draft, secret: value })} />
           </FormGroup>
           <FormGroup label="Events" fieldId="webhook-events">

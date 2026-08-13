@@ -766,7 +766,7 @@ export type ApiBagDropAssociation = {
   last_attempt_at: string | null
   last_synced_at: string | null
   last_sync_error: string | null
-  sync_status: 'pending' | 'synced' | 'removing'
+  sync_status: 'pending' | 'synced' | 'error' | 'removing'
 }
 
 export type ApiBagDropStatus = {
@@ -787,12 +787,6 @@ export async function getBagDropConfig(
   token: string, tenant: Tenant,
 ): Promise<ApiBagDropConfig> {
   return platformGet<ApiBagDropConfig>(token, bagDropPath(tenant))
-}
-
-export async function putBagDropConfig(
-  token: string, tenant: Tenant, config: ApiBagDropConfigWrite,
-): Promise<ApiBagDropConfig> {
-  return platformPut<ApiBagDropConfig>(token, bagDropPath(tenant), config)
 }
 
 export async function deleteBagDropConfig(token: string, tenant: Tenant): Promise<void> {
@@ -839,11 +833,16 @@ export type ApiBagDropEnableResult =
   | { kind: 'refused'; message: string; verification?: ApiBagDropVerificationResult }
 
 export async function enableBagDrop(
-  token: string, tenant: Tenant,
+  token: string, tenant: Tenant, config?: ApiBagDropConfigWrite,
 ): Promise<ApiBagDropEnableResult> {
   const path = `${PLATFORM_BASE}${bagDropPath(tenant, 'enable')}`
   const response = await fetch(path, {
-    method: 'POST', headers: { Authorization: `Bearer ${token}` },
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      ...(config === undefined ? {} : { 'Content-Type': 'application/json' }),
+    },
+    ...(config === undefined ? {} : { body: JSON.stringify(config) }),
   })
   if (response.status === 409) {
     const conflict = (await response.json()) as {

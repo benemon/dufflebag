@@ -59,32 +59,34 @@ func TestCredentialSealingRoundTripsBothPosturesAndRefusesAADSwap(t *testing.T) 
 	}
 }
 
-func TestPutRefusesWithoutBagDropCredentialKey(t *testing.T) {
+func TestEnableWithConfigRefusesWithoutBagDropCredentialKey(t *testing.T) {
 	service := NewService(&memoryRepository{}, NewCredentialSealer(nil, ""), Registry{})
-	_, _, err := service.Put(context.Background(), testOrganization, testProject, testWrite("secret"))
+	write := testWrite("secret")
+	_, _, err := service.Enable(context.Background(), testOrganization, testProject, &write)
 	if !errors.Is(err, ErrCredentialSeal) || !strings.Contains(err.Error(), CredentialKeyEnv) {
-		t.Fatalf("Put error = %v, want refusal naming %s", err, CredentialKeyEnv)
+		t.Fatalf("Enable error = %v, want refusal naming %s", err, CredentialKeyEnv)
 	}
 }
 
-func TestPutDufflebagInvalidPEMRefusedAndNamed(t *testing.T) {
+func TestEnableWithConfigDufflebagInvalidPEMRefusedAndNamed(t *testing.T) {
 	secret := "secret"
 	service := NewService(&memoryRepository{}, NewCredentialSealer(nil, testKey), Registry{})
-	_, _, err := service.Put(context.Background(), testOrganization, testProject, Write{
+	write := Write{
 		Adapter: AdapterDufflebag,
 		Dufflebag: &DufflebagConfig{
 			Endpoint: "https://dufflebag.example.com", CAChain: "not a PEM chain",
 			OrganizationID: "destination-org", ProjectID: "destination-project", ClientID: "client",
 		},
 		ClientSecret: &secret,
-	})
+	}
+	_, _, err := service.Enable(context.Background(), testOrganization, testProject, &write)
 	if !errors.Is(err, ErrInvalid) || !strings.Contains(err.Error(), "ca_chain") ||
 		!strings.Contains(err.Error(), "parseable PEM") {
 		t.Fatalf("Put error = %v, want invalid ca_chain refusal", err)
 	}
 }
 
-func TestPutRefusesAdapterConnectionBlockMismatch(t *testing.T) {
+func TestEnableWithConfigRefusesAdapterConnectionBlockMismatch(t *testing.T) {
 	secret := "secret"
 	hcp := &HCPPackerConfig{OrganizationID: "org", ProjectID: "project", ClientID: "client"}
 	dufflebag := &DufflebagConfig{
@@ -97,8 +99,8 @@ func TestPutRefusesAdapterConnectionBlockMismatch(t *testing.T) {
 		{Adapter: AdapterHCPPacker, Dufflebag: dufflebag, ClientSecret: &secret},
 		{Adapter: AdapterDufflebag, HCPPacker: hcp, Dufflebag: dufflebag, ClientSecret: &secret},
 	} {
-		if _, _, err := service.Put(context.Background(), testOrganization, testProject, write); !errors.Is(err, ErrInvalid) {
-			t.Fatalf("Put(%#v) error = %v, want adapter/connection mismatch refusal", write, err)
+		if _, _, err := service.Enable(context.Background(), testOrganization, testProject, &write); !errors.Is(err, ErrInvalid) {
+			t.Fatalf("Enable(%#v) error = %v, want adapter/connection mismatch refusal", write, err)
 		}
 	}
 }
@@ -136,7 +138,7 @@ func TestEnableRefusesWhenResolveFails(t *testing.T) {
 		Outcome: OutcomeFailed, Reason: ReasonCredentialRefused,
 	}}
 	service := NewService(repository, sealer, Registry{AdapterHCPPacker: adapter})
-	config, verification, err := service.Enable(context.Background(), testOrganization, testProject)
+	config, verification, err := service.Enable(context.Background(), testOrganization, testProject, nil)
 	if config != nil || !errors.Is(err, ErrResolution) || verification == nil ||
 		verification.Reason != ReasonCredentialRefused {
 		t.Fatalf("Enable = %#v, %#v, %v", config, verification, err)
@@ -158,7 +160,7 @@ func TestDeleteWhileEnabledRefuses(t *testing.T) {
 	}
 }
 
-func TestEnabledPutRefusesUnresolvableReplacementWithoutChangingConfig(t *testing.T) {
+func TestEnableWithConfigRefusesUnresolvableReplacementWithoutChangingConfig(t *testing.T) {
 	sealer := NewCredentialSealer(nil, testKey)
 	sealed, err := sealer.Seal(testOrganization, testProject, "old-secret")
 	if err != nil {
@@ -177,34 +179,55 @@ func TestEnabledPutRefusesUnresolvableReplacementWithoutChangingConfig(t *testin
 	replacement := testWrite("")
 	replacement.ClientSecret = nil
 	replacement.HCPPacker.ClientID = "new-client"
-	config, verification, err := service.Put(
-		context.Background(), testOrganization, testProject, replacement,
+	config, verification, err := service.Enable(
+		context.Background(), testOrganization, testProject, &replacement,
 	)
 	if config != nil || !errors.Is(err, ErrResolution) || verification == nil ||
 		verification.Reason != ReasonUnreachable || adapter.calls != 1 {
-		t.Fatalf("Put = %#v, %#v, %v; Resolve calls=%d", config, verification, err, adapter.calls)
+		t.Fatalf("Enable = %#v, %#v, %v; Resolve calls=%d", config, verification, err, adapter.calls)
 	}
-	if repository.record.HCPPacker.ClientID != "old-client" || !repository.record.Enabled {
+	if repository.putCalls != 0 || repository.record.HCPPacker.ClientID != "old-client" ||
+		!repository.record.Enabled {
 		t.Fatalf("failed replacement changed stored config: %#v", repository.record)
 	}
 }
 
-func TestUpdateWithoutSecretKeepsOldSecretWorking(t *testing.T) {
+func TestEnableWithConfigResolutionFailureDoesNotCreateConfig(t *testing.T) {
+	repository := &memoryRepository{}
+	adapter := &fakeAdapter{result: VerificationResult{Outcome: OutcomeFailed, Reason: ReasonUnreachable}}
+	service := NewService(
+		repository, NewCredentialSealer(nil, testKey), Registry{AdapterHCPPacker: adapter},
+	)
+	write := testWrite("secret")
+	config, verification, err := service.Enable(
+		context.Background(), testOrganization, testProject, &write,
+	)
+	if config != nil || !errors.Is(err, ErrResolution) || verification == nil ||
+		verification.Reason != ReasonUnreachable {
+		t.Fatalf("Enable = %#v, %#v, %v", config, verification, err)
+	}
+	if repository.putCalls != 0 || repository.record != nil {
+		t.Fatalf("failed create persisted config: calls=%d record=%#v", repository.putCalls, repository.record)
+	}
+}
+
+func TestEnableWithConfigUpdateWithoutSecretKeepsOldSecretWorking(t *testing.T) {
 	repository := &memoryRepository{}
 	adapter := &fakeAdapter{result: VerificationResult{Outcome: OutcomeResolved}}
 	service := NewService(
 		repository, NewCredentialSealer(nil, testKey), Registry{AdapterHCPPacker: adapter},
 	)
 	service.now = func() time.Time { return time.Date(2026, 8, 10, 10, 0, 0, 0, time.UTC) }
-	if _, _, err := service.Put(
-		context.Background(), testOrganization, testProject, testWrite("known-old-secret"),
+	create := testWrite("known-old-secret")
+	if _, _, err := service.Enable(
+		context.Background(), testOrganization, testProject, &create,
 	); err != nil {
 		t.Fatalf("create: %v", err)
 	}
 	update := testWrite("")
 	update.ClientSecret = nil
 	update.HCPPacker.ClientID = "updated-client"
-	if _, _, err := service.Put(context.Background(), testOrganization, testProject, update); err != nil {
+	if _, _, err := service.Enable(context.Background(), testOrganization, testProject, &update); err != nil {
 		t.Fatalf("update without secret: %v", err)
 	}
 	if _, err := service.Verify(context.Background(), testOrganization, testProject); err != nil {
@@ -368,6 +391,7 @@ type memoryRepository struct {
 	associations map[string]Association
 	bucketExists bool
 	enableCalls  int
+	putCalls     int
 	deleteCalls  int
 }
 
@@ -381,6 +405,7 @@ func (r *memoryRepository) GetBagDropConfig(context.Context, string, string) (*R
 }
 
 func (r *memoryRepository) PutBagDropConfig(_ context.Context, record *Record) (*Record, error) {
+	r.putCalls++
 	copy := *record
 	copy.SealedSecret = append([]byte(nil), record.SealedSecret...)
 	r.record = &copy

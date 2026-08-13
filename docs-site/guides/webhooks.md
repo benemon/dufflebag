@@ -7,7 +7,7 @@ or delete them and inspect their delivery history.
 ## Create and activate a webhook
 
 Open **Webhooks** in the console, select **Create webhook**, and provide a name
-and an HTTP or HTTPS URL. A description and signing secret are optional. Choose
+and an HTTP or HTTPS URL. A description and HMAC key are optional. Choose
 individual event operations, or leave every checkbox clear to receive all
 events.
 
@@ -19,12 +19,12 @@ handshake. There is no separate ping operation.
 
 ## Verify a request
 
-When a signing secret is configured, every request includes
+When an HMAC key is configured, every request includes
 `X-Dufflebag-Signature: sha512=<hex>`, computed as HMAC-SHA512 over the exact raw
 request body. `X-Dufflebag-Event` names the operation and
 `X-Dufflebag-Delivery` carries its ULID event ID. Compute the HMAC over the body
-before parsing JSON and compare it in constant time. A webhook without a secret
-omits the signature header.
+before parsing JSON and compare it in constant time. A webhook without an HMAC
+key omits the signature header.
 
 The event envelope identifies the organisation and project, the operation and
 target, and the acting principal. Its payload uses the same resource vocabulary

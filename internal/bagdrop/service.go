@@ -42,70 +42,6 @@ func (s *Service) Get(ctx context.Context, organizationID, projectID string) (*C
 	return render(record), nil
 }
 
-func (s *Service) Put(
-	ctx context.Context, organizationID, projectID string, write Write,
-) (*Config, *VerificationResult, error) {
-	if err := validateWrite(write); err != nil {
-		return nil, nil, err
-	}
-	existing, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
-	if err != nil && !errors.Is(err, ErrNotFound) {
-		return nil, nil, err
-	}
-	if existing == nil && write.ClientSecret == nil {
-		return nil, nil, fmt.Errorf("%w: client_secret is required when creating a Bag Drop configuration", ErrInvalid)
-	}
-
-	var sealed []byte
-	if write.ClientSecret != nil {
-		sealed, err = s.sealer.Seal(organizationID, projectID, *write.ClientSecret)
-		if err != nil {
-			return nil, nil, err
-		}
-	} else {
-		sealed = append([]byte(nil), existing.SealedSecret...)
-	}
-
-	now := s.now().UTC()
-	record := &Record{
-		OrganizationID: organizationID, ProjectID: projectID,
-		Adapter: write.Adapter, SealedSecret: sealed,
-		CreatedAt: now, UpdatedAt: now,
-	}
-	if write.HCPPacker != nil {
-		record.HCPPacker = *write.HCPPacker
-	}
-	if write.Dufflebag != nil {
-		record.Dufflebag = *write.Dufflebag
-	}
-	changed := true
-	if existing != nil {
-		record.Enabled = existing.Enabled
-		record.CreatedAt = existing.CreatedAt
-		changed = write.ClientSecret != nil || existing.Adapter != write.Adapter ||
-			existing.HCPPacker != record.HCPPacker || existing.Dufflebag != record.Dufflebag
-		if !changed {
-			record.LastVerification = existing.LastVerification
-		}
-	}
-
-	if existing != nil && existing.Enabled && changed {
-		result, resolveErr := s.resolve(ctx, record)
-		if resolveErr != nil {
-			return nil, nil, resolveErr
-		}
-		if result.Outcome != OutcomeResolved {
-			return nil, &result, ErrResolution
-		}
-		record.LastVerification = &LastVerification{VerificationResult: result, VerifiedAt: now}
-	}
-	stored, err := s.repository.PutBagDropConfig(ctx, record)
-	if err != nil {
-		return nil, nil, err
-	}
-	return render(stored), nil, nil
-}
-
 func (s *Service) Delete(ctx context.Context, organizationID, projectID string) error {
 	record, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
 	if err != nil {
@@ -191,12 +127,65 @@ func (s *Service) Verify(
 }
 
 func (s *Service) Enable(
-	ctx context.Context, organizationID, projectID string,
+	ctx context.Context, organizationID, projectID string, write *Write,
 ) (*Config, *VerificationResult, error) {
-	record, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
-	if err != nil {
+	if write == nil {
+		record, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
+		if err != nil {
+			return nil, nil, err
+		}
+		result, err := s.resolve(ctx, record)
+		if err != nil {
+			return nil, nil, err
+		}
+		if result.Outcome != OutcomeResolved {
+			return nil, &result, ErrResolution
+		}
+		stored, err := s.repository.SetBagDropEnabled(
+			ctx, organizationID, projectID, true, &result, s.now().UTC(),
+		)
+		if err != nil {
+			return nil, nil, err
+		}
+		return render(stored), nil, nil
+	}
+	if err := validateWrite(*write); err != nil {
 		return nil, nil, err
 	}
+	existing, err := s.repository.GetBagDropConfig(ctx, organizationID, projectID)
+	if err != nil && !errors.Is(err, ErrNotFound) {
+		return nil, nil, err
+	}
+	if existing == nil && write.ClientSecret == nil {
+		return nil, nil, fmt.Errorf("%w: client_secret is required when creating a Bag Drop configuration", ErrInvalid)
+	}
+
+	var sealed []byte
+	if write.ClientSecret != nil {
+		sealed, err = s.sealer.Seal(organizationID, projectID, *write.ClientSecret)
+		if err != nil {
+			return nil, nil, err
+		}
+	} else {
+		sealed = append([]byte(nil), existing.SealedSecret...)
+	}
+
+	now := s.now().UTC()
+	record := &Record{
+		OrganizationID: organizationID, ProjectID: projectID,
+		Adapter: write.Adapter, SealedSecret: sealed,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if write.HCPPacker != nil {
+		record.HCPPacker = *write.HCPPacker
+	}
+	if write.Dufflebag != nil {
+		record.Dufflebag = *write.Dufflebag
+	}
+	if existing != nil {
+		record.CreatedAt = existing.CreatedAt
+	}
+
 	result, err := s.resolve(ctx, record)
 	if err != nil {
 		return nil, nil, err
@@ -204,9 +193,9 @@ func (s *Service) Enable(
 	if result.Outcome != OutcomeResolved {
 		return nil, &result, ErrResolution
 	}
-	stored, err := s.repository.SetBagDropEnabled(
-		ctx, organizationID, projectID, true, &result, s.now().UTC(),
-	)
+	record.Enabled = true
+	record.LastVerification = &LastVerification{VerificationResult: result, VerifiedAt: now}
+	stored, err := s.repository.PutBagDropConfig(ctx, record)
 	if err != nil {
 		return nil, nil, err
 	}

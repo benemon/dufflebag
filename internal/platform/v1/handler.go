@@ -97,10 +97,9 @@ type EncryptionService interface {
 type BagDropService interface {
 	CredentialProtection() string
 	Get(context.Context, string, string) (*bagdrop.Config, error)
-	Put(context.Context, string, string, bagdrop.Write) (*bagdrop.Config, *bagdrop.VerificationResult, error)
 	Delete(context.Context, string, string) error
 	Verify(context.Context, string, string) (bagdrop.VerificationResult, error)
-	Enable(context.Context, string, string) (*bagdrop.Config, *bagdrop.VerificationResult, error)
+	Enable(context.Context, string, string, *bagdrop.Write) (*bagdrop.Config, *bagdrop.VerificationResult, error)
 	Disable(context.Context, string, string) (*bagdrop.Config, error)
 	ListAssociations(context.Context, string, string) ([]bagdrop.Association, error)
 	Associate(context.Context, string, string, string) (*bagdrop.Association, error)

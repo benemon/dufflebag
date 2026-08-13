@@ -5,6 +5,7 @@ import {
   appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync,
   rmSync, statfsSync, statSync, symlinkSync, writeFileSync, writeSync,
 } from 'node:fs'
+import https from 'node:https'
 import net from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -431,6 +432,58 @@ async function api(token, method, path, body) {
   const text = await response.text()
   assert.ok(response.ok, `${method} ${path} answered ${response.status}: ${text}`)
   return text ? JSON.parse(text) : null
+}
+
+// The Bag Drop mirror destination the one-step Enable resolves against. The
+// adapter refuses plain http, so this terminates TLS on loopback with a
+// throwaway openssl certificate the config trusts through ca_chain, and
+// answers the two calls resolution makes: a client-credentials token and a
+// bucket-list probe.
+async function startMirrorStub() {
+  const work = mkdtempSync(join(tmpdir(), 'dufflebag-mirror-'))
+  await execFile('openssl', [
+    'req', '-x509', '-newkey', 'ec', '-pkeyopt', 'ec_paramgen_curve:P-256',
+    '-keyout', join(work, 'key.pem'), '-out', join(work, 'cert.pem'),
+    '-days', '2', '-nodes', '-subj', '/CN=127.0.0.1',
+    '-addext', 'subjectAltName=IP:127.0.0.1',
+  ])
+  const server = https.createServer(
+    { key: readFileSync(join(work, 'key.pem')), cert: readFileSync(join(work, 'cert.pem')) },
+    (request, response) => {
+      if (request.method === 'POST' && request.url === '/oauth2/token') {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ access_token: 'smoke-mirror-token' }))
+        return
+      }
+      if (request.method === 'GET' && request.url.startsWith('/packer/2023-01-01/organizations/')) {
+        response.writeHead(200, { 'Content-Type': 'application/json' })
+        response.end(JSON.stringify({ buckets: [] }))
+        return
+      }
+      response.writeHead(404)
+      response.end()
+    },
+  )
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  return {
+    url: `https://127.0.0.1:${server.address().port}`,
+    caChain: readFileSync(join(work, 'cert.pem'), 'utf8'),
+    close: () =>
+      new Promise((resolve) => {
+        server.close(resolve)
+        rmSync(work, { recursive: true, force: true })
+      }),
+  }
+}
+
+// A loopback port that answers nothing: bound, read, and released, so an
+// Enable pointed at it fails with connection refused rather than a timeout.
+async function closedPort() {
+  const probe = net.createServer()
+  await new Promise((resolve) => probe.listen(0, '127.0.0.1', resolve))
+  const port = probe.address().port
+  await new Promise((resolve) => probe.close(resolve))
+  return port
 }
 
 async function scanAttribution(token, path) {
@@ -2050,10 +2103,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('Bag Drop mirrors a bucket and un-association only acts through its confirmation', async () => {
-    // The console facet of ADR-0025 (duf-d8t7). Standing in acme/widgets as
-    // root: a destination is stored DISABLED without contacting it, the seeded
-    // bucket is associated, and the destructive direction — un-associating,
-    // which deletes the destination copy — acts only through its confirmation
+    // The console facet of ADR-0025 (duf-d8t7), under the duf-fcg6.3 ruling:
+    // Enable is the only write path and a failed resolution persists nothing.
+    // Standing in acme/widgets as root: Enable is refused honestly against a
+    // dead destination, succeeds against a stub mirror, the seeded bucket is
+    // associated, and the destructive direction — un-associating, which
+    // deletes the destination copy — acts only through its confirmation
     // (duf-mq17's severity ruling). This subtest is the named smoke gate for
     // that confirmation: without the warning step, the waits below never see it.
     const clickDeepByText = (selector, text) =>
@@ -2074,23 +2129,56 @@ test('the console works end to end, from first run to a seeded tenancy', async (
           text,
         ),
       )
+    const stub = await startMirrorStub()
+    try {
     await clickByText('a', 'Bag Drop')
     await waitForText('Mirror selected buckets to another registry')
     // Unconfigured is a rendered state, not a blank.
     await waitForText('Bag Drop is not configured')
-    // Store a destination. Save writes it disabled with no destination
-    // contact, so the credentials only need shape, not validity.
-    await page.type('#bagdrop-organization-id', 'a0000000-0000-4000-8000-000000000001')
-    await page.type('#bagdrop-project-id', 'a0000000-0000-4000-8000-000000000002')
-    await page.type('#bagdrop-client-id', 'smoke-bagdrop-client')
-    await page.type('#bagdrop-client-secret', 'smoke-bagdrop-secret')
+    // One-step Enable against an unreachable destination persists NOTHING —
+    // the maintainer ruling that superseded ADR-0025's save/verify/enable
+    // ceremony: a failed resolution leaves no half-saved configuration.
+    const deadPort = await closedPort()
+    await page.select('#bagdrop-adapter', 'dufflebag')
+    await page.type('#bagdrop-endpoint', `https://127.0.0.1:${deadPort}`)
+    await page.type('#bagdrop-organization-id', seeded.organization.id)
+    await page.type('#bagdrop-project-id', seeded.project.id)
+    await page.type('#bagdrop-client-id', 'smoke-mirror-client')
+    await page.type('#bagdrop-client-secret', 'smoke-mirror-secret')
     // Verify resolves the STORED configuration, so it is disabled while dirty.
     assert.equal(await buttonDisabled('Verify'), true)
-    await clickByText('button', 'Save')
+    await clickByText('button', 'Enable')
+    await waitForText('Nothing was saved. No configuration was created.')
+    // Leaving and returning re-reads the server: still unconfigured.
+    await clickByText('a', 'Buckets')
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
+    await clickByText('a', 'Bag Drop')
+    await waitForText('Bag Drop is not configured')
+    // Against a resolvable destination the same single action saves, verifies,
+    // and enables.
+    await page.select('#bagdrop-adapter', 'dufflebag')
+    await page.type('#bagdrop-endpoint', stub.url)
+    await page.type('#bagdrop-ca-chain', stub.caChain)
+    await page.type('#bagdrop-organization-id', seeded.organization.id)
+    await page.type('#bagdrop-project-id', seeded.project.id)
+    await page.type('#bagdrop-client-id', 'smoke-mirror-client')
+    await page.type('#bagdrop-client-secret', 'smoke-mirror-secret')
+    await clickByText('button', 'Enable')
     await waitForText('Secret set')
+    // Enabled is proven by its off-switch appearing.
+    await until('the Disable action to appear', () =>
+      page.$$eval('button', (buttons) =>
+        buttons.some((b) => b.innerText.trim() === 'Disable')))
     // This stack seals with the vault keyring, so the env-key warning must
     // not appear (it belongs to unencrypted deployments only).
     assert.doesNotMatch(await bodyText(), /sealed with an environment key/)
+    // Disable before the association dance: it exercises the confirmation
+    // flow, not destination sync, and a disabled configuration keeps
+    // un-association immediate for a never-attempted bucket.
+    await clickByText('button', 'Disable')
+    await until('the Disable action to withdraw', () =>
+      page.$$eval('button', (buttons) =>
+        buttons.every((b) => b.innerText.trim() !== 'Disable')))
     // Associate the seeded bucket through the dual list.
     await clickDeepByText('#bagdrop-buckets li, #bagdrop-buckets li *', 'smoke-images')
     await page.click('button[aria-label="Mirror selected bucket"]')
@@ -2114,25 +2202,33 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Leave the world as this subtest found it.
     await clickByText('button', 'Delete configuration')
     await waitForText('Bag Drop is not configured')
+    } finally {
+      await stub.close()
+    }
   })
 
   await t.test('the bucket-delete confirmation warns for a Bag Drop-mirrored bucket', async () => {
-    // A stored-disabled destination and an API-side association are enough:
-    // the warning reads the same reader-visible status the Bag Drop screen does.
+    // Enable-with-body is the only config write path now, so seeding rides
+    // the stub mirror and steps back down to disabled; the warning reads the
+    // same reader-visible status the Bag Drop screen does.
     const rootToken = await tokenFor(credentials.clientID, credentials.secret)
     const bagdropBase =
       `/api/v1/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/bagdrop`
-    await api(rootToken, 'PUT', bagdropBase, {
+    const stub = await startMirrorStub()
+    try {
+    await api(rootToken, 'POST', `${bagdropBase}/enable`, {
       adapter: 'dufflebag',
       dufflebag: {
-        endpoint: 'https://mirror.invalid',
+        endpoint: stub.url,
+        ca_chain: stub.caChain,
         organization_id: seeded.organization.id,
         project_id: seeded.project.id,
         client_id: 'smoke-mirror-client',
         client_secret: 'smoke-mirror-secret',
       },
     })
+    await api(rootToken, 'POST', `${bagdropBase}/disable`)
     await api(rootToken, 'PUT', `${bagdropBase}/buckets/smoke-images`)
 
     await clickByText('a', 'Buckets')
@@ -2155,6 +2251,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // Leave the world as this subtest found it.
     await api(rootToken, 'DELETE', bagdropBase)
+    } finally {
+      await stub.close()
+    }
   })
 
   await t.test('a version is deleted through the console, refused first while assigned', async () => {
