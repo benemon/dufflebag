@@ -19,6 +19,7 @@ import type { TenancyGap } from '../data/tenant'
 import { BuildStateLabel, packageSummary, pluginSummary } from './Version'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
 import { FindingCounts, PackageFindingsTable } from '../components/Findings'
+import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { SEVERITY_ORDER } from '../data/findings'
 
 const darkCodeStyle: CSSProperties = {
@@ -213,7 +214,11 @@ function BuildOverview({
               <EnvironmentField label="Arch" value={build.arch} />
               <DescriptionListGroup>
                 <DescriptionListTerm>Run UUID</DescriptionListTerm>
-                <DescriptionListDescription><code>{build.packerRunUUID || '—'}</code></DescriptionListDescription>
+                <DescriptionListDescription>
+                  {build.packerRunUUID ? (
+                    <CopyableIdentifier value={build.packerRunUUID} label="Build Run UUID" />
+                  ) : '—'}
+                </DescriptionListDescription>
               </DescriptionListGroup>
             </DescriptionList>
           </CardBody>

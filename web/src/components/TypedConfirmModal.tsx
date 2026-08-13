@@ -13,13 +13,19 @@ type TypedConfirmModalProps = {
   busy: boolean
   /** A site may retain an existing validation gate in addition to the typed match. */
   confirmDisabled?: boolean
+  variant?: 'small' | 'medium'
 }
 
 export function TypedConfirmModal(props: TypedConfirmModalProps) {
   const [confirmation, setConfirmation] = useState('')
 
   return (
-    <Modal aria-labelledby="typed-confirm-modal-title" isOpen onClose={props.onCancel} variant="small">
+    <Modal
+      aria-labelledby="typed-confirm-modal-title"
+      isOpen
+      onClose={props.onCancel}
+      variant={props.variant ?? 'small'}
+    >
       <TypedConfirmModalView
         {...props}
         confirmation={confirmation}

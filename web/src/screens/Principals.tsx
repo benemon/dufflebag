@@ -15,6 +15,7 @@ import {
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { When } from '../components/When'
 
 const ROOT_KEYSTONE_REASON = 'A root principal must keep one secret that never expires'
@@ -546,7 +547,9 @@ export function PrincipalTableView({
               <Label isCompact>{principal.role}</Label>
             </Td>
             <Td dataLabel="Scope">{scopeLabel(principal)}</Td>
-            <Td dataLabel="Client ID">{principal.client_id}</Td>
+            <Td dataLabel="Client ID">
+              <CopyableIdentifier value={principal.client_id} label={`${principal.name} client ID`} />
+            </Td>
             <Td dataLabel="Secrets">
               {/* Usable secrets: an expired one grants nothing and does not
                   count against the cap, exactly as the server counts. */}
@@ -613,7 +616,7 @@ function IssueSecretModal({
       aria-labelledby="issue-secret-modal-title"
       isOpen
       onClose={onClose}
-      variant="small"
+      variant="medium"
     >
       <IssueSecretModalView
         principal={principal}

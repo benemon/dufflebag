@@ -72,10 +72,3 @@ test('global navigation uses the settled type hierarchy', () => {
   assert.match(link, /font: 400 14px\/1\.4 "Red Hat Text", sans-serif;/)
   assert.match(current, /font-weight: 500;/)
 })
-
-test('registry fingerprints wrap without truncating their text', () => {
-  const fingerprint = rule('.registry-fingerprint')
-  assert.match(fingerprint, /overflow-wrap: anywhere;/)
-  assert.match(fingerprint, /word-break: break-word;/)
-  assert.doesNotMatch(fingerprint, /overflow: hidden|text-overflow|white-space: nowrap/)
-})

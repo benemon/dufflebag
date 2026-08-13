@@ -161,11 +161,6 @@
   font-size: var(--pf-t--global--font--size--sm, 0.875rem);
 }
 
-.registry-fingerprint {
-  overflow-wrap: anywhere;
-  word-break: break-word;
-}
-
 /*
  * Figures that are no longer being maintained, because no channel selects the
  * version any more. The card keeps a harmless container cue while its title

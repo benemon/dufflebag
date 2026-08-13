@@ -221,17 +221,23 @@ test('the Channels column bounds labels after three while retaining their versio
   assert.doesNotMatch(nameCell, /latest|production|staging|canary/)
 })
 
-test('pinned bucket gallery renders joined cards and disappears when empty', () => {
-  const buckets = [galleryBucket('images'), galleryBucket('workers')]
+test('pinned bucket cards reuse version state and ancestry treatments and disappear when empty', () => {
+  const buckets = [{
+    ...galleryBucket('images'),
+    parents: { href: '/parents', status: 'OUT_OF_DATE' },
+    childrenInOlderVersions: true,
+  }, galleryBucket('workers')]
   const pinned = renderToStaticMarkup(React.createElement(BucketsView, {
     buckets, total: 2, loading: false, failure: null,
     pins: [{ bucket_name: 'images', pinned_at: '2026-08-09T10:00:00Z' }],
     openBucket: () => {}, canPin: true,
   }))
-  assert.match(pinned, /aria-label="Pinned buckets"/)
-  assert.match(pinned, />images</)
-  assert.match(pinned, /Newest version:.*v1/)
-  assert.match(pinned, /<time[^>]*dateTime="2026-08-09T10:00:00Z"/)
+  const pinnedSection = pinned.match(/<section aria-label="Pinned buckets"[\s\S]*?<\/section>/)?.[0] ?? ''
+  assert.match(pinnedSection, />images</)
+  assert.match(pinnedSection, /Newest version:.*v1[\s\S]*>complete</)
+  assert.match(pinnedSection, /Parents:[\s\S]*>out of date</)
+  assert.match(pinnedSection, /Children:[\s\S]*>other versions</)
+  assert.match(pinnedSection, /<time[^>]*dateTime="2026-08-09T10:00:00Z"/)
   assert.match(pinned, /aria-label="Buckets"/)
   assert.match(pinned, /aria-label="Unpin images"/)
 

@@ -18,6 +18,7 @@ import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { When } from '../components/When'
 
 import {
@@ -347,7 +348,9 @@ function BucketOverview({
               <DescriptionListGroup>
                 <DescriptionListTerm>Fingerprint</DescriptionListTerm>
                 <DescriptionListDescription>
-                  <code className="registry-fingerprint">{newest?.fingerprint ?? '—'}</code>
+                  {newest ? (
+                    <CopyableIdentifier value={newest.fingerprint} label="Newest version fingerprint" />
+                  ) : '—'}
                 </DescriptionListDescription>
               </DescriptionListGroup>
               <EnforcedProvisionersRow
@@ -571,7 +574,7 @@ export function VersionsFacet({
                             <DescriptionListGroup>
                               <DescriptionListTerm>Fingerprint</DescriptionListTerm>
                               <DescriptionListDescription>
-                                <code className="registry-fingerprint">{version.fingerprint}</code>
+                                <CopyableIdentifier value={version.fingerprint} label={`${version.name} fingerprint`} />
                               </DescriptionListDescription>
                             </DescriptionListGroup>
                             <DescriptionListGroup>
@@ -746,7 +749,9 @@ export function BucketChannelsFacet({
                         <DescriptionListGroup>
                           <DescriptionListTerm>Fingerprint</DescriptionListTerm>
                           <DescriptionListDescription>
-                            {channel.fingerprint ? <code>{channel.fingerprint}</code> : 'Unassigned'}
+                            {channel.fingerprint ? (
+                              <CopyableIdentifier value={channel.fingerprint} label={`${channel.name} fingerprint`} />
+                            ) : 'Unassigned'}
                           </DescriptionListDescription>
                         </DescriptionListGroup>
                         <DescriptionListGroup>
@@ -1079,7 +1084,7 @@ export function AssignChannelModalView({
     <>
       <ModalHeader
         labelId="assign-channel-modal-title"
-        title={`Assign ${bucket} version to ${channel.name}`}
+        title={`Assign ${bucket} version — ${channel.name}`}
       />
       <ModalBody>
         {failure ? (
@@ -1175,7 +1180,7 @@ export function DeleteChannelModalView({
 }) {
   return (
     <TypedConfirmModal
-      title={`Delete ${bucket} ${channel.name}`}
+      title={`Delete ${bucket} — ${channel.name}`}
       expected={channel.name}
       verb={`Delete ${channel.name}`}
       busy={submitting}
