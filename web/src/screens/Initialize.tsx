@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from 'react'
 import {
   Alert, Button, Checkbox, ClipboardCopy, ClipboardCopyVariant, Content, Form, FormGroup,
-  Login, LoginHeader, LoginMainBody, LoginMainHeader, TextInput, Title, Wizard,
+  Login, LoginHeader, LoginMainBody, LoginMainHeader, Title, Wizard,
   WizardFooterWrapper, WizardStep,
 } from '@patternfly/react-core'
 
@@ -9,6 +9,7 @@ import {
   ApiError, createOrganization, createProject, initialize, requestToken,
   type ApiOrganization, type InitResponse,
 } from '../api/client'
+import { TenancyForm } from '../components/TenancyForm'
 
 type Credentials = { client_id: string; client_secret: string }
 type Step = 'initialize' | 'credentials' | 'organization' | 'project'
@@ -188,8 +189,6 @@ export function Initialize({
   const [credentials, setCredentials] = useState<InitResponse | null>(null)
   const [token, setToken] = useState<string | null>(null)
   const [organization, setOrganization] = useState<ApiOrganization | null>(null)
-  const [organizationName, setOrganizationName] = useState('')
-  const [projectName, setProjectName] = useState('')
   const [failure, setFailure] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [stored, setStored] = useState(false)
@@ -222,12 +221,12 @@ export function Initialize({
     }
   }
 
-  const submitOrganization = async () => {
+  const submitOrganization = async (name: string) => {
     if (!token) return
     setSubmitting(true)
     setFailure(null)
     try {
-      setOrganization(await createOrganization(token, organizationName.trim()))
+      setOrganization(await createOrganization(token, name))
       setStep('project')
     } catch (err) {
       setFailure(err instanceof Error ? err.message : 'The organization could not be created.')
@@ -236,12 +235,12 @@ export function Initialize({
     }
   }
 
-  const submitProject = async () => {
+  const submitProject = async (name: string) => {
     if (!token || !organization || !credentials) return
     setSubmitting(true)
     setFailure(null)
     try {
-      await createProject(token, organization.id, projectName.trim())
+      await createProject(token, organization.id, name)
       onDone(credentials)
     } catch (err) {
       setFailure(err instanceof Error ? err.message : 'The project could not be created.')
@@ -322,57 +321,25 @@ export function Initialize({
           id="organization-step"
           name="Organization"
           isDisabled={step !== 'organization'}
-          footer={(
-            <WizardFooterWrapper>
-              <Button
-                type="submit"
-                form="initialize-organization"
-                variant="primary"
-                isLoading={submitting}
-                isDisabled={submitting || organizationName.trim() === ''}
-              >
-                Create organization and continue
-              </Button>
-            </WizardFooterWrapper>
-          )}
+          footer={<></>}
         >
           <Title headingLevel="h2" size="xl">Name your organization</Title>
-          <Form
-            id="initialize-organization"
-            style={{ marginTop: 16 }}
-            onSubmit={(event) => {
-              event.preventDefault()
-              void submitOrganization()
-            }}
-          >
-            <FormGroup label="Organization name" isRequired fieldId="organization-name">
-              <TextInput
-                id="organization-name"
-                value={organizationName}
-                onChange={(_event, value) => setOrganizationName(value)}
-                autoFocus
-              />
-            </FormGroup>
-          </Form>
+          <TenancyForm
+            kind="organization"
+            formID="initialize-organization"
+            fieldID="organization-name"
+            submitLabel="Create organization and continue"
+            submitting={submitting}
+            footer="wizard"
+            onSubmit={submitOrganization}
+          />
         </WizardStep>
 
         <WizardStep
           id="project-step"
           name="Project"
           isDisabled={step !== 'project'}
-          footer={(
-            <WizardFooterWrapper>
-              <Button
-                type="submit"
-                form="initialize-project"
-                variant="primary"
-                isLoading={submitting}
-                isDisabled={submitting || projectName.trim() === ''}
-              >
-                Create project and open the console
-              </Button>
-            </WizardFooterWrapper>
-          )}
+          footer={<></>}
         >
           <Title headingLevel="h2" size="xl">Name your first project</Title>
           {organization && (
@@ -380,23 +347,15 @@ export function Initialize({
               This project will belong to {organization.name}.
             </Content>
           )}
-          <Form
-            id="initialize-project"
-            style={{ marginTop: 16 }}
-            onSubmit={(event) => {
-              event.preventDefault()
-              void submitProject()
-            }}
-          >
-            <FormGroup label="Project name" isRequired fieldId="project-name">
-              <TextInput
-                id="project-name"
-                value={projectName}
-                onChange={(_event, value) => setProjectName(value)}
-                autoFocus
-              />
-            </FormGroup>
-          </Form>
+          <TenancyForm
+            kind="project"
+            formID="initialize-project"
+            fieldID="project-name"
+            submitLabel="Create project and open the console"
+            submitting={submitting}
+            footer="wizard"
+            onSubmit={submitProject}
+          />
         </WizardStep>
       </Wizard>
     </BootstrapPage>

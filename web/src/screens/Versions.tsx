@@ -14,6 +14,7 @@ import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
+import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
 
@@ -234,9 +235,7 @@ export function VersionsView({
             <Content component="p">{failure}</Content>
           </Alert>
         ) : gap ? (
-          <Alert variant="info" isInline title={gap.title}>
-            <Content component="p">{gap.detail}</Content>
-          </Alert>
+          <TenancyGapEmptyState gap={gap} callerRole={callerRole} />
         ) : (
           <FacetRail
             active={facet}

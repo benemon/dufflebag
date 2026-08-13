@@ -1,8 +1,9 @@
 import { useState } from 'react'
-import { Content, MenuToggle, Select, SelectList, SelectOption } from '@patternfly/react-core'
+import { Content, MenuFooter, MenuToggle, Select, SelectList, SelectOption } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
 
 import { useAuth } from '../auth/AuthContext'
+import { CreateTenancyButton } from '../components/TenancyCreation'
 import { organizationRows, useTenant } from '../data/tenant'
 
 /**
@@ -20,7 +21,7 @@ import { organizationRows, useTenant } from '../data/tenant'
  */
 export function TenantSwitcher() {
   const {
-    state, organizations, organizationsLoading, organizationFailure,
+    state, self, organizations, organizationsLoading, organizationFailure,
     organizationRefreshFailure, selectedOrganization,
   } = useAuth()
 
@@ -37,7 +38,12 @@ export function TenantSwitcher() {
     return <Content component="p">Organisations could not be loaded</Content>
   }
   if (organizations.length === 0) {
-    return <Content component="p">No organisations exist</Content>
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Content component="p">No organisations exist</Content>
+        <CreateTenancyButton kind="organization" callerRole={self?.role ?? null} variant="link" />
+      </div>
+    )
   }
   return (
     <>
@@ -52,13 +58,15 @@ export function TenantSwitcher() {
 
 export function refreshOrganizationsOnPickerOpen(
   open: boolean,
-  refreshOrganizations: () => Promise<void>,
+  refreshOrganizations: () => Promise<unknown>,
 ) {
   if (open) void refreshOrganizations()
 }
 
 function OrganizationSelect() {
-  const { organizations, selectedOrganization, selectOrganization, refreshOrganizations } = useAuth()
+  const {
+    self, organizations, selectedOrganization, selectOrganization, refreshOrganizations,
+  } = useAuth()
   const [open, setOpen] = useState(false)
   // The dash row ahead of the real organisations: the deliberate step back up
   // to platform standing (ADR-0014's "nothing selected"), matching the blank
@@ -101,6 +109,13 @@ function OrganizationSelect() {
           </SelectOption>
         ))}
       </SelectList>
+      <MenuFooter>
+        <CreateTenancyButton
+          kind="organization"
+          callerRole={self?.role ?? null}
+          variant="link"
+        />
+      </MenuFooter>
     </Select>
   )
 }
@@ -112,6 +127,7 @@ function OrganizationSelect() {
  * organisation, so repeating it would say nothing.
  */
 function ProjectSelect({ combined = false }: { combined?: boolean }) {
+  const { self, selectedOrganization } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
   const [open, setOpen] = useState(false)
   const label = (t: typeof tenant) => (combined ? `${t.organization} / ${t.project}` : t.project)
@@ -145,6 +161,14 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
           </SelectOption>
         ))}
       </SelectList>
+      <MenuFooter>
+        <CreateTenancyButton
+          kind="project"
+          callerRole={self?.role ?? null}
+          organizationID={selectedOrganization ?? undefined}
+          variant="link"
+        />
+      </MenuFooter>
     </Select>
   )
 }

@@ -17,6 +17,7 @@ import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import {
   useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
@@ -249,9 +250,7 @@ export function VersionView({
             <Content component="p">{failure}</Content>
           </Alert>
         ) : gap ? (
-          <Alert variant="info" isInline title={gap.title}>
-            <Content component="p">{gap.detail}</Content>
-          </Alert>
+          <TenancyGapEmptyState gap={gap} callerRole={callerRole} />
         ) : version ? (
           <FacetRail
             active={facet}

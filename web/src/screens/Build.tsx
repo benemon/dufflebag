@@ -10,8 +10,10 @@ import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformLabel } from '../components/PlatformLabel'
+import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { downloadSbom, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import type { Role } from '../auth/permissions'
 import { useBuild, type Build, type BuildDetail, type Package, type SbomRef } from '../data/versions'
 import type { TenancyGap } from '../data/tenant'
 import { BuildStateLabel, packageSummary, pluginSummary } from './Version'
@@ -29,7 +31,7 @@ export function Build() {
   const { bucket = '', fingerprint = '', build = '' } = useParams()
   const navigate = useNavigate()
   const { data, loading, failure, gap } = useBuild(bucket, fingerprint, build)
-  const { state, selectedOrganization, selectedProject, signOut } = useAuth()
+  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const fetchSbom = async (sbom: SbomRef): Promise<ArrayBuffer> => {
     if (!state || !selectedOrganization || !selectedProject) {
       throw new Error('No session.')
@@ -56,6 +58,7 @@ export function Build() {
       loading={loading}
       failure={failure}
       gap={gap}
+      callerRole={self?.role ?? null}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onBackToVersion={() => navigate(versionPath)}
@@ -70,6 +73,7 @@ export function BuildView({
   loading,
   failure,
   gap,
+  callerRole = null,
   onBackToRegistry,
   onBackToBucket,
   onBackToVersion,
@@ -80,6 +84,7 @@ export function BuildView({
   loading: boolean
   failure: string | null
   gap?: TenancyGap | null
+  callerRole?: Role | null
   onBackToRegistry: () => void
   onBackToBucket: () => void
   onBackToVersion: () => void
@@ -130,9 +135,7 @@ export function BuildView({
             <Content component="p">{failure}</Content>
           </Alert>
         ) : gap ? (
-          <Alert variant="info" isInline title={gap.title}>
-            <Content component="p">{gap.detail}</Content>
-          </Alert>
+          <TenancyGapEmptyState gap={gap} callerRole={callerRole} />
         ) : build ? (
           <FacetRail
             active={facet}

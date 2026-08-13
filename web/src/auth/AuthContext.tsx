@@ -61,12 +61,12 @@ export function selectionAfterOrganizationRefresh(
   return current
 }
 
-type OrganizationRefreshFlight = { current: Promise<void> | null }
+type OrganizationRefreshFlight<T> = { current: Promise<T> | null }
 
-export function startOrganizationRefresh(
-  flight: OrganizationRefreshFlight,
-  start: () => Promise<void>,
-): Promise<void> {
+export function startOrganizationRefresh<T>(
+  flight: OrganizationRefreshFlight<T>,
+  start: () => Promise<T>,
+): Promise<T> {
   if (flight.current) return flight.current
   const pending = start().finally(() => {
     if (flight.current === pending) flight.current = null
@@ -102,7 +102,7 @@ type AuthContextValue = {
   organizationsLoading: boolean
   organizationFailure: string | null
   organizationRefreshFailure: string | null
-  refreshOrganizations: () => Promise<void>
+  refreshOrganizations: () => Promise<ApiOrganization[] | null>
   /**
    * The organisation in effect: chosen for a platform session, the token's
    * otherwise. '' is the dash row — a platform session that deliberately
@@ -118,6 +118,7 @@ type AuthContextValue = {
   selectProject: (project: string) => void
   projectsLoading: boolean
   projectFailure: string | null
+  refreshProjects: () => Promise<ApiProject[] | null>
 }
 
 // Exported for the unit tests, which render context consumers under a
@@ -177,7 +178,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [restoring, setRestoring] = useState(true)
   const [sessionEnded, setSessionEnded] = useState(false)
   const organizationSession = useRef(0)
-  const organizationRefreshFlight = useRef<Promise<void> | null>(null)
+  const organizationRefreshFlight = useRef<Promise<ApiOrganization[] | null> | null>(null)
 
   const enterSession = useCallback((token: string, claims: TokenClaims) => {
     organizationSession.current += 1
@@ -378,24 +379,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // never auto-selects. A deleted current organisation is the one exception:
   // its absence is authoritative, so the selection steps back to platform.
   const refreshOrganizations = useCallback(() => {
-    if (!state || state.claims.organizationID !== null) return Promise.resolve()
+    if (!state || state.claims.organizationID !== null) return Promise.resolve(null)
     return startOrganizationRefresh(organizationRefreshFlight, async () => {
       const session = organizationSession.current
       setOrganizationRefresh((current) => ({ ...current, failure: null }))
       try {
         const listed = await listOrganizations(state.token)
-        if (session !== organizationSession.current) return
+        if (session !== organizationSession.current) return null
         setOrganizationRefresh((current) => applyOrganizationRefresh(current, {
           kind: 'listed', organizations: listed,
         }))
         setSelectedOrganization((current) => selectionAfterOrganizationRefresh(current, listed))
+        return listed
       } catch (err: unknown) {
-        if (session !== organizationSession.current) return
-        if (signOutIfUnauthorized(err, signOut)) return
+        if (session !== organizationSession.current) return null
+        if (signOutIfUnauthorized(err, signOut)) return null
         setOrganizationRefresh((current) => applyOrganizationRefresh(current, {
           kind: 'failed',
           failure: err instanceof Error ? err.message : 'Could not refresh organisations.',
         }))
+        return null
       }
     })
   }, [state, signOut])
@@ -475,6 +478,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [state, selectedOrganization, signOut])
 
+  const refreshProjects = useCallback(async (): Promise<ApiProject[] | null> => {
+    if (!state) return null
+    const platform = state.claims.organizationID === null
+    const organizationID = platform ? selectedOrganization : state.claims.organizationID
+    if (!organizationID) return null
+    setProjectsLoading(true)
+    setProjectFailure(null)
+    try {
+      const projects = state.claims.projectID
+        ? [await getOrganizationProject(state.token, organizationID, state.claims.projectID)]
+        : platform
+          ? await listOrganizationProjects(state.token, organizationID)
+          : await listProjects(state.token, organizationID)
+      const ordered = [...projects].sort((a, b) => a.created_at.localeCompare(b.created_at))
+      setOrganizationProjects(ordered)
+      setSelectedProject((current) => current && ordered.some((project) => project.id === current)
+        ? current
+        : ordered[0]?.id ?? null)
+      return ordered
+    } catch (err: unknown) {
+      if (signOutIfUnauthorized(err, signOut)) return null
+      setProjectFailure(err instanceof Error ? err.message : 'Could not refresh projects.')
+      return null
+    } finally {
+      setProjectsLoading(false)
+    }
+  }, [state, selectedOrganization, signOut])
+
   const value = useMemo(
     () => ({
       state,
@@ -499,6 +530,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       selectProject: setSelectedProject,
       projectsLoading,
       projectFailure,
+      refreshProjects,
     }),
     [
       state, self, selfLoading, selfFailure, restoring, sessionEnded, signIn, signOut,
@@ -506,7 +538,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organizationRefresh.failure, refreshOrganizations,
       selectedOrganization, selectOrganization,
       permittedProjects, projectNames, selectedProject,
-      projectsLoading, projectFailure,
+      projectsLoading, projectFailure, refreshProjects,
     ],
   )
 

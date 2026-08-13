@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router'
-import { Alert, Content, PageSection } from '@patternfly/react-core'
+import {
+  Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
+} from '@patternfly/react-core'
 
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
@@ -14,6 +16,8 @@ import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
+import { CreateTenancyButton } from './components/TenancyCreation'
+import type { Role } from './auth/permissions'
 
 export function App() {
   return (
@@ -31,7 +35,9 @@ export function App() {
  * be arrived at by forgetting something (ADR-0017).
  */
 function Authenticated() {
-  const { state, restoring, selectedProject, projectsLoading, projectFailure } = useAuth()
+  const {
+    state, self, restoring, selectedOrganization, selectedProject, projectsLoading, projectFailure,
+  } = useAuth()
   // While the boot exchange asks whether a session survived the reload,
   // showing the sign-in screen would flash a state that may be about to be
   // untrue. Nothing renders until the answer is in — it is one same-origin
@@ -62,7 +68,10 @@ function Authenticated() {
     return (
       <AppShell>
         <PageSection>
-          <Alert variant="info" isInline title="No projects are available to this principal" />
+          <NoProjectsYet
+            callerRole={self?.role ?? null}
+            organizationID={selectedOrganization ?? undefined}
+          />
         </PageSection>
       </AppShell>
     )
@@ -84,6 +93,28 @@ function Authenticated() {
         <Route path="/instance" element={<Instance />} />
       </Routes>
     </AppShell>
+  )
+}
+
+export function NoProjectsYet({
+  callerRole, organizationID,
+}: {
+  callerRole: Role | null
+  organizationID?: string
+}) {
+  return (
+    <EmptyState titleText="No projects yet" headingLevel="h2">
+      <EmptyStateBody>A project scopes buckets, principals and channels.</EmptyStateBody>
+      <EmptyStateFooter>
+        <EmptyStateActions>
+          <CreateTenancyButton
+            kind="project"
+            callerRole={callerRole}
+            organizationID={organizationID}
+          />
+        </EmptyStateActions>
+      </EmptyStateFooter>
+    </EmptyState>
   )
 }
 
