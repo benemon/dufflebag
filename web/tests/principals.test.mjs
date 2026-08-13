@@ -9,7 +9,7 @@ import { createServer } from 'vite'
 let vite
 let PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard
 let PrincipalTableView
-let DeletePrincipalConfirmation, RevokeSecretConfirmationView
+let DeletePrincipalConfirmation, RevokeSecretConfirmation
 let TypedConfirmModalView
 let grantableRoles
 const principalScreenSource = readFileSync(new URL('../src/screens/Principals.tsx', import.meta.url), 'utf8')
@@ -24,7 +24,7 @@ before(async () => {
   })
   ;({
     PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard,
-    PrincipalTableView, DeletePrincipalConfirmation, RevokeSecretConfirmationView,
+    PrincipalTableView, DeletePrincipalConfirmation, RevokeSecretConfirmation,
   } =
     await vite.ssrLoadModule('/src/screens/Principals.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
@@ -387,19 +387,28 @@ test('principal deletion requires the typed modal before its action fires', () =
   assert.match(principalScreenSource, /deleting \? \(\s*<DeletePrincipalConfirmation/)
 })
 
-test('secret revoke requires the new plain confirmation before its action fires', () => {
+test('secret revoke requires revoke before its danger action arms', () => {
   let revokes = 0
   const record = principal()
-  const confirmation = RevokeSecretConfirmationView({
-    principal: record, secret: record.secrets[0], callerRole: 'maintainer', onCancel: () => {},
+  const confirmation = RevokeSecretConfirmation({
+    principal: record, secret: record.secrets[0], onCancel: () => {},
     onConfirm: () => { revokes++ },
   })
+  assert.equal(confirmation.props.expected, 'revoke')
   assert.equal(revokes, 0)
-  findElement(confirmation, (element) => element.props.children === 'Revoke secret').props.onClick()
+  const blocked = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
+  }))
+  assert.match(blocked, /Revoke secret for sp-packer-ci\?/)
+  assert.match(blocked, /Secret s-1 will stop authenticating immediately\./)
+  assert.match(blocked, /Type <strong>revoke<\/strong> to confirm/)
+  assert.match(blocked, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Revoke secret/)
+  const armed = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: 'revoke', onConfirmationChange: () => {},
+  }))
+  assert.doesNotMatch(armed, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Revoke secret/)
+  confirmation.props.onConfirm()
   assert.equal(revokes, 1)
-  const markup = renderToStaticMarkup(confirmation)
-  assert.match(markup, /Revoke secret for sp-packer-ci\?/)
-  assert.doesNotMatch(markup, /Type <strong>/)
   assert.match(principalScreenSource, /onRevoke=\{\(principal, secret\) => setRevoking\(\{ principal, secret \}\)\}/)
   assert.match(principalScreenSource, /revoking \? \(\s*<RevokeSecretConfirmation/)
 })
