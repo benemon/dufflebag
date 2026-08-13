@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react'
+import { forwardRef, type ComponentProps, type ReactNode } from 'react'
 import { NavLink, useLocation } from 'react-router'
 import {
-  Button, Masthead, MastheadBrand, MastheadContent, MastheadMain, MastheadToggle,
+  Button, Masthead, MastheadBrand, MastheadContent, MastheadLogo, MastheadMain, MastheadToggle,
   Nav, NavGroup, NavItem, Page, PageSidebar, PageSidebarBody,
   PageToggleButton, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
@@ -34,6 +34,14 @@ const NAV: readonly NavGroupModel[] = [
   ]},
 ]
 
+type RouterNavLinkProps = Omit<ComponentProps<typeof NavLink>, 'to'> & { href?: string }
+
+// PatternFly's component slot supplies link destinations as href; the router
+// consumes the same destination as to.
+const RouterNavLink = forwardRef<HTMLAnchorElement, RouterNavLinkProps>(
+  ({ href = '', ...props }, ref) => <NavLink ref={ref} to={href} {...props} />,
+)
+
 function AppMasthead() {
   const { signOut } = useAuth()
 
@@ -46,7 +54,7 @@ function AppMasthead() {
           </PageToggleButton>
         </MastheadToggle>
         <MastheadBrand>
-          <span style={{ fontSize: 20, fontWeight: 500 }}>dufflebag</span>
+          <MastheadLogo className="app-wordmark">dufflebag</MastheadLogo>
         </MastheadBrand>
       </MastheadMain>
       <MastheadContent>
@@ -109,8 +117,13 @@ export function AppShellView({
           {visibleGroups.map(({ group, items }) => (
             <NavGroup key={group} title={group}>
               {items.map(({ key, to, label }) => (
-                <NavItem key={key} isActive={pathname.startsWith(to)}>
-                  <NavLink className="nv" to={to}>{label}</NavLink>
+                <NavItem
+                  key={key}
+                  component={RouterNavLink}
+                  to={to}
+                  isActive={pathname.startsWith(to)}
+                >
+                  {label}
                 </NavItem>
               ))}
             </NavGroup>

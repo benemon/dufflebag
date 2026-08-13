@@ -73,7 +73,6 @@
   --sf1: var(--pf-t--global--background--color--200);
   --tx1: var(--pf-t--global--text--color--200);
   --bd: var(--pf-t--global--border--color--100);
-  --lk: var(--pf-t--global--text--color--link--default);
 }
 
 .dfbg-bootstrap .pf-v6-c-login__main {
@@ -117,18 +116,11 @@
 .app-global-nav {
   row-gap: 0;
   padding: 0;
-  /* PatternFly paints the row from these, and its defaults are action--plain
-     overlays — deliberately translucent so a plain button tints whatever sits
-     beneath it. Setting background on our own rule never reaches the paint,
-     which is why the selected row kept rendering a low-alpha grey. */
-  --pf-v6-c-nav__link--BackgroundColor: transparent;
-  --pf-v6-c-nav__link--hover--BackgroundColor: var(--sf1);
-  --pf-v6-c-nav__link--m-current--BackgroundColor: var(--sf1);
 }
 
 .app-global-nav .pf-v6-c-nav__section-title {
   padding: 16px 16px 6px;
-  font: 400 14px/1.4 "Red Hat Text", sans-serif;
+  font: 500 14px/1.4 "Red Hat Display", sans-serif;
   color: var(--tx1);
 }
 
@@ -136,30 +128,16 @@
   row-gap: 0;
 }
 
-.app-global-nav .pf-v6-c-nav__item::before {
-  display: none;
+.app-global-nav .pf-v6-c-nav__link {
+  font: 400 14px/1.4 "Red Hat Text", sans-serif;
 }
 
-.app-global-nav .nv {
-  display: block;
-  width: var(--pf-v6-c-page__sidebar--Width);
-  padding: 8px 16px 8px 13px;
-  border-left: 3px solid transparent;
-  font: 400 16px/1.4 "Red Hat Text", sans-serif;
-}
-
-.app-global-nav .nv:hover {
-  background-color: var(--sf1);
-  color: var(--tx0);
-}
-
-.app-global-nav .nv[aria-current="page"] {
-  border-left-color: var(--lk);
-  /* Set on the element, not inherited: PatternFly declares its own
-     --m-current--BackgroundColor on this element, and a direct declaration
-     always beats an inherited one whatever the layers say. */
-  background-color: var(--sf1);
+.app-global-nav .pf-v6-c-nav__link.pf-m-current {
   font-weight: 500;
+}
+
+.app-wordmark {
+  font: 500 20px/1 "Red Hat Display", sans-serif;
 }
 
 .registry-fingerprint {

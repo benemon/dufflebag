@@ -30,7 +30,7 @@ export type PackageRow = {
 }
 
 /**
- * Attribution accompanying a scanned response, from the Dufflebag-Scan-*
+ * Attribution accompanying a scanned response, from the dufflebag-scan-*
  * headers. Absent entirely when no scanner is configured — which is why every
  * field is optional and the whole object may be undefined.
  */
@@ -169,9 +169,9 @@ export function hasCoverageGap(attribution: ScanAttribution | undefined): boolea
   return Boolean(attribution.unsupported || attribution.unversioned || attribution.invalid)
 }
 
-/** Parses the Dufflebag-Scan-* headers into attribution, or undefined. */
+/** Parses the dufflebag-scan-* headers into attribution, or undefined. */
 export function scanAttribution(headers: Headers): ScanAttribution | undefined {
-  const adapter = headers.get('Dufflebag-Scan-Adapter')
+  const adapter = headers.get('dufflebag-scan-adapter')
   if (!adapter) return undefined
   const number = (name: string): number | undefined => {
     const raw = headers.get(name)
@@ -181,13 +181,13 @@ export function scanAttribution(headers: Headers): ScanAttribution | undefined {
   }
   return {
     adapter,
-    engine: headers.get('Dufflebag-Scan-Engine') ?? undefined,
-    databaseRevision: headers.get('Dufflebag-Scan-Database-Revision') ?? undefined,
-    observedAt: headers.get('Dufflebag-Scan-Observed-At') ?? undefined,
-    submitted: number('Dufflebag-Scan-Submitted'),
-    invalid: number('Dufflebag-Scan-Invalid'),
-    unversioned: number('Dufflebag-Scan-Unversioned'),
-    unsupported: number('Dufflebag-Scan-Unsupported'),
+    engine: headers.get('dufflebag-scan-engine') ?? undefined,
+    databaseRevision: headers.get('dufflebag-scan-database-revision') ?? undefined,
+    observedAt: headers.get('dufflebag-scan-observed-at') ?? undefined,
+    submitted: number('dufflebag-scan-submitted'),
+    invalid: number('dufflebag-scan-invalid'),
+    unversioned: number('dufflebag-scan-unversioned'),
+    unsupported: number('dufflebag-scan-unsupported'),
   }
 }
 

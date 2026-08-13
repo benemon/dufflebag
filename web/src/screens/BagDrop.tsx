@@ -464,7 +464,7 @@ export function DestinationFormView({
           onChange={(_event, value) => update({ adapter: value as DestinationDraft['adapter'] })}
         >
           <FormSelectOption value="hcp-packer" label="HCP Packer" />
-          <FormSelectOption value="dufflebag" label="Dufflebag" />
+          <FormSelectOption value="dufflebag" label="dufflebag" />
         </FormSelect>
       </FormGroup>
       {draft.adapter === 'dufflebag' ? (

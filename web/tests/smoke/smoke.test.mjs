@@ -1329,7 +1329,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     const navStyles = await page.evaluate(() => {
       const panel = document.querySelector('.app-sidebar')
       const heading = document.querySelector('.app-global-nav .pf-v6-c-nav__section-title')
-      const selected = document.querySelector('.app-global-nav .nv[aria-current="page"]')
+      const selected = document.querySelector('.app-global-nav .pf-v6-c-nav__link[aria-current="page"]')
       const panelStyle = getComputedStyle(panel)
       const headingStyle = getComputedStyle(heading)
       const selectedStyle = getComputedStyle(selected)
@@ -1365,13 +1365,15 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         border: '1px solid rgb(224, 224, 224)', padding: '8px 0px 8px 0px',
       },
       heading: {
-        padding: '16px 16px 6px 16px', fontWeight: '400', fontSize: '14px',
+        padding: '16px 16px 6px 16px', fontWeight: '500', fontSize: '14px',
         lineHeight: '19.6px', color: 'rgb(77, 77, 77)',
       },
       selected: {
-        display: 'block', width: '212px', padding: '8px 16px 8px 13px',
-        borderLeft: '3px solid rgb(0, 102, 204)', background: 'rgb(242, 242, 242)',
-        fontWeight: '500', fontSize: '16px', lineHeight: '22.4px',
+        // PF's native link is inset within the item rather than a full-bleed
+        // row — 175px is the 212px sidebar minus PatternFly's item insets.
+        display: 'flex', width: '175px', padding: '8px 16px 8px 16px',
+        borderLeft: '0px none rgb(21, 21, 21)', background: 'rgb(255, 255, 255)',
+        fontWeight: '500', fontSize: '14px', lineHeight: '19.6px',
       },
     })
     // Its fields render truthfully: no versions have been pushed, so the
@@ -1721,7 +1723,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Assigned time')
     assert.equal(historyRequests.length, 0, 'collapsed channel table fetched assignment history')
     await toggleRow('latest')
-    await waitForText('Dufflebag, on version completion')
+    await waitForText('dufflebag, on version completion')
     await until('only latest history to be fetched', () => historyRequests.length === 1)
     await toggleRow('production')
     await waitForText('hcp_packer_channel_assignment')

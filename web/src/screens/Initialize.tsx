@@ -24,7 +24,7 @@ const stepIndex: Record<Step, number> = {
 function BootstrapPage({ children, host }: { children: ReactNode; host: string }) {
   return (
     <Login className="dfbg-bootstrap" header={<LoginHeader />}>
-      <LoginMainHeader title="Dufflebag" subtitle={host} />
+      <LoginMainHeader title="dufflebag" subtitle={host} />
       <LoginMainBody>{children}</LoginMainBody>
     </Login>
   )

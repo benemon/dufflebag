@@ -1314,7 +1314,7 @@ test('managed and unmanaged channels name their different managers', () => {
   for (const heading of ['Channel', 'Assigned version', 'Assigned by', 'Assigned time']) {
     assert.match(markup, new RegExp(`>${heading}<`))
   }
-  assert.match(markup, /Dufflebag, on version completion/)
+  assert.match(markup, /dufflebag, on version completion/)
   assert.match(markup, /hcp_packer_channel_assignment/)
   assert.match(markup, />Unknown</)
 })
