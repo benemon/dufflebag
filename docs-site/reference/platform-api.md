@@ -1,20 +1,27 @@
 # Platform API
 
-The platform API manages dufflebag tenancy, service principals and operational
-configuration. Its OpenAPI document is the source for endpoint, request and
-response details; see the [generated API reference](/platform-api.html).
+The platform API manages dufflebag tenancy, service principals, and
+operational configuration.
+
+::: info
+The OpenAPI document defines endpoint, request, and response details. See the
+[generated API reference](/platform-api.html).
+:::
 
 ## Authentication
 
-Exchange a service principal's client ID and secret at `/oauth2/token` using
-the OAuth 2.0 client-credentials grant. Send the returned access token on
-authenticated requests as a bearer token.
+Prerequisites: A service principal's client ID and secret.
+
+1. Exchange the client ID and secret at `/oauth2/token` with the OAuth 2.0
+   client-credentials grant.
+
+2. Send the returned access token as a bearer token on authenticated requests.
 
 ## Tenancy
 
-An organisation contains projects. A principal can be scoped to the platform,
-an organisation, or one project. Organisation-scoped principals can act across
-that organisation's projects; project-scoped principals can act only in their
+An organisation contains projects. A principal has platform, organisation, or
+project scope. An organisation-scoped principal can act across that
+organisation's projects. A project-scoped principal can act only in its
 project.
 
 ## Roles
@@ -27,6 +34,9 @@ Roles are ordered tiers within a principal's scope:
 - `maintainer` provides administrative access within the scope.
 - `root` provides platform administration.
 
-A caller can grant or modify only roles at or below its own tier. The
-[generated API reference](/platform-api.html) records the required role for
+::: warning
+A caller can grant or modify only roles at or below its own tier.
+:::
+
+The [generated API reference](/platform-api.html) records the required role for
 each operation.

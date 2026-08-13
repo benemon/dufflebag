@@ -19,6 +19,8 @@ Getting started:
   on OpenShift, or as a container.
 - [Point Packer and Terraform at an instance](./getting-started/first-use.md) —
   initialize an instance and connect the stock clients.
+- [Upgrade an instance](./getting-started/upgrading.md) — replace the image,
+  migrate the database and verify readiness.
 
 Administration:
 
