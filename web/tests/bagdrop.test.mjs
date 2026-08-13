@@ -250,6 +250,20 @@ test('only rows carrying last_sync_error have a visible error expander', () => {
   assert.match(markup, /<button[\s\S]*?<svg/)
 })
 
+test('verification and association times use semantic timestamps with unchanged empty copy', () => {
+  const markup = renderView({
+    config: config({ last_verification: {
+      ...verification(), verified_at: '2026-08-11T09:06:00.123456Z',
+    } }),
+    status: status({ associations: [association({
+      last_synced_at: '2026-08-11T09:05:00.654321Z', last_attempt_at: null,
+    })] }),
+  })
+  assert.match(markup, /<time[^>]*dateTime="2026-08-11T09:06:00.123456Z"/)
+  assert.match(markup, /<time[^>]*dateTime="2026-08-11T09:05:00.654321Z"/)
+  assert.match(markup, /data-label="Last attempt"[^>]*>Never</)
+})
+
 test('error sync status renders a danger label and visible error text', () => {
   const failed = association({
     sync_status: 'error', last_synced_at: null,

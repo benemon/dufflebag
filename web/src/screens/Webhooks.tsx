@@ -8,6 +8,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 import {
   WEBHOOK_OPERATIONS, createWebhook, deleteWebhook, listWebhookDeliveries, listWebhooks,
   verifyWebhook, type Webhook, type WebhookDelivery, type WebhookOperation,
@@ -247,7 +248,7 @@ function WebhookTable({ webhooks, callerRole, onVerify, onDelete, onDeliveries }
   )
 }
 
-function DeliveryTable({ deliveries }: { deliveries: WebhookDelivery[] }) {
+export function DeliveryTable({ deliveries }: { deliveries: WebhookDelivery[] }) {
   if (deliveries.length === 0) return <Content component="p">No deliveries recorded.</Content>
   return (
     <Table aria-label="Webhook deliveries" variant="compact">
@@ -256,7 +257,7 @@ function DeliveryTable({ deliveries }: { deliveries: WebhookDelivery[] }) {
         <Tr key={delivery.id}>
           <Td dataLabel="Operation">{delivery.operation}</Td><Td dataLabel="Status">{delivery.status}</Td>
           <Td dataLabel="Attempts">{delivery.attempt_count}</Td><Td dataLabel="Response">{delivery.response_code ?? '—'}</Td>
-          <Td dataLabel="Last attempt">{delivery.last_attempted_at ?? '—'}</Td><Td dataLabel="Detail">{delivery.detail ?? '—'}</Td>
+          <Td dataLabel="Last attempt"><When iso={delivery.last_attempted_at} /></Td><Td dataLabel="Detail">{delivery.detail ?? '—'}</Td>
         </Tr>
       ))}</Tbody>
     </Table>

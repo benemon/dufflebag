@@ -13,6 +13,7 @@ import {
 } from '../data/principals'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { When } from '../components/When'
 
 /**
  * Service principals — the console's only write surface (ADR-0012, amended).
@@ -733,14 +734,14 @@ function SecretSlots({
         {principal.secrets.map((secret) => (
           <Tr key={secret.id}>
             <Td dataLabel="Secret">{secret.id}</Td>
-            <Td dataLabel="Created">{secret.created_at}</Td>
+            <Td dataLabel="Created"><When iso={secret.created_at} /></Td>
             <Td dataLabel="Last used">
               {/*
                 "never used" is the signal that matters: a rotation whose new
                 secret never authenticates is a rotation that has not happened,
                 and revoking the old one then breaks the build.
               */}
-              {everUsed(secret) ? secret.last_used_at : 'never used'}
+              <When iso={everUsed(secret) ? secret.last_used_at : null} emptyText="never used" />
             </Td>
             <Td dataLabel="Expires">
               <ExpiryCell secret={secret} />
@@ -806,6 +807,6 @@ function secretExpired(secret: SecretMetadata): boolean {
  */
 function ExpiryCell({ secret }: { secret: SecretMetadata }) {
   if (!secret.expires_at) return <>never</>
-  if (!secretExpired(secret)) return <>{secret.expires_at}</>
-  return <Label isCompact color="red">expired {secret.expires_at}</Label>
+  if (!secretExpired(secret)) return <When iso={secret.expires_at} dateOnly />
+  return <Label isCompact color="red">expired <When iso={secret.expires_at} dateOnly /></Label>
 }

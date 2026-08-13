@@ -64,11 +64,12 @@ test('serving over http is called out, because the SDK will refuse the auth URL'
 test('the build card renders only endpoint-supplied values', () => {
   const markup = view()
   for (const supplied of [
-    '1.2.3', 'abc123', '/packer/2023-01-01', '2026-08-05T09:00:00Z',
+    '1.2.3', 'abc123', '/packer/2023-01-01',
     'reachable', 'ok', 'degraded', 'enabled',
   ]) {
     assert.match(markup, new RegExp(supplied.replaceAll('/', '\\/')))
   }
+  assert.match(markup, /<time[^>]*dateTime="2026-08-05T09:00:00Z"/)
   assert.doesNotMatch(markup, /postgres 16/)
 })
 

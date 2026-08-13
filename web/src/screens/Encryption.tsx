@@ -6,6 +6,7 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
+import { When } from '../components/When'
 import {
   encryptionRefusalHint, rewrapEncryption, rotateEncryption, useEncryption,
   type Encryption as EncryptionData, type KeyringEntry,
@@ -255,7 +256,7 @@ export function KeyringTable({ entries }: { entries: KeyringEntry[] }) {
               <Td dataLabel="Active">{summary.activeVersion}</Td>
               <Td dataLabel="Retained">{summary.retained}</Td>
               <Td dataLabel="KEK version">{summary.kekRefs}</Td>
-              <Td dataLabel="Wrapped at">{summary.wrappedAt}</Td>
+              <Td dataLabel="Wrapped at"><When iso={summary.wrappedAt} /></Td>
             </Tr>
           ))}
         </Tbody>

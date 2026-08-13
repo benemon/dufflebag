@@ -433,7 +433,7 @@ export async function loadChannelHistory(
         : 'historical',
     parentStatus: assignmentParentStatus(assignment.version),
     author: knownAuthor(assignment.author_id),
-    assignedAt: formatCreated(assignment.assigned_at),
+    assignedAt: assignment.assigned_at ?? '',
   }))
 }
 
@@ -631,13 +631,13 @@ function toVersion(
     channels: assignedChannels.map((channel) => channel.name),
     assignments: assignedChannels.map((channel) => ({
       channel: channel.name,
-      assignedAt: formatCreated(channel.updated_at),
+      assignedAt: channel.updated_at ?? '',
       author: knownAuthor(channel.author_id),
     })),
     builds: (version.builds ?? []).map(toBuild),
     parents: [],
     children: [],
-    created: formatCreated(version.created_at),
+    created: version.created_at ?? '',
   }
 }
 
@@ -665,7 +665,7 @@ function toBucketChannel(channel: ApiChannel): BucketChannel {
     fingerprint: channel.version?.fingerprint ?? '',
     managed: channel.managed ?? false,
     restricted: channel.restricted ?? false,
-    assignedAt: assigned ? formatCreated(channel.updated_at) : '—',
+    assignedAt: assigned ? channel.updated_at ?? '' : '',
     author: assigned ? knownAuthor(channel.author_id) : null,
   }
 }
@@ -759,12 +759,6 @@ function toFindings(pkg: ApiPackage): Finding[] {
   return findings
 }
 
-/** "2026-07-27 09:14 UTC" — the timestamps the server emits are always UTC. */
-function formatCreated(iso?: string): string {
-  if (!iso) return '—'
-  return `${iso.slice(0, 10)} ${iso.slice(11, 16)} UTC`
-}
-
 function toBuild(build: ApiBuild): Build {
   const packer = build.metadata?.packer
   const options = packer?.options
@@ -798,7 +792,7 @@ function toBuild(build: ApiBuild): Build {
       debug: options?.debug === true,
       force: options?.force === true,
     },
-    updated: formatCreated(build.updated_at),
+    updated: build.updated_at ?? '',
     packageInventory: { status: 'not-loaded' },
   }
 }

@@ -186,12 +186,12 @@ const detailMarkup = (version, extra = {}) =>
 
 const actionVersion = (state = 'complete') => ({
   name: 'v7', fingerprint: 'fp-action', state, templateType: 'HCL2', channels: [],
-  assignments: [], builds: [], parents: [], children: [], created: '2026-08-12 10:00 UTC',
+  assignments: [], builds: [], parents: [], children: [], created: '2026-08-12T10:00:00.000Z',
 })
 
 const channelFixture = (over = {}) => ({
   name: 'production', versionName: 'v7', fingerprint: 'fp-action', managed: false,
-  restricted: false, assignedAt: '2026-08-12 10:01 UTC', author: 'publisher', ...over,
+  restricted: false, assignedAt: '2026-08-12T10:01:00.000Z', author: 'publisher', ...over,
 })
 
 const channelVersions = [
@@ -226,6 +226,16 @@ const revokeModalProps = (over = {}) => ({
   failure: null, onMessageChange: () => {}, onWhenChange: () => {},
   onScheduledAtChange: () => {}, onSkipDescendantsChange: () => {},
   onDisableRollbackChange: () => {}, onConfirm: async () => {}, onClose: () => {}, ...over,
+})
+
+test('version and channel screens keep raw timestamps on semantic time elements', () => {
+  const versionMarkup = detailMarkup({
+    ...actionVersion(), created: '2026-08-12T10:00:00.123456Z',
+  })
+  assert.match(versionMarkup, /<time[^>]*dateTime="2026-08-12T10:00:00.123456Z"/)
+
+  const channelMarkup = channelFacetMarkup('publisher')
+  assert.match(channelMarkup, /<time[^>]*dateTime="2026-08-12T10:01:00.000Z"/)
 })
 
 const findElement = (node, predicate) => {
@@ -682,7 +692,7 @@ test('an incomplete version renders as incomplete, not as broken', async () => {
 
 const facetVersion = {
   name: 'v1', fingerprint: 'fp-complete', state: 'complete', templateType: 'HCL2',
-  channels: [], assignments: [], created: '2026-08-01 14:02 UTC',
+  channels: [], assignments: [], created: '2026-08-01T14:02:00.000Z',
   builds: [{ artifacts: [] }], parents: [], children: [],
 }
 
@@ -828,7 +838,7 @@ test('build and artifact details come through to the version page', async () => 
         variableFiles: ['./production.pkrvars.hcl'],
         only: ['docker.ubuntu'], except: [], debug: true, force: true,
       },
-      updated: '2026-07-31 10:05 UTC',
+      updated: '2026-07-31T10:05:00.000Z',
       packageInventory: { status: 'not-loaded' },
     },
   ])
@@ -840,6 +850,8 @@ test('build and artifact details come through to the version page', async () => 
   assert.match(markup, /linux/)
   assert.match(markup, /amd64/)
   assert.match(markup, /docker 1\.1\.4/)
+  assert.match(markup, /<time[^>]*dateTime="2026-07-31T10:00:00.000Z"/)
+  assert.match(markup, /<time[^>]*dateTime="2026-07-31T10:05:00.000Z"/)
 })
 
 test('the build list renders metadata columns and expandable package detail', () => {
@@ -853,12 +865,12 @@ test('the build list renders metadata columns and expandable package detail', ()
     assignments: [],
     parents: [],
     children: [],
-    created: '2026-07-31 10:00 UTC',
+    created: '2026-07-31T10:00:00.000Z',
     builds: [{
       id: 'build-list-id', component: 'docker.ubuntu', platform: 'docker', state: 'done',
       packerRunUUID: 'run-list', sourceExternalIdentifier: '', labels: {}, artifacts: [],
       packerVersion: '1.16.0', plugins: [{ name: 'docker', version: '1.1.4' }],
-      runnerOS: 'linux', arch: 'amd64', updated: '2026-07-31 10:05 UTC',
+      runnerOS: 'linux', arch: 'amd64', updated: '2026-07-31T10:05:00.000Z',
       options: {
         path: './image.pkr.hcl', variables: [], variableFiles: [],
         only: [], except: [], debug: false, force: false,
@@ -1088,7 +1100,7 @@ test('channel assignment context names the channels pointing at each version', a
 test('a version row expands to fingerprint, build summary, parent freshness, and children', () => {
   const version = {
     name: 'v14', fingerprint: 'child-fingerprint', state: 'complete', templateType: 'HCL2',
-    channels: ['production'], assignments: [], created: '2026-08-01 14:02 UTC',
+    channels: ['production'], assignments: [], created: '2026-08-01T14:02:00.000Z',
     builds: [{ artifacts: [{ id: 'artifact-1' }, { id: 'artifact-2' }] }],
     parents: [{
       bucket: 'base-images', versionName: 'v22', fingerprint: 'parent-fingerprint',
@@ -1133,7 +1145,7 @@ test('collapsed bucket detail uses channel metadata and does not fetch assignmen
   assert.deepEqual(bucket.latestVersion, { name: 'v1', fingerprint: 'fp-complete' })
   assert.deepEqual(bucket.versions[0].assignments, [{
     channel: 'production',
-    assignedAt: '2026-08-01 09:10 UTC',
+    assignedAt: '2026-08-01T09:10:00.000Z',
     author: 'principal-real-author',
   }])
   assert.equal(bucket.channels[0].author, 'principal-real-author')
@@ -1165,7 +1177,7 @@ test('bucket status and rail counts come from the loaded newest version and face
   assert.deepEqual(bucket.latestVersion, { name: 'v1', fingerprint: 'fp-complete' })
   assert.deepEqual(bucket.newestVersion, {
     name: 'v0', fingerprint: 'fp-incomplete', state: 'incomplete',
-    created: '2026-07-31 11:00 UTC',
+    created: '2026-07-31T11:00:00.000Z',
   })
   const markup = renderToStaticMarkup(React.createElement(VersionsView, {
     bucket: 'images', bucketData: bucket, loading: false, failure: null,
@@ -1232,7 +1244,7 @@ test('assignment history marks only the current row active and preserves unknown
 test('managed and unmanaged channels name their different managers', () => {
   const channel = (overrides) => ({
     name: 'production', versionName: 'v2', fingerprint: 'fp-current',
-    managed: false, restricted: false, assignedAt: '2026-08-02 09:10 UTC',
+    managed: false, restricted: false, assignedAt: '2026-08-02T09:10:00.000Z',
     author: 'principal-current', ...overrides,
   })
   const markup = renderToStaticMarkup(React.createElement(BucketChannelsFacet, {
@@ -1429,7 +1441,7 @@ test('the list windows old versions instead of hiding them', () => {
     builds: [],
     parents: [],
     children: [],
-    created: '2026-07-31 10:00 UTC',
+    created: '2026-07-31T10:00:00.000Z',
   }))
   const markup = listMarkup(versions)
   assert.match(markup, />v33</)
