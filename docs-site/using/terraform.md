@@ -1,54 +1,64 @@
 # Terraform provider
 
-`terraform-provider-hcp` is the recommended automation interface for a
-dufflebag registry: it ships *resources*, not just data sources, so buckets,
-channels and channel assignments can be managed declaratively. Version
-**0.84.0 or newer** is supported; 0.112.0 is the pin the end-to-end suite
-actually drives.
+Use `terraform-provider-hcp` as the automation interface for a dufflebag
+registry. It includes resources, not only data sources, so it can manage
+buckets, channels, and channel assignments declaratively. Dufflebag supports
+version 0.84.0 or newer. The end-to-end suite runs version 0.112.0.
 
-The provider reads the same `HCP_*` environment variables as Packer —
-[Getting started](../getting-started/first-use.md) covers the block. Two
-provider-specific notes:
+## Configure the provider
 
-- Set `skip_status_check = true`: the HCP status page is outside dufflebag's
-  surface, and skipping it keeps the run from calling the real service.
-- Even with `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` set, the provider
-  fetches the pinned project through the resource-manager API (Packer skips
-  that call). dufflebag serves it; nothing to configure.
+Prerequisites: The `HCP_*` environment variables from
+[Getting started](../getting-started/first-use.md) and
+`terraform-provider-hcp` 0.84.0 or newer.
+
+1. Set `skip_status_check = true` in the provider configuration. The HCP status
+   page is outside dufflebag's surface. Skipping the check prevents the run
+   from calling the HCP service.
+
+2. Run Terraform with the `HCP_*` environment variables set.
+
+::: info
+The provider fetches the selected project through the resource-manager API,
+even when `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` are set. Packer skips this
+call. Dufflebag serves the provider's request without additional
+configuration.
+:::
 
 ## Resources
 
-**`hcp_packer_bucket`** creates and manages a bucket. Its destroy tolerates
-an already-deleted bucket and fails on anything else.
+- **`hcp_packer_bucket`** creates and manages a bucket. Destroying the resource
+  tolerates an already-deleted bucket and fails on any other error.
+- **`hcp_packer_channel`** manages user channels. It can also manage the
+  managed `latest` channel. `CreateBucket` creates `latest`, so the provider
+  receives an already-exists response and adopts the existing channel. Omit
+  the `restricted` argument from a channel block that manages `latest`.
+  Setting it makes the provider try to update a managed channel, and dufflebag
+  refuses the update.
+- **`hcp_packer_channel_assignment`** records a promotion by assigning a
+  version fingerprint to a channel. Destroying the resource clears the
+  assignment.
 
-**`hcp_packer_channel`** manages user channels. It can also manage the
-managed `latest` channel: `CreateBucket` mints `latest` automatically, so the
-provider's create receives an already-exists answer and *adopts* the existing
-channel — this is expected, not an error. Omit the `restricted` argument on a
-channel block managing `latest`; setting it makes the provider try to update
-a managed channel, which is refused.
-
-**`hcp_packer_channel_assignment`** is the promotion record: it assigns a
-version fingerprint to a channel. Destroying it clears the assignment.
-
-Not supported: `hcp_packer_run_task` (an inbound-webhook feature of HCP
-Terraform), and bucket IAM bindings.
+::: warning
+`hcp_packer_run_task`, an inbound-webhook feature of HCP Terraform, is not
+supported. Bucket IAM bindings are also not supported.
+:::
 
 ## Data sources
 
-- `hcp_packer_version` resolves a channel to its current version — the
-  standard consumption pattern, most often against `latest`. A revoked
-  version is refused, which is the point: consumers cannot build from what
-  has been pulled.
-- `hcp_packer_artifact` resolves a version's artifact by platform and
-  region, yielding the `external_identifier` a downstream build consumes.
+- `hcp_packer_version` resolves a channel to its current version. This is the
+  consumption pattern, most often against `latest`. It refuses a revoked
+  version, so consumers cannot build from a version that has been pulled.
+- `hcp_packer_artifact` resolves a version's artifact by platform and region.
+  It returns the `external_identifier` consumed by a downstream build.
 - `hcp_packer_bucket_names` lists the project's buckets.
 
 ## A working example
 
-This is the shape the end-to-end suite applies against a real dufflebag
-instance (with the environment from
-[Getting started](../getting-started/first-use.md)):
+Prerequisites: A dufflebag instance and the environment from
+[Getting started](../getting-started/first-use.md).
+
+1. Apply the following configuration. The end-to-end suite applies this shape
+   against a real dufflebag instance:
 
 ```hcl
 terraform {
@@ -100,20 +110,24 @@ data "hcp_packer_artifact" "release" {
 
 ## Promotion as code
 
-With the assignment resource holding the pointer, promotion is a plan/apply:
-change `release_fingerprint` to the fingerprint that passed testing and
-apply. The channel's assignment history accumulates on the server, which is
-what [revocation rollback](./revocation-channels.md) walks when a version is
-pulled — after a revocation rolls a channel back, the Terraform state's
-assignment will show as drift on the next plan, which is exactly what you
-want to see.
+Prerequisites: An `hcp_packer_channel_assignment` resource and the fingerprint
+of a version that passed testing.
 
-The console offers the same operations interactively to publishers, but for
-pipelines, Terraform remains the recommended path.
+1. Change `release_fingerprint` to the selected fingerprint.
+
+2. Apply the change.
+
+The server accumulates the channel's assignment history. Revocation rollback
+walks that history when a version is pulled. After a revocation rolls a channel
+back, the assignment in Terraform state appears as drift on the next plan.
+See [Revocation, restore and channels](./revocation-channels.md).
+
+The console provides the same operations to publishers. Use Terraform to keep
+pipeline operations declarative.
 
 ## Where to go next
 
-- [Revocation, restore and channels](./revocation-channels.md) — what
-  happens to assignments when versions are revoked.
-- [Compatibility reference](../reference/compatibility.md)
-  — the twelve provider operations and the client-version floors.
+- [Revocation, restore and channels](./revocation-channels.md): what happens to
+  assignments when versions are revoked.
+- [Compatibility reference](../reference/compatibility.md): the twelve
+  provider operations and the client-version floors.

@@ -1,89 +1,104 @@
 # SBOMs and findings
 
-A build can carry one or more SBOMs — software bills of materials — uploaded
-while the build runs. dufflebag stores the documents, projects a package
-inventory out of them, and, when a scanner is configured, attributes
-vulnerability findings to those packages. The full wire contract is in the
-[compatibility reference](../reference/compatibility.md).
+A build can carry one or more software bills of materials (SBOMs) uploaded
+while the build runs. Dufflebag stores the documents and projects a package
+inventory from them. When a scanner is configured, it attributes vulnerability
+findings to those packages. The
+[compatibility reference](../reference/compatibility.md) records the wire
+contract.
 
-SBOM storage requires an S3-compatible object store; without one, upload and
-download answer 503 while everything else keeps working.
+::: warning
+SBOM storage requires an S3-compatible object store. Without one, upload and
+download return 503. Other operations continue to work.
+:::
 
 ## Uploading from Packer
 
-Add HashiCorp's `hcp-sbom` provisioner to a build that publishes to the
-registry; it uploads the document to the build during the run. The rules that
-matter:
+Prerequisites: A Packer build that publishes to the registry and a configured
+S3-compatible object store.
 
-- Uploads are only accepted **while the build is running** — outside that
-  window the request is refused with
-  `This build's status isn't Running, so sboms can not be uploaded`.
-- Any upload error **fails the Packer build** — this is the stock client's
-  behaviour, not dufflebag's choice.
-- SPDX JSON and CycloneDX JSON are both supported. The document travels
-  zstd-compressed; the original bytes are stored verbatim (sealed at rest on
-  encrypted deployments).
-- The SBOM name is optional. An unnamed upload is stored under the build
-  fingerprint — a recorded divergence from HCP Packer, which mints a random
-  identifier; nothing in the supported client surface parses the name either
-  way.
+1. Add HashiCorp's `hcp-sbom` provisioner to the build. It uploads the document
+   to the build during the run.
+
+Uploads are accepted only while the build is running. Outside that window, the
+request is refused with
+`This build's status isn't Running, so sboms can not be uploaded`.
+
+::: warning
+Any upload error fails the Packer build. This is the stock client's behavior,
+not a choice made by dufflebag.
+:::
+
+SPDX JSON and CycloneDX JSON are supported. The document is transported with
+zstd compression. Dufflebag stores the original bytes verbatim and seals them
+at rest on encrypted deployments.
+
+The SBOM name is optional. An unnamed upload is stored under the build
+fingerprint. HCP Packer instead creates a random identifier, which is a
+recorded divergence. Nothing in the supported client surface parses the name
+in either case.
 
 ## Reading and downloading
 
-Any `reader` can list a build's SBOMs and download them — from the build
-screen's SBOM card in the console, or via the API. The download always serves
-the **decompressed** document as `<name>.json`, whatever format was uploaded:
-compression is transport, not contract.
+Prerequisites: The `reader` role and a build with an SBOM.
+
+1. Open the build's SBOM card in the console, or use the API to list and
+   download its SBOMs.
+
+Downloads always return the decompressed document as `<name>.json`, regardless of the format used at upload.
 
 ## The package inventory
 
-Each SBOM is parsed at upload, in the same transaction that stores it. The
-build's packages read returns one row per `(name, version, purl)` with the
-SBOMs it came from; the console's build screen shows the same inventory on
-its **Packages** tab. A document that cannot be parsed stays stored with an
-explicit unparseable status, and the packages read says so rather than
-returning an empty — and falsely clean-looking — list.
+Each SBOM is parsed during upload in the transaction that stores it. The build
+packages response contains one row per `(name, version, purl)` and identifies
+the SBOMs that supplied the row. The console shows the same inventory on the
+build screen's **Packages** tab.
 
-One honest boundary: package names, versions and purls are
-**client-reported**. dufflebag records and attributes the assertion; it does
-not certify the SBOM against the image.
+A document that cannot be parsed remains stored with an explicit unparseable
+status. The packages response reports that status instead of returning an
+empty list that could be mistaken for an SBOM with no packages.
+
+::: info
+Package names, versions, and purls are reported by the client. Dufflebag records them; it does not verify the SBOM against the image.
+:::
 
 ## Vulnerability findings
 
-Scanning is optional and off by default — an operator enables the OSV adapter
-(`DFBG_SCANNER_ADAPTER=osv`), which queries by package name and version
-derived from purls; the SBOM document itself never leaves the deployment. See
-the
+Scanning is optional and disabled by default. An operator enables the OSV
+adapter with `DFBG_SCANNER_ADAPTER=osv`. The adapter derives package name and
+version queries from purls. The SBOM document does not leave the deployment.
+See the
 [deployment guide](../deployment/operations.md#vulnerability-scanning-optional)
 for the operator contract.
 
-The absence rule is deliberate everywhere findings appear: **no scan means
-absent, never empty**. An unscanned build has no `vuln_details` at all, the
-bucket-level vulnerability reads answer not-found rather than an empty
-success, and the console never describes an unscanned state as clean. Only a
-current successful scan produces findings — including a genuinely empty
-findings list when the scan found nothing — and a failed newer scan attempt
-does not erase the previous successful run's findings.
+::: info
+No scan is represented as absent, not as an empty result. An unscanned build
+has no `vuln_details`. Bucket-level vulnerability reads return not-found. The
+console does not describe an unscanned state as clean.
+:::
+
+Only a current successful scan produces findings, including an empty findings
+list when the scan found nothing. A newer failed scan does not erase the
+findings from the previous successful run.
 
 With a scanner configured:
 
-- Build packages carry their findings, and responses are attributed with
-  `Dufflebag-Scan-*` headers naming the adapter, engine, database revision
-  and coverage counts.
-- Bucket-level reads aggregate across builds: a vulnerability summary,
-  packages-with-vulnerabilities, and the flat vulnerability list — all
-  `reader` operations.
-- The console's package tables show severity counts, and rows with findings
-  expand to the individual findings — rows without findings have nothing to
-  open.
+- Build packages include their findings. Responses include
+  `Dufflebag-Scan-*` headers with the adapter, engine, database revision, and
+  coverage counts.
+- Bucket-level `reader` operations aggregate across builds. They return a
+  vulnerability summary, packages with vulnerabilities, and a flat
+  vulnerability list.
+- Console package tables show severity counts. Rows with findings expand to
+  show individual findings. Rows without findings do not expand.
 
-When findings warrant taking an image out of circulation, that is what
-[revocation](./revocation-channels.md) is for: revoke the version, let the
-channels roll back, and consumers stop resolving it.
+When findings require removing an image from circulation, revoke the version.
+Channels roll back, and consumers stop resolving the version. See
+[Revocation, restore and channels](./revocation-channels.md).
 
 ## Where to go next
 
-- [Compatibility reference](../reference/compatibility.md)
-  — the SBOM wire contract and package projection rules.
-- [Deployment guide](../deployment/index.md)
-  — object storage and scanner configuration.
+- [Compatibility reference](../reference/compatibility.md): the SBOM wire
+  contract and package projection rules.
+- [Deployment guide](../deployment/index.md): object storage and scanner
+  configuration.

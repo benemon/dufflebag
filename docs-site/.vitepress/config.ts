@@ -9,6 +9,7 @@ const sidebar = [
     items: [
       { text: 'Installation', link: '/getting-started/installation' },
       { text: 'First use', link: '/getting-started/first-use' },
+      { text: 'Upgrading', link: '/getting-started/upgrading' },
     ],
   },
   {
