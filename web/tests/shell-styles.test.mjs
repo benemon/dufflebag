@@ -61,7 +61,16 @@ test('the built bundle puts PatternFly component CSS in a lower cascade layer', 
   assert.ok(layered('.pf-v6-c-nav{'), 'PatternFly Nav CSS escaped the patternfly cascade layer')
   // The console's own rules must stay unlayered so they win over PatternFly's.
   assert.ok(!layered('.pf-v6-c-page.app-page{'), 'app shell CSS was swallowed by the patternfly layer')
-  assert.ok(!layered('.app-global-nav .nv[aria-current=page]{'), 'app nav CSS was swallowed by the patternfly layer')
+  assert.ok(!layered('.app-global-nav .pf-v6-c-nav__link{'), 'app nav CSS was swallowed by the patternfly layer')
+})
+
+test('global navigation uses the settled type hierarchy', () => {
+  const heading = rule('.app-global-nav .pf-v6-c-nav__section-title')
+  const link = rule('.app-global-nav .pf-v6-c-nav__link')
+  const current = rule('.app-global-nav .pf-v6-c-nav__link.pf-m-current')
+  assert.match(heading, /font: 500 14px\/1\.4 "Red Hat Display", sans-serif;/)
+  assert.match(link, /font: 400 14px\/1\.4 "Red Hat Text", sans-serif;/)
+  assert.match(current, /font-weight: 500;/)
 })
 
 test('registry fingerprints wrap without truncating their text', () => {

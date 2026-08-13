@@ -10,6 +10,8 @@ import { useHumanMethods } from '../auth/methods'
 import { instanceHealth, type InstanceHealth } from '../api/client'
 import { Initialize } from './Initialize'
 
+const loginTitle = 'dufflebag'
+
 /**
  * Sign in.
  *
@@ -41,12 +43,12 @@ export function Login() {
 
   if (health === null) {
     // A blank page and a broken one are indistinguishable; say what is happening.
-    return <LoginPage loginTitle="Dufflebag" loginSubtitle="Checking this instance…" />
+    return <LoginPage loginTitle={loginTitle} loginSubtitle="Checking this instance…" />
   }
 
   if (health === 'unreachable') {
     return (
-      <LoginPage loginTitle="Dufflebag" loginSubtitle={window.location.host}>
+      <LoginPage loginTitle={loginTitle} loginSubtitle={window.location.host}>
         <Alert variant="danger" isInline title="This instance could not be reached">
           <Content component="p">
             The status probe at /sys/health did not answer, so the console cannot tell
@@ -64,7 +66,7 @@ export function Login() {
 
   if (destination === 'database-failure') {
     return (
-      <LoginPage loginTitle="Dufflebag" loginSubtitle={window.location.host}>
+      <LoginPage loginTitle={loginTitle} loginSubtitle={window.location.host}>
         <Alert variant="danger" isInline title="The instance database is unavailable">
           <Content component="p">
             The status endpoint answered, but its database check failed. The console cannot safely
@@ -102,7 +104,7 @@ export function Login() {
 
   return (
     <LoginPage
-      loginTitle="Dufflebag"
+      loginTitle={loginTitle}
       loginSubtitle={window.location.host}
     >
       {health.audit === 'degraded' ? (

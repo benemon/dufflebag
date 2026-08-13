@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -27,12 +28,13 @@ after(async () => {
 })
 
 const labels = ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
+const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
 
-const view = (role) => renderToStaticMarkup(React.createElement(
+const view = (role, pathname = '/buckets') => renderToStaticMarkup(React.createElement(
   MemoryRouter,
-  { initialEntries: ['/buckets'] },
+  { initialEntries: [pathname] },
   React.createElement(AppShellView, {
-    pathname: '/buckets',
+    pathname,
     visibleItems: visibleNavItems(role),
   }, React.createElement('main', null, 'Screen')),
 ))
@@ -56,4 +58,21 @@ test('the shell renders only navigation the caller can use', () => {
     // shipped grouping.
     assert.match(markup, /Administration/)
   }
+})
+
+test('router links carry PatternFly native current navigation state', () => {
+  const markup = view('root', '/audit')
+  assert.match(
+    markup,
+    /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
+  )
+  assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
+  for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+    assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
+  }
+})
+
+test('the masthead uses the PatternFly brand slot for the lowercase wordmark', () => {
+  assert.match(shellSource, /<MastheadLogo className="app-wordmark">dufflebag<\/MastheadLogo>/)
+  assert.doesNotMatch(shellSource, /<span style=\{\{ fontSize:/)
 })

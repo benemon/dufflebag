@@ -50,13 +50,13 @@ export function auditRefusalHint(error: unknown): string | null {
     case 'not-a-regular-file':
       return 'The path must name a regular file, not a directory, device, or pipe.'
     case 'permission-denied':
-      return 'The Dufflebag process does not have permission to open that path.'
+      return 'The dufflebag process does not have permission to open that path.'
     case 'symlink-refused':
       return 'Symlinks are refused for audit targets. Enter the regular file path directly.'
     case 'world-writable-parent':
       return 'The parent directory is world-writable. Restrict it before adding this target.'
     case 'path-unavailable':
-      return 'The path or its parent is unavailable to the Dufflebag process.'
+      return 'The path or its parent is unavailable to the dufflebag process.'
     default:
       return error.message
   }

@@ -6,6 +6,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
+let AuthContext
+let Login
 let ServicePrincipalForm
 let Initialize
 let StoreCredentials
@@ -22,7 +24,8 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ ServicePrincipalForm } = await vite.ssrLoadModule('/src/screens/Login.tsx'))
+  ;({ AuthContext } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
+  ;({ Login, ServicePrincipalForm } = await vite.ssrLoadModule('/src/screens/Login.tsx'))
   ;({
     Initialize,
     StoreCredentials,
@@ -81,7 +84,7 @@ test('the first-run screen uses the bootstrap shell and four-step wizard', () =>
     onDone: () => {},
   }))
   assert.match(wizard, /pf-v6-c-login dfbg-bootstrap/)
-  assert.match(wizard, />Dufflebag</)
+  assert.match(wizard, />dufflebag</)
   assert.match(wizard, /dufflebag\.test/)
   assert.match(wizard, /Mint the administrative principal, store its credentials/)
   assert.match(wizard, /Initialization progress/)
@@ -92,6 +95,21 @@ test('the first-run screen uses the bootstrap shell and four-step wizard', () =>
   assert.match(wizard, /Initialize this instance/)
   assert.match(wizard, /creates only the first root principal/)
   assert.doesNotMatch(wizard, />Next<|>Back<|>Cancel</)
+})
+
+test('sign-in and bootstrap use the lowercase wordmark', () => {
+  const signIn = renderToStaticMarkup(React.createElement(
+    AuthContext.Provider,
+    { value: { signIn: async () => {}, sessionEnded: false } },
+    React.createElement(Login),
+  ))
+  const bootstrap = renderToStaticMarkup(React.createElement(Initialize, {
+    host: 'dufflebag.test',
+    onDone: () => {},
+  }))
+  assert.match(signIn, />dufflebag</)
+  assert.match(bootstrap, />dufflebag</)
+  assert.doesNotMatch(`${signIn}${bootstrap}`, />Dufflebag</)
 })
 
 test('the wizard rail is forward-only', () => {

@@ -763,7 +763,7 @@ export function BucketChannelsFacet({
                           <DescriptionListTerm>Managed by</DescriptionListTerm>
                           <DescriptionListDescription>
                             {channel.managed
-                              ? 'Dufflebag, on version completion'
+                              ? 'dufflebag, on version completion'
                               : <code>hcp_packer_channel_assignment</code>}
                           </DescriptionListDescription>
                         </DescriptionListGroup>

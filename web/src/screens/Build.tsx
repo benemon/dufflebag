@@ -355,7 +355,7 @@ function PackagesCard({ build }: { build: Build }) {
       <CardTitle>Packages</CardTitle>
       <CardBody>
         <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-          Reported by client-supplied SBOMs; Dufflebag has not verified this inventory.
+          Reported by client-supplied SBOMs; dufflebag has not verified this inventory.
           {' '}{all.length} {all.length === 1 ? 'package' : 'packages'} · {affected.length} with findings.
         </Content>
         <Toolbar id="packages-toolbar">
