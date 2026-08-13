@@ -261,6 +261,7 @@ export function VersionView({
             onSelect={setFacet}
             heading="This version"
             label="Version facets"
+            unmountOnExit
             facets={[
               {
                 key: 'overview', label: 'Overview',
@@ -926,7 +927,7 @@ function terraformLabel(value: string): string {
   return /^[0-9]/.test(label) ? `v_${label}` : label
 }
 
-function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id: string) => void }) {
+export function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id: string) => void }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   return (
     <Table aria-label="Builds" variant="compact">
