@@ -45,7 +45,9 @@ deleting a bucket, version, channel, webhook, principal or Bag Drop configuratio
 a version, or stopping a mirror asks for the resource's name; removing an audit target asks
 for the target path; revoking a secret, rotating encryption keys, or rewrapping the keyring
 asks for the action word itself. Restoring a version is recovery, not destruction, and
-confirms with a single click.
+confirms with a single click. For set actions, the modal lists every selected resource and
+any exclusions, then asks for the fixed action word: `stop mirroring`, `revoke`, or `delete`;
+single-resource flows still ask for the resource name.
 
 ## The screens
 

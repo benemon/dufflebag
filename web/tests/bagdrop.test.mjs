@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -11,6 +12,7 @@ let AssociationSelectorView
 let BagDropStatusTableView
 let BagDropView
 let BucketRemovalConfirmation
+let BucketSetRemovalConfirmation
 let DestinationActionFailure
 let DeleteBagDropConfigConfirmation
 let DestinationFormView
@@ -30,6 +32,7 @@ before(async () => {
   ;({ enableBagDrop } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({
     AssociationSelectorView, BagDropStatusTableView, BagDropView, BucketRemovalConfirmation,
+    BucketSetRemovalConfirmation,
     DeleteBagDropConfigConfirmation, DestinationActionFailure, DestinationFormView,
     DestinationZone, bagDropWrite,
     enableFailureMessage,
@@ -154,27 +157,36 @@ test('the primary destination action is Enable and Verify stays disabled while d
 
 const selectorProps = (over = {}) => ({
   buckets: [{ name: 'images' }, { name: 'workers' }], associations: [association()],
-  selectedAvailable: null, selectedMirrored: 'images', confirming: null, busy: false,
+  selectedAvailable: [], selectedMirrored: ['images'], confirming: null, busy: false,
   onSelectAvailable: () => {}, onSelectMirrored: () => {}, onAssociate: () => {},
   onRequestRemoval: () => {}, onCancelRemoval: () => {}, onConfirmRemoval: () => {},
   ...over,
 })
 
-test('moving out opens the destructive confirmation and Cancel never calls DELETE', () => {
+// MUTATION_UNASSOCIATE_GATE (container wiring): the view-layer tests below
+// prove the control only REQUESTS removal, but they inject the callbacks, so
+// a container that wires the request straight to unassociate would pass them.
+// The wiring itself is the invariant; pin it at source level.
+const bagdropScreenSource = readFileSync(new URL('../src/screens/BagDrop.tsx', import.meta.url), 'utf8')
+test('the container stages removal requests as confirmations, never as direct unassociates', () => {
+  assert.match(bagdropScreenSource, /onRequestRemoval=\{setConfirming\}/)
+})
+
+test('MUTATION_UNASSOCIATE_GATE keeps single removal behind its typed-name confirmation', () => {
   let confirming = null
   let deletes = 0
   const selector = AssociationSelectorView(selectorProps({
-    onRequestRemoval: (name) => { confirming = name },
+    onRequestRemoval: (names) => { confirming = names },
     onConfirmRemoval: () => { deletes++ },
   }))
   findElement(
     selector, (element) => element.props['aria-label'] === 'Stop mirroring selected bucket',
   ).props.onClick()
-  assert.equal(confirming, 'images')
+  assert.deepEqual(confirming, ['images'])
   assert.equal(deletes, 0)
 
   const warning = BucketRemovalConfirmation({
-    bucketName: confirming,
+    bucketName: confirming[0],
     onCancel: () => { confirming = null },
     onConfirm: () => { deletes++ },
   })
@@ -188,6 +200,60 @@ test('moving out opens the destructive confirmation and Cancel never calls DELET
     bucketName: 'images', onCancel: () => {}, onConfirm: () => { deletes++ },
   })
   confirmed.props.onConfirm()
+  assert.equal(deletes, 1)
+})
+
+test('multi-select assembly moves the selected set and the add-all control moves every bucket', () => {
+  const moved = []
+  const selected = AssociationSelectorView(selectorProps({
+    buckets: [{ name: 'images' }, { name: 'workers' }, { name: 'base' }],
+    associations: [], selectedAvailable: ['images', 'base'], selectedMirrored: [],
+    onAssociate: (names) => moved.push(names),
+  }))
+  findElement(
+    selected, (element) => element.props['aria-label'] === 'Mirror selected bucket',
+  ).props.onClick()
+  assert.deepEqual(moved, [['images', 'base']])
+
+  findElement(
+    selected, (element) => element.props['aria-label'] === 'Mirror all buckets',
+  ).props.onClick()
+  assert.deepEqual(moved[1], ['images', 'workers', 'base'])
+})
+
+test('MUTATION_UNASSOCIATE_GATE_SET lists the set and requires the stop mirroring action word', () => {
+  let confirming = null
+  let deletes = 0
+  const associations = [association(), association({ bucket_name: 'workers' })]
+  const selector = AssociationSelectorView(selectorProps({
+    associations, selectedMirrored: ['images', 'workers'],
+    onRequestRemoval: (names) => { confirming = names },
+    onConfirmRemoval: () => { deletes++ },
+  }))
+  findElement(
+    selector, (element) => element.props['aria-label'] === 'Stop mirroring selected bucket',
+  ).props.onClick()
+  assert.deepEqual(confirming, ['images', 'workers'])
+  assert.equal(deletes, 0)
+
+  const warning = BucketSetRemovalConfirmation({
+    bucketNames: confirming, onCancel: () => {}, onConfirm: () => { deletes++ },
+  })
+  assert.equal(warning.props.expected, 'stop mirroring')
+  assert.equal(warning.props.verb, 'Stop mirroring')
+  const markup = renderTyped(warning)
+  assert.match(markup, /Stop mirroring 2 buckets\?/)
+  assert.match(markup, /images/)
+  assert.match(markup, /workers/)
+  assert.match(markup, /Type <strong>stop mirroring<\/strong> to confirm/)
+
+  confirming = null
+  findElement(
+    selector, (element) => element.props['aria-label'] === 'Stop mirroring all buckets',
+  ).props.onClick()
+  assert.deepEqual(confirming, ['images', 'workers'])
+  assert.equal(deletes, 0)
+  warning.props.onConfirm()
   assert.equal(deletes, 1)
 })
 
@@ -208,14 +274,14 @@ test('pending_removal stays in the mirrored pane as Removing and can be resumed'
   let resumed = null
   const pending = association({ state: 'pending_removal', sync_status: 'removing' })
   const tree = AssociationSelectorView(selectorProps({
-    associations: [pending], selectedMirrored: 'images', onAssociate: (name) => { resumed = name },
+    associations: [pending], selectedMirrored: ['images'], onAssociate: (names) => { resumed = names },
   }))
   const markup = renderToStaticMarkup(tree)
   assert.match(markup, /Mirrored buckets/)
   assert.match(markup, /images/)
   assert.match(markup, /Removing/)
   findElement(tree, (element) => element.props['aria-label'] === 'Resume selected bucket').props.onClick()
-  assert.equal(resumed, 'images')
+  assert.deepEqual(resumed, ['images'])
 })
 
 test('env_key shows the persistent credential warning while keyring does not', () => {

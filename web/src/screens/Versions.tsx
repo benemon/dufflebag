@@ -4,7 +4,7 @@ import {
   DescriptionList, DescriptionListDescription, DescriptionListGroup, DescriptionListTerm,
   Dropdown, DropdownItem, DropdownList, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, Form, FormGroup, FormSelect, FormSelectOption,
-  Label, MenuToggle, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, Pagination,
+  Label, MenuToggle, MenuToggleCheckbox, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, Pagination,
   Popover, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
@@ -19,12 +19,15 @@ import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import {
+  RevokeVersionOptionsForm, revokeOptions, revokeScheduleFailure, type RevokeWhen,
+} from '../components/RevokeVersionOptionsForm'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { When } from '../components/When'
 
 import {
-  assignChannelVersion, createChannel, deleteBucket, deleteChannel, getBagDropStatus,
-  signOutIfUnauthorized,
+  assignChannelVersion, createChannel, deleteBucket, deleteChannel, deleteVersion,
+  getBagDropStatus, revokeVersion, signOutIfUnauthorized, type RevokeVersionOptions,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
@@ -112,6 +115,25 @@ export function Versions() {
           throw err
         }
       }}
+      onRevokeVersion={async (fingerprint, options) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await revokeVersion(state.token, tenant, bucket, fingerprint, options)
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
+      onDeleteVersion={async (fingerprint) => {
+        if (!state || !tenant) throw new Error('No session.')
+        try {
+          await deleteVersion(state.token, tenant, bucket, fingerprint)
+        } catch (err: unknown) {
+          signOutIfUnauthorized(err, signOut)
+          throw err
+        }
+      }}
+      onRefresh={reload}
       onCheckMirrored={async () => {
         if (!state || !tenant) return false
         const status = await getBagDropStatus(state.token, tenant)
@@ -144,6 +166,9 @@ export function VersionsView({
   onAssignChannel = () => Promise.reject(new Error('No session.')),
   onDeleteChannel = () => Promise.reject(new Error('No session.')),
   onDeleteBucket = () => Promise.reject(new Error('No session.')),
+  onRevokeVersion = () => Promise.reject(new Error('No session.')),
+  onDeleteVersion = () => Promise.reject(new Error('No session.')),
+  onRefresh = () => {},
   onCheckMirrored,
 }: {
   bucket: string
@@ -166,6 +191,9 @@ export function VersionsView({
   onAssignChannel?: (channel: string, fingerprint: string) => Promise<void>
   onDeleteChannel?: (channel: string) => Promise<void>
   onDeleteBucket?: () => Promise<void>
+  onRevokeVersion?: (fingerprint: string, options: RevokeVersionOptions) => Promise<void>
+  onDeleteVersion?: (fingerprint: string) => Promise<void>
+  onRefresh?: () => void | Promise<void>
   onCheckMirrored?: () => Promise<boolean>
 }) {
   const versions = bucketData?.versions ?? suppliedVersions ?? []
@@ -264,7 +292,11 @@ export function VersionsView({
                 content: (
                   <VersionsFacet
                     versions={versions}
+                    callerRole={callerRole}
                     onOpenVersion={onOpenVersion}
+                    onRevokeVersion={onRevokeVersion}
+                    onDeleteVersion={onDeleteVersion}
+                    onRefresh={onRefresh}
                   />
                 ),
               },
@@ -476,21 +508,44 @@ function LocalVersionNote({
 
 export function VersionsFacet({
   versions,
+  callerRole = null,
   onOpenVersion,
+  onRevokeVersion = () => Promise.reject(new Error('No session.')),
+  onDeleteVersion = () => Promise.reject(new Error('No session.')),
+  onRefresh = () => {},
 }: {
   versions: Version[]
+  callerRole?: Role | null
   onOpenVersion: (fingerprint: string) => void
+  onRevokeVersion?: (fingerprint: string, options: RevokeVersionOptions) => Promise<void>
+  onDeleteVersion?: (fingerprint: string) => Promise<void>
+  onRefresh?: () => void | Promise<void>
 }) {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(RECENT)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkSelectOpen, setBulkSelectOpen] = useState(false)
+  const [bulkAction, setBulkAction] = useState<BulkVersionAction | null>(null)
   const lastPage = Math.max(1, Math.ceil(versions.length / perPage))
   const first = (page - 1) * perPage
   const visibleVersions = versionPage(versions, page, perPage)
+  const visibleFingerprints = visibleVersions.map((version) => version.fingerprint)
+  const selectedVersions = versions.filter((version) => selected.includes(version.fingerprint))
+  const visibleSelected = visibleFingerprints.filter((fingerprint) => selected.includes(fingerprint))
+  const allVisibleSelected = visibleFingerprints.length > 0 &&
+    visibleSelected.length === visibleFingerprints.length
 
   useEffect(() => {
     if (page > lastPage) setPage(lastPage)
   }, [lastPage, page])
+
+  useEffect(() => {
+    const current = new Set(versions.map((version) => version.fingerprint))
+    setSelected((selectedFingerprints) => selectedFingerprints.filter(
+      (fingerprint) => current.has(fingerprint),
+    ))
+  }, [versions])
 
   const setCurrentPage = (_event: unknown, nextPage: number) => {
     setPage(nextPage)
@@ -514,6 +569,71 @@ export function VersionsFacet({
             <>
               <Toolbar id="versions-toolbar">
                 <ToolbarContent>
+                  <ToolbarItem>
+                    <Dropdown
+                      role="menu"
+                      isOpen={bulkSelectOpen}
+                      onOpenChange={setBulkSelectOpen}
+                      onSelect={(_event, value) => {
+                        if (value === 'none') setSelected([])
+                        if (value === 'page') setSelected((current) => updateVersionSelection(
+                          current, visibleFingerprints, !allVisibleSelected,
+                        ))
+                        if (value === 'all') setSelected(
+                          selected.length === versions.length
+                            ? []
+                            : versions.map((version) => version.fingerprint),
+                        )
+                        setBulkSelectOpen(false)
+                      }}
+                      toggle={(toggleRef: Ref<MenuToggleElement>) => (
+                        <MenuToggle
+                          ref={toggleRef}
+                          isExpanded={bulkSelectOpen}
+                          onClick={() => setBulkSelectOpen(!bulkSelectOpen)}
+                          aria-label="Select versions"
+                          splitButtonItems={[
+                            <MenuToggleCheckbox
+                              id="versions-bulk-select-checkbox"
+                              key="versions-bulk-select-checkbox"
+                              aria-label={selected.length > 0 ? 'Deselect all versions' : 'Select all versions'}
+                              isChecked={selected.length === versions.length
+                                ? true
+                                : selected.length > 0 ? null : false}
+                              onChange={(checked) => setSelected(
+                                checked ? versions.map((version) => version.fingerprint) : [],
+                              )}
+                            >
+                              {selected.length > 0 ? `${selected.length} selected` : null}
+                            </MenuToggleCheckbox>,
+                          ]}
+                        />
+                      )}
+                    >
+                      <DropdownList>
+                        <DropdownItem value="none">Select none (0 items)</DropdownItem>
+                        <DropdownItem value="page">
+                          Select page ({visibleVersions.length} items)
+                        </DropdownItem>
+                        <DropdownItem value="all">Select all ({versions.length} items)</DropdownItem>
+                      </DropdownList>
+                    </Dropdown>
+                  </ToolbarItem>
+                  {selected.length > 0 ? (
+                    <ToolbarItem>
+                      <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        {selected.length} selected
+                        <RoleRestrictedButton
+                          action="revokeVersions" callerRole={callerRole}
+                          variant="secondary" onClick={() => setBulkAction('revoke')}
+                        >Revoke</RoleRestrictedButton>
+                        <RoleRestrictedButton
+                          action="deleteVersions" callerRole={callerRole}
+                          variant="danger" onClick={() => setBulkAction('delete')}
+                        >Delete</RoleRestrictedButton>
+                      </span>
+                    </ToolbarItem>
+                  ) : null}
                   <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
                     <Pagination
                       itemCount={versions.length}
@@ -526,10 +646,22 @@ export function VersionsFacet({
                   </ToolbarItem>
                 </ToolbarContent>
               </Toolbar>
-              <Table aria-label="Versions" variant="compact" isStickyHeader>
+              <Table
+                aria-label="Versions" variant="compact" isStickyHeader
+                selectableRowCaptionText="Version"
+              >
                 <Thead>
                   <Tr>
                     <Th screenReaderText="Row expansion" />
+                    <Th
+                      aria-label="Select page"
+                      select={{
+                        isSelected: allVisibleSelected,
+                        isIndeterminate: visibleSelected.length > 0 && !allVisibleSelected,
+                        onSelect: (_event, isSelecting) => setSelected((current) =>
+                          updateVersionSelection(current, visibleFingerprints, isSelecting)),
+                      }}
+                    />
                     <Th>Version</Th>
                     <Th>Status</Th>
                     <Th>Channels</Th>
@@ -538,7 +670,10 @@ export function VersionsFacet({
                 </Thead>
                 {visibleVersions.map((version, index) => (
                   <Tbody key={version.fingerprint} isExpanded={expanded === version.fingerprint}>
-                    <Tr>
+                    <Tr
+                      isSelectable
+                      isRowSelected={selected.includes(version.fingerprint)}
+                    >
                       <Td expand={{
                         rowIndex: first + index,
                         isExpanded: expanded === version.fingerprint,
@@ -546,6 +681,12 @@ export function VersionsFacet({
                           expanded === version.fingerprint ? null : version.fingerprint,
                         ),
                         expandId: `version-${version.fingerprint}`,
+                      }} />
+                      <Td select={{
+                        rowIndex: first + index,
+                        isSelected: selected.includes(version.fingerprint),
+                        onSelect: (_event, isSelecting) => setSelected((current) =>
+                          updateVersionSelection(current, [version.fingerprint], isSelecting)),
                       }} />
                       <Td dataLabel="Version">
                         <Button variant="link" isInline onClick={() => onOpenVersion(version.fingerprint)}>
@@ -568,6 +709,7 @@ export function VersionsFacet({
                       </Td>
                     </Tr>
                     <Tr isExpanded={expanded === version.fingerprint}>
+                      <Td />
                       <Td />
                       <Td dataLabel="Version detail" colSpan={4}>
                         <ExpandableRowContent>
@@ -616,10 +758,223 @@ export function VersionsFacet({
                 variant="bottom"
                 dropDirection="up"
               />
+              {bulkAction ? (
+                <BulkVersionActionModal
+                  action={bulkAction}
+                  versions={selectedVersions}
+                  onRevokeVersion={onRevokeVersion}
+                  onDeleteVersion={onDeleteVersion}
+                  onFinished={async (allSucceeded) => {
+                    await onRefresh()
+                    if (allSucceeded) setSelected([])
+                  }}
+                  onClose={() => setBulkAction(null)}
+                />
+              ) : null}
             </>
           )}
         </CardBody>
     </Card>
+  )
+}
+
+export type BulkVersionAction = 'revoke' | 'delete'
+
+export type BulkVersionExclusion = { version: Version; reason: string }
+
+export function partitionBulkVersions(versions: Version[], action: BulkVersionAction): {
+  included: Version[]
+  excluded: BulkVersionExclusion[]
+} {
+  const included: Version[] = []
+  const excluded: BulkVersionExclusion[] = []
+  for (const version of versions) {
+    if (action === 'revoke' && version.state === 'revoked') {
+      excluded.push({ version, reason: 'is already revoked' })
+    } else if (action === 'revoke' && version.state === 'revocation-scheduled') {
+      excluded.push({ version, reason: 'already has revocation scheduled' })
+    } else if (action === 'delete' && version.channels.length > 0) {
+      excluded.push({
+        version,
+        reason: `is assigned to ${version.channels.length === 1 ? 'channel' : 'channels'}: ${version.channels.join(', ')}`,
+      })
+    } else {
+      included.push(version)
+    }
+  }
+  return { included, excluded }
+}
+
+export function updateVersionSelection(
+  current: string[], fingerprints: string[], isSelecting: boolean,
+): string[] {
+  if (!isSelecting) {
+    const removed = new Set(fingerprints)
+    return current.filter((fingerprint) => !removed.has(fingerprint))
+  }
+  return [...new Set([...current, ...fingerprints])]
+}
+
+export type BulkVersionResult = {
+  version: Version
+  status: 'success' | 'refused'
+  message: string
+}
+
+export async function runBulkVersionAction(
+  versions: Version[], operation: (version: Version) => Promise<void>,
+): Promise<BulkVersionResult[]> {
+  const results: BulkVersionResult[] = []
+  for (const version of versions) {
+    try {
+      await operation(version)
+      results.push({ version, status: 'success', message: 'Success' })
+    } catch (err: unknown) {
+      results.push({
+        version,
+        status: 'refused',
+        message: err instanceof Error ? err.message : 'The action failed.',
+      })
+    }
+  }
+  return results
+}
+
+function BulkVersionActionModal({
+  action, versions, onRevokeVersion, onDeleteVersion, onFinished, onClose,
+}: {
+  action: BulkVersionAction
+  versions: Version[]
+  onRevokeVersion: (fingerprint: string, options: RevokeVersionOptions) => Promise<void>
+  onDeleteVersion: (fingerprint: string) => Promise<void>
+  onFinished: (allSucceeded: boolean) => void | Promise<void>
+  onClose: () => void
+}) {
+  const [message, setMessage] = useState('')
+  const [when, setWhen] = useState<RevokeWhen>('now')
+  const [scheduledAt, setScheduledAt] = useState('')
+  const [skipDescendants, setSkipDescendants] = useState(false)
+  const [disableRollback, setDisableRollback] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState<BulkVersionResult[] | null>(null)
+  const partition = partitionBulkVersions(versions, action)
+
+  const confirm = async () => {
+    setSubmitting(true)
+    const options = action === 'revoke' ? revokeOptions({
+      message, when, scheduledAt, skipDescendants, disableRollback,
+    }) : null
+    const nextResults = await runBulkVersionAction(
+      partition.included,
+      (version) => action === 'revoke'
+        ? onRevokeVersion(version.fingerprint, options!)
+        : onDeleteVersion(version.fingerprint),
+    )
+    setResults(nextResults)
+    setSubmitting(false)
+    const allSucceeded = nextResults.every((result) => result.status === 'success')
+    await onFinished(allSucceeded)
+    if (allSucceeded) onClose()
+  }
+
+  return (
+    <BulkVersionActionModalView
+      action={action} versions={versions} partition={partition}
+      message={message} when={when} scheduledAt={scheduledAt}
+      skipDescendants={skipDescendants} disableRollback={disableRollback}
+      submitting={submitting} results={results}
+      onMessageChange={setMessage} onWhenChange={setWhen}
+      onScheduledAtChange={setScheduledAt}
+      onSkipDescendantsChange={setSkipDescendants}
+      onDisableRollbackChange={setDisableRollback}
+      onConfirm={confirm} onClose={onClose}
+    />
+  )
+}
+
+export function BulkVersionActionModalView({
+  action, versions, partition, message, when, scheduledAt, skipDescendants,
+  disableRollback, submitting, results, onMessageChange, onWhenChange,
+  onScheduledAtChange, onSkipDescendantsChange, onDisableRollbackChange,
+  onConfirm, onClose,
+}: {
+  action: BulkVersionAction
+  versions: Version[]
+  partition: ReturnType<typeof partitionBulkVersions>
+  message: string
+  when: RevokeWhen
+  scheduledAt: string
+  skipDescendants: boolean
+  disableRollback: boolean
+  submitting: boolean
+  results: BulkVersionResult[] | null
+  onMessageChange: (message: string) => void
+  onWhenChange: (when: RevokeWhen) => void
+  onScheduledAtChange: (scheduledAt: string) => void
+  onSkipDescendantsChange: (checked: boolean) => void
+  onDisableRollbackChange: (checked: boolean) => void
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  const capitalized = action === 'revoke' ? 'Revoke' : 'Delete'
+  const past = action === 'revoke' ? 'revoked' : 'deleted'
+  const scheduleFailure = action === 'revoke'
+    ? revokeScheduleFailure(when, scheduledAt)
+    : null
+  return (
+    <TypedConfirmModal
+      variant="medium"
+      title={`${capitalized} ${versions.length} ${versions.length === 1 ? 'version' : 'versions'}`}
+      expected={action}
+      verb={capitalized}
+      busy={submitting}
+      confirmDisabled={scheduleFailure !== null || partition.included.length === 0 || results !== null}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      body={<>
+        <Content component="p">
+          {partition.included.length} of {versions.length} will be {past}.
+        </Content>
+        {partition.included.length > 0 ? (
+          <>
+            <Content component="p">Included versions:</Content>
+            <Content component="ul">
+              {partition.included.map((version) => <li key={version.fingerprint}>{version.name}</li>)}
+            </Content>
+          </>
+        ) : null}
+        {partition.excluded.length > 0 ? (
+          <>
+            <Content component="p">Excluded versions:</Content>
+            <Content component="ul">
+              {partition.excluded.map(({ version, reason }) => (
+                <li key={version.fingerprint}>{version.name} {reason}.</li>
+              ))}
+            </Content>
+          </>
+        ) : null}
+        {action === 'revoke' ? (
+          RevokeVersionOptionsForm({
+            idPrefix: 'bulk-revoke',
+            message, when, scheduledAt, skipDescendants, disableRollback, scheduleFailure,
+            onMessageChange, onWhenChange, onScheduledAtChange,
+            onSkipDescendantsChange, onDisableRollbackChange,
+          })
+        ) : null}
+        {results ? (
+          <Content component="ul" aria-label={`${capitalized} results`}>
+            {results.map((result) => (
+              <li key={result.version.fingerprint}>
+                <Label color={result.status === 'success' ? 'green' : 'red'} isCompact>
+                  {result.status === 'success' ? 'Success' : 'Refused'}
+                </Label>{' '}
+                {result.version.name} — {result.message}
+              </li>
+            ))}
+          </Content>
+        ) : null}
+      </>}
+    />
   )
 }
 

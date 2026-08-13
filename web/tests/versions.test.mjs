@@ -10,6 +10,10 @@ let vite
 let VersionsView
 let VersionsFacet
 let versionPage
+let updateVersionSelection
+let partitionBulkVersions
+let runBulkVersionAction
+let BulkVersionActionModalView
 let BucketChannelsFacet
 let CreateChannelModalView
 let AssignChannelModalView
@@ -64,7 +68,9 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ VersionsView, VersionsFacet, versionPage, BucketChannelsFacet, CreateChannelModalView,
+  ;({ VersionsView, VersionsFacet, versionPage, updateVersionSelection, partitionBulkVersions,
+    runBulkVersionAction, BulkVersionActionModalView,
+    BucketChannelsFacet, CreateChannelModalView,
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
@@ -792,6 +798,111 @@ test('the Versions facet is one full-width card without a redundant summary', ()
   const table = markup.match(/<table[^>]*aria-label="Versions"[^>]*>/)?.[0] ?? ''
   assert.match(table, /pf-m-sticky-header/)
   assert.doesNotMatch(markup, /Version summary|>Complete<|>Incomplete<|>Artifacts</)
+  assert.match(versionsScreenSource, /Select page \(\{visibleVersions\.length\} items\)/)
+  assert.match(versionsScreenSource, /Select all \(\{versions\.length\} items\)/)
+  assert.match(markup, /aria-label="Select all versions"/)
+  assert.match(markup, /type="checkbox"/)
+})
+
+test('versions selection survives pagination and select-all-N covers the filtered set', () => {
+  const versions = Array.from({ length: 4 }, (_unused, index) => ({
+    ...facetVersion, name: `v${index + 1}`, fingerprint: `fp-${index + 1}`,
+  }))
+  let selected = updateVersionSelection(
+    [], versionPage(versions, 1, 2).map((version) => version.fingerprint), true,
+  )
+  assert.deepEqual(selected, ['fp-1', 'fp-2'])
+  assert.deepEqual(versionPage(versions, 2, 2).map((version) => version.fingerprint), ['fp-3', 'fp-4'])
+  assert.deepEqual(selected, ['fp-1', 'fp-2'], 'paging must not discard page-one selection')
+  selected = updateVersionSelection(
+    selected, versions.map((version) => version.fingerprint), true,
+  )
+  assert.deepEqual(selected, ['fp-1', 'fp-2', 'fp-3', 'fp-4'])
+})
+
+const bulkModalProps = (action, versions, partition, over = {}) => ({
+  action, versions, partition,
+  message: '', when: 'now', scheduledAt: '', skipDescendants: false,
+  disableRollback: false, submitting: false, results: null,
+  onMessageChange: () => {}, onWhenChange: () => {}, onScheduledAtChange: () => {},
+  onSkipDescendantsChange: () => {}, onDisableRollbackChange: () => {},
+  onConfirm: async () => {}, onClose: () => {}, ...over,
+})
+
+test('bulk revoke eligibility excludes already-revoked versions before requests', async () => {
+  const versions = [
+    { ...facetVersion, name: 'v9', fingerprint: 'fp-9', state: 'revoked' },
+    { ...facetVersion, name: 'v8', fingerprint: 'fp-8' },
+    { ...facetVersion, name: 'v7', fingerprint: 'fp-7' },
+    { ...facetVersion, name: 'v6', fingerprint: 'fp-6' },
+  ]
+  const partition = partitionBulkVersions(versions, 'revoke')
+  assert.deepEqual(partition.included.map((version) => version.name), ['v8', 'v7', 'v6'])
+  assert.deepEqual(partition.excluded.map(({ version, reason }) => [version.name, reason]), [
+    ['v9', 'is already revoked'],
+  ])
+
+  const requests = []
+  await runBulkVersionAction(partition.included, async (version) => requests.push(version.name))
+  assert.deepEqual(requests, ['v8', 'v7', 'v6'])
+
+  const modal = BulkVersionActionModalView(bulkModalProps('revoke', versions, partition))
+  assert.equal(modal.props.expected, 'revoke')
+  assert.equal(modal.props.variant, 'medium')
+  const markup = renderTyped(modal)
+  assert.match(markup, /Revoke 4 versions/)
+  assert.match(markup, /3 of 4 will be revoked/)
+  assert.match(markup, /v9 is already revoked/)
+  for (const name of ['v8', 'v7', 'v6']) assert.match(markup, new RegExp(`>${name}<`))
+  assert.equal((markup.match(/Revocation message/g) ?? []).length, 1)
+  assert.match(markup, /Type <strong>revoke<\/strong> to confirm/)
+})
+
+test('bulk delete eligibility excludes channel-assigned versions with reasons', () => {
+  const versions = [
+    { ...facetVersion, name: 'v4', fingerprint: 'fp-4', channels: ['production'] },
+    { ...facetVersion, name: 'v3', fingerprint: 'fp-3' },
+  ]
+  const partition = partitionBulkVersions(versions, 'delete')
+  assert.deepEqual(partition.included.map((version) => version.name), ['v3'])
+  assert.deepEqual(partition.excluded.map(({ version, reason }) => [version.name, reason]), [
+    ['v4', 'is assigned to channel: production'],
+  ])
+  const modal = BulkVersionActionModalView(bulkModalProps('delete', versions, partition))
+  assert.equal(modal.props.expected, 'delete')
+  const markup = renderTyped(modal)
+  assert.match(markup, /Delete 2 versions/)
+  assert.match(markup, /1 of 2 will be deleted/)
+  assert.match(markup, /v4 is assigned to channel: production/)
+  assert.match(markup, /Type <strong>delete<\/strong> to confirm/)
+})
+
+test('bulk partial failures render every per-row result and the server refusal verbatim', async () => {
+  const versions = [
+    { ...facetVersion, name: 'v3', fingerprint: 'fp-3' },
+    { ...facetVersion, name: 'v2', fingerprint: 'fp-2' },
+    { ...facetVersion, name: 'v1', fingerprint: 'fp-1' },
+  ]
+  const order = []
+  const refusal = 'v2 is protected by registry policy'
+  const results = await runBulkVersionAction(versions, async (version) => {
+    order.push(version.name)
+    if (version.name === 'v2') throw new Error(refusal)
+  })
+  assert.deepEqual(order, ['v3', 'v2', 'v1'])
+  assert.deepEqual(results.map(({ version, status }) => [version.name, status]), [
+    ['v3', 'success'], ['v2', 'refused'], ['v1', 'success'],
+  ])
+
+  const partition = partitionBulkVersions(versions, 'delete')
+  const markup = renderTyped(BulkVersionActionModalView(bulkModalProps(
+    'delete', versions, partition, { results },
+  )))
+  assert.equal((markup.match(/>Success<\/span>/g) ?? []).length, 2)
+  assert.equal((markup.match(/>Refused<\/span>/g) ?? []).length, 1)
+  for (const name of ['v3', 'v2', 'v1']) assert.match(markup, new RegExp(name))
+  assert.match(markup, new RegExp(refusal))
+  assert.doesNotMatch(markup, /The action was refused/)
 })
 
 test('fingerprint fields use the compact read-only copy control everywhere they render', () => {
