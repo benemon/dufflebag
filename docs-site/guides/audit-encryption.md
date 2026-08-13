@@ -5,7 +5,7 @@ what the instance did, and **encryption at rest** protects what it stores.
 Both are managed from the console's root-only **Audit** and **Encryption**
 pages or the equivalent [platform API](/platform-api.html) endpoints; the
 deeper operational contract lives in the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md).
+[deployment guide](../deployment/index.md).
 
 ## The audit trail
 
@@ -98,11 +98,11 @@ Encryption page:
 
 The exact command sequences, the seal-out recovery procedure, and the
 Kubernetes-native Vault auth mode are in the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#encryption-at-rest-optional-decided-at-first-boot).
+[deployment guide](../deployment/encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot).
 
 ## Where to go next
 
-- [Deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
+- [Deployment guide](../deployment/index.md)
   — serving, health probes, first run, recovery.
 - [Roles and principals](./roles-principals.md) — the recovery shares and the
   root principal.

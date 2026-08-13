@@ -2,7 +2,7 @@
 
 Three ways to get a running instance, from most to least self-contained. Each
 quickstart here gets you to a serving instance; the
-[deployment reference](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
+[deployment reference](../deployment/index.md)
 is the authority on every variable, the PostgreSQL role model, TLS, object
 storage and backups. Once the instance serves, continue with
 [getting started](./getting-started.md).
@@ -24,7 +24,7 @@ When every pod is ready, the in-cluster `dufflebag` Service serves on port
 Vault's lifecycle is deliberately lab-grade — its unseal key lives in a
 namespace Secret — so production deployments should bring their own Vault and
 database instead. The
-[Helm section of the deployment reference](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#helm)
+[Helm section of the deployment reference](../deployment/index.md#helm)
 covers the values, the trust model and the single-replica constraint.
 
 ## OpenShift
@@ -50,7 +50,7 @@ the Route's hostname; without it OpenShift assigns one.
 A single container against a PostgreSQL you provide. Create the two database
 roles first — a migration owner and a serving role that must hold neither
 superuser nor `BYPASSRLS` — exactly as the
-[PostgreSQL section](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#postgresql-two-roles)
+[PostgreSQL section](../deployment/index.md#postgresql-two-roles)
 specifies. Then migrate and serve with the same image:
 
 ```sh

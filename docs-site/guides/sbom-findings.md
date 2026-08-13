@@ -4,7 +4,7 @@ A build can carry one or more SBOMs — software bills of materials — uploaded
 while the build runs. dufflebag stores the documents, projects a package
 inventory out of them, and, when a scanner is configured, attributes
 vulnerability findings to those packages. The full wire contract is in the
-[compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md).
+[compatibility reference](../reference/compatibility.md).
 
 SBOM storage requires an S3-compatible object store; without one, upload and
 download answer 503 while everything else keeps working.
@@ -54,7 +54,7 @@ Scanning is optional and off by default — an operator enables the OSV adapter
 (`DFBG_SCANNER_ADAPTER=osv`), which queries by package name and version
 derived from purls; the SBOM document itself never leaves the deployment. See
 the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#vulnerability-scanning-optional)
+[deployment guide](../deployment/operations.md#vulnerability-scanning-optional)
 for the operator contract.
 
 The absence rule is deliberate everywhere findings appear: **no scan means
@@ -83,7 +83,7 @@ channels roll back, and consumers stop resolving it.
 
 ## Where to go next
 
-- [Compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md)
+- [Compatibility reference](../reference/compatibility.md)
   — the SBOM wire contract and package projection rules.
-- [Deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
+- [Deployment guide](../deployment/index.md)
   — object storage and scanner configuration.

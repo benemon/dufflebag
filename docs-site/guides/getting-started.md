@@ -14,9 +14,9 @@ You need:
 - stock Packer 1.15.4 or newer, plus Terraform with
   `terraform-provider-hcp` 0.84.0 or newer.
 
-The [deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
+The [deployment guide](../deployment/index.md)
 covers PostgreSQL, migrations, TLS and running the server.
-For a self-contained alternative, use its [Helm section](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#helm).
+For a self-contained alternative, use its [Helm section](../deployment/index.md#helm).
 
 ## Initialize the instance
 
@@ -132,5 +132,5 @@ through the resource-manager API.
 
 ## Where to go next
 
-- [Compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md)
-- [Deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md)
+- [Compatibility reference](../reference/compatibility.md)
+- [Deployment guide](../deployment/index.md)

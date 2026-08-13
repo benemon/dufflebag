@@ -115,5 +115,5 @@ pipelines, Terraform remains the recommended path.
 
 - [Revocation, restore and channels](./revocation-channels.md) — what
   happens to assignments when versions are revoked.
-- [Compatibility reference](https://github.com/benemon/dufflebag/blob/main/docs/compatibility.md)
+- [Compatibility reference](../reference/compatibility.md)
   — the twelve provider operations and the client-version floors.

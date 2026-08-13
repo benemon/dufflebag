@@ -89,7 +89,7 @@ accepts a threshold of shares and mints a fresh root if the credentials are
 ever lost. Every attempt, including refusals, is audited.
 
 The full break-glass ceremony is in the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md).
+[deployment guide](../deployment/index.md).
 
 ## Where to go next
 

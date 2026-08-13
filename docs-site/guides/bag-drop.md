@@ -7,9 +7,9 @@ converges toward it. Nothing ever flows back in.
 
 This guide covers the workflow: enabling a destination in one step,
 associating buckets, and reading sync status. The
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)
+[deployment guide](../deployment/operations.md#bag-drop)
 covers the operator concerns (egress, credential keys, reconcile cadence), and
-the [architecture document](https://github.com/benemon/dufflebag/blob/main/docs/architecture.md)
+the [architecture document](../reference/architecture.md)
 covers the design.
 
 Configuring Bag Drop requires the `maintainer` role on the project; reading
@@ -46,7 +46,7 @@ The destination client secret is always stored sealed, never in plaintext:
   database dump, not a compromised host.
 
 See the
-[deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)
+[deployment guide](../deployment/operations.md#bag-drop)
 for the full credential-protection contract.
 
 ## Configure and enable
@@ -137,7 +137,7 @@ until the next tick while ordinary serving continues.
 
 ## Where to go next
 
-- [Deployment guide — Bag Drop](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)
+- [Deployment guide — Bag Drop](../deployment/operations.md#bag-drop)
   — egress, credential keys, reconcile cadence, SBOM size refusals.
 - [Platform API reference](/platform-api.html) — the full `bagdrop` endpoint
   family.
