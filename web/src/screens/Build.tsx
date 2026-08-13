@@ -436,7 +436,7 @@ function PackageTable({
   onToggle: (purl: string | null) => void
 }) {
   return (
-    <Table aria-label="Packages" variant="compact" style={{ marginTop: 14 }}>
+    <Table aria-label="Packages" variant="compact" isStickyHeader style={{ marginTop: 14 }}>
       <Thead>
         <Tr>
           <Th>Name</Th>

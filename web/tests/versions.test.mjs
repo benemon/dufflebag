@@ -720,6 +720,8 @@ test('the Versions facet is one full-width card without a redundant summary', ()
   assert.match(markup, /^<div [^>]*class="pf-v6-c-card\b/)
   assert.equal((markup.match(/class="pf-v6-c-card\b/g) ?? []).length, 1)
   assert.match(markup, /class="pf-v6-c-card__title-text">Versions<\/div>/)
+  const table = markup.match(/<table[^>]*aria-label="Versions"[^>]*>/)?.[0] ?? ''
+  assert.match(table, /pf-m-sticky-header/)
   assert.doesNotMatch(markup, /Version summary|>Complete<|>Incomplete<|>Artifacts</)
 })
 
@@ -1583,5 +1585,7 @@ test('the bucket ancestry card aggregates every version and names the local vers
   assert.match(markup, /parent of v1/)
   assert.match(markup, /built from v2 \(latest\)/)
   assert.match(markup, /built from v1/)
+  assert.match(markup, /aria-label="Parents ancestry scope"/)
+  assert.match(markup, /aria-label="Children ancestry scope"/)
   assert.doesNotMatch(markup, /parent of v1 \(latest\)/)
 })

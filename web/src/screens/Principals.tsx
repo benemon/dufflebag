@@ -515,7 +515,7 @@ export function PrincipalTableView({
   onToggle: (principal: Principal) => void
 }) {
   return (
-    <Table aria-label="Service principals" variant="compact">
+    <Table aria-label="Service principals" variant="compact" isStickyHeader>
       <Thead>
         <Tr>
           <Th screenReaderText="Expand" />

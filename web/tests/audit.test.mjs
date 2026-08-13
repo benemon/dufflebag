@@ -159,7 +159,7 @@ test('every audit target removal requires its path before the danger action arms
   assert.doesNotMatch(nonLastArmed, /<button[^>]*disabled[^>]*>[\s\S]{0,160}Remove target/)
 })
 
-test('recovered health still renders cumulative and last-failure history', () => {
+test('audit health omits the parent status while preserving failure history', () => {
   const recovered = target({
     status: 'healthy',
     since: '2026-08-03T10:00:00.123456Z',
@@ -169,11 +169,16 @@ test('recovered health still renders cumulative and last-failure history', () =>
   const markup = renderToStaticMarkup(React.createElement(AuditTargetTable, {
     targets: [recovered], callerRole: 'root', onRemove: () => {},
   }))
-  assert.match(markup, /Cumulative failures<\/td><td[^>]*>7<\/td>/)
-  assert.match(markup, /Last failure/)
-  assert.match(markup, /<time[^>]*dateTime="2026-08-03T10:00:00.123456Z"/)
-  assert.match(markup, /<time[^>]*dateTime="2026-08-03T10:30:00Z"/)
-  assert.match(markup, /Consecutive failures<\/td><td[^>]*>0<\/td>/)
+  const health = markup.match(
+    /<dl[^>]*aria-label="Health for \/var\/log\/dufflebag\/audit\.log"[^>]*>[\s\S]*?<\/dl>/,
+  )?.[0] ?? ''
+  assert.match(health, /pf-m-compact/)
+  assert.doesNotMatch(health, />Status</)
+  assert.match(health, /Cumulative failures[\s\S]{0,300}>7<\/div><\/dd>/)
+  assert.match(health, /Last failure/)
+  assert.match(health, /<time[^>]*dateTime="2026-08-03T10:00:00.123456Z"/)
+  assert.match(health, /<time[^>]*dateTime="2026-08-03T10:30:00Z"/)
+  assert.match(health, /Consecutive failures[\s\S]{0,300}>0<\/div><\/dd>/)
 })
 
 test('storage columns distinguish an empty current file from an unavailable measurement', () => {
