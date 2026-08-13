@@ -1,16 +1,17 @@
 # Roles and principals
 
-Every client of a dufflebag instance — Packer, Terraform, the console, your
-scripts — authenticates as a **service principal** with client credentials.
-There are no user accounts. A principal is bound to one scope, holds one
-role, and authenticates with up to two active secrets.
+Every client of a dufflebag instance authenticates as a **service principal**
+with client credentials. This includes Packer, Terraform, the console, and
+scripts. There are no user accounts. A principal is bound to one scope, holds
+one role, and authenticates with up to two active secrets.
 
-Roles are resolved from the database on every request, never baked into the
-token, so revoking a secret or changing a binding takes effect immediately.
+Roles are resolved from the database on every request. They are never baked
+into the token, so revoking a secret or changing a binding takes effect
+immediately.
 
 ## The role ladder
 
-Roles are strictly ordered — each adds to the one below it:
+Roles are strictly ordered. Each role adds to the one below it:
 
 | Role | Adds |
 |---|---|
@@ -20,80 +21,114 @@ Roles are strictly ordered — each adds to the one below it:
 | `maintainer` | Manages principals and role bindings within its scope, and operational configuration such as Bag Drop. |
 | `root` | Everything, including creating organisations and configuring authentication and audit. Platform scope only. |
 
-The `builder` / `publisher` split is deliberate: declaring a channel is asking
-to promote, and a CI credential that can promote straight to production is
-fine until it is not. Give build pipelines `builder`; keep promotion behind a
-separate credential.
+The `builder` and `publisher` roles separate builds from promotion. Declaring a
+channel requests promotion.
+
+::: warning
+A CI credential with promotion access can promote directly to production. Give
+build pipelines the `builder` role. Keep promotion behind a separate
+credential.
+:::
 
 ## Scopes
 
 A principal is bound to exactly one scope:
 
-- **Platform** — only `root` lives here.
-- **Organisation** — sees every project in its organisation.
-- **Project** — sees exactly one project.
+- **Platform:** only `root` lives here.
+- **Organisation:** sees every project in its organisation.
+- **Project:** sees exactly one project.
 
-Both tenancy-scoped kinds exist because the Packer CLI treats them
-differently: a project-scoped principal gets a 403 from project discovery
-(which Packer turns into "try setting `HCP_PROJECT_ID`"), while an org-scoped
-principal seeing several projects picks the oldest and warns. Set
-`HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` explicitly and neither path
-matters.
+The two tenancy-scoped kinds behave differently in the Packer CLI. A
+project-scoped principal gets a 403 from project discovery, which Packer turns
+into "try setting `HCP_PROJECT_ID`". An organisation-scoped principal that sees
+several projects selects the oldest and warns.
 
-Authorization always checks tenancy before role: a caller outside the tenant
-gets the same 404 as for something that does not exist (existence is a
-disclosure); a caller inside the tenant with an insufficient role gets a 403.
+::: tip
+Set `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` explicitly to avoid both
+discovery paths.
+:::
+
+Authorization checks tenancy before role. A caller outside the tenant gets the
+same 404 as a resource that does not exist. This response prevents disclosure
+of the resource's existence. A caller inside the tenant with an insufficient
+role gets a 403.
 
 ## Principals and secrets
 
-Creating a principal mints **no** credentials — it cannot authenticate until
-a secret is explicitly issued. Issuing is always the same call, whether it is
-the first secret or a rotation:
+Principal management requires `maintainer` on the relevant scope. A maintainer
+manages principals within its organisation or project. A root manages every
+principal and other platform concerns.
 
-- A principal may hold **two active secrets** at once. That is what makes
-  rotation gap-free: issue the second, roll the deployment onto it, revoke
-  the first.
-- Issuing a third is refused while two are *usable* — rotation is a
-  deliberate sequence, not accumulation. An expired secret does not count
-  against the cap.
-- **Expiry is chosen at issue time** and lives on the secret, not the
-  principal: never, 90 days, or a custom timestamp. The outgoing secret of a
-  rotation can expire soon while its replacement expires later.
-- The secret value is returned exactly once, at issue. Store it then.
-- Expiry never deletes anything — an expired secret stops granting access but
-  stays listed until revoked.
-- Any principal except root may be left secretless (a maintainer issues it a
-  replacement — so a leaked credential can be revoked *immediately*, before
-  its successor exists). Revoking the last usable never-expiring secret of a
-  **root** principal is refused: a secretless root would leave the instance
-  administrable only by direct database access.
+### Create a principal and issue its first secret
 
-The console's **Principals** screen drives all of this — create, issue with
-the expiry choice, revoke, delete — and shows the one-time secret exactly
-once. The same operations are in the
+Prerequisites: Permission to manage principals in the target scope.
+
+1. Create the principal. A new principal has no credentials and cannot
+   authenticate.
+
+2. Issue its first secret. Choose an expiry of never, 90 days, or a custom
+   timestamp. Expiry belongs to the secret, not the principal.
+
+3. Store the secret value when it is returned. The value is returned exactly
+   once, at issue.
+
+The same issue operation creates a first secret or a rotation secret. A
+principal may hold two active secrets at once. Issuing a third secret is refused
+while two are usable. An expired secret does not count against the cap. Expiry
+does not delete a secret. An expired secret stops granting access but stays
+listed until revoked.
+
+During a rotation, the outgoing secret can expire soon while its replacement
+expires later.
+
+### Rotate a secret
+
+Prerequisites: A principal with one usable secret and permission to manage it.
+
+1. Issue a second secret.
+
+2. Roll the deployment onto the second secret.
+
+3. Revoke the first secret.
+
+This sequence rotates credentials without an authentication gap.
+
+::: warning
+Any principal except root may be left without a usable secret. This allows a
+leaked credential to be revoked immediately, before its replacement exists.
+Revoking the last usable, never-expiring secret of a root principal is refused.
+A root without a secret would leave the instance administrable only through
+direct database access.
+:::
+
+The console's **Principals** screen supports creating principals, issuing
+secrets with an expiry choice, revoking secrets, and deleting principals. It
+shows the one-time secret exactly once. The same operations are in the
 [platform API reference](/platform-api.html) under `principals`.
-
-Principal management requires `maintainer` on the scope in question; a
-maintainer manages principals within its organisation or project, and `root`
-manages everything including other platform concerns.
 
 ## The root principal and recovery
 
-The first principal comes from initialization: one unauthenticated
-`POST /sys/init`, callable exactly once, returns the root principal's
-credentials **and the recovery shares** (with their threshold) exactly once.
-The console's first-run wizard is an ordinary client of the same endpoint —
-there is no privileged side door. Store the credentials in a secret manager
-and the shares separately: on an unencrypted deployment, `POST /sys/recovery`
-accepts a threshold of shares and mints a fresh root if the credentials are
-ever lost. Every attempt, including refusals, is audited.
+Initialization creates the first principal. One unauthenticated
+`POST /sys/init` request can be made exactly once. It returns the root
+principal's credentials, the recovery shares, and their threshold exactly
+once. The console's first-run wizard uses the same endpoint. It has no
+privileged side door.
+
+::: warning
+Store the root credentials in a secret manager and store the recovery shares
+separately.
+:::
+
+On an unencrypted deployment, `POST /sys/recovery` accepts a threshold of
+shares and mints a fresh root if the credentials are ever lost. Every recovery
+attempt is audited, including refusals.
 
 The full break-glass ceremony is in the
 [deployment guide](../deployment/index.md).
 
 ## Where to go next
 
-- [Getting started](../getting-started/first-use.md) — minting a builder principal and
+- [Getting started](../getting-started/first-use.md): minting a builder principal and
   pointing Packer at the instance.
-- [Platform API reference](/platform-api.html) — the `principals` and
+- [Platform API reference](/platform-api.html): the `principals` and
   `organizations` endpoint families.
