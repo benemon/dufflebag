@@ -3,7 +3,7 @@ import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
-  PageSection, Pagination, Popover, Radio, TextInput, Title,
+  PageSection, Pagination, Popover, Radio, TextInput,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -13,6 +13,7 @@ import {
   type IssuedCredential, type Principal, type Role, type SecretMetadata, type Standing,
 } from '../data/principals'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
 
@@ -75,26 +76,24 @@ export function PrincipalsView({
 
   return (
     <>
-      <PageSection variant="default">
-        <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start' }}>
-          <div style={{ flex: 1 }}>
-            <Title headingLevel="h1" size="2xl">Principals</Title>
-            <Content component="p">
-              Service principals authenticate with a client id and secret, and receive a
-              short-lived token. Two secrets can be active at once, so rotation needs no window.
-              New ones are created in the context selected above.
-            </Content>
-          </div>
-          {!creating && (loading || failure || principals.length > 0) && (
-            <RoleRestrictedButton
-              action="managePrincipals" callerRole={callerRole}
-              variant="primary" onClick={() => setCreating(true)}
-            >
-              Create principal
-            </RoleRestrictedButton>
-          )}
-        </div>
-      </PageSection>
+      <ScreenHeader
+        title="Principals"
+        description={(
+          <>
+            Service principals authenticate with a client id and secret, and receive a
+            short-lived token. Two secrets can be active at once, so rotation needs no window.
+            New ones are created in the context selected above.
+          </>
+        )}
+        actions={!creating && (loading || failure || principals.length > 0) ? (
+          <RoleRestrictedButton
+            action="managePrincipals" callerRole={callerRole}
+            variant="primary" onClick={() => setCreating(true)}
+          >
+            Create principal
+          </RoleRestrictedButton>
+        ) : null}
+      />
 
       <PageSection variant="secondary" isFilled>
         {failure ? (

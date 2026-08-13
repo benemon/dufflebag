@@ -79,14 +79,14 @@ export function selectTenantProject(tenant: Tenant, selectProject: (projectID: s
  * The rows a PLATFORM session's organisation select offers: the deliberate
  * step back up to platform standing — ADR-0014's "nothing selected", where
  * platform principals are listed and created — ahead of the real
- * organisations, with the same dash treatment as the blank project row above.
- * It stores '', which the sole-organisation auto-select cannot undo ('' is
+ * organisations. Its explicit label distinguishes it from the blank project
+ * row's dash while it still stores '', which the sole-organisation auto-select cannot undo ('' is
  * not nullish), so a root that stepped up stays up. Only a platform session
  * renders an organisation select at all; a tenancy session's organisation is
  * the token's and is never a choice, so it never sees this row.
  */
 export function organizationRows(organizations: ApiOrganization[]): ApiOrganization[] {
-  return [{ id: '', name: '—', created_at: '' }, ...organizations]
+  return [{ id: '', name: 'All organisations (platform)', created_at: '' }, ...organizations]
 }
 
 /** Why a data screen has nothing to query yet, said plainly (duf-tkw). */

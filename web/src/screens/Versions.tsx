@@ -15,6 +15,7 @@ import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
@@ -177,50 +178,45 @@ export function VersionsView({
 
   return (
     <>
-      <PageSection variant="default">
-        <Breadcrumb>
-          {/* "Registry" is the bucket list, exactly as the Buckets screen's own
-              breadcrumb names it. */}
-          <BreadcrumbItem component="button" onClick={onBack}>
-            Registry
-          </BreadcrumbItem>
-          <BreadcrumbItem isActive>{bucket}</BreadcrumbItem>
-        </Breadcrumb>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 16 }}>
-          <Title headingLevel="h1" size="2xl">
-            <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-              {bucket}
-              {bucketData?.templateTypes.map((templateType) => (
-                <Label key={templateType} isCompact>{templateType}</Label>
-              ))}
-            </span>
-          </Title>
-          {!loading && !failure && !gap ? (
-            <RoleRestrictedButton
-              action="deleteBuckets"
-              callerRole={callerRole}
-              variant="danger"
-              onClick={() => setDeletingBucket(true)}
-            >
-              Delete bucket
-            </RoleRestrictedButton>
-          ) : null}
-        </div>
-        {bucketData && (
-          <>
-            <Content component="p">
-              {bucketData.description || 'No description has been recorded.'}
-            </Content>
-            {Object.keys(bucketData.labels).length > 0 && (
-              <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
-                {Object.entries(bucketData.labels).map(([key, value]) => (
-                  <Label key={key} isCompact>{key}={value}</Label>
-                ))}
-              </span>
-            )}
-          </>
+      <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBack}>
+              Registry
+            </BreadcrumbItem>
+            <BreadcrumbItem isActive>{bucket}</BreadcrumbItem>
+          </Breadcrumb>
         )}
-      </PageSection>
+        title={(
+          <span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+            {bucket}
+            {bucketData?.templateTypes.map((templateType) => (
+              <Label key={templateType} isCompact>{templateType}</Label>
+            ))}
+          </span>
+        )}
+        description={bucketData
+          ? bucketData.description || 'No description has been recorded.'
+          : null}
+        actions={!loading && !failure && !gap ? (
+          <RoleRestrictedButton
+            action="deleteBuckets"
+            callerRole={callerRole}
+            variant="danger"
+            onClick={() => setDeletingBucket(true)}
+          >
+            Delete bucket
+          </RoleRestrictedButton>
+        ) : null}
+      >
+        {bucketData && Object.keys(bucketData.labels).length > 0 ? (
+          <span style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 12 }}>
+            {Object.entries(bucketData.labels).map(([key, value]) => (
+              <Label key={key} isCompact>{key}={value}</Label>
+            ))}
+          </span>
+        ) : null}
+      </ScreenHeader>
 
       {/* The rail sits flush against the header and left edge; only the facet
           content carries the grey well's padding. Alert states have no rail,

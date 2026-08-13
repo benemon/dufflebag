@@ -1,6 +1,6 @@
 import { useEffect, useState, type Ref } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardFooter, CardTitle, Content, Gallery, GalleryItem, Label,
+  Alert, Button, Card, CardBody, CardFooter, CardTitle, Content, Gallery, GalleryItem, Label,
   Dropdown, DropdownItem, DropdownList, FormSelect, FormSelectOption, MenuToggle,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, Hint, HintBody,
   LabelGroup, PageSection, Pagination, SearchInput, Title, Toolbar,
@@ -15,6 +15,7 @@ import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
 import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
@@ -174,23 +175,16 @@ export function BucketsView({
 
   return (
     <>
-      <PageSection variant="default" padding={{ default: 'padding' }}>
-        <Breadcrumb>
-          <BreadcrumbItem to="#" isActive>
-          Project registry
-          </BreadcrumbItem>
-        </Breadcrumb>
-        <Title headingLevel="h1" size="2xl">
-          Buckets
-        </Title>
-        {!loading && !failure && !gap && (
-          <Content component="p">
+      <ScreenHeader
+        title="Buckets"
+        description={!loading && !failure && !gap ? (
+          <>
             {total} {total === 1 ? 'bucket' : 'buckets'} ·{' '}
             {buckets.reduce((count, bucket) => count + bucket.versionCount, 0)} versions ·{' '}
             {buckets.reduce((count, bucket) => count + bucket.channels.length, 0)} channels
-          </Content>
-        )}
-      </PageSection>
+          </>
+        ) : null}
+      />
 
       <PageSection variant="secondary" isFilled>
         {pinsFailure && (

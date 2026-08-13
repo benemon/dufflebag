@@ -1,12 +1,13 @@
 import { useState } from 'react'
 import {
-  Alert, Card, CardBody, CardTitle, Content, PageSection, Title,
+  Alert, Card, CardBody, CardTitle, Content, PageSection,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
 import {
   encryptionRefusalHint, rewrapEncryption, rotateEncryption, useEncryption,
@@ -40,14 +41,16 @@ export function EncryptionView({
 
   return (
     <>
-      <PageSection variant="default">
-        <Title headingLevel="h1" size="2xl">Encryption</Title>
-        <Content component="p">
-          Encryption at rest protects stored data with a keyring backed by an external key
-          service. This state is visible only to root; other roles can open this page but the
-          server refuses access.
-        </Content>
-      </PageSection>
+      <ScreenHeader
+        title="Encryption"
+        description={(
+          <>
+            Encryption at rest protects stored data with a keyring backed by an external key
+            service. This state is visible only to root; other roles can open this page but the
+            server refuses access.
+          </>
+        )}
+      />
 
       <PageSection variant="secondary" isFilled>
         <EncryptionAlerts failure={failure} actionFailure={actionFailure} />

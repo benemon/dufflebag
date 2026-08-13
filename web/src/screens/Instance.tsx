@@ -2,12 +2,13 @@ import { useState, type ReactNode } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, ClipboardCopyButton, CodeBlock, CodeBlockAction,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
-  DescriptionListGroup, DescriptionListTerm, PageSection, Title,
+  DescriptionListGroup, DescriptionListTerm, PageSection,
 } from '@patternfly/react-core'
 
 import type { ApiInstance } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useInstance } from '../data/instance'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
 
 /**
@@ -49,12 +50,7 @@ export function InstanceView({
 }) {
   return (
     <>
-      <PageSection variant="default">
-        <Title headingLevel="h1" size="2xl">Instance</Title>
-        <Content component="p">
-          What a client needs to point at this registry.
-        </Content>
-      </PageSection>
+      <ScreenHeader title="Instance" description="What a client needs to point at this registry." />
 
       {/* One section, no body wrapper: the cards sit directly in the section's
           flex column so its row gap spaces them, and a second section would
