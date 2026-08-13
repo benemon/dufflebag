@@ -166,6 +166,8 @@ github.com/hashicorp/hcp-sdk-go v0.174.0 h1:BVUBgq4ZX5U5LeSb3OZilLUOFOlDqm1lfdFQ
 github.com/hashicorp/hcp-sdk-go v0.174.0/go.mod h1:v2vbpNIrmgUTelW4Z+ur+aQuSPxeaVK3xytFdpEXvSg=
 github.com/hashicorp/vault/api v1.23.0 h1:gXgluBsSECfRWTSW9niY2jwg2e9mMJc4WoHNv4g3h6A=
 github.com/hashicorp/vault/api v1.23.0/go.mod h1:zransKiB9ftp+kgY8ydjnvCU7Wk8i9L0DYWpXeMj9ko=
+github.com/hashicorp/vault/api/auth/approle v0.12.0 h1:PhF7jrQjydK1DC05EboosXmZg31GDUIKL8bjyilsJ+E=
+github.com/hashicorp/vault/api/auth/approle v0.12.0/go.mod h1:J7BJLpXeQXhuMAWi31Puunu5QOeCoRAgLh2iDti7OLA=
 github.com/hashicorp/vault/api/auth/kubernetes v0.12.0 h1:DTrUMNXjpWEFMcU0FY1Eza+l4nSSz/+yUr6JN2GpzF0=
 github.com/hashicorp/vault/api/auth/kubernetes v0.12.0/go.mod h1:njyxrmFPtMuEPpPMZeemwhHovzC22hq2OuJtScI3iFc=
 github.com/jackc/pgpassfile v1.0.0 h1:/6Hmqy13Ss2zCq62VdNG8tM1wchn8zjSGOBJ6icpsIM=

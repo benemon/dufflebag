@@ -13,6 +13,9 @@ versions without a migration path. The
 record for each release. Do not assume upgrade compatibility that a release
 note does not state.
 
+Deployments that set `DFBG_VAULT_AUTH_METHOD=env` must set it to `token`
+instead. The process refuses to start with the old value and names the rename.
+
 ::: warning
 The bundled Helm chart runs one dufflebag replica and does not provide leader
 election or other high-availability machinery. Do not use a multi-replica or

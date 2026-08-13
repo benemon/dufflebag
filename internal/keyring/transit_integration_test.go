@@ -247,6 +247,115 @@ path "transit/decrypt/dufflebag" { capabilities = ["update"] }
 	})
 }
 
+func TestTransitAppRoleAuth(t *testing.T) {
+	ctx := context.Background()
+	const rootToken = "dufflebag-integration-root"
+	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
+		ContainerRequest: testcontainers.ContainerRequest{
+			Image:        "hashicorp/vault:1.17",
+			ExposedPorts: []string{"8200/tcp"},
+			Env: map[string]string{
+				"VAULT_DEV_ROOT_TOKEN_ID":  rootToken,
+				"VAULT_DEV_LISTEN_ADDRESS": "0.0.0.0:8200",
+			},
+			WaitingFor: wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp").WithStartupTimeout(time.Minute),
+		},
+		Started: true,
+	})
+	if err != nil {
+		t.Fatalf("start Vault: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := container.Terminate(context.Background()); err != nil {
+			t.Errorf("terminate Vault: %v", err)
+		}
+	})
+	port, err := container.MappedPort(ctx, "8200/tcp")
+	if err != nil {
+		t.Fatalf("Vault mapped port: %v", err)
+	}
+	address := fmt.Sprintf("http://127.0.0.1:%s", port.Port())
+	client, err := vault.NewClient(&vault.Config{Address: address, HttpClient: vault.DefaultConfig().HttpClient})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.SetToken(rootToken)
+
+	if err := client.Sys().EnableAuthWithOptions("approle", &vault.EnableAuthOptions{Type: "approle"}); err != nil {
+		t.Fatalf("enable AppRole auth: %v", err)
+	}
+	if err := client.Sys().Mount("transit", &vault.MountInput{Type: "transit"}); err != nil {
+		t.Fatalf("enable transit: %v", err)
+	}
+	if _, err := client.Logical().Write("transit/keys/dufflebag", nil); err != nil {
+		t.Fatalf("create transit key: %v", err)
+	}
+	if err := client.Sys().PutPolicy("dufflebag-transit", `
+path "transit/encrypt/dufflebag" { capabilities = ["update"] }
+path "transit/decrypt/dufflebag" { capabilities = ["update"] }
+path "transit/rewrap/dufflebag" { capabilities = ["update"] }
+`); err != nil {
+		t.Fatalf("create transit policy: %v", err)
+	}
+	if _, err := client.Logical().Write("auth/approle/role/dufflebag", map[string]any{
+		"token_policies": []string{"dufflebag-transit"},
+		"token_ttl":      "10s",
+		"token_max_ttl":  "30s",
+	}); err != nil {
+		t.Fatalf("create AppRole: %v", err)
+	}
+	roleSecret, err := client.Logical().Read("auth/approle/role/dufflebag/role-id")
+	if err != nil {
+		t.Fatalf("read AppRole role ID: %v", err)
+	}
+	roleID, _ := roleSecret.Data["role_id"].(string)
+	if roleID == "" {
+		t.Fatal("AppRole role ID response was empty")
+	}
+	secret, err := client.Logical().Write("auth/approle/role/dufflebag/secret-id", nil)
+	if err != nil {
+		t.Fatalf("generate AppRole secret ID: %v", err)
+	}
+	secretID, _ := secret.Data["secret_id"].(string)
+	if secretID == "" {
+		t.Fatal("AppRole secret ID response was empty")
+	}
+	secretIDPath := t.TempDir() + "/secret-id"
+	if err := os.WriteFile(secretIDPath, []byte(secretID), 0o600); err != nil {
+		t.Fatalf("write AppRole secret ID: %v", err)
+	}
+
+	t.Setenv("VAULT_ADDR", address)
+	t.Setenv("VAULT_TOKEN", "")
+	t.Setenv("VAULT_NAMESPACE", "")
+	t.Setenv("VAULT_AGENT_ADDR", "")
+	t.Setenv("VAULT_PROXY_ADDR", "")
+	t.Setenv(vaultAuthMethodEnv, "approle")
+	t.Setenv(vaultAuthNamespaceEnv, "")
+	t.Setenv(vaultAppRoleRoleIDEnv, roleID)
+	t.Setenv(vaultAppRoleSecretIDFileEnv, secretIDPath)
+	t.Setenv(vaultAppRoleMountEnv, "approle")
+	providerCtx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	provider, err := transitFromEnvironment(providerCtx)
+	if err != nil {
+		t.Fatalf("construct provider: %v", err)
+	}
+
+	plaintext := []byte("wrapped through AppRole-authenticated transit")
+	wrapped, keyVersion, err := provider.Wrap(ctx, plaintext)
+	if err != nil {
+		t.Fatalf("Wrap: %v", err)
+	}
+	unwrapped, err := provider.Unwrap(ctx, wrapped, keyVersion)
+	if err != nil {
+		t.Fatalf("Unwrap: %v", err)
+	}
+	if string(unwrapped) != string(plaintext) {
+		t.Fatalf("Unwrap = %q, want %q", unwrapped, plaintext)
+	}
+}
+
 func tokenAccessor(t *testing.T, client *vault.Client) string {
 	t.Helper()
 	secret, err := client.Auth().Token().LookupSelf()
