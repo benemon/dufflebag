@@ -9,6 +9,8 @@ import {
 } from '@patternfly/react-core'
 import AngleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-left-icon'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
+import AngleDoubleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-double-left-icon'
+import AngleDoubleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-double-right-icon'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import {
@@ -580,19 +582,22 @@ export function MirroredBucketsZone({
 }: Pick<BagDropViewProps,
   'config' | 'buckets' | 'associations' | 'associationsLoading' | 'associationsFailure' |
   'onAssociate' | 'onUnassociate'>) {
-  const [selectedAvailable, setSelectedAvailable] = useState<string | null>(null)
-  const [selectedMirrored, setSelectedMirrored] = useState<string | null>(null)
-  const [confirming, setConfirming] = useState<string | null>(null)
+  const [selectedAvailable, setSelectedAvailable] = useState<string[]>([])
+  const [selectedMirrored, setSelectedMirrored] = useState<string[]>([])
+  const [confirming, setConfirming] = useState<string[] | null>(null)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
   const run = async (work: () => Promise<void>) => {
     setActionFailure(null)
     setBusy(true)
+    // The operation consumes its selection when it STARTS: clearing on
+    // completion instead would wipe anything selected while the tail of the
+    // run was still refreshing the listing.
+    setSelectedAvailable([])
+    setSelectedMirrored([])
     try {
       await work()
-      setSelectedAvailable(null)
-      setSelectedMirrored(null)
     } catch (err: unknown) {
       setActionFailure(messageFor(err, 'The bucket association could not be changed.'))
     } finally {
@@ -627,20 +632,18 @@ export function MirroredBucketsZone({
             buckets={buckets} associations={associations}
             selectedAvailable={selectedAvailable} selectedMirrored={selectedMirrored}
             confirming={confirming} busy={busy}
-            onSelectAvailable={(name) => {
-              setSelectedAvailable(name)
-              setSelectedMirrored(null)
-            }}
-            onSelectMirrored={(name) => {
-              setSelectedMirrored(name)
-              setSelectedAvailable(null)
-            }}
-            onAssociate={(name) => { void run(() => onAssociate(name)) }}
+            onSelectAvailable={(names) => setSelectedAvailable(names)}
+            onSelectMirrored={(names) => setSelectedMirrored(names)}
+            onAssociate={(names) => { void run(async () => {
+              for (const name of names) await onAssociate(name)
+            }) }}
             onRequestRemoval={setConfirming}
             onCancelRemoval={() => setConfirming(null)}
-            onConfirmRemoval={(name) => {
+            onConfirmRemoval={(names) => {
               setConfirming(null)
-              void run(() => onUnassociate(name))
+              void run(async () => {
+                for (const name of names) await onUnassociate(name)
+              })
             }}
           />
         )}
@@ -656,30 +659,47 @@ export function AssociationSelectorView({
 }: {
   buckets: ApiBucket[]
   associations: ApiBagDropAssociation[]
-  selectedAvailable: string | null
-  selectedMirrored: string | null
-  confirming: string | null
+  selectedAvailable: string[]
+  selectedMirrored: string[]
+  confirming: string[] | null
   busy: boolean
-  onSelectAvailable: (name: string) => void
-  onSelectMirrored: (name: string) => void
-  onAssociate: (name: string) => void
-  onRequestRemoval: (name: string) => void
+  onSelectAvailable: (names: string[]) => void
+  onSelectMirrored: (names: string[]) => void
+  onAssociate: (names: string[]) => void
+  onRequestRemoval: (names: string[]) => void
   onCancelRemoval: () => void
-  onConfirmRemoval: (name: string) => void
+  onConfirmRemoval: (names: string[]) => void
 }) {
   const mirroredNames = new Set(associations.map((association) => association.bucket_name))
   const available = buckets.filter((bucket) => !mirroredNames.has(bucket.name))
-  const selectedAssociation = associations.find(
-    (association) => association.bucket_name === selectedMirrored,
-  )
-  const canResume = selectedAssociation?.state === 'pending_removal'
+  const pendingSelected = associations.filter(
+    (association) => selectedMirrored.includes(association.bucket_name) &&
+      association.state === 'pending_removal',
+  ).map((association) => association.bucket_name)
+  const removableSelected = associations.filter(
+    (association) => selectedMirrored.includes(association.bucket_name) &&
+      association.state !== 'pending_removal',
+  ).map((association) => association.bucket_name)
+  const allRemovable = associations.filter(
+    (association) => association.state !== 'pending_removal',
+  ).map((association) => association.bucket_name)
+  const toggle = (selected: string[], name: string) => selected.includes(name)
+    ? selected.filter((selectedName) => selectedName !== name)
+    : [...selected, name]
   return (
     <>
       {confirming ? (
-        <BucketRemovalConfirmation
-          bucketName={confirming} onCancel={onCancelRemoval}
-          onConfirm={() => onConfirmRemoval(confirming)}
-        />
+        confirming.length === 1 ? (
+          <BucketRemovalConfirmation
+            bucketName={confirming[0]!} onCancel={onCancelRemoval}
+            onConfirm={() => onConfirmRemoval(confirming)}
+          />
+        ) : (
+          <BucketSetRemovalConfirmation
+            bucketNames={confirming} onCancel={onCancelRemoval}
+            onConfirm={() => onConfirmRemoval(confirming)}
+          />
+        )
       ) : null}
       {available.length === 0 && associations.length === 0 ? (
         <Content component="p">No local buckets are available to mirror.</Content>
@@ -692,28 +712,43 @@ export function AssociationSelectorView({
             {available.map((bucket) => (
               <DualListSelectorListItem
                 key={bucket.name} id={`available-${bucket.name}`}
-                isSelected={selectedAvailable === bucket.name}
-                onOptionSelect={() => onSelectAvailable(bucket.name)}
+                isSelected={selectedAvailable.includes(bucket.name)}
+                onOptionSelect={() => onSelectAvailable(toggle(selectedAvailable, bucket.name))}
               >{bucket.name}</DualListSelectorListItem>
             ))}
           </DualListSelectorList>
         </DualListSelectorPane>
         <DualListSelectorControlsWrapper aria-label="Bucket mirroring controls">
           <DualListSelectorControl
-            aria-label={canResume ? 'Resume selected bucket' : 'Mirror selected bucket'}
-            isDisabled={busy || (!selectedAvailable && !canResume)}
+            aria-label={selectedAvailable.length === 0 && pendingSelected.length > 0
+              ? 'Resume selected bucket'
+              : 'Mirror selected bucket'}
+            isDisabled={busy || (selectedAvailable.length === 0 && pendingSelected.length === 0)}
             onClick={() => {
-              const name = selectedAvailable ?? (canResume ? selectedMirrored : null)
-              if (name) onAssociate(name)
+              const names = selectedAvailable.length > 0 ? selectedAvailable : pendingSelected
+              if (names.length > 0) onAssociate(names)
             }}
             icon={<AngleRightIcon />}
           />
           <DualListSelectorControl
+            aria-label="Mirror all buckets"
+            isDisabled={busy || available.length === 0}
+            onClick={() => onAssociate(available.map((bucket) => bucket.name))}
+            icon={<AngleDoubleRightIcon />}
+          />
+          <DualListSelectorControl
             aria-label="Stop mirroring selected bucket"
-            isDisabled={busy || !selectedMirrored || canResume}
+            isDisabled={busy || removableSelected.length === 0}
             /* MUTATION_UNASSOCIATE_GATE: this control may only open the warning. */
-            onClick={() => { if (selectedMirrored) onRequestRemoval(selectedMirrored) }}
+            onClick={() => onRequestRemoval(removableSelected)}
             icon={<AngleLeftIcon />}
+          />
+          <DualListSelectorControl
+            aria-label="Stop mirroring all buckets"
+            isDisabled={busy || allRemovable.length === 0}
+            /* MUTATION_UNASSOCIATE_GATE_SET: this control may only open the set warning. */
+            onClick={() => onRequestRemoval(allRemovable)}
+            icon={<AngleDoubleLeftIcon />}
           />
         </DualListSelectorControlsWrapper>
         <DualListSelectorPane
@@ -724,8 +759,10 @@ export function AssociationSelectorView({
             {associations.map((association) => (
               <DualListSelectorListItem
                 key={association.bucket_name} id={`mirrored-${association.bucket_name}`}
-                isSelected={selectedMirrored === association.bucket_name}
-                onOptionSelect={() => onSelectMirrored(association.bucket_name)}
+                isSelected={selectedMirrored.includes(association.bucket_name)}
+                onOptionSelect={() => onSelectMirrored(
+                  toggle(selectedMirrored, association.bucket_name),
+                )}
               >
                 {association.bucket_name}
                 {association.state === 'pending_removal' ? (
@@ -737,6 +774,32 @@ export function AssociationSelectorView({
         </DualListSelectorPane>
       </DualListSelector>
     </>
+  )
+}
+
+export function BucketSetRemovalConfirmation({
+  bucketNames, onConfirm, onCancel,
+}: {
+  bucketNames: string[]
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  const count = bucketNames.length
+  return (
+    <TypedConfirmModal
+      title={`Stop mirroring ${count} ${count === 1 ? 'bucket' : 'buckets'}?`}
+      body={<>
+        <Content component="p">Their copies at the destination will be deleted:</Content>
+        <Content component="ul">
+          {bucketNames.map((name) => <li key={name}>{name}</li>)}
+        </Content>
+      </>}
+      expected="stop mirroring"
+      verb="Stop mirroring"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   )
 }
 

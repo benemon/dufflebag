@@ -1,10 +1,10 @@
 import { useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle,
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Label, Modal,
-  ModalBody, ModalFooter, ModalHeader, PageSection, Radio, TextArea, TextInput, Title,
+  ModalBody, ModalFooter, ModalHeader, PageSection, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -18,6 +18,9 @@ import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { SkeletonRows } from '../components/Loading'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
+import {
+  RevokeVersionOptionsForm, revokeOptions, revokeScheduleFailure, type RevokeWhen,
+} from '../components/RevokeVersionOptionsForm'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
@@ -396,8 +399,6 @@ export function DeleteVersionModalView({
   )
 }
 
-type RevokeWhen = 'now' | 'scheduled'
-
 function RevokeModal({
   bucket, version, callerRole, onConfirm, onClose,
 }: {
@@ -473,17 +474,7 @@ export function RevokeModalView({
   onConfirm: (options: RevokeVersionOptions) => Promise<void>
   onClose: () => void
 }) {
-  const parsedSchedule = scheduledAt === '' ? null : new Date(scheduledAt)
-  const scheduleMissing = when === 'scheduled' && (
-    parsedSchedule === null || Number.isNaN(parsedSchedule.getTime())
-  )
-  const schedulePast = when === 'scheduled' && !scheduleMissing &&
-    parsedSchedule!.getTime() <= Date.now()
-  const scheduleFailure = scheduleMissing
-    ? 'Choose a scheduled time.'
-    : schedulePast
-      ? 'Scheduled time must be in the future.'
-      : null
+  const scheduleFailure = revokeScheduleFailure(when, scheduledAt)
   const idPrefix = `revoke-${version.fingerprint}`
 
   return (
@@ -495,76 +486,21 @@ export function RevokeModalView({
       busy={submitting}
       confirmDisabled={scheduleFailure !== null}
       onCancel={onClose}
-      onConfirm={() => onConfirm({
-        revoke_at: when === 'now' ? new Date().toISOString() : parsedSchedule!.toISOString(),
-        ...(message.trim() ? { revocation_message: message.trim() } : {}),
-        ...(skipDescendants ? { skip_descendants_revocation: true } : {}),
-        ...(disableRollback ? { disable_rollback_channels: true } : {}),
-      })}
+      onConfirm={() => onConfirm(revokeOptions({
+        message, when, scheduledAt, skipDescendants, disableRollback,
+      }))}
       body={<>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
-        <Form>
-          <FormGroup label="Revocation message" fieldId={`${idPrefix}-message`}>
-            <TextArea
-              id={`${idPrefix}-message`}
-              value={message}
-              resizeOrientation="vertical"
-              onChange={(_event, value) => onMessageChange(value)}
-            />
-          </FormGroup>
-          <FormGroup label="When" fieldId={`${idPrefix}-when`} role="radiogroup">
-            <Radio
-              id={`${idPrefix}-now`}
-              name={`${idPrefix}-when`}
-              label="Now"
-              isChecked={when === 'now'}
-              onChange={() => onWhenChange('now')}
-            />
-            <Radio
-              id={`${idPrefix}-scheduled`}
-              name={`${idPrefix}-when`}
-              label="At a scheduled time"
-              isChecked={when === 'scheduled'}
-              onChange={() => onWhenChange('scheduled')}
-            />
-          </FormGroup>
-          {when === 'scheduled' ? (
-            <FormGroup label="Scheduled time" isRequired fieldId={`${idPrefix}-scheduled-at`}>
-              <TextInput
-                id={`${idPrefix}-scheduled-at`}
-                type="datetime-local"
-                value={scheduledAt}
-                validated={scheduleFailure ? 'error' : 'default'}
-                aria-invalid={scheduleFailure ? 'true' : undefined}
-                aria-describedby={scheduleFailure ? `${idPrefix}-scheduled-at-error` : undefined}
-                onChange={(_event, value) => onScheduledAtChange(value)}
-              />
-              {scheduleFailure ? (
-                <Content component="p" id={`${idPrefix}-scheduled-at-error`}>
-                  {scheduleFailure}
-                </Content>
-              ) : null}
-            </FormGroup>
-          ) : null}
-          <Checkbox
-            id={`${idPrefix}-skip-descendants`}
-            label="Skip descendant revocation"
-            description="Leave descendant versions active."
-            isChecked={skipDescendants}
-            onChange={(_event, checked) => onSkipDescendantsChange(checked)}
-          />
-          <Checkbox
-            id={`${idPrefix}-disable-rollback`}
-            label="Do not roll channels back"
-            description="Leave channel assignments unchanged."
-            isChecked={disableRollback}
-            onChange={(_event, checked) => onDisableRollbackChange(checked)}
-          />
-        </Form>
+        {RevokeVersionOptionsForm({
+          idPrefix,
+          message, when, scheduledAt, skipDescendants, disableRollback, scheduleFailure,
+          onMessageChange, onWhenChange, onScheduledAtChange,
+          onSkipDescendantsChange, onDisableRollbackChange,
+        })}
       </>}
     />
   )

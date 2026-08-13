@@ -2255,23 +2255,49 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the Disable action to withdraw', () =>
       page.$$eval('button', (buttons) =>
         buttons.every((b) => b.innerText.trim() !== 'Disable')))
+    // Select-and-open as one retried unit: the association run may still be
+    // settling (busy disables the control, and starting a run consumes the
+    // selections), and the item click TOGGLES — so it only fires when the
+    // item is not already selected.
+    const openStopMirroringWarning = (bucket) =>
+      until(`the stop-mirroring warning for ${bucket}`, async () => {
+        await page.$eval(`#mirrored-${bucket}`, (item) => {
+          const selected = item.querySelector('.pf-m-selected') !== null ||
+            item.className.includes('pf-m-selected') ||
+            item.getAttribute('aria-selected') === 'true'
+          if (!selected) {
+            const target = item.querySelector('.pf-v6-c-dual-list-selector__item') ?? item
+            target.click()
+          }
+        })
+        const opened = await page.$$eval(
+          'button[aria-label="Stop mirroring selected bucket"]',
+          (buttons) => {
+            const control = buttons[0]
+            if (!control || control.disabled) return false
+            control.click()
+            return true
+          },
+        )
+        if (!opened) return false
+        return (await bodyText()).includes(`Stop mirroring ${bucket}?`)
+      })
+
     // Associate the seeded bucket through the dual list.
     await clickDeepByText('#bagdrop-buckets li, #bagdrop-buckets li *', 'smoke-images')
     await page.click('button[aria-label="Mirror selected bucket"]')
     await until('the bucket to appear in the mirrored pane', async () =>
       Boolean(await page.$('#mirrored-smoke-images')))
     // The destructive direction opens the warning; Cancel changes nothing.
-    await page.click('#mirrored-smoke-images')
-    await page.click('button[aria-label="Stop mirroring selected bucket"]')
-    await waitForText('Stop mirroring smoke-images?')
+    // Select-and-open as one retried unit: the association run may still be
+    // settling (busy disables the control, and the run consumes selections).
+    await openStopMirroringWarning('smoke-images')
     await waitForText('Its copy at the destination will be deleted')
     await clickByText('button', 'Cancel')
     assert.ok(await page.$('#mirrored-smoke-images'), 'Cancel must leave the association in place')
     // Confirming acts: a never-attempted association is removed immediately
     // and the bucket returns to the local pane.
-    await page.click('#mirrored-smoke-images')
-    await page.click('button[aria-label="Stop mirroring selected bucket"]')
-    await waitForText('Stop mirroring smoke-images?')
+    await openStopMirroringWarning('smoke-images')
     await typeToConfirm('smoke-images')
     await clickDeepByText('button', 'Stop mirroring smoke-images')
     await until('the bucket to return to the local pane', async () =>
