@@ -60,9 +60,10 @@ const view = (over = {}) => renderToStaticMarkup(React.createElement(EncryptionV
   ...over,
 }))
 
-test('encryption screen has an honest loading state', () => {
+test('encryption screen has an honest skeleton loading state', () => {
   const loading = view({ encryption: null, loading: true })
-  assert.match(loading, /Loading encryption state/)
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /pf-v6-screen-reader">Loading encryption state…<\/span>/)
   assert.doesNotMatch(loading, /Encryption keyring/)
 })
 

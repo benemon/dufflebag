@@ -16,6 +16,7 @@ import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
+import { SkeletonRows } from '../components/Loading'
 import { When } from '../components/When'
 
 const ROOT_KEYSTONE_REASON = 'A root principal must keep one secret that never expires'
@@ -157,7 +158,7 @@ export function PrincipalsView({
         ) : null}
 
         {loading ? (
-          <Content component="p">Loading principals…</Content>
+          <SkeletonRows screenreaderText="Loading principals…" />
         ) : principals.length === 0 && !failure ? (
           // The listing is EXACTLY the selection's scope, so an empty table
           // needs to say which scope answered empty — an organisation with no

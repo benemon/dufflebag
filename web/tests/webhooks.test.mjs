@@ -112,6 +112,13 @@ test('the empty and failed states say so honestly', () => {
   assert.doesNotMatch(failed, /No webhooks are configured/)
 })
 
+test('the loading listing is held by skeleton rows with honest screen-reader copy', () => {
+  const loading = view({ loading: true })
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /pf-v6-screen-reader">Loading webhooks…<\/span>/)
+  assert.doesNotMatch(loading, /No webhooks are configured/)
+})
+
 test('delivery attempts render as semantic timestamps and retain the empty dash', () => {
   const markup = renderToStaticMarkup(React.createElement(DeliveryTable, { deliveries: [{
     id: 'delivery-1', event_id: 'event-1', operation: 'version.completed',

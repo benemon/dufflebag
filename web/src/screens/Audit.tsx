@@ -16,6 +16,7 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
+import { SkeletonRows } from '../components/Loading'
 
 export function Audit() {
   return <AuditView {...useAuditTargets()} />
@@ -136,7 +137,7 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
         ) : null}
 
         {loading ? (
-          <Content component="p">Loading audit targets…</Content>
+          <SkeletonRows screenreaderText="Loading audit targets…" />
         ) : targets.length === 0 && !failure ? (
           <EmptyState titleText="No audit targets are configured" headingLevel="h2">
             <EmptyStateBody>

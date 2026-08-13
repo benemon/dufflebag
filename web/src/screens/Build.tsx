@@ -10,6 +10,7 @@ import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformLabel } from '../components/PlatformLabel'
+import { SkeletonRows } from '../components/Loading'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { downloadSbom, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -130,7 +131,7 @@ export function BuildView({
         padding={{ default: !loading && !failure && !gap && build ? 'noPadding' : 'padding' }}
       >
         {loading ? (
-          <Content component="p">Loading build…</Content>
+          <SkeletonRows screenreaderText="Loading build…" />
         ) : failure ? (
           <Alert variant="danger" isInline title="Build could not be loaded">
             <Content component="p">{failure}</Content>

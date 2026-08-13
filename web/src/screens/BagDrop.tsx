@@ -24,6 +24,7 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
+import { SkeletonRows } from '../components/Loading'
 
 type DestinationDraft = {
   adapter: 'hcp-packer' | 'dufflebag'
@@ -351,7 +352,7 @@ export function DestinationZone({
         ) : null}
         {config?.credential_protection === 'env_key' ? <EnvironmentKeyWarning /> : null}
         {configLoading ? (
-          <Content component="p">Loading Bag Drop configuration…</Content>
+          <SkeletonRows screenreaderText="Loading Bag Drop configuration…" />
         ) : configFailure ? null : (
           <DestinationFormView
             config={config} draft={draft} dirty={dirty} busy={busy}
@@ -620,7 +621,7 @@ export function MirroredBucketsZone({
         {!config ? (
           <Alert variant="info" isInline title="Configure a destination before mirroring buckets" />
         ) : associationsLoading ? (
-          <Content component="p">Loading mirrored buckets…</Content>
+          <SkeletonRows screenreaderText="Loading mirrored buckets…" />
         ) : associationsFailure ? null : (
           <AssociationSelectorView
             buckets={buckets} associations={associations}
@@ -801,7 +802,7 @@ export function StatusZone({
           >Reconcile now</Button>
         ) : null}
         {loading ? (
-          <Content component="p">Loading Bag Drop status…</Content>
+          <SkeletonRows screenreaderText="Loading Bag Drop status…" />
         ) : failure ? null : !status?.configured ? (
           <EmptyState titleText="Bag Drop is not configured" headingLevel="h2">
             <EmptyStateBody>No buckets are being mirrored from this project.</EmptyStateBody>

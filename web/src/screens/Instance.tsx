@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useInstance } from '../data/instance'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
+import { SkeletonRows } from '../components/Loading'
 
 /**
  * Instance — what a client needs to point at this registry.
@@ -98,7 +99,7 @@ export function ScannerCard({
     <Card>
       <CardTitle>Scanner</CardTitle>
       <CardBody>
-        {loading ? <Content component="p">Loading scanner information…</Content> : null}
+        {loading ? <SkeletonRows screenreaderText="Loading scanner information…" /> : null}
         {failure ? (
           <Alert variant="danger" isInline title="Scanner information could not be loaded">
             <Content component="p">{failure}</Content>
@@ -129,7 +130,7 @@ export function BuildCard({
     <Card>
       <CardTitle>Build</CardTitle>
       <CardBody>
-        {loading ? <Content component="p">Loading build information…</Content> : null}
+        {loading ? <SkeletonRows screenreaderText="Loading build information…" /> : null}
         {failure ? (
           <Alert variant="danger" isInline title="Build information could not be loaded">
             <Content component="p">{failure}</Content>
