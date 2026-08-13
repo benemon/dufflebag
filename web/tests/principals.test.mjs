@@ -10,9 +10,11 @@ let vite
 let PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard
 let PrincipalTableView
 let DeletePrincipalConfirmation, RevokeSecretConfirmation
+let BulkPrincipalDeleteModalView, partitionBulkPrincipals, runBulkPrincipalDelete, principalPage
 let TypedConfirmModalView
 let grantableRoles
 let RoleRestrictedButton
+let updateBulkSelection
 const principalScreenSource = readFileSync(new URL('../src/screens/Principals.tsx', import.meta.url), 'utf8')
 
 before(async () => {
@@ -26,8 +28,10 @@ before(async () => {
   ;({
     PrincipalsView, CreatePrincipalForm, IssueSecretModalView, IssuedCredentialCard,
     PrincipalTableView, DeletePrincipalConfirmation, RevokeSecretConfirmation,
+    BulkPrincipalDeleteModalView, partitionBulkPrincipals, runBulkPrincipalDelete, principalPage,
   } =
     await vite.ssrLoadModule('/src/screens/Principals.tsx'))
+  ;({ updateBulkSelection } = await vite.ssrLoadModule('/src/components/BulkSelection.ts'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ RoleRestrictedButton } = await vite.ssrLoadModule('/src/auth/RoleRestrictedButton.tsx'))
   ;({ TypedConfirmModalView } =
@@ -405,6 +409,96 @@ test('a root holding two secrets is unconstrained, and says nothing', () => {
   assert.doesNotMatch(markup, /must keep one secret that never expires/)
   const revoke = markup.slice(markup.indexOf('>Revoke<') - 200, markup.indexOf('>Revoke<'))
   assert.doesNotMatch(revoke, /disabled/)
+})
+
+test('principal selection survives pagination and the bulk action keeps its role gate', () => {
+  const principals = Array.from({ length: 4 }, (_unused, index) => principal({
+    id: `p-${index + 1}`, name: `principal ${index + 1}`, client_id: `client-${index + 1}`,
+  }))
+  let selected = updateBulkSelection(
+    [], principalPage(principals, 1, 2).map((record) => record.id), true,
+  )
+  assert.deepEqual(selected, ['p-1', 'p-2'])
+  assert.deepEqual(principalPage(principals, 2, 2).map((record) => record.id), ['p-3', 'p-4'])
+  assert.deepEqual(selected, ['p-1', 'p-2'], 'paging must retain page-one selection')
+  selected = updateBulkSelection(selected, principals.map((record) => record.id), true)
+  assert.deepEqual(selected, ['p-1', 'p-2', 'p-3', 'p-4'])
+
+  const reader = renderToStaticMarkup(React.createElement(PrincipalTableView, {
+    principals: principals.slice(0, 2), allPrincipals: principals,
+    selected: ['p-1'], selfID: 'p-caller', callerRole: 'reader', expanded: null,
+    onToggle: () => {}, onOpenIssue: () => {}, onRevoke: () => {}, onDelete: () => {},
+  }))
+  assert.match(reader, /1 selected/)
+  assert.match(reader, /Requires maintainer/)
+  assert.match(principalScreenSource, /<Tr isSelectable isRowSelected=\{selected\.includes\(principal\.id\)\}>/)
+})
+
+const bulkPrincipalModalProps = (principals, partition, over = {}) => ({
+  principals, partition, submitting: false, results: null,
+  onConfirm: async () => {}, onClose: () => {}, ...over,
+})
+
+const renderBulkPrincipalModal = (modal) => renderToStaticMarkup(
+  React.createElement(TypedConfirmModalView, {
+    ...modal.props, confirmation: '', onConfirmationChange: () => {},
+  }),
+)
+
+test('bulk principal delete excludes the caller from the request set with its reason', async () => {
+  const selected = [
+    principal({ id: 'p-caller', name: 'current automation' }),
+    principal({ id: 'p-worker', name: 'worker automation' }),
+  ]
+  const partition = partitionBulkPrincipals(selected, 'p-caller')
+  assert.deepEqual(partition.included.map((record) => record.id), ['p-worker'])
+  assert.deepEqual(partition.excluded.map(({ principal: record, reason }) => [record.id, reason]), [
+    ['p-caller', 'is your current session; a principal may not delete itself'],
+  ])
+
+  const requests = []
+  await runBulkPrincipalDelete(partition.included, async (record) => requests.push(record.id))
+  assert.deepEqual(requests, ['p-worker'])
+
+  const modal = BulkPrincipalDeleteModalView(bulkPrincipalModalProps(selected, partition))
+  assert.equal(modal.props.expected, 'delete')
+  assert.equal(modal.props.variant, 'medium')
+  const markup = renderBulkPrincipalModal(modal)
+  assert.match(markup, /Delete 2 principals/)
+  assert.match(markup, /1 of 2 will be deleted\./)
+  assert.match(markup, /current automation is your current session; a principal may not delete itself\./)
+  assert.match(markup, />worker automation</)
+  assert.equal((markup.match(/Deleting a principal revokes all of its secrets\./g) ?? []).length, 1)
+  assert.match(markup, /Type <strong>delete<\/strong> to confirm/)
+})
+
+test('bulk principal partial failures render every per-row result and keep the modal open', async () => {
+  const selected = [
+    principal({ id: 'p-a', name: 'builder automation' }),
+    principal({ id: 'p-b', name: 'publisher automation' }),
+    principal({ id: 'p-c', name: 'reader automation' }),
+  ]
+  const refusal = 'publisher automation is the last root principal'
+  const results = await runBulkPrincipalDelete(selected, async (record) => {
+    if (record.id === 'p-b') throw new Error(refusal)
+  })
+  assert.deepEqual(results.map(({ principal: record, status }) => [record.name, status]), [
+    ['builder automation', 'success'],
+    ['publisher automation', 'refused'],
+    ['reader automation', 'success'],
+  ])
+
+  const partition = partitionBulkPrincipals(selected, 'p-caller')
+  const markup = renderBulkPrincipalModal(BulkPrincipalDeleteModalView(
+    bulkPrincipalModalProps(selected, partition, { results }),
+  ))
+  assert.equal((markup.match(/>Success<\/span>/g) ?? []).length, 2)
+  assert.equal((markup.match(/>Refused<\/span>/g) ?? []).length, 1)
+  for (const name of ['builder automation', 'publisher automation', 'reader automation']) {
+    assert.match(markup, new RegExp(name))
+  }
+  assert.match(markup, new RegExp(refusal))
+  assert.match(principalScreenSource, /if \(allSucceeded\) onClose\(\)/)
 })
 
 test('a principal may not delete itself, so the action is absent rather than disabled', () => {

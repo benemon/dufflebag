@@ -1,10 +1,13 @@
-import { useState } from 'react'
+import { useEffect, useState, type Ref } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, Content, Form, FormGroup,
+  Dropdown, DropdownItem, DropdownList,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
-  FormSelect, FormSelectOption, Label, Modal, ModalBody, ModalFooter, ModalHeader,
-  PageSection, Pagination, Popover, Radio, TextInput,
+  FormSelect, FormSelectOption, Label, MenuToggle, MenuToggleCheckbox, Modal, ModalBody,
+  ModalFooter, ModalHeader, PageSection, Pagination, Popover, Radio, TextInput,
+  Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
+import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import {
@@ -14,6 +17,7 @@ import {
 } from '../data/principals'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { ScreenHeader } from '../components/ScreenHeader'
+import { updateBulkSelection } from '../components/BulkSelection'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { SkeletonRows } from '../components/Loading'
@@ -215,6 +219,11 @@ export function PrincipalsView({
                 }}
                 onRevoke={(principal, secret) => setRevoking({ principal, secret })}
                 onDelete={setDeleting}
+                onBulkDelete={async (principal) => {
+                  if (!token) throw new Error('No session.')
+                  await deletePrincipal(token, principal.id)
+                }}
+                onRefresh={reload}
               />
             </CardBody>
           </Card>
@@ -297,6 +306,141 @@ export function DeletePrincipalConfirmation({
       busy={false}
       onConfirm={onConfirm}
       onCancel={onCancel}
+    />
+  )
+}
+
+export type BulkPrincipalExclusion = { principal: Principal; reason: string }
+
+export function partitionBulkPrincipals(principals: Principal[], selfID: string | null): {
+  included: Principal[]
+  excluded: BulkPrincipalExclusion[]
+} {
+  const included: Principal[] = []
+  const excluded: BulkPrincipalExclusion[] = []
+  for (const principal of principals) {
+    if (principal.id === selfID) {
+      excluded.push({
+        principal,
+        reason: 'is your current session; a principal may not delete itself',
+      })
+    } else {
+      included.push(principal)
+    }
+  }
+  return { included, excluded }
+}
+
+export type BulkPrincipalResult = {
+  principal: Principal
+  status: 'success' | 'refused'
+  message: string
+}
+
+export async function runBulkPrincipalDelete(
+  principals: Principal[], operation: (principal: Principal) => Promise<void>,
+): Promise<BulkPrincipalResult[]> {
+  const results: BulkPrincipalResult[] = []
+  for (const principal of principals) {
+    try {
+      await operation(principal)
+      results.push({ principal, status: 'success', message: 'Success' })
+    } catch (err: unknown) {
+      results.push({
+        principal,
+        status: 'refused',
+        message: refusalHint(err) ?? (err instanceof Error ? err.message : 'The action failed.'),
+      })
+    }
+  }
+  return results
+}
+
+function BulkPrincipalDeleteModal({ principals, selfID, onDelete, onFinished, onClose }: {
+  principals: Principal[]
+  selfID: string | null
+  onDelete: (principal: Principal) => Promise<void>
+  onFinished: (allSucceeded: boolean) => void | Promise<void>
+  onClose: () => void
+}) {
+  const [submitting, setSubmitting] = useState(false)
+  const [results, setResults] = useState<BulkPrincipalResult[] | null>(null)
+  const partition = partitionBulkPrincipals(principals, selfID)
+
+  const confirm = async () => {
+    setSubmitting(true)
+    const nextResults = await runBulkPrincipalDelete(partition.included, onDelete)
+    setResults(nextResults)
+    setSubmitting(false)
+    const allSucceeded = nextResults.every((result) => result.status === 'success')
+    await onFinished(allSucceeded)
+    if (allSucceeded) onClose()
+  }
+
+  return (
+    <BulkPrincipalDeleteModalView
+      principals={principals} partition={partition} submitting={submitting} results={results}
+      onConfirm={confirm} onClose={onClose}
+    />
+  )
+}
+
+export function BulkPrincipalDeleteModalView({
+  principals, partition, submitting, results, onConfirm, onClose,
+}: {
+  principals: Principal[]
+  partition: ReturnType<typeof partitionBulkPrincipals>
+  submitting: boolean
+  results: BulkPrincipalResult[] | null
+  onConfirm: () => Promise<void>
+  onClose: () => void
+}) {
+  return (
+    <TypedConfirmModal
+      variant="medium"
+      title={`Delete ${principals.length} ${principals.length === 1 ? 'principal' : 'principals'}`}
+      expected="delete"
+      verb="Delete"
+      busy={submitting}
+      confirmDisabled={partition.included.length === 0 || results !== null}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      body={<>
+        <Content component="p">Deleting a principal revokes all of its secrets.</Content>
+        <Content component="p">
+          {partition.included.length} of {principals.length} will be deleted.
+        </Content>
+        {partition.included.length > 0 ? (
+          <>
+            <Content component="p">Included principals:</Content>
+            <Content component="ul">
+              {partition.included.map((principal) => <li key={principal.id}>{principal.name}</li>)}
+            </Content>
+          </>
+        ) : null}
+        {partition.excluded.length > 0 ? (
+          <>
+            <Content component="p">Excluded principals:</Content>
+            <Content component="ul">
+              {partition.excluded.map(({ principal, reason }) => (
+                <li key={principal.id}>{principal.name} {reason}.</li>
+              ))}
+            </Content>
+          </>
+        ) : null}
+        {results ? (
+          <Content component="ul" aria-label="Delete results">
+            {results.map((result) => (
+              <li key={result.principal.id}>
+                <Label color={result.status === 'success' ? 'green' : 'red'} isCompact>
+                  {result.status === 'success' ? 'Success' : 'Refused'}
+                </Label>{' '}
+                {result.principal.name} — {result.message}
+              </li>
+            ))}
+          </Content>
+        ) : null}
+      </>}
     />
   )
 }
@@ -463,14 +607,31 @@ type PrincipalTableProps = {
   onDelete: (principal: Principal) => void
 }
 
-function PrincipalTable(props: PrincipalTableProps) {
+export function principalPage(principals: Principal[], page: number, perPage: number): Principal[] {
+  const first = (page - 1) * perPage
+  return principals.slice(first, first + perPage)
+}
+
+function PrincipalTable(props: PrincipalTableProps & {
+  onBulkDelete: (principal: Principal) => Promise<void>
+  onRefresh: () => void | Promise<void>
+}) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
+  const [selected, setSelected] = useState<string[]>([])
+  const [bulkSelectOpen, setBulkSelectOpen] = useState(false)
+  const [bulkDeleting, setBulkDeleting] = useState(false)
   const lastPage = Math.max(1, Math.ceil(props.principals.length / perPage))
   const currentPage = Math.min(page, lastPage)
-  const first = (currentPage - 1) * perPage
-  const visiblePrincipals = props.principals.slice(first, first + perPage)
+  const visiblePrincipals = principalPage(props.principals, currentPage, perPage)
+  const selectedPrincipals = props.principals.filter((principal) => selected.includes(principal.id))
+
+  useEffect(() => {
+    const current = new Set(props.principals.map((principal) => principal.id))
+    setSelected((selectedIDs) => selectedIDs.filter((id) => current.has(id)))
+  }, [props.principals])
+
   const setCurrentPage = (_event: unknown, nextPage: number) => {
     setPage(nextPage)
     setExpanded(null)
@@ -494,6 +655,13 @@ function PrincipalTable(props: PrincipalTableProps) {
       <PrincipalTableView
         {...props}
         principals={visiblePrincipals}
+        allPrincipals={props.principals}
+        selected={selected}
+        bulkSelectOpen={bulkSelectOpen}
+        onBulkSelectOpenChange={setBulkSelectOpen}
+        onSelectionChange={(ids, isSelecting) => setSelected((current) =>
+          updateBulkSelection(current, ids, isSelecting))}
+        onBulkDelete={() => setBulkDeleting(true)}
         expanded={expanded}
         onToggle={(principal) => setExpanded(expanded === principal.id ? null : principal.id)}
       />
@@ -506,22 +674,117 @@ function PrincipalTable(props: PrincipalTableProps) {
         variant="bottom"
         dropDirection="up"
       />
+      {bulkDeleting ? (
+        <BulkPrincipalDeleteModal
+          principals={selectedPrincipals}
+          selfID={props.selfID}
+          onDelete={props.onBulkDelete}
+          onFinished={async (allSucceeded) => {
+            await props.onRefresh()
+            if (allSucceeded) setSelected([])
+          }}
+          onClose={() => setBulkDeleting(false)}
+        />
+      ) : null}
     </>
   )
 }
 
 /** Controlled table view keeps row actions testable without a browser renderer. */
 export function PrincipalTableView({
-  principals, selfID, callerRole, onOpenIssue, onRevoke, onDelete, expanded, onToggle,
+  principals, allPrincipals = principals, selfID, callerRole, onOpenIssue, onRevoke, onDelete,
+  selected = [], bulkSelectOpen = false, onBulkSelectOpenChange = () => {},
+  onSelectionChange = () => {}, onBulkDelete = () => {}, expanded, onToggle,
 }: PrincipalTableProps & {
+  allPrincipals?: Principal[]
+  selected?: string[]
+  bulkSelectOpen?: boolean
+  onBulkSelectOpenChange?: (open: boolean) => void
+  onSelectionChange?: (ids: string[], isSelecting: boolean) => void
+  onBulkDelete?: () => void
   expanded: string | null
   onToggle: (principal: Principal) => void
 }) {
+  const visibleIDs = principals.map((principal) => principal.id)
+  const visibleSelected = visibleIDs.filter((id) => selected.includes(id))
+  const allVisibleSelected = visibleIDs.length > 0 && visibleSelected.length === visibleIDs.length
   return (
-    <Table aria-label="Service principals" variant="compact" isStickyHeader>
+    <>
+    <Toolbar id="principals-toolbar">
+      <ToolbarContent>
+        <ToolbarItem>
+          <Dropdown
+            role="menu"
+            isOpen={bulkSelectOpen}
+            onOpenChange={onBulkSelectOpenChange}
+            onSelect={(_event, value) => {
+              if (value === 'none') onSelectionChange(selected, false)
+              if (value === 'page') onSelectionChange(visibleIDs, !allVisibleSelected)
+              if (value === 'all') onSelectionChange(
+                allPrincipals.map((principal) => principal.id),
+                selected.length !== allPrincipals.length,
+              )
+              onBulkSelectOpenChange(false)
+            }}
+            toggle={(toggleRef: Ref<MenuToggleElement>) => (
+              <MenuToggle
+                ref={toggleRef}
+                isExpanded={bulkSelectOpen}
+                onClick={() => onBulkSelectOpenChange(!bulkSelectOpen)}
+                aria-label="Select principals"
+                splitButtonItems={[
+                  <MenuToggleCheckbox
+                    id="principals-bulk-select-checkbox"
+                    key="principals-bulk-select-checkbox"
+                    aria-label={selected.length > 0 ? 'Deselect all principals' : 'Select all principals'}
+                    isChecked={selected.length === allPrincipals.length
+                      ? true
+                      : selected.length > 0 ? null : false}
+                    onChange={(checked) => onSelectionChange(
+                      allPrincipals.map((principal) => principal.id), checked,
+                    )}
+                  >
+                    {selected.length > 0 ? `${selected.length} selected` : null}
+                  </MenuToggleCheckbox>,
+                ]}
+              />
+            )}
+          >
+            <DropdownList>
+              <DropdownItem value="none">Select none (0 items)</DropdownItem>
+              <DropdownItem value="page">Select page ({principals.length} items)</DropdownItem>
+              <DropdownItem value="all">Select all ({allPrincipals.length} items)</DropdownItem>
+            </DropdownList>
+          </Dropdown>
+        </ToolbarItem>
+        {selected.length > 0 ? (
+          <ToolbarItem>
+            <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {selected.length} selected
+              <RoleRestrictedButton
+                action="managePrincipals" callerRole={callerRole}
+                variant="danger" onClick={onBulkDelete}
+              >Delete</RoleRestrictedButton>
+            </span>
+          </ToolbarItem>
+        ) : null}
+      </ToolbarContent>
+    </Toolbar>
+    <Table
+      aria-label="Service principals" variant="compact" isStickyHeader
+      selectableRowCaptionText="Principal"
+    >
       <Thead>
         <Tr>
           <Th screenReaderText="Expand" />
+          <Th
+            aria-label="Select page"
+            select={{
+              isSelected: allVisibleSelected,
+              isIndeterminate: visibleSelected.length > 0 && !allVisibleSelected,
+              onSelect: (_event, isSelecting) => onSelectionChange(visibleIDs, isSelecting),
+            }}
+          />
           <Th>Name</Th>
           <Th>Role</Th>
           <Th>Scope</Th>
@@ -532,7 +795,7 @@ export function PrincipalTableView({
       </Thead>
       {principals.map((principal, index) => (
         <Tbody key={principal.id} isExpanded={expanded === principal.id}>
-          <Tr>
+          <Tr isSelectable isRowSelected={selected.includes(principal.id)}>
             <Td
               expand={{
                 rowIndex: index,
@@ -540,6 +803,11 @@ export function PrincipalTableView({
                 onToggle: () => onToggle(principal),
               }}
             />
+            <Td select={{
+              rowIndex: index,
+              isSelected: selected.includes(principal.id),
+              onSelect: (_event, isSelecting) => onSelectionChange([principal.id], isSelecting),
+            }} />
             <Td dataLabel="Name">
               {principal.name}
               {principal.id === selfID ? <Label isCompact>your session</Label> : null}
@@ -581,7 +849,7 @@ export function PrincipalTableView({
             </Td>
           </Tr>
           <Tr isExpanded={expanded === principal.id}>
-            <Td colSpan={7}>
+            <Td colSpan={8}>
               <ExpandableRowContent>
                 <SecretSlots
                   principal={principal}
@@ -594,6 +862,7 @@ export function PrincipalTableView({
         </Tbody>
       ))}
     </Table>
+    </>
   )
 }
 
