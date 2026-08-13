@@ -3,11 +3,13 @@ import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardFooter, CardTitle, Content, Gallery, GalleryItem, Label,
   Dropdown, DropdownItem, DropdownList, FormSelect, FormSelectOption, MenuToggle,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, Hint, HintBody,
-  PageSection, Pagination, TextInput, Title, Toolbar,
-  ToolbarContent, ToolbarItem,
+  LabelGroup, PageSection, Pagination, SearchInput, Title, Toolbar,
+  ToolbarContent, ToolbarFilter, ToolbarItem,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
-import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
+import {
+  ExpandableRowContent, SortByDirection, Table, Tbody, Td, Th, Thead, Tr,
+} from '@patternfly/react-table'
 import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
 import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
 import { useLocation, useNavigate } from 'react-router'
@@ -21,6 +23,17 @@ import { useAuth } from '../auth/AuthContext'
 import { permitsAction, requirementReason, type Role } from '../auth/permissions'
 import { deleteBucket, getBagDropStatus, signOutIfUnauthorized, type ApiPin } from '../api/client'
 import type { TenancyGap } from '../data/tenant'
+import { VersionStateLabel } from './Versions'
+
+const BUCKET_SORT_KEYS = {
+  1: 'name',
+  3: 'status',
+  7: 'last-push',
+} as const
+type BucketSortIndex = keyof typeof BUCKET_SORT_KEYS
+const VERSION_STATE_ORDER: NonNullable<Bucket['newestVersion']>['state'][] = [
+  'complete', 'incomplete', 'revoked', 'revocation-scheduled',
+]
 
 /**
  * Buckets — the registry landing screen.
@@ -106,17 +119,26 @@ export function BucketsView({
   const [platformFilter, setPlatformFilter] = useState('')
   const [statusFilter, setStatusFilter] = useState('')
   // Newest first: a registry's most recent push is what a reader came for.
-  const [sort, setSort] = useState('last-push')
+  const [activeSortIndex, setActiveSortIndex] = useState<BucketSortIndex>(7)
+  const [activeSortDirection, setActiveSortDirection] = useState(SortByDirection.desc)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
   const [deletingBucket, setDeletingBucket] = useState<string | null>(null)
   const [showConnectionHint, setShowConnectionHint] = useState(true)
   const platforms = [...new Set(buckets.flatMap((bucket) => bucket.platforms))].sort()
+  const states = VERSION_STATE_ORDER.filter((state) =>
+    buckets.some((bucket) => bucket.newestVersion?.state === state),
+  )
+  const sortKey = BUCKET_SORT_KEYS[activeSortIndex]
+  const comparator = bucketComparator(sortKey)
+  const naturalDirection = sortKey === 'last-push' ? SortByDirection.desc : SortByDirection.asc
   const filteredBuckets = buckets
     .filter((bucket) => bucket.name.toLowerCase().includes(nameFilter.trim().toLowerCase()))
     .filter((bucket) => !platformFilter || bucket.platforms.includes(platformFilter))
     .filter((bucket) => !statusFilter || bucket.newestVersion?.state === statusFilter)
-    .sort(bucketComparator(sort))
+    .sort((a, b) => activeSortDirection === naturalDirection
+      ? comparator(a, b)
+      : -comparator(a, b))
   const filteredTotal = filteredBuckets.length
   const lastPage = Math.max(1, Math.ceil(filteredTotal / perPage))
   const first = (page - 1) * perPage
@@ -132,6 +154,22 @@ export function BucketsView({
   useEffect(() => {
     if (page > lastPage) setPage(lastPage)
   }, [lastPage, page])
+
+  const clearAllFilters = () => {
+    setNameFilter('')
+    setPlatformFilter('')
+    setStatusFilter('')
+    setPage(1)
+  }
+  const getSortParams = (columnIndex: BucketSortIndex) => ({
+    sortBy: { index: activeSortIndex, direction: activeSortDirection },
+    onSort: (_event: React.MouseEvent, index: number, direction: SortByDirection) => {
+      setActiveSortIndex(index as BucketSortIndex)
+      setActiveSortDirection(direction)
+      setPage(1)
+    },
+    columnIndex,
+  })
 
   return (
     <>
@@ -247,10 +285,10 @@ export function BucketsView({
                     </HintBody>
                   </Hint>
                 ) : null}
-                <Toolbar id="buckets-toolbar">
+                <Toolbar id="buckets-toolbar" clearAllFilters={clearAllFilters}>
                   <ToolbarContent>
                     <ToolbarItem>
-                      <TextInput
+                      <SearchInput
                         aria-label="Filter buckets by name"
                         placeholder="Filter by name"
                         value={nameFilter}
@@ -258,9 +296,20 @@ export function BucketsView({
                           setNameFilter(value)
                           setPage(1)
                         }}
+                        onClear={() => {
+                          setNameFilter('')
+                          setPage(1)
+                        }}
                       />
                     </ToolbarItem>
-                    <ToolbarItem>
+                    <ToolbarFilter
+                      categoryName="Platform"
+                      labels={platformFilter ? [platformFilter] : []}
+                      deleteLabel={() => {
+                        setPlatformFilter('')
+                        setPage(1)
+                      }}
+                    >
                       <FormSelect
                         aria-label="Filter buckets by platform"
                         value={platformFilter}
@@ -274,8 +323,15 @@ export function BucketsView({
                           <FormSelectOption key={platform} value={platform} label={platform} />
                         ))}
                       </FormSelect>
-                    </ToolbarItem>
-                    <ToolbarItem>
+                    </ToolbarFilter>
+                    <ToolbarFilter
+                      categoryName="State"
+                      labels={statusFilter ? [statusFilter.replace('-', ' ')] : []}
+                      deleteLabel={() => {
+                        setStatusFilter('')
+                        setPage(1)
+                      }}
+                    >
                       <FormSelect
                         aria-label="Filter buckets by status"
                         value={statusFilter}
@@ -288,30 +344,15 @@ export function BucketsView({
                         {/* Only states the listing actually contains: a filter
                             for a state nothing carries returns an empty table
                             and reads as a fault. */}
-                        {[...new Set(buckets.map((b) => b.newestVersion?.state ?? ''))]
-                          .filter(Boolean).sort().map((state) => (
-                            <FormSelectOption
-                              key={state}
-                              value={state}
-                              label={state.charAt(0).toUpperCase() + state.slice(1).replace('-', ' ')}
-                            />
-                          ))}
+                        {states.map((state) => (
+                          <FormSelectOption
+                            key={state}
+                            value={state}
+                            label={state.charAt(0).toUpperCase() + state.slice(1).replace('-', ' ')}
+                          />
+                        ))}
                       </FormSelect>
-                    </ToolbarItem>
-                    <ToolbarItem>
-                      <FormSelect
-                        aria-label="Sort buckets"
-                        value={sort}
-                        onChange={(_event, value) => {
-                          setSort(value)
-                          setPage(1)
-                        }}
-                      >
-                        <FormSelectOption value="name" label="Sort: name" />
-                        <FormSelectOption value="status" label="Sort: status" />
-                        <FormSelectOption value="last-push" label="Sort: last push" />
-                      </FormSelect>
-                    </ToolbarItem>
+                    </ToolbarFilter>
                     <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
                       <Pagination
                         itemCount={filteredTotal}
@@ -337,12 +378,7 @@ export function BucketsView({
                       <EmptyStateActions>
                         <Button
                           variant="primary"
-                          onClick={() => {
-                            setNameFilter('')
-                            setPlatformFilter('')
-                            setStatusFilter('')
-                            setPage(1)
-                          }}
+                          onClick={clearAllFilters}
                         >
                           Clear all filters
                         </Button>
@@ -353,12 +389,13 @@ export function BucketsView({
                   <Thead>
                     <Tr>
                       <Th screenReaderText="Row expansion" />
-                      <Th>Bucket name</Th>
-                      <Th>Newest version</Th>
+                      <Th sort={getSortParams(1)}>Bucket name</Th>
+                      <Th>Channels</Th>
+                      <Th sort={getSortParams(3)}>Newest version</Th>
                       <Th>Parents</Th>
                       <Th>Children</Th>
                       <Th>Platforms</Th>
-                      <Th>Last updated</Th>
+                      <Th sort={getSortParams(7)}>Last updated</Th>
                       <Th screenReaderText="Actions" />
                     </Tr>
                   </Thead>
@@ -384,22 +421,29 @@ export function BucketsView({
                               {bucket.name}
                             </Button>
                           </div>
-                          {bucket.channels.length > 0 && (
-                            <div aria-label={`Channels for ${bucket.name}`}>
-                              {bucket.channels.map((channel, index) => (
-                                <span key={channel.name}>
-                                  {index > 0 && <span aria-hidden> · </span>}
+                        </Td>
+                        <Td dataLabel="Channels">
+                          {bucket.channels.length === 0 ? '—' : (
+                            <LabelGroup
+                              aria-label={`Channels for ${bucket.name}`}
+                              numLabels={3}
+                            >
+                              {bucket.channels.map((channel) => (
+                                <Label key={channel.name} isCompact>
                                   {channel.name} {channel.versionName}
-                                </span>
+                                </Label>
                               ))}
-                            </div>
+                            </LabelGroup>
                           )}
                         </Td>
                         <Td dataLabel="Newest version">
                           {bucket.newestVersion ? (
-                            <Button variant="link" isInline onClick={() => openBucket(bucket.name)}>
-                              {bucket.newestVersion.name}
-                            </Button>
+                            <>
+                              <Button variant="link" isInline onClick={() => openBucket(bucket.name)}>
+                                {bucket.newestVersion.name}
+                              </Button>{' '}
+                              <VersionStateLabel state={bucket.newestVersion.state} />
+                            </>
                           ) : '—'}
                         </Td>
                         <Td dataLabel="Parents">
@@ -430,7 +474,7 @@ export function BucketsView({
                       </Tr>
                       <Tr isExpanded={expanded === bucket.name}>
                         <Td />
-                        <Td dataLabel="Detail" colSpan={7}>
+                        <Td dataLabel="Detail" colSpan={8}>
                           <ExpandableRowContent>
                             <BucketDetail bucket={bucket} />
                           </ExpandableRowContent>
@@ -611,10 +655,12 @@ export function pinBucketAction(canPin: boolean): { disabled: boolean; label: st
   }
 }
 
-function bucketComparator(sort: string): (a: Bucket, b: Bucket) => number {
+export function bucketComparator(sort: string): (a: Bucket, b: Bucket) => number {
   switch (sort) {
     case 'status':
-      return (a, b) => (a.newestVersion?.state ?? '').localeCompare(b.newestVersion?.state ?? '') ||
+      return (a, b) => (a.newestVersion
+        ? VERSION_STATE_ORDER.indexOf(a.newestVersion.state) : -1) -
+        (b.newestVersion ? VERSION_STATE_ORDER.indexOf(b.newestVersion.state) : -1) ||
         a.name.localeCompare(b.name)
     case 'last-push':
       // The full timestamp, never the truncated display value: everything

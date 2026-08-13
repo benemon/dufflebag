@@ -216,7 +216,8 @@ test('empty results are distinct and unsupported actions are absent', () => {
   assert.match(firstPage, />bucket-20</)
   assert.doesNotMatch(firstPage, />bucket-21</)
   assert.match(firstPage, /Filter buckets by name/)
-  assert.match(firstPage, /Sort: status/)
+  assert.match(firstPage, /aria-sort="descending"[\s\S]{0,600}Last updated/)
+  assert.doesNotMatch(firstPage, /Sort buckets|Sort: status/)
   assert.match(firstPage, /Actions for bucket-01/)
   for (const unsupported of [
     'Pin to project', 'Copy Terraform reference', 'View ancestry', 'View SBOMs',

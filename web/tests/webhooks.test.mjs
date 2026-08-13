@@ -125,3 +125,20 @@ test('delivery attempts render as semantic timestamps and retain the empty dash'
   assert.match(markup, /<time[^>]*dateTime="2026-08-13T07:41:30.702958Z"/)
   assert.match(markup, /data-label="Last attempt"[^>]*>—</)
 })
+
+test('webhook deliveries paginate the in-memory listing', () => {
+  const deliveries = Array.from({ length: 21 }, (_, index) => {
+    const number = String(index + 1).padStart(2, '0')
+    return {
+      id: `delivery-${number}`, event_id: `event-${number}`,
+      operation: `operation-${number}`, status: 'delivered', attempt_count: 1,
+      first_attempted_at: '2026-08-13T07:41:00Z',
+      last_attempted_at: '2026-08-13T07:41:30Z', response_code: 204,
+      detail: null, created_at: '2026-08-13T07:41:00Z',
+    }
+  })
+  const markup = renderToStaticMarkup(React.createElement(DeliveryTable, { deliveries }))
+  assert.match(markup, />operation-20</)
+  assert.doesNotMatch(markup, />operation-21</)
+  assert.ok((markup.match(/pf-v6-c-pagination/g) ?? []).length >= 2)
+})

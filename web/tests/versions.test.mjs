@@ -9,6 +9,7 @@ import { createServer } from 'vite'
 let vite
 let VersionsView
 let VersionsFacet
+let versionPage
 let BucketChannelsFacet
 let CreateChannelModalView
 let AssignChannelModalView
@@ -56,7 +57,7 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ VersionsView, VersionsFacet, BucketChannelsFacet, CreateChannelModalView,
+  ;({ VersionsView, VersionsFacet, versionPage, BucketChannelsFacet, CreateChannelModalView,
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
@@ -959,7 +960,8 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   assert.match(markup, /aria-label="Download fp-complete\.json"/)
   assert.match(markup, />SPDX</)
   assert.doesNotMatch(markup, /zstd/)
-  assert.doesNotMatch(markup, /pf-v6-c-menu-toggle/)
+  assert.doesNotMatch(markup, /aria-label="Download format|Select SBOM/)
+  assert.match(markup, /pf-v6-c-pagination/)
   assert.equal(sbomFileName(detail.sboms[0]), 'fp-complete.json')
   // The wire names every format the same way — no format-suffix invention.
   assert.equal(sbomFileName({ id: 'x', name: 'inv', format: 'CYCLONEDX' }), 'inv.json')
@@ -1445,10 +1447,10 @@ test('a nested channels failure rejects the whole load', async () => {
   )
 })
 
-test('the list windows old versions instead of hiding them', () => {
-  const versions = Array.from({ length: 33 }, (_, index) => ({
-    name: `v${33 - index}`,
-    fingerprint: `fp-${33 - index}`,
+test('versions paginate the 30-row recent window and expose the five older rows on page 2', () => {
+  const versions = Array.from({ length: 35 }, (_, index) => ({
+    name: `v${35 - index}`,
+    fingerprint: `fp-${35 - index}`,
     state: 'complete',
     templateType: 'HCL2',
     channels: [],
@@ -1459,10 +1461,15 @@ test('the list windows old versions instead of hiding them', () => {
     created: '2026-07-31T10:00:00.000Z',
   }))
   const markup = listMarkup(versions)
-  assert.match(markup, />v33</)
-  assert.match(markup, />v4</)
-  assert.doesNotMatch(markup, />v3</)
-  assert.match(markup, /3 older versions · show all/)
+  assert.match(markup, />v35</)
+  assert.match(markup, />v6</)
+  assert.doesNotMatch(markup, />v5</)
+  assert.equal((markup.match(/pf-v6-c-pagination/g) ?? []).length >= 2, true)
+  assert.doesNotMatch(markup, /older versions|show all/i)
+
+  const secondPage = versionPage(versions, 2, 30)
+  assert.equal(secondPage.length, 5)
+  assert.deepEqual(secondPage.map((version) => version.name), ['v5', 'v4', 'v3', 'v2', 'v1'])
 })
 
 test('empty and gap states are distinct, and list rows remain read-only', async () => {

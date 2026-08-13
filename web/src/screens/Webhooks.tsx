@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, Checkbox, Content, Form, FormGroup,
   EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
-  Label, PageSection, TextArea, TextInput, Title,
+  Label, PageSection, Pagination, TextArea, TextInput, Title,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
@@ -262,18 +262,49 @@ function WebhookTable({ webhooks, callerRole, onVerify, onDelete, onDeliveries }
 }
 
 export function DeliveryTable({ deliveries }: { deliveries: WebhookDelivery[] }) {
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
+  const lastPage = Math.max(1, Math.ceil(deliveries.length / perPage))
+  const currentPage = Math.min(page, lastPage)
+  const first = (currentPage - 1) * perPage
+  const visibleDeliveries = deliveries.slice(first, first + perPage)
   if (deliveries.length === 0) return <Content component="p">No deliveries recorded.</Content>
   return (
-    <Table aria-label="Webhook deliveries" variant="compact">
-      <Thead><Tr><Th>Operation</Th><Th>Status</Th><Th>Attempts</Th><Th>Response</Th><Th>Last attempt</Th><Th>Detail</Th></Tr></Thead>
-      <Tbody>{deliveries.map((delivery) => (
-        <Tr key={delivery.id}>
-          <Td dataLabel="Operation">{delivery.operation}</Td><Td dataLabel="Status">{delivery.status}</Td>
-          <Td dataLabel="Attempts">{delivery.attempt_count}</Td><Td dataLabel="Response">{delivery.response_code ?? '—'}</Td>
-          <Td dataLabel="Last attempt"><When iso={delivery.last_attempted_at} /></Td><Td dataLabel="Detail">{delivery.detail ?? '—'}</Td>
-        </Tr>
-      ))}</Tbody>
-    </Table>
+    <>
+      <Pagination
+        itemCount={deliveries.length}
+        page={currentPage}
+        perPage={perPage}
+        onSetPage={(_event, nextPage) => setPage(nextPage)}
+        onPerPageSelect={(_event, nextPerPage) => {
+          setPerPage(nextPerPage)
+          setPage(1)
+        }}
+        isCompact
+      />
+      <Table aria-label="Webhook deliveries" variant="compact">
+        <Thead><Tr><Th>Operation</Th><Th>Status</Th><Th>Attempts</Th><Th>Response</Th><Th>Last attempt</Th><Th>Detail</Th></Tr></Thead>
+        <Tbody>{visibleDeliveries.map((delivery) => (
+          <Tr key={delivery.id}>
+            <Td dataLabel="Operation">{delivery.operation}</Td><Td dataLabel="Status">{delivery.status}</Td>
+            <Td dataLabel="Attempts">{delivery.attempt_count}</Td><Td dataLabel="Response">{delivery.response_code ?? '—'}</Td>
+            <Td dataLabel="Last attempt"><When iso={delivery.last_attempted_at} /></Td><Td dataLabel="Detail">{delivery.detail ?? '—'}</Td>
+          </Tr>
+        ))}</Tbody>
+      </Table>
+      <Pagination
+        itemCount={deliveries.length}
+        page={currentPage}
+        perPage={perPage}
+        onSetPage={(_event, nextPage) => setPage(nextPage)}
+        onPerPageSelect={(_event, nextPerPage) => {
+          setPerPage(nextPerPage)
+          setPage(1)
+        }}
+        variant="bottom"
+        dropDirection="up"
+      />
+    </>
   )
 }
 

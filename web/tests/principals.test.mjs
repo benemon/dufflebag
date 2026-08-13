@@ -285,6 +285,19 @@ test('the listing never renders a secret value', () => {
   assert.match(markup, /never used/)
 })
 
+test('principals paginate the in-memory table', () => {
+  const principals = Array.from({ length: 21 }, (_, index) => {
+    const number = String(index + 1).padStart(2, '0')
+    return principal({
+      id: `p-${number}`, name: `principal-${number}`, client_id: `client-${number}`,
+    })
+  })
+  const markup = view({ principals })
+  assert.match(markup, />principal-20</)
+  assert.doesNotMatch(markup, />principal-21</)
+  assert.ok((markup.match(/pf-v6-c-pagination/g) ?? []).length >= 2)
+})
+
 // ADR-0004 as amended 2026-08-02: a non-root principal's last secret CAN be
 // revoked, so nothing about it is disabled or explained.
 test('a non-root sole secret offers revoke, with no rule stated in prose', () => {

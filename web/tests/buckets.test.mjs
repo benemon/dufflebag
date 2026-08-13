@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -7,6 +8,7 @@ import { createServer } from 'vite'
 
 let vite
 let BucketsView
+let bucketComparator
 let pinBucketAction
 let deleteBucketAction
 let DeleteBucketModalView
@@ -24,7 +26,7 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ BucketsView, pinBucketAction, deleteBucketAction } =
+  ;({ BucketsView, bucketComparator, pinBucketAction, deleteBucketAction } =
     await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
   ;({ DeleteBucketModalView } =
     await vite.ssrLoadModule('/src/components/DeleteBucketModal.tsx'))
@@ -77,6 +79,7 @@ const renderTyped = (element) => renderToStaticMarkup(React.createElement(
   TypedConfirmModalView,
   { ...element.props, confirmation: '', onConfirmationChange: () => {} },
 ))
+const bucketScreenSource = readFileSync(new URL('../src/screens/Buckets.tsx', import.meta.url), 'utf8')
 
 // Fixtures follow the server's rendering (renderVersion/renderBucket in
 // internal/compat/hcp2023/handler.go): a version carries has_descendants and a
@@ -151,6 +154,69 @@ const galleryBucket = (name) => ({
   drift: { kind: 'current' },
   platforms: ['linux/amd64'],
   lastPushAt: '2026-08-09T10:00:00Z',
+})
+
+test('bucket header sorts replace the sort selector and keep newest-push first', () => {
+  const buckets = [
+    { ...galleryBucket('older'), lastPushAt: '2026-08-08T10:00:00Z' },
+    { ...galleryBucket('newer'), lastPushAt: '2026-08-10T10:00:00Z' },
+  ]
+  const markup = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets, total: buckets.length, loading: false, failure: null, openBucket: () => {},
+  }))
+  assert.doesNotMatch(markup, /Sort buckets|Sort: name|Sort: status|Sort: last push/)
+  assert.match(markup, /aria-label="Filter buckets by name"/)
+  assert.match(markup, /aria-sort="descending"[\s\S]{0,600}Last updated/)
+  assert.ok(markup.indexOf('>newer<') < markup.indexOf('>older<'))
+})
+
+test('status sorting follows the rendered state scale, not the alphabet', () => {
+  const stateBucket = (state) => ({
+    ...galleryBucket(state),
+    newestVersion: { name: 'v1', fingerprint: `${state}-v1`, state },
+  })
+  const ordered = [
+    stateBucket('revocation-scheduled'),
+    stateBucket('revoked'),
+    stateBucket('incomplete'),
+    stateBucket('complete'),
+  ].sort(bucketComparator('status'))
+  assert.deepEqual(ordered.map((bucket) => bucket.newestVersion.state), [
+    'complete', 'incomplete', 'revoked', 'revocation-scheduled',
+  ])
+})
+
+test('platform and state filters own chips and share one complete reset', () => {
+  assert.match(bucketScreenSource, /categoryName="Platform"[\s\S]{0,120}labels=\{platformFilter/)
+  assert.match(bucketScreenSource, /categoryName="State"[\s\S]{0,120}labels=\{statusFilter/)
+  assert.match(
+    bucketScreenSource,
+    /const clearAllFilters = \(\) => \{\s*setNameFilter\(''\)\s*setPlatformFilter\(''\)\s*setStatusFilter\(''\)\s*setPage\(1\)/,
+  )
+  assert.match(bucketScreenSource, /<Toolbar id="buckets-toolbar" clearAllFilters=\{clearAllFilters\}>/)
+  assert.match(bucketScreenSource, /onClick=\{clearAllFilters\}/)
+})
+
+test('the Channels column bounds labels after three while retaining their versions', () => {
+  assert.match(bucketScreenSource, /<LabelGroup[\s\S]{0,120}numLabels=\{3\}/)
+  const channels = ['latest', 'production', 'staging', 'canary'].map((name, index) => ({
+    name, versionName: `v${index + 1}`, fingerprint: `fp-${index + 1}`,
+    managed: false, restricted: false,
+  }))
+  const markup = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [{ ...galleryBucket('images'), channels }],
+    total: 1, loading: false, failure: null, openBucket: () => {},
+  }))
+  assert.match(markup, />Channels</)
+  assert.match(markup, /aria-label="Channels for images"/)
+  assert.match(markup, />latest v1</)
+  assert.match(markup, />production v2</)
+  assert.match(markup, />staging v3</)
+  assert.match(markup, /1 more/)
+  assert.doesNotMatch(markup, />canary v4</)
+  const nameCell = markup.match(/<td[^>]*data-label="Bucket"[\s\S]*?<\/td>/)?.[0] ?? ''
+  assert.match(nameCell, />images</)
+  assert.doesNotMatch(nameCell, /latest|production|staging|canary/)
 })
 
 test('pinned bucket gallery renders joined cards and disappears when empty', () => {
