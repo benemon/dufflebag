@@ -15,6 +15,7 @@ import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
 import { useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
+import { SkeletonRows } from '../components/Loading'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
@@ -192,7 +193,9 @@ export function BucketsView({
             <Content component="p">{pinsFailure}</Content>
           </Alert>
         )}
-        {pinsLoading && !loading && <Content component="p">Loading pinned buckets…</Content>}
+        {pinsLoading && !loading ? (
+          <SkeletonRows screenreaderText="Loading pinned buckets…" />
+        ) : null}
         {!loading && pinnedBuckets.length > 0 && (
           <section aria-label="Pinned buckets" style={{ marginBottom: 24 }}>
             <Title headingLevel="h2" size="lg" style={{ marginBottom: 12 }}>Pinned buckets</Title>
@@ -247,7 +250,7 @@ export function BucketsView({
           <CardTitle>All buckets</CardTitle>
           <CardBody>
             {loading ? (
-              <Content component="p">Loading buckets…</Content>
+              <SkeletonRows screenreaderText="Loading buckets…" />
             ) : failure ? (
               <Alert variant="danger" isInline title="Buckets could not be loaded">
                 <Content component="p">{failure}</Content>

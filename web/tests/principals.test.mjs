@@ -383,8 +383,13 @@ test('a root with no secrets says nothing, having no control to explain', () => 
 // principals, so an unguarded alert outlives the rows it explains.
 test('the notice does not outlive the listing it explains while loading', () => {
   const markup = view({ principals: [soleRoot()], loading: true })
-  assert.match(markup, /Loading principals…/)
+  assert.match(markup, /pf-v6-c-skeleton/)
+  assert.match(markup, /pf-v6-screen-reader">Loading principals…<\/span>/)
   assert.doesNotMatch(markup, /must keep one secret that never expires/)
+  assert.match(
+    principalScreenSource,
+    /\{!loading && principals\.some\(rootsLastSecret\) \? \(/,
+  )
 })
 
 // The notice is a property of the state, not of the screen: a root that has

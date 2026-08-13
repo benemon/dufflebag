@@ -11,6 +11,7 @@ import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
+import { SkeletonRows } from '../components/Loading'
 import {
   WEBHOOK_OPERATIONS, createWebhook, deleteWebhook, listWebhookDeliveries, listWebhooks,
   verifyWebhook, type Webhook, type WebhookDelivery, type WebhookOperation,
@@ -132,7 +133,9 @@ export function WebhooksView({
             onCreate={async (draft) => run(async () => { await onCreate(draft); setCreating(false) })}
           />
         ) : null}
-        {loading ? <Content component="p">Loading webhooks…</Content> : webhooks.length === 0 && !failure ? (
+        {loading ? (
+          <SkeletonRows screenreaderText="Loading webhooks…" />
+        ) : webhooks.length === 0 && !failure ? (
           <EmptyState titleText="No webhooks are configured" headingLevel="h2">
             <EmptyStateBody>Create a webhook to send signed project events.</EmptyStateBody>
             <EmptyStateFooter>

@@ -9,6 +9,7 @@ import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
+import { SkeletonRows } from '../components/Loading'
 import {
   encryptionRefusalHint, rewrapEncryption, rotateEncryption, useEncryption,
   type Encryption as EncryptionData, type KeyringEntry,
@@ -56,7 +57,7 @@ export function EncryptionView({
         <EncryptionAlerts failure={failure} actionFailure={actionFailure} />
 
         {loading ? (
-          <Content component="p">Loading encryption state…</Content>
+          <SkeletonRows screenreaderText="Loading encryption state…" />
         ) : failure ? null : encryptionIsUnconfigured(encryption) ? (
           <Alert variant="info" isInline title="Encryption at rest is not configured on this instance.">
             <Content component="p">

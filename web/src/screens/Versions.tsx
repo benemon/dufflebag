@@ -14,6 +14,7 @@ import HelpIcon from '@patternfly/react-icons/dist/esm/icons/help-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
+import { SkeletonRows } from '../components/Loading'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
@@ -229,7 +230,7 @@ export function VersionsView({
         padding={{ default: loading || failure || gap ? 'padding' : 'noPadding' }}
       >
         {loading ? (
-          <Content component="p">Loading versions…</Content>
+          <SkeletonRows screenreaderText="Loading versions…" />
         ) : failure ? (
           <Alert variant="danger" isInline title="Versions could not be loaded">
             <Content component="p">{failure}</Content>
@@ -1204,7 +1205,7 @@ function LazyAssignmentHistory({ bucket, channel }: { bucket: string; channel: B
   const { data, loading, failure } = useChannelHistory(bucket, channel.name, channel.fingerprint)
   let body: ReactNode
   if (loading) {
-    body = <Content component="p">Loading assignment history…</Content>
+    body = <SkeletonRows screenreaderText="Loading assignment history…" />
   } else if (failure) {
     body = (
       <Alert variant="danger" isInline title="Assignment history could not be loaded">

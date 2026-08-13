@@ -15,6 +15,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { SkeletonRows } from '../components/Loading'
 import type { Role } from '../auth/permissions'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
@@ -247,7 +248,7 @@ export function VersionView({
         padding={{ default: !loading && !failure && !gap && version ? 'noPadding' : 'padding' }}
       >
         {loading ? (
-          <Content component="p">Loading version…</Content>
+          <SkeletonRows screenreaderText="Loading version…" />
         ) : failure ? (
           <Alert variant="danger" isInline title="Version could not be loaded">
             <Content component="p">{failure}</Content>

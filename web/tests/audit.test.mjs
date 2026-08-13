@@ -101,7 +101,9 @@ test('Add target moves between the empty state and populated header with its rol
 })
 
 test('audit screen has honest loading, empty, and root-refusal states', () => {
-  assert.match(view({ loading: true }), /Loading audit targets/)
+  const loading = view({ loading: true })
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /pf-v6-screen-reader">Loading audit targets…<\/span>/)
   assert.match(view(), /<h2[^>]*>No audit targets are configured<\/h2>/)
   assert.match(view(), /class="pf-v6-c-empty-state__body"/)
   assert.match(view(), /not recording audit events to a file/)

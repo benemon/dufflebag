@@ -285,9 +285,9 @@ test('Bag Drop zones render honest loading, error, and empty states', () => {
   const loading = renderView({
     configLoading: true, associationsLoading: true, statusLoading: true,
   })
-  assert.match(loading, /Loading Bag Drop configuration/)
-  assert.match(loading, /Loading mirrored buckets/)
-  assert.match(loading, /Loading Bag Drop status/)
+  assert.match(loading, /pf-v6-screen-reader">Loading Bag Drop configuration…<\/span>/)
+  assert.match(loading, /pf-v6-screen-reader">Loading mirrored buckets…<\/span>/)
+  assert.match(loading, /pf-v6-screen-reader">Loading Bag Drop status…<\/span>/)
 
   const failed = renderView({
     configFailure: 'configuration refused', associationsFailure: 'bucket listing refused',

@@ -1,6 +1,7 @@
 import { Navigate, Route, Routes } from 'react-router'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
+  Spinner,
 } from '@patternfly/react-core'
 
 import { AuthProvider, useAuth } from './auth/AuthContext'
@@ -40,9 +41,16 @@ function Authenticated() {
   } = useAuth()
   // While the boot exchange asks whether a session survived the reload,
   // showing the sign-in screen would flash a state that may be about to be
-  // untrue. Nothing renders until the answer is in — it is one same-origin
-  // round trip.
-  if (!state && restoring) return null
+  // untrue. Hold the page on an explicit state until the answer is in — it is
+  // one same-origin round trip.
+  if (!state && restoring) {
+    return (
+      <PageSection>
+        <Spinner aria-label="Restoring your session…" />
+        <Content component="p">Restoring your session…</Content>
+      </PageSection>
+    )
+  }
   if (!state) return <Login />
   // A platform-scoped session (no organization claim — the bootstrap root,
   // duf-tkw) is gated on nothing: Principals and Instance need no tenancy, and
@@ -53,7 +61,10 @@ function Authenticated() {
   if (!platform && projectsLoading) {
     return (
       <AppShell>
-        <PageSection><Content component="p">Loading projects…</Content></PageSection>
+        <PageSection>
+          <Spinner aria-label="Loading projects…" />
+          <Content component="p">Loading projects…</Content>
+        </PageSection>
       </AppShell>
     )
   }

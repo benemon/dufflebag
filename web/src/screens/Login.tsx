@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import {
   ActionGroup,
   Checkbox, Alert, Button, Content, Form, FormGroup, LoginPage,
-  Tab, Tabs, TabTitleText, TextInput,
+  Spinner, Tab, Tabs, TabTitleText, TextInput,
 } from '@patternfly/react-core'
 
 import { useAuth } from '../auth/AuthContext'
@@ -43,7 +43,11 @@ export function Login() {
 
   if (health === null) {
     // A blank page and a broken one are indistinguishable; say what is happening.
-    return <LoginPage loginTitle={loginTitle} loginSubtitle="Checking this instance…" />
+    return (
+      <LoginPage loginTitle={loginTitle} loginSubtitle="Checking this instance…">
+        <Spinner aria-label="Checking this instance…" />
+      </LoginPage>
+    )
   }
 
   if (health === 'unreachable') {

@@ -75,7 +75,9 @@ test('the build card renders only endpoint-supplied values', () => {
 
 test('the build card distinguishes loading, failure, and honest absence', () => {
   const card = (props) => renderToStaticMarkup(React.createElement(BuildCard, props))
-  assert.match(card({ instance: null, loading: true, failure: null }), /Loading build information/)
+  const loading = card({ instance: null, loading: true, failure: null })
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /pf-v6-screen-reader">Loading build information…<\/span>/)
   const failed = card({ instance: null, loading: false, failure: '503 from instance' })
   assert.match(failed, /Build information could not be loaded/)
   assert.match(failed, /503 from instance/)
@@ -97,6 +99,12 @@ test('the scanner card names the adapter and renders honest absence', () => {
 
   const absent = card({ scanner: { configured: false } })
   assert.match(absent, /Scanning is not configured/)
+
+  const loading = renderToStaticMarkup(React.createElement(ScannerCard, {
+    instance: null, loading: true, failure: null,
+  }))
+  assert.match(loading, /pf-v6-c-skeleton/)
+  assert.match(loading, /pf-v6-screen-reader">Loading scanner information…<\/span>/)
 })
 
 // duf-6ah: the screen is the copyable block, not documentation. The prose,
