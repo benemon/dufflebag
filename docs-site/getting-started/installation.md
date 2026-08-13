@@ -1,7 +1,7 @@
 # Installation
 
-Three ways to get a running instance, from most to least self-contained. Each
-quickstart here gets you to a serving instance; the
+This guide provides three ways to get a running instance, from most to least
+self-contained. Each quickstart gets you to a serving instance. The
 [deployment reference](../deployment/index.md)
 is the authority on every variable, the PostgreSQL role model, TLS, object
 storage and backups. Once the instance serves, continue with
@@ -9,9 +9,10 @@ storage and backups. Once the instance serves, continue with
 
 ## Kubernetes (Helm)
 
-The chart deploys the whole stack — dufflebag, PostgreSQL, Ceph object storage
-and a community Vault providing the encryption keyring — with nothing external
-required:
+The chart deploys dufflebag, PostgreSQL, Ceph object storage and a community
+Vault that provides the encryption keyring. It requires no external services.
+
+1. Add the Helm repository and install the chart:
 
 ```sh
 helm repo add dufflebag https://benemon.github.io/dufflebag/charts
@@ -19,17 +20,26 @@ helm install dufflebag dufflebag/dufflebag \
   --namespace dufflebag --create-namespace
 ```
 
-When every pod is ready, the in-cluster `dufflebag` Service serves on port
-8080; `ingress.enabled` adds an Ingress if you want a hostname. The bundled
-Vault's lifecycle is deliberately lab-grade — its unseal key lives in a
-namespace Secret — so production deployments should bring their own Vault and
-database instead. The
+2. Wait until every pod is ready. The in-cluster `dufflebag` Service serves on
+   port 8080. Set `ingress.enabled` to add an Ingress for a hostname.
+
+::: warning
+The bundled Vault stores its unseal key in a Kubernetes Secret and is not suitable for production. Production deployments should use an external Vault and database.
+:::
+
+The
 [Helm section of the deployment reference](../deployment/index.md#helm)
 covers the values, the trust model and the single-replica constraint.
 
 ## OpenShift
 
-The same chart, two settings: the security profile and the Route.
+The same chart supports OpenShift with settings for the security profile and
+the Route.
+
+Prerequisites: A user who can grant SCC use and create the chart's one
+ClusterRoleBinding. In practice, this requires a cluster administrator.
+
+1. Add the Helm repository and install the chart with the OpenShift settings:
 
 ```sh
 helm repo add dufflebag https://benemon.github.io/dufflebag/charts
@@ -39,19 +49,21 @@ helm install dufflebag dufflebag/dufflebag \
   --set route.enabled=true
 ```
 
-The profile keeps every pod under the restricted-v2 constraints except the
-Ceph image, which must run as root and is pinned to the `anyuid` SCC.
-Installing needs a user who can grant SCC use and create the chart's one
-ClusterRoleBinding — in practice a cluster administrator. `route.host` fixes
-the Route's hostname; without it OpenShift assigns one.
+2. Wait until every pod is ready. The profile keeps every pod under the
+   restricted-v2 constraints except the Ceph image. The Ceph image must run as
+   root and is pinned to the `anyuid` SCC.
+
+`route.host` fixes the Route's hostname. Without it, OpenShift assigns one.
 
 ## Docker or Podman
 
-A single container against a PostgreSQL you provide. Create the two database
-roles first — a migration owner and a serving role that must hold neither
-superuser nor `BYPASSRLS` — exactly as the
-[PostgreSQL section](../deployment/index.md#postgresql-two-roles)
-specifies. Then migrate and serve with the same image:
+A single container runs against a PostgreSQL instance that you provide.
+
+Prerequisites: Create a migration owner and a serving role. The serving role
+must hold neither superuser nor `BYPASSRLS`. Create both roles exactly as the
+[PostgreSQL section](../deployment/index.md#postgresql-two-roles) specifies.
+
+1. Run the migration, then serve with the same image:
 
 ```sh
 docker run --rm \
@@ -68,17 +80,23 @@ docker run -d --name dufflebag -p 8443:8443 \
   quay.io/benjamin_holmes/dufflebag:<tag>
 ```
 
-Podman accepts the same invocations. Two constraints worth knowing before you
-choose a hostname: the instance must sit at the root of it (the Packer SDK
-silently discards any path prefix), and the auth URL must be HTTPS — one
-TLS-serving hostname covers everything. Without S3-compatible object storage
-configured, everything serves except SBOM upload and download, which answer
-503 — a reasonable way to evaluate before committing storage.
+   Podman accepts the same invocations.
+
+2. Serve the instance at the root of the hostname. The Packer SDK silently
+   discards any path prefix.
+
+3. Use HTTPS for the authentication URL. One TLS-serving hostname covers
+   everything.
+
+If no S3-compatible object storage is configured, SBOM upload and download return 503. All other features work normally, so you can evaluate an instance before configuring storage.
 
 ## After any of these
 
-`GET /sys/health` is the readiness signal and reports whether the instance has
-been claimed. A fresh instance is owned by whoever completes `POST /sys/init`
-first — do that before exposing it, in the browser through the first-run
-wizard or with one `curl`. [Getting started](./first-use.md) picks up
-from there.
+1. Check `GET /sys/health`. It is the readiness signal and reports whether the
+   instance has been claimed.
+
+2. Complete `POST /sys/init` before exposing the instance. Whoever completes
+   it first owns a fresh instance. Use the browser's first-run wizard or one
+   `curl` request.
+
+[Getting started](./first-use.md) picks up from there.
