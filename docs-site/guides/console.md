@@ -62,9 +62,9 @@ the version — the console's standing handoff to automation.
 issue secrets with an expiry choice, revoke, delete. One-time secrets are
 shown exactly once — see [Roles and principals](./roles-principals.md).
 
-**Bag Drop** shows mirror status to any reader; maintainers configure,
-verify, enable and disable the destination there. See the
-[Bag Drop guide](./bag-drop.md).
+**Bag Drop** shows mirror status to any reader; maintainers enable, verify
+and disable the destination there — enabling configures it in one step. See
+the [Bag Drop guide](./bag-drop.md).
 
 **Audit** (root) manages audit targets — up to three — and shows each
 target's health. Removing the last target gets an explicit warning, because

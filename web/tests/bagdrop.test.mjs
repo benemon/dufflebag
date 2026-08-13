@@ -14,6 +14,8 @@ let BucketRemovalConfirmation
 let DestinationActionFailure
 let DestinationFormView
 let DestinationZone
+let bagDropWrite
+let enableFailureMessage
 
 before(async () => {
   vite = await createServer({
@@ -26,7 +28,8 @@ before(async () => {
   ;({ enableBagDrop } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({
     AssociationSelectorView, BagDropStatusTableView, BagDropView, BucketRemovalConfirmation,
-    DestinationActionFailure, DestinationFormView, DestinationZone,
+    DestinationActionFailure, DestinationFormView, DestinationZone, bagDropWrite,
+    enableFailureMessage,
   } = await vite.ssrLoadModule('/src/screens/BagDrop.tsx'))
 })
 
@@ -80,7 +83,7 @@ const draft = (over = {}) => ({
 const viewProps = (over = {}) => ({
   callerRole: 'maintainer', canConfigure: true,
   config: config(), configLoading: false, configFailure: null,
-  onSave: async () => config(), onVerify: async () => verification({ outcome: 'resolved' }),
+  onVerify: async () => verification({ outcome: 'resolved' }),
   onEnable: async () => ({ kind: 'enabled', config: config({ enabled: true }) }),
   onDisable: async () => config(), onDelete: async () => {},
   buckets: [{ name: 'images' }, { name: 'workers' }], associations: [association()],
@@ -119,18 +122,20 @@ test('reader renders the status zone only while maintainer renders all three zon
   assert.match(maintainer, /aria-label="Status"/)
 })
 
-test('Verify is disabled while dirty and enabled after Save restores the saved draft', () => {
-  let saved = false
+test('the primary destination action is Enable and Verify stays disabled while dirty', () => {
+  let enabled = false
   const props = {
     config: config(), draft: draft({ organizationID: 'edited-org' }), busy: null,
-    onDraftChange: () => {}, onSave: () => { saved = true }, onVerify: () => {},
-    onEnable: () => {}, onDisable: () => {}, onDelete: () => {},
+    onDraftChange: () => {}, onVerify: () => {},
+    onEnable: () => { enabled = true }, onDisable: () => {}, onDelete: () => {},
   }
   const dirtyView = DestinationFormView({ ...props, dirty: true })
   const dirtyVerify = findElement(dirtyView, (element) => element.props.children === 'Verify')
   assert.equal(dirtyVerify.props.isDisabled, true)
-  findElement(dirtyView, (element) => element.props.children === 'Save').props.onClick()
-  assert.equal(saved, true)
+  const primary = findElement(dirtyView, (element) => element.props.children === 'Enable')
+  assert.equal(primary.props.variant, 'primary')
+  primary.props.onClick()
+  assert.equal(enabled, true)
 
   const savedView = DestinationFormView({ ...props, draft: draft(), dirty: false })
   const savedVerify = findElement(savedView, (element) => element.props.children === 'Verify')
@@ -193,7 +198,7 @@ test('pending_removal stays in the mirrored pane as Removing and can be resumed'
 test('env_key shows the persistent credential warning while keyring does not', () => {
   const props = {
     configLoading: false, configFailure: null,
-    onSave: async () => config(), onVerify: async () => verification(),
+    onVerify: async () => verification(),
     onEnable: async () => ({ kind: 'enabled', config: config() }),
     onDisable: async () => config(), onDelete: async () => {},
   }
@@ -220,6 +225,23 @@ test('only rows carrying last_sync_error have a visible error expander', () => {
   assert.equal(markup.split('<button').length - 1, 1)
   assert.match(markup, /<button[^>]*aria-label="Details"/)
   assert.match(markup, /<button[\s\S]*?<svg/)
+})
+
+test('error sync status renders a danger label and visible error text', () => {
+  const failed = association({
+    sync_status: 'error', last_synced_at: null,
+    last_sync_error: 'destination returned HTTP 500',
+  })
+  const tree = BagDropStatusTableView({
+    associations: [failed], expanded: null, onToggle: () => {},
+  })
+  const danger = findElement(
+    tree, (element) => element.props.status === 'danger' && element.props.children === 'error',
+  )
+  assert.ok(danger)
+  const markup = renderToStaticMarkup(tree)
+  assert.match(markup, /destination returned HTTP 500/)
+  assert.match(markup, /color:var\(--pf-t--global--color--status--danger--default\)/)
 })
 
 test('Bag Drop zones render honest loading, error, and empty states', () => {
@@ -249,21 +271,29 @@ test('Bag Drop zones render honest loading, error, and empty states', () => {
   assert.match(empty, /No buckets are being mirrored from this project/)
 })
 
-test('enable 409 preserves and renders its verification failure inline', async () => {
+test('enable posts the draft configuration and 409 says nothing was saved', async () => {
   const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response(JSON.stringify({
-    message: 'destination did not resolve; configuration remains disabled',
-    verification: verification(),
-  }), { status: 409, headers: { 'Content-Type': 'application/json' } })
+  let request
+  globalThis.fetch = async (_path, options) => {
+    request = options
+    return new Response(JSON.stringify({
+      message: 'destination did not resolve', verification: verification(),
+    }), { status: 409, headers: { 'Content-Type': 'application/json' } })
+  }
   try {
+    const write = bagDropWrite(draft({ clientSecret: 'draft-secret' }))
     const result = await enableBagDrop('token', {
       organizationID: 'source-org', projectID: 'source-project',
-    })
+    }, write)
+    assert.equal(request.method, 'POST')
+    assert.deepEqual(JSON.parse(request.body), write)
     assert.equal(result.kind, 'refused')
+    const message = enableFailureMessage(config({ enabled: true }), result.message)
     const markup = renderToStaticMarkup(React.createElement(DestinationActionFailure, {
-      message: result.message, verification: result.verification ?? null,
+      message, verification: result.verification ?? null,
     }))
-    assert.match(markup, /configuration remains disabled/)
+    assert.match(markup, /Nothing was saved/)
+    assert.match(markup, /previous configuration remains in place untouched and is still enabled/)
     assert.match(markup, /credential_refused/)
     assert.match(markup, /Destination rejected the credential/)
   } finally {

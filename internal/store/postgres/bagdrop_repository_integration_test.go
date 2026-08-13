@@ -129,21 +129,22 @@ func TestBagDropServiceAgainstPostgres(t *testing.T) {
 		bagdrop.Registry{bagdrop.AdapterHCPPacker: adapter},
 	)
 	secret := "postgres-destination-secret"
-	config, verification, err := service.Put(context.Background(), orgA, projectA, bagdrop.Write{
+	write := bagdrop.Write{
 		Adapter: bagdrop.AdapterHCPPacker,
 		HCPPacker: &bagdrop.HCPPackerConfig{
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
 		},
 		ClientSecret: &secret,
-	})
-	if err != nil || verification != nil || !config.SecretSet || config.Enabled {
-		t.Fatalf("put = %#v, %#v, %v", config, verification, err)
+	}
+	config, verification, err := service.Enable(context.Background(), orgA, projectA, &write)
+	if err != nil || verification != nil || !config.SecretSet || !config.Enabled {
+		t.Fatalf("enable with config = %#v, %#v, %v", config, verification, err)
 	}
 	result, err := service.Verify(context.Background(), orgA, projectA)
 	if err != nil || result.Outcome != bagdrop.OutcomeResolved || adapter.secret != secret {
 		t.Fatalf("verify = %#v, %v, adapter secret %q", result, err, adapter.secret)
 	}
-	config, verification, err = service.Enable(context.Background(), orgA, projectA)
+	config, verification, err = service.Enable(context.Background(), orgA, projectA, nil)
 	if err != nil || verification != nil || !config.Enabled || config.LastVerification == nil {
 		t.Fatalf("enable = %#v, %#v, %v", config, verification, err)
 	}
@@ -293,16 +294,14 @@ func TestBagDropConsumedTombstoneUnblocksConfigDelete(t *testing.T) {
 	}
 	service := bagdrop.NewService(repository, sealer, adapters)
 	secret := "destination-secret"
-	if _, _, err := service.Put(ctx, orgA, projectA, bagdrop.Write{
+	write := bagdrop.Write{
 		Adapter: bagdrop.AdapterHCPPacker,
 		HCPPacker: &bagdrop.HCPPackerConfig{
 			OrganizationID: "hcp-org", ProjectID: "hcp-project", ClientID: "client",
 		},
 		ClientSecret: &secret,
-	}); err != nil {
-		t.Fatalf("put config: %v", err)
 	}
-	if _, _, err := service.Enable(ctx, orgA, projectA); err != nil {
+	if _, _, err := service.Enable(ctx, orgA, projectA, &write); err != nil {
 		t.Fatalf("enable config: %v", err)
 	}
 	insertPinBucket(t, repository, "images")
@@ -372,7 +371,7 @@ func TestBagDropAssociationReconcileStatusLifecycle(t *testing.T) {
 	listed, err := repository.ListBagDropAssociations(ctx, orgA, projectA)
 	if err != nil || len(listed) != 1 || listed[0].FirstAttemptedAt == nil ||
 		listed[0].LastAttemptAt == nil || listed[0].LastSyncError == nil ||
-		listed[0].SyncStatus() != bagdrop.SyncPending {
+		listed[0].SyncStatus() != bagdrop.SyncError {
 		t.Fatalf("failed status = %#v, %v", listed, err)
 	}
 	syncedAt := attemptedAt.Add(time.Minute)

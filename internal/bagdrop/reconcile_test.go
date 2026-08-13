@@ -35,8 +35,9 @@ func TestAssociationSyncStatus(t *testing.T) {
 	}{
 		{Association{State: AssociationActive}, SyncPending},
 		{Association{State: AssociationActive, LastSyncedAt: &now}, SyncSynced},
-		{Association{State: AssociationActive, LastSyncedAt: &now, LastSyncError: &failure}, SyncPending},
-		{Association{State: AssociationPendingRemoval, LastSyncedAt: &now}, SyncRemoving},
+		{Association{State: AssociationActive, LastSyncError: &failure}, SyncError},
+		{Association{State: AssociationActive, LastSyncedAt: &now, LastSyncError: &failure}, SyncError},
+		{Association{State: AssociationPendingRemoval, LastSyncedAt: &now, LastSyncError: &failure}, SyncRemoving},
 	} {
 		if got := test.association.SyncStatus(); got != test.want {
 			t.Errorf("SyncStatus(%#v) = %q, want %q", test.association, got, test.want)

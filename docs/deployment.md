@@ -187,7 +187,7 @@ Bag Drop mirrors a project's registry data to a destination registry; the
 [architecture document](architecture.md#bag-drop-the-outbound-mirror) covers
 the design. Operationally:
 
-Configuring or verifying an HCP Packer Bag Drop destination makes outbound
+Enabling or verifying an HCP Packer Bag Drop destination makes outbound
 HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant and
 `api.cloud.hashicorp.com` for scoped reads and destination writes. Permit egress
 to both hosts. A destination may instead be another dufflebag instance,

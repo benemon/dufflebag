@@ -412,9 +412,6 @@ func (response refusalResponse) VisitDeletePinResponse(w http.ResponseWriter) er
 func (response refusalResponse) VisitGetBagDropConfigResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
-func (response refusalResponse) VisitPutBagDropConfigResponse(w http.ResponseWriter) error {
-	return response.write(w)
-}
 func (response refusalResponse) VisitDeleteBagDropConfigResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

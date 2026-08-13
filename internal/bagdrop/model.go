@@ -54,6 +54,7 @@ type SyncStatus string
 const (
 	SyncPending  SyncStatus = "pending"
 	SyncSynced   SyncStatus = "synced"
+	SyncError    SyncStatus = "error"
 	SyncRemoving SyncStatus = "removing"
 )
 
@@ -147,6 +148,9 @@ func (a Association) SyncStatus() SyncStatus {
 	}
 	if a.LastSyncedAt != nil && a.LastSyncError == nil {
 		return SyncSynced
+	}
+	if a.LastSyncError != nil {
+		return SyncError
 	}
 	return SyncPending
 }
