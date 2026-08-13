@@ -9,6 +9,7 @@ import { createServer } from 'vite'
 
 let vite
 let AppShellView
+let ThemeToggleButton
 let visibleNavItems
 
 before(async () => {
@@ -19,7 +20,7 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ AppShellView } = await vite.ssrLoadModule('/src/shell/AppShell.tsx'))
+  ;({ AppShellView, ThemeToggleButton } = await vite.ssrLoadModule('/src/shell/AppShell.tsx'))
   ;({ visibleNavItems } = await vite.ssrLoadModule('/src/auth/permissions.ts'))
 })
 
@@ -93,6 +94,31 @@ test('the masthead keeps the labelled tenancy pickers in one toolbar item', () =
     shellSource,
     /<ToolbarItem className="tenant-switcher-item">[\s\S]*?<TenantSwitcher \/>/,
   )
+})
+
+test('the theme toggle flips its action label and persists the chosen override', () => {
+  const writes = []
+  const toggles = []
+  let changed
+  const button = ThemeToggleButton({
+    theme: 'light',
+    onThemeChange: (theme) => { changed = theme },
+    storage: { setItem: (...args) => writes.push(args) },
+    root: { classList: { toggle: (...args) => toggles.push(args) } },
+  })
+  assert.equal(button.props['aria-label'], 'Switch to dark theme')
+  button.props.onClick()
+  assert.deepEqual(writes, [['dufflebag-theme', 'dark']])
+  assert.deepEqual(toggles, [['pf-v6-theme-dark', true]])
+  assert.equal(changed, 'dark')
+
+  const darkButton = ThemeToggleButton({
+    theme: 'dark',
+    onThemeChange: () => {},
+    storage: { setItem: () => {} },
+    root: { classList: { toggle: () => {} } },
+  })
+  assert.equal(darkButton.props['aria-label'], 'Switch to light theme')
 })
 
 test('settled screen headers cannot drift back to inline header shapes', () => {

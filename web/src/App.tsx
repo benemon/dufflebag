@@ -19,11 +19,13 @@ import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
 import { CreateTenancyButton } from './components/TenancyCreation'
 import type { Role } from './auth/permissions'
+import { useTheme, type Theme } from './theme/theme'
 
 export function App() {
+  const { theme, setTheme } = useTheme()
   return (
     <AuthProvider>
-      <Authenticated />
+      <Authenticated theme={theme} onThemeChange={setTheme} />
     </AuthProvider>
   )
 }
@@ -35,7 +37,13 @@ export function App() {
  * default — an unauthenticated route has to be written deliberately, it cannot
  * be arrived at by forgetting something (ADR-0017).
  */
-function Authenticated() {
+function Authenticated({
+  theme,
+  onThemeChange,
+}: {
+  theme: Theme
+  onThemeChange: (theme: Theme) => void
+}) {
   const {
     state, self, restoring, selectedOrganization, selectedProject, projectsLoading, projectFailure,
   } = useAuth()
@@ -60,7 +68,7 @@ function Authenticated() {
   const platform = state.claims.organizationID === null
   if (!platform && projectsLoading) {
     return (
-      <AppShell>
+      <AppShell theme={theme} onThemeChange={onThemeChange}>
         <PageSection>
           <Spinner aria-label="Loading projects…" />
           <Content component="p">Loading projects…</Content>
@@ -70,14 +78,14 @@ function Authenticated() {
   }
   if (!platform && projectFailure) {
     return (
-      <AppShell>
+      <AppShell theme={theme} onThemeChange={onThemeChange}>
         <ProjectLoadFailure failure={projectFailure} />
       </AppShell>
     )
   }
   if (!platform && !selectedProject) {
     return (
-      <AppShell>
+      <AppShell theme={theme} onThemeChange={onThemeChange}>
         <PageSection>
           <NoProjectsYet
             callerRole={self?.role ?? null}
@@ -89,7 +97,7 @@ function Authenticated() {
   }
 
   return (
-    <AppShell>
+    <AppShell theme={theme} onThemeChange={onThemeChange}>
       <Routes>
         <Route path="/" element={<Navigate to="/buckets" replace />} />
         <Route path="/buckets" element={<Buckets />} />

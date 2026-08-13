@@ -9,6 +9,7 @@ Sign in with a service principal's client ID and secret, then select an
 organisation and project. On a fresh instance the console opens with the
 first-run wizard instead — see
 [Roles and principals](./roles-principals.md) for what initialization mints.
+The console follows the system theme and offers a masthead toggle that remembers your choice.
 
 ## What your role unlocks
 

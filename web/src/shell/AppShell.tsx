@@ -6,9 +6,12 @@ import {
   PageToggleButton, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import BarsIcon from '@patternfly/react-icons/dist/esm/icons/bars-icon'
+import MoonIcon from '@patternfly/react-icons/dist/esm/icons/moon-icon'
+import SunIcon from '@patternfly/react-icons/dist/esm/icons/sun-icon'
 
 import { useAuth } from '../auth/AuthContext'
 import { visibleNavItems, type NavKey } from '../auth/permissions'
+import { applyTheme, THEME_STORAGE_KEY, type Theme } from '../theme/theme'
 import { TenantSwitcher } from './TenantSwitcher'
 
 type NavGroupModel = {
@@ -42,7 +45,13 @@ const RouterNavLink = forwardRef<HTMLAnchorElement, RouterNavLinkProps>(
   ({ href = '', ...props }, ref) => <NavLink ref={ref} to={href} {...props} />,
 )
 
-function AppMasthead() {
+function AppMasthead({
+  theme,
+  onThemeChange,
+}: {
+  theme: Theme
+  onThemeChange: (theme: Theme) => void
+}) {
   const { signOut } = useAuth()
 
   return (
@@ -64,6 +73,9 @@ function AppMasthead() {
               <TenantSwitcher />
             </ToolbarItem>
             <ToolbarItem align={{ default: 'alignEnd' }}>
+              <ThemeToggleButton theme={theme} onThemeChange={onThemeChange} />
+            </ToolbarItem>
+            <ToolbarItem>
               <SignOutButton signOut={signOut} />
             </ToolbarItem>
           </ToolbarContent>
@@ -73,11 +85,46 @@ function AppMasthead() {
   )
 }
 
+export function ThemeToggleButton({
+  theme,
+  onThemeChange,
+  storage = window.localStorage,
+  root = document.documentElement,
+}: {
+  theme: Theme
+  onThemeChange: (theme: Theme) => void
+  storage?: Pick<Storage, 'setItem'>
+  root?: Pick<HTMLElement, 'classList'>
+}) {
+  const next = theme === 'light' ? 'dark' : 'light'
+  return (
+    <Button
+      variant="plain"
+      aria-label={`Switch to ${next} theme`}
+      onClick={() => {
+        storage.setItem(THEME_STORAGE_KEY, next)
+        applyTheme(next, root)
+        onThemeChange(next)
+      }}
+    >
+      {theme === 'light' ? <MoonIcon /> : <SunIcon />}
+    </Button>
+  )
+}
+
 export function SignOutButton({ signOut }: { signOut: (reason: 'requested') => void }) {
   return <Button variant="link" onClick={() => signOut('requested')}>Sign out</Button>
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  theme,
+  onThemeChange,
+}: {
+  children: ReactNode
+  theme: Theme
+  onThemeChange: (theme: Theme) => void
+}) {
   const { pathname } = useLocation()
   const { self } = useAuth()
 
@@ -85,7 +132,7 @@ export function AppShell({ children }: { children: ReactNode }) {
     <AppShellView
       pathname={pathname}
       visibleItems={visibleNavItems(self?.role ?? null)}
-      masthead={<AppMasthead />}
+      masthead={<AppMasthead theme={theme} onThemeChange={onThemeChange} />}
     >
       {children}
     </AppShellView>
