@@ -12,6 +12,7 @@ import {
   type IssuedCredential, type Principal, type Role, type SecretMetadata, type Standing,
 } from '../data/principals'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 
 /**
  * Service principals — the console's only write surface (ADR-0012, amended).
@@ -42,6 +43,11 @@ export function PrincipalsView({
   const [issued, setIssued] = useState<IssuedCredential | null>(null)
   const [issueFailure, setIssueFailure] = useState<string | null>(null)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState<Principal | null>(null)
+  const [revoking, setRevoking] = useState<{
+    principal: Principal
+    secret: SecretMetadata
+  } | null>(null)
 
   // The picker selection IS the scope, of the listing and of anything created
   // here (duf-4qr): nothing selected is the platform, an organisation with the
@@ -174,18 +180,8 @@ export function PrincipalsView({
                   setIssued(null)
                   setIssueFailure(null)
                 }}
-                onRevoke={(principal, secret) =>
-                  run(async () => {
-                    if (!token) return
-                    await revokeSecret(token, principal.id, secret.id)
-                  })
-                }
-                onDelete={(principal) =>
-                  run(async () => {
-                    if (!token) return
-                    await deletePrincipal(token, principal.id)
-                  })
-                }
+                onRevoke={(principal, secret) => setRevoking({ principal, secret })}
+                onDelete={setDeleting}
               />
             </CardBody>
           </Card>
@@ -219,6 +215,105 @@ export function PrincipalsView({
           }}
         />
       ) : null}
+      {deleting ? (
+        <DeletePrincipalConfirmation
+          principal={deleting}
+          onCancel={() => setDeleting(null)}
+          onConfirm={() => {
+            const principal = deleting
+            setDeleting(null)
+            void run(async () => {
+              if (!token) return
+              await deletePrincipal(token, principal.id)
+            })
+          }}
+        />
+      ) : null}
+      {revoking ? (
+        <RevokeSecretConfirmation
+          principal={revoking.principal}
+          secret={revoking.secret}
+          callerRole={callerRole}
+          onCancel={() => setRevoking(null)}
+          onConfirm={() => {
+            const selected = revoking
+            setRevoking(null)
+            void run(async () => {
+              if (!token) return
+              await revokeSecret(token, selected.principal.id, selected.secret.id)
+            })
+          }}
+        />
+      ) : null}
+    </>
+  )
+}
+
+export function DeletePrincipalConfirmation({
+  principal, onConfirm, onCancel,
+}: {
+  principal: Principal
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <TypedConfirmModal
+      title={`Delete ${principal.name}?`}
+      body={<Content component="p">Deleting this principal revokes all of its secrets.</Content>}
+      expected={principal.name}
+      verb="Delete principal"
+      busy={false}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
+  )
+}
+
+export function RevokeSecretConfirmation({
+  principal, secret, callerRole, onConfirm, onCancel,
+}: {
+  principal: Principal
+  secret: SecretMetadata
+  callerRole: Role | null
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <Modal aria-labelledby="revoke-secret-modal-title" isOpen onClose={onCancel} variant="small">
+      <RevokeSecretConfirmationView
+        principal={principal}
+        secret={secret}
+        callerRole={callerRole}
+        onConfirm={onConfirm}
+        onCancel={onCancel}
+      />
+    </Modal>
+  )
+}
+
+export function RevokeSecretConfirmationView({
+  principal, secret, callerRole, onConfirm, onCancel,
+}: {
+  principal: Principal
+  secret: SecretMetadata
+  callerRole: Role | null
+  onConfirm: () => void
+  onCancel: () => void
+}) {
+  return (
+    <>
+      <ModalHeader labelId="revoke-secret-modal-title" title={`Revoke secret for ${principal.name}?`} />
+      <ModalBody>
+        <Content component="p">Secret {secret.id} will stop authenticating immediately.</Content>
+      </ModalBody>
+      <ModalFooter>
+        <RoleRestrictedButton
+          action="managePrincipals" callerRole={callerRole} variant="danger" onClick={onConfirm}
+        >
+          Revoke secret
+        </RoleRestrictedButton>
+        <Button variant="link" onClick={onCancel}>Cancel</Button>
+      </ModalFooter>
     </>
   )
 }

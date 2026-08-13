@@ -306,6 +306,13 @@ const readCredentialCard = () =>
     }),
   )
 
+// Destructive modals demand the resource name typed before their danger
+// button arms (duf-fcg6.5); the input id is the shared component's.
+const typeToConfirm = async (expected) => {
+  await page.waitForSelector('#typed-confirm-modal-input')
+  await page.type('#typed-confirm-modal-input', expected)
+}
+
 const buttonDisabled = (text) =>
   page.$$eval(
     'button',
@@ -1086,6 +1093,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // With three targets the explanation is present; removing one makes both
     // it and the disabled state disappear together.
     await clickInRow(auditGoodTwo, 'Remove')
+    // Non-last removal now confirms plainly (duf-fcg6.5) before acting.
+    await waitForText(`Remove ${auditGoodTwo}?`)
+    await clickByText('button', 'Remove target')
     await until('the second target to disappear', async () => !(await bodyText()).includes(auditGoodTwo))
     // Removal triggers a reload, and while it is in flight the form is not
     // rendered at all — so the re-enabled Add control is a condition to wait
@@ -1098,6 +1108,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // sink. The broker is genuinely degraded while the database remains healthy.
     exhaustAuditVolume()
     await clickInRow(auditGoodOne, 'Remove')
+    await waitForText(`Remove ${auditGoodOne}?`)
+    await clickByText('button', 'Remove target')
     await until('the Audit screen to report its degraded load failure', async () => {
       await page.click('a[href="/principals"]')
       await page.waitForFunction(
@@ -1157,6 +1169,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Cancel')
     assert.match(await bodyText(), new RegExp(auditFull.replaceAll('/', '\\/')))
     await clickInRow(auditFull, 'Remove')
+    await typeToConfirm(auditFull)
     await clickByText('button', 'Remove last target')
     await waitForText('No audit targets are configured')
 
@@ -1758,6 +1771,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // when the wire answered and the refetch landed.
     await clickByText('button', 'Revoke')
     await waitForText('Revoke smoke-revocable v1')
+    await typeToConfirm('v1')
     await clickByText('button', 'Revoke smoke-revocable v1')
     await until('the version to render revoked after the wire confirms', async () =>
       /revoked/.test(await bodyText()))
@@ -1821,6 +1835,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
     await waitForText('Delete smoke-revocable staging')
+    await typeToConfirm('staging')
     await clickByText('.pf-v6-c-modal-box button', 'Delete staging')
     await until('the staging channel to leave the wire', async () => {
       const { channels } = await api(builderToken, 'GET', channelsPath)
@@ -1845,6 +1860,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The opener and the modal confirm share a label; scope the confirm.
     await clickByText('button', 'Delete bucket')
     await waitForText('Delete smoke-revocable')
+    await typeToConfirm('smoke-revocable')
     await clickByText('.pf-v6-c-modal-box button', 'Delete bucket')
     await until('the console to land back on the bucket list', async () =>
       (await bodyText()).includes('All buckets'))
@@ -2196,11 +2212,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await page.click('#mirrored-smoke-images')
     await page.click('button[aria-label="Stop mirroring selected bucket"]')
     await waitForText('Stop mirroring smoke-images?')
+    await typeToConfirm('smoke-images')
     await clickDeepByText('button', 'Stop mirroring smoke-images')
     await until('the bucket to return to the local pane', async () =>
       Boolean(await page.$('#available-smoke-images')))
-    // Leave the world as this subtest found it.
+    // Leave the world as this subtest found it. Deleting the configuration
+    // now demands the adapter's name typed (duf-fcg6.5).
     await clickByText('button', 'Delete configuration')
+    await waitForText('Delete Bag Drop configuration?')
+    await typeToConfirm('dufflebag')
+    await clickByText('.pf-v6-c-modal-box button', 'Delete configuration')
     await waitForText('Bag Drop is not configured')
     } finally {
       await stub.close()
@@ -2289,6 +2310,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Lineage')
     await clickByText('button', 'Delete version')
     await waitForText('Delete smoke-deletable v1')
+    await typeToConfirm('v1')
     await clickByText('.pf-v6-c-modal-box button', 'Delete version')
     await waitForText('Version is assigned by channels: hold')
     await clickByText('.pf-v6-c-modal-box button', 'Cancel')
@@ -2300,6 +2322,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
     await clickByText('button', 'Delete version')
     await waitForText('Delete smoke-deletable v1')
+    await typeToConfirm('v1')
     await clickByText('.pf-v6-c-modal-box button', 'Delete version')
     await until('the console to land on the bucket after deletion', async () =>
       (await bodyText()).includes('Bucket details'))
@@ -2412,6 +2435,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await toggleRow('doomed-builder')
     await revokeFirstSecretOf('doomed-builder')
+    // Rotation stays plain-confirm by design: no typed field, one deliberate click.
+    await clickInModal('Revoke secret')
     await until('the revoked secret to leave the listing', async () =>
       (await rowText('doomed-builder')).includes('1 of 2'))
     // The seam the unit suites cannot see: the console said it revoked, so the
@@ -2420,6 +2445,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(await tokenStatus(doomedSecond), 200, 'the surviving secret must still work')
 
     await clickInRow('doomed-builder', 'Delete')
+    await typeToConfirm('doomed-builder')
+    await clickInModal('Delete principal')
     await until('the deleted principal to leave the listing', async () =>
       !(await page.$$eval('table[aria-label="Service principals"]', (tables) =>
         tables.map((table) => table.innerText).join(' '))).includes('doomed-builder'))

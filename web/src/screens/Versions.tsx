@@ -13,6 +13,7 @@ import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { DeleteBucketModal } from '../components/DeleteBucketModal'
+import { TypedConfirmModal } from '../components/TypedConfirmModal'
 
 import {
   assignChannelVersion, createChannel, deleteBucket, deleteChannel, getBagDropStatus,
@@ -1070,23 +1071,19 @@ function DeleteChannelModal({
       setSubmitting(false)
     }
   }
-  return (
-    <Modal aria-labelledby="delete-channel-modal-title" isOpen onClose={onClose} variant="small">
-      <DeleteChannelModalView
-        bucket={bucket}
-        channel={channel}
-        callerRole={callerRole}
-        submitting={submitting}
-        failure={failure}
-        onConfirm={confirm}
-        onClose={onClose}
-      />
-    </Modal>
-  )
+  return <DeleteChannelModalView
+    bucket={bucket}
+    channel={channel}
+    callerRole={callerRole}
+    submitting={submitting}
+    failure={failure}
+    onConfirm={confirm}
+    onClose={onClose}
+  />
 }
 
 export function DeleteChannelModalView({
-  bucket, channel, callerRole, submitting, failure, onConfirm, onClose,
+  bucket, channel, submitting, failure, onConfirm, onClose,
 }: {
   bucket: string
   channel: BucketChannel
@@ -1097,9 +1094,14 @@ export function DeleteChannelModalView({
   onClose: () => void
 }) {
   return (
-    <>
-      <ModalHeader labelId="delete-channel-modal-title" title={`Delete ${bucket} ${channel.name}`} />
-      <ModalBody>
+    <TypedConfirmModal
+      title={`Delete ${bucket} ${channel.name}`}
+      expected={channel.name}
+      verb={`Delete ${channel.name}`}
+      busy={submitting}
+      onConfirm={onConfirm}
+      onCancel={onClose}
+      body={<>
         {failure ? (
           <Alert variant="danger" isInline title="The action was refused">
             <Content component="p">{failure}</Content>
@@ -1108,21 +1110,8 @@ export function DeleteChannelModalView({
         <Content component="p">
           Deleting {channel.name} destroys its assignment history.
         </Content>
-      </ModalBody>
-      <ModalFooter>
-        <RoleRestrictedButton
-          action="manageChannels"
-          callerRole={callerRole}
-          variant="danger"
-          isLoading={submitting}
-          isDisabled={submitting}
-          onClick={onConfirm}
-        >
-          Delete {channel.name}
-        </RoleRestrictedButton>
-        <Button variant="link" isDisabled={submitting} onClick={onClose}>Cancel</Button>
-      </ModalFooter>
-    </>
+      </>}
+    />
   )
 }
 

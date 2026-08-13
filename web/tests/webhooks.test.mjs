@@ -9,6 +9,7 @@ let vite
 let CreateWebhookForm
 let DeleteConfirmation
 let WebhooksView
+let TypedConfirmModalView
 
 before(async () => {
   vite = await createServer({
@@ -20,6 +21,8 @@ before(async () => {
   })
   ;({ CreateWebhookForm, DeleteConfirmation, WebhooksView } =
     await vite.ssrLoadModule('/src/screens/Webhooks.tsx'))
+  ;({ TypedConfirmModalView } =
+    await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
 
 after(async () => {
@@ -55,11 +58,20 @@ test('the create form carries the approved fields and event subscriptions', () =
   assert.match(markup, /Leave every box clear to subscribe to all operations\./)
 })
 
-test('deletion demands an explicit inline confirmation', () => {
-  const markup = renderToStaticMarkup(React.createElement(DeleteConfirmation, {
-    webhook: webhook(), onConfirm: () => {}, onCancel: () => {},
+test('deletion demands the webhook name and only fires through confirmation', () => {
+  let deletes = 0
+  const confirmation = DeleteConfirmation({
+    webhook: webhook(), onConfirm: () => { deletes++ }, onCancel: () => {},
+  })
+  assert.equal(deletes, 0)
+  assert.equal(confirmation.props.expected, 'build events')
+  confirmation.props.onConfirm()
+  assert.equal(deletes, 1)
+  const markup = renderToStaticMarkup(React.createElement(TypedConfirmModalView, {
+    ...confirmation.props, confirmation: '', onConfirmationChange: () => {},
   }))
   assert.match(markup, /Delete build events\?/)
+  assert.match(markup, /Type <strong>build events<\/strong> to confirm/)
   assert.match(markup, /Delete webhook/)
   assert.match(markup, /Cancel/)
 })
