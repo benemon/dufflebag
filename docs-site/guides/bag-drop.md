@@ -38,10 +38,12 @@ The destination client secret is always stored sealed, never in plaintext:
 - On a deployment with encryption at rest, it is sealed with the instance
   keyring — nothing to configure.
 - On an unencrypted deployment, the operator must set
-  `DFBG_BAGDROP_CREDENTIAL_KEY` (32 random bytes). Without it, writes that
-  seal a secret and verify/enable operations refuse and name the missing
-  variable. The console shows a standing warning on this posture: the
-  environment key protects a database dump, not a compromised host.
+  `DFBG_CREDENTIAL_KEY` (32 random bytes). The former
+  `DFBG_BAGDROP_CREDENTIAL_KEY` remains a supported alias; if both are set they
+  must be identical. Without either, writes that seal a secret and
+  verify/enable operations refuse and name the missing variable. The console
+  shows a standing warning on this posture: the environment key protects a
+  database dump, not a compromised host.
 
 See the
 [deployment guide](https://github.com/benemon/dufflebag/blob/main/docs/deployment.md#bag-drop)

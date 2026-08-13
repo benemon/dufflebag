@@ -14,6 +14,7 @@ import (
 	"github.com/benemon/dufflebag/internal/keyring"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
+	"github.com/benemon/dufflebag/internal/webhook"
 	"github.com/google/uuid"
 )
 
@@ -206,10 +207,19 @@ func (r *Repository) CreateBucket(ctx context.Context, tenant Tenant, bucket Buc
 		row.ID, bucket.CreatedAt); err != nil {
 		return nil, fmt.Errorf("create managed latest channel: %w", err)
 	}
+	created, err := restoreBucket(row)
+	if err != nil {
+		return nil, err
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationBucketCreated,
+		webhook.Target{Type: "bucket", Bucket: created.Name}, bucketWebhookPayload(tenant, *created), bucket.CreatedAt,
+	); err != nil {
+		return nil, err
+	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit create bucket: %w", err)
 	}
-	return restoreBucket(row)
+	return created, nil
 }
 
 func (r *Repository) GetBucket(ctx context.Context, tenant Tenant, name string) (*Bucket, error) {
@@ -237,11 +247,20 @@ func (r *Repository) GetBucket(ctx context.Context, tenant Tenant, name string) 
 // behind deliberately: like history for a deleted channel, they outlive what
 // they describe, and nothing lists them once the channel is gone.
 func (r *Repository) DeleteBucket(ctx context.Context, tenant Tenant, name string) error {
+	at := time.Now().UTC()
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	bucketRow, err := q.GetBucketByName(ctx, name)
+	if err != nil {
+		return mapNotFound("get bucket for deletion", err)
+	}
+	bucket, err := restoreBucket(bucketRow)
+	if err != nil {
+		return err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT sboms.object_key
@@ -260,6 +279,11 @@ func (r *Repository) DeleteBucket(ctx context.Context, tenant Tenant, name strin
 	}
 	if _, err := q.DeleteBucketByName(ctx, name); err != nil {
 		return mapNotFound("delete bucket", err)
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationBucketDeleted,
+		webhook.Target{Type: "bucket", Bucket: name}, bucketWebhookPayload(tenant, *bucket), at,
+	); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete bucket: %w", err)
@@ -332,6 +356,10 @@ func (r *Repository) DeleteVersion(
 	if err != nil {
 		return mapNotFound("delete version", err)
 	}
+	version, err := r.restoreVersion(ctx, q, tenant, versionRow)
+	if err != nil {
+		return err
+	}
 
 	var latestChannelID sql.NullString
 	err = tx.QueryRowContext(ctx, `
@@ -366,6 +394,13 @@ func (r *Repository) DeleteVersion(
 	if err != nil {
 		return fmt.Errorf("list version SBOM objects: %w", err)
 	}
+	var latestBefore *Channel
+	if latestChannelID.Valid {
+		latestBefore, err = r.getChannel(ctx, tx, q, tenant, bucketName, "latest")
+		if err != nil {
+			return fmt.Errorf("read managed latest before version delete: %w", err)
+		}
+	}
 
 	if _, err := tx.ExecContext(ctx, `DELETE FROM versions WHERE id = $1`, versionRow.ID); err != nil {
 		return fmt.Errorf("delete version: %w", err)
@@ -398,6 +433,22 @@ func (r *Repository) DeleteVersion(
 				return fmt.Errorf("update cleared managed latest channel: %w", err)
 			}
 		}
+		latestAfter, err := r.getChannel(ctx, tx, q, tenant, bucketName, "latest")
+		if err != nil {
+			return fmt.Errorf("read managed latest after version delete: %w", err)
+		}
+		if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+			webhook.Target{Type: "channel", Bucket: bucketName, Name: "latest"},
+			channelWebhookPayload(latestAfter, latestBefore), at,
+		); err != nil {
+			return err
+		}
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationVersionDeleted,
+		webhook.Target{Type: "version", Bucket: bucketName, Fingerprint: fingerprint},
+		versionWebhookPayload(version, at), at,
+	); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete version: %w", err)
@@ -577,6 +628,12 @@ func (r *Repository) CreateVersion(
 		return nil, err
 	}
 	if err := persisted.EnsureTemplateType(version.TemplateType); err != nil {
+		return nil, err
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationVersionCreated,
+		webhook.Target{Type: "version", Bucket: version.BucketName, Fingerprint: version.Fingerprint},
+		versionWebhookPayload(persisted, version.CreatedAt), version.CreatedAt,
+	); err != nil {
 		return nil, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -872,6 +929,8 @@ func (r *Repository) UpdateBuild(
 	); err != nil {
 		return nil, err
 	}
+	completedNow := false
+	var assignedLatest, previousLatest *Channel
 	if !version.Complete() && version.ReadyToComplete() {
 		if _, err := q.LockBucketForVersionSequence(ctx, versionRow.BucketID); err != nil {
 			return nil, fmt.Errorf("lock bucket for version sequence: %w", err)
@@ -883,6 +942,7 @@ func (r *Repository) UpdateBuild(
 		if err := version.MarkComplete(int(sequence), at); err != nil {
 			return nil, err
 		}
+		completedNow = true
 		completed, err := q.CompleteVersion(ctx, postgresdb.CompleteVersionParams{
 			ID: version.ID.String(),
 			// Nullable because an incomplete version has no sequence; it is
@@ -913,6 +973,28 @@ func (r *Repository) UpdateBuild(
 				return nil, fmt.Errorf("managed latest channel for completion: %w", err)
 			}
 			if err := r.recordAssignment(ctx, tx, tenant, latest.ID, version.ID, "Dufflebag", at); err != nil {
+				return nil, err
+			}
+			previous := *latest
+			previousLatest = &previous
+			assignedLatest, err = r.getChannel(ctx, tx, q, tenant, bucketName, "latest")
+			if err != nil {
+				return nil, fmt.Errorf("read assigned managed latest channel: %w", err)
+			}
+		}
+	}
+	if completedNow {
+		if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationVersionCompleted,
+			webhook.Target{Type: "version", Bucket: bucketName, Fingerprint: fingerprint},
+			versionWebhookPayload(version, at), at,
+		); err != nil {
+			return nil, err
+		}
+		if assignedLatest != nil {
+			if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+				webhook.Target{Type: "channel", Bucket: bucketName, Name: "latest"},
+				channelWebhookPayload(assignedLatest, previousLatest), at,
+			); err != nil {
 				return nil, err
 			}
 		}
@@ -1098,8 +1180,9 @@ func (r *Repository) RevokeVersion(
 
 	if !req.DisableRollbackChannels {
 		rows, err := tx.QueryContext(ctx, `
-			SELECT channels.id
+			SELECT channels.id, buckets.name, channels.name
 			FROM channels
+			JOIN buckets ON buckets.id = channels.bucket_id
 			JOIN LATERAL (
 				SELECT assignments.version_id
 				FROM channel_assignments AS assignments
@@ -1114,10 +1197,15 @@ func (r *Repository) RevokeVersion(
 		if err != nil {
 			return nil, fmt.Errorf("list channels requiring rollback: %w", err)
 		}
-		channelIDs := make([]registry.ID, 0)
+		type rollbackChannel struct {
+			id         registry.ID
+			bucketName string
+			name       string
+		}
+		channels := make([]rollbackChannel, 0)
 		for rows.Next() {
-			var channelID string
-			if err := rows.Scan(&channelID); err != nil {
+			var channelID, rollbackBucket, channelName string
+			if err := rows.Scan(&channelID, &rollbackBucket, &channelName); err != nil {
 				_ = rows.Close()
 				return nil, fmt.Errorf("scan channel requiring rollback: %w", err)
 			}
@@ -1126,7 +1214,9 @@ func (r *Repository) RevokeVersion(
 				_ = rows.Close()
 				return nil, fmt.Errorf("parse rollback channel id: %w", err)
 			}
-			channelIDs = append(channelIDs, parsedChannelID)
+			channels = append(channels, rollbackChannel{
+				id: parsedChannelID, bucketName: rollbackBucket, name: channelName,
+			})
 		}
 		if err := rows.Err(); err != nil {
 			_ = rows.Close()
@@ -1135,8 +1225,12 @@ func (r *Repository) RevokeVersion(
 		if err := rows.Close(); err != nil {
 			return nil, fmt.Errorf("close channels requiring rollback: %w", err)
 		}
-		for _, channelID := range channelIDs {
-			rollbackID, found, err := r.newestValidAssignedVersion(ctx, tx, channelID)
+		for _, channel := range channels {
+			previous, err := r.getChannel(ctx, tx, q, tenant, channel.bucketName, channel.name)
+			if err != nil {
+				return nil, err
+			}
+			rollbackID, found, err := r.newestValidAssignedVersion(ctx, tx, channel.id)
 			if err != nil {
 				return nil, err
 			}
@@ -1144,14 +1238,34 @@ func (r *Repository) RevokeVersion(
 				continue
 			}
 			if err := r.recordAssignment(
-				ctx, tx, tenant, channelID, rollbackID, "Dufflebag", at,
+				ctx, tx, tenant, channel.id, rollbackID, "Dufflebag", at,
 			); err != nil {
 				return nil, fmt.Errorf("rollback channel assignment: %w", err)
+			}
+			updated, err := r.getChannel(ctx, tx, q, tenant, channel.bucketName, channel.name)
+			if err != nil {
+				return nil, err
+			}
+			if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationChannelAssigned,
+				webhook.Target{Type: "channel", Bucket: channel.bucketName, Name: channel.name},
+				channelWebhookPayload(updated, previous), at,
+			); err != nil {
+				return nil, err
 			}
 		}
 		// A channel whose entire history is revoked has no honest rollback
 		// target. Its current assignment is left in place rather than inventing
 		// an unassignment state that has not been observed from HCP.
+	}
+	operation := webhook.OperationVersionRevoked
+	if effectAt.After(at) {
+		operation = webhook.OperationVersionRevocationScheduled
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, operation,
+		webhook.Target{Type: "version", Bucket: bucketName, Fingerprint: fingerprint},
+		versionWebhookPayload(version, at), at,
+	); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {
@@ -1231,6 +1345,12 @@ func (r *Repository) RestoreRevokedVersion(
 		if err := r.unrevokeRow(ctx, q, descendant.ID, version.ID.String(), at); err != nil {
 			return nil, err
 		}
+	}
+	if err := enqueueWebhookEvent(ctx, q, tenant, webhook.OperationVersionRestored,
+		webhook.Target{Type: "version", Bucket: bucketName, Fingerprint: fingerprint},
+		versionWebhookPayload(version, at), at,
+	); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {

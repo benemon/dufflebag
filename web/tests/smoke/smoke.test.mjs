@@ -732,10 +732,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Sign out')
     assert.doesNotMatch(await bodyText(), /Log in/)
     await until('all root navigation items to appear', async () =>
-      (await globalNavItems()).length === 6)
+      (await globalNavItems()).length === 7)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Instance'],
+      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
   })
 

@@ -13,6 +13,7 @@ import { Principals } from './screens/Principals'
 import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
+import { Webhooks } from './screens/Webhooks'
 
 export function App() {
   return (
@@ -79,6 +80,7 @@ function Authenticated() {
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />
         <Route path="/bagdrop" element={<BagDrop />} />
+        <Route path="/webhooks" element={<Webhooks />} />
         <Route path="/instance" element={<Instance />} />
       </Routes>
     </AppShell>

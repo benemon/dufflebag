@@ -28,12 +28,12 @@ test('each role gets the nested console action snapshot declared by the server',
     allowedActions('maintainer'),
     [
       'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets',
-      'managePrincipals', 'configureBagDrop',
+      'managePrincipals', 'configureBagDrop', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
     'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets', 'configureAudit',
-    'manageEncryption', 'managePrincipals', 'configureBagDrop',
+    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configureWebhooks',
   ])
   assert.deepEqual(allowedActions(null), [])
 })
@@ -77,8 +77,8 @@ test('each role gets the navigation snapshot declared by the server', () => {
     ['reader', ['buckets', 'bagdrop', 'instance']],
     ['builder', ['buckets', 'bagdrop', 'instance']],
     ['publisher', ['buckets', 'bagdrop', 'instance']],
-    ['maintainer', ['buckets', 'principals', 'bagdrop', 'instance']],
-    ['root', ['buckets', 'principals', 'audit', 'encryption', 'bagdrop', 'instance']],
+    ['maintainer', ['buckets', 'principals', 'bagdrop', 'webhooks', 'instance']],
+    ['root', ['buckets', 'principals', 'audit', 'encryption', 'bagdrop', 'webhooks', 'instance']],
   ]) {
     assert.deepEqual(visibleNavItems(role), expected, String(role))
   }

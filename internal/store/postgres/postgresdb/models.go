@@ -216,3 +216,48 @@ type Version struct {
 	RevocationInheritedFromFingerprint sql.NullString `json:"revocation_inherited_from_fingerprint"`
 	RevocationInheritedFromName        sql.NullString `json:"revocation_inherited_from_name"`
 }
+
+type Webhook struct {
+	OrganizationID        uuid.UUID      `json:"organization_id"`
+	ProjectID             uuid.UUID      `json:"project_id"`
+	ID                    uuid.UUID      `json:"id"`
+	Name                  string         `json:"name"`
+	Url                   string         `json:"url"`
+	Description           string         `json:"description"`
+	SealedSecret          []byte         `json:"sealed_secret"`
+	Events                []string       `json:"events"`
+	State                 string         `json:"state"`
+	LastVerificationAt    sql.NullTime   `json:"last_verification_at"`
+	LastVerificationError sql.NullString `json:"last_verification_error"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+type WebhookDelivery struct {
+	OrganizationID   uuid.UUID      `json:"organization_id"`
+	ProjectID        uuid.UUID      `json:"project_id"`
+	ID               uuid.UUID      `json:"id"`
+	WebhookID        uuid.UUID      `json:"webhook_id"`
+	EventID          string         `json:"event_id"`
+	Operation        string         `json:"operation"`
+	Status           string         `json:"status"`
+	AttemptCount     int32          `json:"attempt_count"`
+	FirstAttemptedAt sql.NullTime   `json:"first_attempted_at"`
+	LastAttemptedAt  sql.NullTime   `json:"last_attempted_at"`
+	NextAttemptAt    sql.NullTime   `json:"next_attempt_at"`
+	ResponseCode     sql.NullInt32  `json:"response_code"`
+	Detail           sql.NullString `json:"detail"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
+type WebhookOutbox struct {
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	ProjectID      uuid.UUID       `json:"project_id"`
+	EventID        string          `json:"event_id"`
+	OccurredAt     time.Time       `json:"occurred_at"`
+	Operation      string          `json:"operation"`
+	Target         json.RawMessage `json:"target"`
+	Actor          json.RawMessage `json:"actor"`
+	Payload        json.RawMessage `json:"payload"`
+	AvailableAt    time.Time       `json:"available_at"`
+}

@@ -10,6 +10,7 @@ const guideSidebar = [
   { text: 'Revocation & channels', link: '/guides/revocation-channels' },
   { text: 'SBOMs & findings', link: '/guides/sbom-findings' },
   { text: 'Bag Drop', link: '/guides/bag-drop' },
+  { text: 'Webhooks', link: '/guides/webhooks' },
   { text: 'Audit & encryption', link: '/guides/audit-encryption' },
   { text: 'Platform API', link: '/guides/platform-api' },
 ]

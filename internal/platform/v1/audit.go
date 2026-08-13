@@ -67,6 +67,13 @@ var operationDescriptors = map[string]operationDescriptor{
 	"DeleteBagDropAssociation": {method: http.MethodDelete, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/buckets/{bucketName}", Descriptor: audit.Descriptor{Operation: "bagdrop.association.delete", TargetType: "bagdrop_association", TargetIDParam: "bucketName"}},
 	"GetBagDropStatus":         {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/status", Descriptor: audit.Descriptor{Operation: "bagdrop.status.read", TargetType: "bagdrop_status"}},
 	"ReconcileBagDrop":         {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/reconcile", Descriptor: audit.Descriptor{Operation: "bagdrop.reconcile", TargetType: "bagdrop_config"}},
+	"ListWebhooks":             {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks", Descriptor: audit.Descriptor{Operation: "webhook.list", TargetType: "webhook_collection"}},
+	"CreateWebhook":            {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks", Descriptor: audit.Descriptor{Operation: "webhook.create", TargetType: "webhook"}},
+	"GetWebhook":               {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}", Descriptor: audit.Descriptor{Operation: "webhook.read", TargetType: "webhook", TargetIDParam: "webhookId"}},
+	"UpdateWebhook":            {method: http.MethodPatch, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}", Descriptor: audit.Descriptor{Operation: "webhook.update", TargetType: "webhook", TargetIDParam: "webhookId"}},
+	"DeleteWebhook":            {method: http.MethodDelete, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}", Descriptor: audit.Descriptor{Operation: "webhook.delete", TargetType: "webhook", TargetIDParam: "webhookId"}},
+	"VerifyWebhook":            {method: http.MethodPost, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify", Descriptor: audit.Descriptor{Operation: "webhook.verify", TargetType: "webhook", TargetIDParam: "webhookId"}},
+	"ListWebhookDeliveries":    {method: http.MethodGet, path: "/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/deliveries", Descriptor: audit.Descriptor{Operation: "webhook.delivery.list", TargetType: "webhook", TargetIDParam: "webhookId"}},
 }
 
 type resolvedHandler struct {

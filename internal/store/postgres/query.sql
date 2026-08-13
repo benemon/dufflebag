@@ -612,3 +612,119 @@ WHERE id = $1;
 -- the same free slot and have one fail on UNIQUE. Held for the transaction,
 -- which does nothing but this insert.
 SELECT pg_advisory_xact_lock(1646664800);
+
+-- name: CreateWebhook :one
+INSERT INTO webhooks (
+    organization_id, project_id, id, name, url, description, sealed_secret,
+    events, state, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'pending', $9, $9)
+RETURNING *;
+
+-- name: GetWebhook :one
+SELECT * FROM webhooks WHERE id = $1;
+
+-- name: ListWebhooks :many
+SELECT * FROM webhooks ORDER BY created_at DESC, id DESC;
+
+-- name: UpdateWebhook :one
+UPDATE webhooks
+SET name = $2, url = $3, description = $4, sealed_secret = $5,
+    events = $6, state = $7, last_verification_at = $8,
+    last_verification_error = $9, updated_at = $10
+WHERE id = $1
+RETURNING *;
+
+-- name: RecordWebhookVerification :one
+UPDATE webhooks
+SET state = $2, last_verification_at = $3,
+    last_verification_error = $4, updated_at = $3
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteWebhook :execrows
+DELETE FROM webhooks WHERE id = $1;
+
+-- name: EnqueueWebhookEvent :exec
+WITH subscribed AS (
+    SELECT id FROM webhooks
+    WHERE state = 'active'
+      AND (cardinality(events) = 0 OR sqlc.arg(operation)::text = ANY(events))
+), pruned AS (
+    DELETE FROM webhook_deliveries AS doomed
+    WHERE doomed.webhook_id IN (SELECT id FROM subscribed) AND doomed.id IN (
+        SELECT retained.id FROM webhook_deliveries AS retained
+        WHERE retained.webhook_id = doomed.webhook_id
+        ORDER BY retained.created_at DESC, retained.id DESC
+        OFFSET 99
+    )
+), queued AS (
+    INSERT INTO webhook_outbox (
+        organization_id, project_id, event_id, occurred_at, operation,
+        target, actor, payload, available_at
+    )
+    SELECT sqlc.arg(organization_id), sqlc.arg(project_id), sqlc.arg(event_id),
+           sqlc.arg(occurred_at)::timestamptz, sqlc.arg(operation),
+           sqlc.arg(target), sqlc.arg(actor), sqlc.arg(payload),
+           sqlc.arg(occurred_at)::timestamptz
+    WHERE EXISTS (SELECT 1 FROM subscribed)
+    RETURNING event_id
+)
+INSERT INTO webhook_deliveries (
+    organization_id, project_id, id, webhook_id, event_id, operation,
+    status, attempt_count, next_attempt_at, created_at
+)
+SELECT sqlc.arg(organization_id), sqlc.arg(project_id), gen_random_uuid(),
+       subscribed.id, queued.event_id, sqlc.arg(operation),
+       'pending', 0, sqlc.arg(occurred_at)::timestamptz,
+       sqlc.arg(occurred_at)::timestamptz
+FROM subscribed CROSS JOIN queued;
+
+-- name: GetNextWebhookOutboxEvent :one
+SELECT * FROM webhook_outbox
+WHERE available_at <= $1
+ORDER BY available_at, event_id
+LIMIT 1;
+
+-- name: SetWebhookOutboxAvailableAt :exec
+UPDATE webhook_outbox SET available_at = $2 WHERE event_id = $1;
+
+-- name: DeleteWebhookOutboxEvent :execrows
+DELETE FROM webhook_outbox WHERE event_id = $1;
+
+-- name: CreateWebhookDelivery :one
+INSERT INTO webhook_deliveries (
+    organization_id, project_id, id, webhook_id, event_id, operation,
+    status, attempt_count, next_attempt_at, created_at
+) VALUES ($1, $2, $3, $4, $5, $6, 'pending', 0, $7, $7)
+ON CONFLICT (organization_id, project_id, webhook_id, event_id) DO UPDATE
+SET event_id = EXCLUDED.event_id
+RETURNING *;
+
+-- name: ListWebhookEventDeliveries :many
+SELECT * FROM webhook_deliveries
+WHERE event_id = $1
+ORDER BY created_at, id;
+
+-- name: RecordWebhookDeliveryAttempt :one
+UPDATE webhook_deliveries
+SET status = $2, attempt_count = $3,
+    first_attempted_at = COALESCE(first_attempted_at, $4),
+    last_attempted_at = $4, next_attempt_at = $5,
+    response_code = $6, detail = $7
+WHERE id = $1
+RETURNING *;
+
+-- name: ListWebhookDeliveries :many
+SELECT * FROM webhook_deliveries
+WHERE webhook_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT 100;
+
+-- name: PruneWebhookDeliveries :exec
+DELETE FROM webhook_deliveries AS doomed
+WHERE doomed.webhook_id = $1 AND doomed.id IN (
+    SELECT retained.id FROM webhook_deliveries AS retained
+    WHERE retained.webhook_id = $1
+    ORDER BY retained.created_at DESC, retained.id DESC
+    OFFSET 100
+);

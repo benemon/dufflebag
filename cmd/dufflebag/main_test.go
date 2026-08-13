@@ -92,6 +92,21 @@ func TestBagDropReconcileIntervalConfiguration(t *testing.T) {
 	}
 }
 
+func TestWebhookAllowPrivateConfiguration(t *testing.T) {
+	t.Setenv("DFBG_WEBHOOK_ALLOW_PRIVATE", "")
+	if got, err := configuredWebhookAllowPrivate(); err != nil || got {
+		t.Fatalf("default = %v, %v; want false", got, err)
+	}
+	t.Setenv("DFBG_WEBHOOK_ALLOW_PRIVATE", "true")
+	if got, err := configuredWebhookAllowPrivate(); err != nil || !got {
+		t.Fatalf("enabled = %v, %v; want true", got, err)
+	}
+	t.Setenv("DFBG_WEBHOOK_ALLOW_PRIVATE", "sometimes")
+	if _, err := configuredWebhookAllowPrivate(); err == nil {
+		t.Fatal("invalid DFBG_WEBHOOK_ALLOW_PRIVATE was accepted")
+	}
+}
+
 func TestObjectStorageConfigurationRequiresOperatorEnvironment(t *testing.T) {
 	for _, name := range objectStorageEnvironment {
 		t.Setenv(name, "")

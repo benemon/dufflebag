@@ -62,8 +62,9 @@ back in, and losing both the root credentials and the recovery shares is
 unrecoverable by design.
 
 Key material lives in a wrapped keyring in the database, not the environment:
-on an encrypted deployment `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`
-and `DFBG_BAGDROP_CREDENTIAL_KEY` must **not** be set. The key service is a
+on an encrypted deployment `DFBG_TOKEN_SIGNING_KEY`, `DFBG_AUDIT_HMAC_KEY`,
+`DFBG_CREDENTIAL_KEY`, and its `DFBG_BAGDROP_CREDENTIAL_KEY` alias must **not**
+be set. The key service is a
 startup dependency only — unreachable at boot means the process refuses to
 start ("sealed"), while running replicas keep serving through a key-service
 outage.
