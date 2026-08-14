@@ -18,8 +18,12 @@ awk 'BEGIN { RS="---" } /kind: Deployment/ && /app.kubernetes.io\/component: duf
 	"$work/default.yaml" > "$work/deployment.yaml"
 [ -s "$work/deployment.yaml" ] || fail "dufflebag Deployment was not rendered"
 
-grep -q 'name: migrate' "$work/deployment.yaml" || fail "migrate init container is absent"
-grep -q 'key: admin-database-url' "$work/deployment.yaml" || fail "migrate does not use the admin DSN"
+if grep -q 'name: migrate' "$work/deployment.yaml"; then
+	fail "dufflebag Deployment contains a migrate init container"
+fi
+if grep -q 'admin-database-url' "$work/default.yaml"; then
+	fail "rendered manifests contain an admin database DSN"
+fi
 for variable in DFBG_KEY_PROVIDER DFBG_VAULT_ADDR DFBG_VAULT_AUTH_METHOD DFBG_VAULT_K8S_ROLE DFBG_VAULT_K8S_MOUNT DFBG_VAULT_K8S_TOKEN_PATH; do
 	grep -q -- "- name: $variable" "$work/deployment.yaml" || fail "$variable is absent from the dufflebag Deployment"
 done
@@ -61,4 +65,4 @@ grep -q 'add:' "$work/openshift.yaml" && fail "openshift profile renders added c
 grep -q 'SETUID' "$work/openshift.yaml" && fail "openshift profile renders SETUID"
 grep -q 'add:' "$work/default.yaml" || fail "default profile lost the postgres capability adds"
 
-printf '[helm-assert] PASS: migration, encrypted Vault auth, bootstrap, Route gating, UID and capability-profile contracts\n'
+printf '[helm-assert] PASS: single-role database, encrypted Vault auth, bootstrap, Route gating, UID and capability-profile contracts\n'

@@ -7,6 +7,9 @@ storage, and a persistent file-backed Vault:
 helm install dufflebag deploy/helm/dufflebag --create-namespace --namespace dufflebag
 ```
 
+The chart uses one non-superuser database-owner role. The server applies
+migrations at startup without a migration init container.
+
 The instance remains NotReady until its one-shot `POST /sys/init` call succeeds.
 Use the in-cluster `dufflebag` Service by default, enable `ingress.enabled` on
 plain Kubernetes, or enable `route.enabled` for an edge-terminated OpenShift
@@ -31,4 +34,3 @@ repository/tag pairs, per-component resources, persistence sizes, the internal
 PostgreSQL and S3 credentials, the S3 bucket, and Route/Ingress toggles and
 hosts. The default credentials are suitable only for the chart's isolated lab
 namespace and should be overridden anywhere less disposable.
-

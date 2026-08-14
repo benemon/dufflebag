@@ -49,21 +49,6 @@ spec:
                   key: postgres-password
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
-        # HELM_ASSERT_MIGRATE_BEGIN
-        - name: migrate
-          image: {{ printf "%s:%s" .Values.dufflebag.image.repository .Values.dufflebag.image.tag | quote }}
-          args: ["migrate"]
-          securityContext:
-            {{- include "dufflebag.containerSecurityContext" . | nindent 12 }}
-          env:
-            - name: DFBG_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "dufflebag.fullname" . }}-postgres
-                  key: admin-database-url
-          resources:
-            {{- toYaml .Values.dufflebag.resources | nindent 12 }}
-        # HELM_ASSERT_MIGRATE_END
         - name: wait-for-vault-bootstrapped
           image: {{ printf "%s:%s" .Values.vault.image.repository .Values.vault.image.tag | quote }}
           command:

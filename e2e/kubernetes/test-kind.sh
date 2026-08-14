@@ -81,21 +81,15 @@ for _ in $(seq 1 60); do
 done
 kubectl exec postgres -- pg_isready -U postgres
 
-progress "creating the migration and serving database roles"
+progress "creating the database-owner role"
 kubectl exec postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d postgres \
 	-c 'CREATE DATABASE dufflebag' \
-	-c "CREATE ROLE dufflebag_migrate LOGIN PASSWORD 'migrate'" \
-	-c 'ALTER DATABASE dufflebag OWNER TO dufflebag_migrate' \
-	-c "CREATE ROLE dufflebag_app LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS"
-kubectl exec postgres -- psql -v ON_ERROR_STOP=1 -U postgres -d dufflebag \
-	-c 'GRANT USAGE ON SCHEMA public TO dufflebag_app' \
-	-c 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app' \
-	-c 'ALTER DEFAULT PRIVILEGES FOR ROLE dufflebag_migrate IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dufflebag_app'
+	-c "CREATE ROLE dufflebag LOGIN PASSWORD 'app' NOSUPERUSER NOBYPASSRLS" \
+	-c 'ALTER DATABASE dufflebag OWNER TO dufflebag'
 
 progress "applying generated secrets and the reference manifests"
 kubectl create secret generic dufflebag \
-	--from-literal=migrate-database-url='postgres://dufflebag_migrate:migrate@postgres/dufflebag?sslmode=disable' \
-	--from-literal=app-database-url='postgres://dufflebag_app:app@postgres/dufflebag?sslmode=disable' \
+	--from-literal=database-url='postgres://dufflebag:app@postgres/dufflebag?sslmode=disable' \
 	--from-literal=token-signing-key='kind-validation-signing-key-at-least-32-bytes' \
 	--dry-run=client -o yaml | kubectl apply -f -
 sed "s|quay.io/benjamin_holmes/dufflebag:<tag>|$image|g" \

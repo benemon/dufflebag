@@ -56,10 +56,8 @@ metadata:
 type: Opaque
 stringData:
   postgres-password: "migrate"
-  migrate-password: "migrate"
   app-password: "app"
-  admin-database-url: "postgres://dufflebag_migrate:migrate@dufflebag-postgres:5432/dufflebag?sslmode=disable"
-  app-database-url: "postgres://dufflebag_app:app@dufflebag-postgres:5432/dufflebag?sslmode=disable"
+  app-database-url: "postgres://dufflebag:app@dufflebag-postgres:5432/dufflebag?sslmode=disable"
 ---
 # Source: dufflebag/templates/secrets.yaml
 apiVersion: v1
@@ -175,16 +173,9 @@ data:
     #!/bin/sh
     set -eu
     psql -v ON_ERROR_STOP=1 --username postgres --dbname dufflebag \
-      --set=migrate_password="$POSTGRES_MIGRATE_PASSWORD" \
       --set=app_password="$POSTGRES_APP_PASSWORD" <<'SQL'
-    CREATE ROLE dufflebag_migrate LOGIN PASSWORD :'migrate_password';
-    ALTER DATABASE dufflebag OWNER TO dufflebag_migrate;
-    CREATE ROLE dufflebag_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOBYPASSRLS;
-    GRANT CONNECT ON DATABASE dufflebag TO dufflebag_app;
-    GRANT USAGE ON SCHEMA public TO dufflebag_app;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app;
-    ALTER DEFAULT PRIVILEGES FOR ROLE dufflebag_migrate IN SCHEMA public
-      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dufflebag_app;
+    CREATE ROLE dufflebag LOGIN PASSWORD :'app_password' NOSUPERUSER NOBYPASSRLS;
+    ALTER DATABASE dufflebag OWNER TO dufflebag;
     SQL
 ---
 # Source: dufflebag/templates/serviceaccounts-rbac.yaml
@@ -364,24 +355,6 @@ spec:
                   key: postgres-password
           resources:
             {}
-        # HELM_ASSERT_MIGRATE_BEGIN
-        - name: migrate
-          image: "quay.io/benjamin_holmes/dufflebag:latest"
-          args: ["migrate"]
-          securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop:
-                - ALL
-          env:
-            - name: DFBG_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: dufflebag-postgres
-                  key: admin-database-url
-          resources:
-            {}
-        # HELM_ASSERT_MIGRATE_END
         - name: wait-for-vault-bootstrapped
           image: "docker.io/hashicorp/vault:2.0.3"
           command:
@@ -662,11 +635,6 @@ spec:
                 secretKeyRef:
                   name: dufflebag-postgres
                   key: postgres-password
-            - name: POSTGRES_MIGRATE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: dufflebag-postgres
-                  key: migrate-password
             - name: POSTGRES_APP_PASSWORD
               valueFrom:
                 secretKeyRef:

@@ -12,16 +12,6 @@ spec:
       labels:
         app: dufflebag
     spec:
-      initContainers:
-        - name: migrate
-          image: quay.io/benjamin_holmes/dufflebag:<tag>
-          args: ["migrate"]
-          env:
-            - name: DFBG_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: dufflebag
-                  key: migrate-database-url
       containers:
         - name: dufflebag
           image: quay.io/benjamin_holmes/dufflebag:<tag>
@@ -30,7 +20,7 @@ spec:
               valueFrom:
                 secretKeyRef:
                   name: dufflebag
-                  key: app-database-url
+                  key: database-url
             - name: DFBG_HTTP_ADDR
               value: :8080
             - name: DFBG_TOKEN_SIGNING_KEY
