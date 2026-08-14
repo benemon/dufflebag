@@ -371,34 +371,53 @@ func (r *Reconciler) reconcileBucket(
 			return err
 		}
 		remoteBuildsByVersion[version.Fingerprint] = remoteBuilds
+		remoteBuildsByComponent := make(map[string]RemoteBuild, len(remoteBuilds)+len(version.Builds))
+		for _, remoteBuild := range remoteBuilds {
+			if _, exists := remoteBuildsByComponent[remoteBuild.ComponentType]; !exists {
+				remoteBuildsByComponent[remoteBuild.ComponentType] = remoteBuild
+			}
+		}
 		for _, build := range version.Builds {
-			remoteBuild := findRemoteBuild(remoteBuilds, build.ComponentType)
-			if remoteBuild == nil {
-				if build.PackerRunUUID == "" {
-					return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
-				}
-				var buildID string
-				if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.create", "build",
-					version.Fingerprint+"/"+build.ComponentType, "", func() error {
-						var createErr error
-						buildID, createErr = run.CreateBuild(ctx, bucket.Name, version.Fingerprint, build)
-						return createErr
-					}); err != nil {
+			if _, exists := remoteBuildsByComponent[build.ComponentType]; exists {
+				continue
+			}
+			if build.PackerRunUUID == "" {
+				return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)
+			}
+			var buildID string
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.build.create", "build",
+				version.Fingerprint+"/"+build.ComponentType, "", func() error {
+					var createErr error
+					buildID, createErr = run.CreateBuild(ctx, bucket.Name, version.Fingerprint, build)
+					return createErr
+				}); err != nil {
+				return err
+			}
+			if buildID == "" {
+				listed, err := run.ListBuilds(ctx, bucket.Name, version.Fingerprint)
+				if err != nil {
 					return err
 				}
-				if buildID == "" {
-					listed, err := run.ListBuilds(ctx, bucket.Name, version.Fingerprint)
-					if err != nil {
-						return err
+				for _, remoteBuild := range listed {
+					if _, exists := remoteBuildsByComponent[remoteBuild.ComponentType]; !exists {
+						remoteBuildsByComponent[remoteBuild.ComponentType] = remoteBuild
 					}
-					remoteBuild = findRemoteBuild(listed, build.ComponentType)
-					if remoteBuild == nil {
-						return errors.New("created destination build was not returned by ListBuilds")
-					}
-					buildID = remoteBuild.ID
 				}
-				remoteBuild = &RemoteBuild{ID: buildID, ComponentType: build.ComponentType, Status: "BUILD_PENDING"}
+				remoteBuild, exists := remoteBuildsByComponent[build.ComponentType]
+				if !exists {
+					return errors.New("created destination build was not returned by ListBuilds")
+				}
+				remoteBuildsByComponent[build.ComponentType] = RemoteBuild{
+					ID: remoteBuild.ID, ComponentType: build.ComponentType, Status: "BUILD_PENDING",
+				}
+				continue
 			}
+			remoteBuildsByComponent[build.ComponentType] = RemoteBuild{
+				ID: buildID, ComponentType: build.ComponentType, Status: "BUILD_PENDING",
+			}
+		}
+		for _, build := range version.Builds {
+			remoteBuild := remoteBuildsByComponent[build.ComponentType]
 			if remoteBuild.Status != "BUILD_DONE" && len(build.Sboms) == 0 {
 				if build.PackerRunUUID == "" {
 					return fmt.Errorf("build %s has blank packer_run_uuid", build.ID)

@@ -479,6 +479,48 @@ func TestReconcileBuildWithSbomsUsesRunningUploadWindowAndEndsDone(t *testing.T)
 	assertDeletionInvariants(t, run, "images")
 }
 
+func TestReconcileVersionWithMultipleBuildsCreatesAllBeforeCompletingAny(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	snapshot := testSnapshot("images")
+	snapshot.Versions[0].Builds[0].Sboms = []SbomSnapshot{{
+		Name: "manifest", Format: "CYCLONEDX", Document: []byte(`{"bomFormat":"CycloneDX"}`),
+	}}
+	snapshot.Versions[0].Builds = append(snapshot.Versions[0].Builds, BuildSnapshot{
+		ID: "build-web", ComponentType: "docker.web", PackerRunUUID: "run-uuid-web",
+		Platform: "docker", Artifacts: []ArtifactSnapshot{{ExternalIdentifier: "web:latest"}},
+	})
+	repository.snapshots["images"] = snapshot
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	for _, componentType := range []string{"amazon-ebs", "docker.web"} {
+		build := findRemoteBuild(run.builds["fp-1"], componentType)
+		if build == nil || build.Status != "BUILD_DONE" {
+			t.Fatalf("destination build %q = %#v", componentType, build)
+		}
+	}
+	if len(run.uploadedSboms) != 1 || run.uploadedSboms[0] != "images/fp-1/remote-amazon-ebs/manifest" {
+		t.Fatalf("uploaded SBOMs = %#v", run.uploadedSboms)
+	}
+	createPositions := make(map[string]int)
+	firstTerminalUpdate := len(repository.events)
+	for i, event := range repository.events {
+		if strings.HasPrefix(event, "create-build:") {
+			createPositions[event] = i
+		}
+		if strings.HasPrefix(event, "update-build:") && firstTerminalUpdate == len(repository.events) {
+			firstTerminalUpdate = i
+		}
+	}
+	if createPositions["create-build:amazon-ebs"] >= firstTerminalUpdate ||
+		createPositions["create-build:docker.web"] >= firstTerminalUpdate ||
+		len(createPositions) != 2 || firstTerminalUpdate == len(repository.events) {
+		t.Fatalf("build creation and terminal update order = %v", repository.events)
+	}
+}
+
 func TestReconcileSbomPresenceDiffAndScopeInvariants(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -1236,6 +1278,7 @@ func newTestReconciler(t *testing.T, secret string) (*Reconciler, *testReconcile
 		builds: make(map[string][]RemoteBuild), readFailures: make(map[string]error), createdBuckets: make(map[string]bool),
 		channels: make(map[string]map[string]RemoteChannel), deleteBucketErrors: make(map[string]error),
 		sboms: make(map[string][]RemoteSbom), uploadSbomErrors: make(map[string]error),
+		completeVersions: make(map[string]bool),
 	}
 	writer := &testAuditWriter{}
 	reconciler, err := NewReconciler(repository, sealer, Registry{
@@ -1345,6 +1388,7 @@ type testReconcileRun struct {
 	deletedVersions    []string
 	deletedBuilds      []string
 	deletedChannels    []string
+	completeVersions   map[string]bool
 }
 
 func (r *testReconcileRun) GetBucket(_ context.Context, name string) (*RemoteBucket, bool, error) {
@@ -1413,6 +1457,7 @@ func (r *testReconcileRun) DeleteVersion(_ context.Context, _, fingerprint strin
 	*r.events = append(*r.events, "delete-version:"+fingerprint)
 	delete(r.versions, fingerprint)
 	delete(r.builds, fingerprint)
+	delete(r.completeVersions, fingerprint)
 	r.deletedVersions = append(r.deletedVersions, fingerprint)
 	return nil
 }
@@ -1422,6 +1467,13 @@ func (r *testReconcileRun) ListBuilds(_ context.Context, _, fingerprint string) 
 }
 func (r *testReconcileRun) CreateBuild(_ context.Context, _, fingerprint string, build BuildSnapshot) (string, error) {
 	*r.events = append(*r.events, "create-build:"+build.ComponentType)
+	if r.completeVersions[fingerprint] {
+		return "", &AdapterError{
+			StatusCode: http.StatusBadRequest,
+			Code:       9,
+			Summary:    "This version is complete. If you wish to add a new build a new version must be created by changing the build fingerprint.",
+		}
+	}
 	remote := RemoteBuild{ID: "remote-" + build.ComponentType, ComponentType: build.ComponentType, Status: "BUILD_PENDING"}
 	r.builds[fingerprint] = append(r.builds[fingerprint], remote)
 	return remote.ID, nil
@@ -1433,6 +1485,7 @@ func (r *testReconcileRun) UpdateBuildRunning(_ context.Context, _, fingerprint,
 			r.builds[fingerprint][i].Status = "BUILD_RUNNING"
 		}
 	}
+	r.completeVersionIfAllBuildsDone(fingerprint)
 	return nil
 }
 func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id string, build BuildSnapshot) error {
@@ -1442,8 +1495,22 @@ func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id str
 			r.builds[fingerprint][i].Status = "BUILD_DONE"
 		}
 	}
+	r.completeVersionIfAllBuildsDone(fingerprint)
 	r.updatedArtifacts = append([]ArtifactSnapshot(nil), build.Artifacts...)
 	return nil
+}
+
+func (r *testReconcileRun) completeVersionIfAllBuildsDone(fingerprint string) {
+	builds := r.builds[fingerprint]
+	if len(builds) == 0 {
+		return
+	}
+	for _, build := range builds {
+		if build.Status != "BUILD_DONE" {
+			return
+		}
+	}
+	r.completeVersions[fingerprint] = true
 }
 func (r *testReconcileRun) DeleteBuild(_ context.Context, _, fingerprint, id string) error {
 	*r.events = append(*r.events, "delete-build:"+id)
