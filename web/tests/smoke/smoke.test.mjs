@@ -2248,8 +2248,6 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await page.type('#bagdrop-project-id', seeded.project.id)
     await page.type('#bagdrop-client-id', 'smoke-mirror-client')
     await page.type('#bagdrop-client-secret', 'smoke-mirror-secret')
-    // Verify resolves the STORED configuration, so it is disabled while dirty.
-    assert.equal(await buttonDisabled('Verify'), true)
     await clickByText('button', 'Enable')
     await waitForText('Nothing was saved. No configuration was created.')
     // Leaving and returning re-reads the server: still unconfigured.

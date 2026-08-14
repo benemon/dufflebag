@@ -91,7 +91,6 @@ const draft = (over = {}) => ({
 const viewProps = (over = {}) => ({
   callerRole: 'maintainer', canConfigure: true,
   config: config(), configLoading: false, configFailure: null,
-  onVerify: async () => verification({ outcome: 'resolved' }),
   onEnable: async () => ({ kind: 'enabled', config: config({ enabled: true }) }),
   onDisable: async () => config(), onDelete: async () => {},
   buckets: [{ name: 'images' }, { name: 'workers' }], associations: [association()],
@@ -135,24 +134,22 @@ test('reader renders the status zone only while maintainer renders all three zon
   assert.match(maintainer, /aria-label="Status"/)
 })
 
-test('the primary destination action is Enable and Verify stays disabled while dirty', () => {
+test('Enable is the only resolution action; no Verify button renders', () => {
   let enabled = false
   const props = {
     config: config(), draft: draft({ organizationID: 'edited-org' }), busy: null,
-    onDraftChange: () => {}, onVerify: () => {},
+    onDraftChange: () => {},
     onEnable: () => { enabled = true }, onDisable: () => {}, onDelete: () => {},
   }
-  const dirtyView = DestinationFormView({ ...props, dirty: true })
-  const dirtyVerify = findElement(dirtyView, (element) => element.props.children === 'Verify')
-  assert.equal(dirtyVerify.props.isDisabled, true)
-  const primary = findElement(dirtyView, (element) => element.props.children === 'Enable')
+  const view = DestinationFormView({ ...props, dirty: true })
+  const primary = findElement(view, (element) => element.props.children === 'Enable')
   assert.equal(primary.props.variant, 'primary')
   primary.props.onClick()
   assert.equal(enabled, true)
-
-  const savedView = DestinationFormView({ ...props, draft: draft(), dirty: false })
-  const savedVerify = findElement(savedView, (element) => element.props.children === 'Verify')
-  assert.equal(savedVerify.props.isDisabled, false)
+  // Removed by ruling: Verify only ever resolved the stored configuration, so
+  // it read as broken on a fresh form; Enable performs the same resolution.
+  const verify = findElement(view, (element) => element.props.children === 'Verify')
+  assert.equal(verify, null)
 })
 
 const selectorProps = (over = {}) => ({
@@ -287,7 +284,6 @@ test('pending_removal stays in the mirrored pane as Removing and can be resumed'
 test('env_key shows the persistent credential warning while keyring does not', () => {
   const props = {
     configLoading: false, configFailure: null,
-    onVerify: async () => verification(),
     onEnable: async () => ({ kind: 'enabled', config: config() }),
     onDisable: async () => config(), onDelete: async () => {},
   }
