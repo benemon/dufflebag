@@ -64,11 +64,14 @@ export function TenantSwitcher() {
   )
 }
 
-export function refreshOrganizationsOnPickerOpen(
+// Both pickers refetch their listing when opened: a select that opens onto a
+// cached list goes stale the moment tenancy is created elsewhere (duf-4hje —
+// new projects only appeared after an organisation round-trip).
+export function refreshOnPickerOpen(
   open: boolean,
-  refreshOrganizations: () => Promise<unknown>,
+  refresh: () => Promise<unknown>,
 ) {
-  if (open) void refreshOrganizations()
+  if (open) void refresh()
 }
 
 function PickerField({ label, children }: { label: string; children: ReactNode }) {
@@ -93,7 +96,7 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
   const selected = rows.find((candidate) => candidate.id === selectedOrganization)
   const setPickerOpen = (nextOpen: boolean) => {
     setOpen(nextOpen)
-    refreshOrganizationsOnPickerOpen(nextOpen, refreshOrganizations)
+    refreshOnPickerOpen(nextOpen, refreshOrganizations)
   }
 
   return (
@@ -161,10 +164,14 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
  * organisation, so repeating it would say nothing.
  */
 function ProjectSelect({ combined = false }: { combined?: boolean }) {
-  const { self, selectedOrganization } = useAuth()
+  const { self, selectedOrganization, refreshProjects } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
   const [open, setOpen] = useState(false)
   const label = (t: typeof tenant) => (combined ? `${t.organization} / ${t.project}` : t.project)
+  const setPickerOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    refreshOnPickerOpen(nextOpen, refreshProjects)
+  }
 
   return (
     <PickerField label="Project">
@@ -176,13 +183,13 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
           if (next) setTenant(next)
           setOpen(false)
         }}
-        onOpenChange={setOpen}
+        onOpenChange={setPickerOpen}
         toggle={(ref: React.Ref<MenuToggleElement>) => (
           <MenuToggle
             id="tenant-project"
             ref={ref}
             isExpanded={open}
-            onClick={() => setOpen(!open)}
+            onClick={() => setPickerOpen(!open)}
             variant="plainText"
           >
             {label(tenant)}
