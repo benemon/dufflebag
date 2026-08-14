@@ -45,6 +45,132 @@ func TestAssociationSyncStatus(t *testing.T) {
 	}
 }
 
+func TestOrderAssociationsByAncestry(t *testing.T) {
+	parent := &BucketSnapshot{
+		Name: "parent",
+		Versions: []VersionSnapshot{{Builds: []BuildSnapshot{{
+			Artifacts: []ArtifactSnapshot{{ExternalIdentifier: "parent-artifact"}},
+		}}}},
+	}
+	child := &BucketSnapshot{
+		Name: "child",
+		Versions: []VersionSnapshot{{Builds: []BuildSnapshot{{
+			SourceExternalIdentifier: "parent-artifact",
+		}}}},
+	}
+	cycleA := &BucketSnapshot{
+		Name: "cycle-a",
+		Versions: []VersionSnapshot{{Builds: []BuildSnapshot{{
+			SourceExternalIdentifier: "artifact-b",
+			Artifacts:                []ArtifactSnapshot{{ExternalIdentifier: "artifact-a"}},
+		}}}},
+	}
+	cycleB := &BucketSnapshot{
+		Name: "cycle-b",
+		Versions: []VersionSnapshot{{Builds: []BuildSnapshot{{
+			SourceExternalIdentifier: "artifact-a",
+			Artifacts:                []ArtifactSnapshot{{ExternalIdentifier: "artifact-b"}},
+		}}}},
+	}
+
+	for _, test := range []struct {
+		name         string
+		associations []Association
+		snapshots    map[string]*BucketSnapshot
+		want         string
+	}{
+		{
+			name:         "parent after child moves before child",
+			associations: []Association{testAssociation("child"), testAssociation("parent")},
+			snapshots:    map[string]*BucketSnapshot{"child": child, "parent": parent},
+			want:         "parent,child",
+		},
+		{
+			name: "unrelated buckets retain input order",
+			associations: []Association{
+				testAssociation("second"), testAssociation("first"), testAssociation("third"),
+			},
+			snapshots: map[string]*BucketSnapshot{},
+			want:      "second,first,third",
+		},
+		{
+			name:         "cycle retains input order",
+			associations: []Association{testAssociation("cycle-b"), testAssociation("cycle-a")},
+			snapshots: map[string]*BucketSnapshot{
+				"cycle-a": cycleA,
+				"cycle-b": cycleB,
+			},
+			want: "cycle-b,cycle-a",
+		},
+		{
+			name: "unassociated parent exerts no edge",
+			associations: []Association{
+				testAssociation("child"), testAssociation("unrelated"),
+			},
+			snapshots: map[string]*BucketSnapshot{
+				"parent": parent,
+				"child":  child,
+			},
+			want: "child,unrelated",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ordered := orderAssociationsByAncestry(test.associations, test.snapshots)
+			names := make([]string, 0, len(ordered))
+			for _, association := range ordered {
+				names = append(names, association.BucketName)
+			}
+			if got := strings.Join(names, ","); got != test.want {
+				t.Fatalf("order = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+func TestReconcileOrdersParentBeforeChildForBuildCorrelation(t *testing.T) {
+	reconciler, repository, run, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("a-child"), testAssociation("z-parent")}
+	repository.snapshots["a-child"] = &BucketSnapshot{
+		Name: "a-child",
+		Versions: []VersionSnapshot{{Fingerprint: "child-fp", Builds: []BuildSnapshot{{
+			ID:                       "child-build",
+			ComponentType:            "child",
+			PackerRunUUID:            "child-run",
+			SourceExternalIdentifier: "parent-artifact",
+		}}}},
+	}
+	repository.snapshots["z-parent"] = &BucketSnapshot{
+		Name: "z-parent",
+		Versions: []VersionSnapshot{{Fingerprint: "parent-fp", Builds: []BuildSnapshot{{
+			ID:            "parent-build",
+			ComponentType: "parent",
+			PackerRunUUID: "parent-run",
+			Artifacts: []ArtifactSnapshot{{
+				ExternalIdentifier: "parent-artifact",
+			}},
+		}}}},
+	}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	if !run.correlatedAtCreate["remote-child"] {
+		t.Fatalf("child build was not correlated at create time: %#v", run.correlatedAtCreate)
+	}
+	parentCreate, childCreate := -1, -1
+	for i, event := range repository.events {
+		switch event {
+		case "create-build:parent":
+			parentCreate = i
+		case "create-build:child":
+			childCreate = i
+		}
+	}
+	if parentCreate == -1 || childCreate == -1 || parentCreate >= childCreate {
+		t.Fatalf("build creation order = %v", repository.events)
+	}
+}
+
 func TestReconcileEmptyDestinationConverges(t *testing.T) {
 	reconciler, repository, run, writer := newTestReconciler(t, "secret")
 	repository.associations = []Association{testAssociation("images")}
@@ -756,6 +882,41 @@ func TestReconcileVersionRevocationDirectionAndInvariants(t *testing.T) {
 	}
 }
 
+func TestReconcileBuildsBeforeVersionRevocation(t *testing.T) {
+	revokeAt := time.Date(2026, 8, 11, 12, 0, 0, 123000000, time.UTC)
+	reconciler, repository, _, _ := newTestReconciler(t, "secret")
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = &BucketSnapshot{
+		Name: "images",
+		Versions: []VersionSnapshot{{
+			Fingerprint: "fp-revoked",
+			RevokeAt:    &revokeAt,
+			Builds: []BuildSnapshot{{
+				ID: "build-local", ComponentType: "amazon-ebs", PackerRunUUID: "run-uuid",
+			}},
+		}},
+	}
+
+	if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+		t.Fatal(err)
+	}
+	createBuild, updateBuild, revokeVersion := -1, -1, -1
+	for i, event := range repository.events {
+		switch event {
+		case "create-build:amazon-ebs":
+			createBuild = i
+		case "update-build:amazon-ebs":
+			updateBuild = i
+		case "revoke-version:fp-revoked":
+			revokeVersion = i
+		}
+	}
+	if createBuild == -1 || updateBuild == -1 || revokeVersion == -1 ||
+		createBuild >= revokeVersion || updateBuild >= revokeVersion {
+		t.Fatalf("build/revocation event order = %v", repository.events)
+	}
+}
+
 func TestReconcileVersionRevocationMutationsAreAuditFailClosed(t *testing.T) {
 	revokeAt := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
 	for _, test := range []struct {
@@ -1278,7 +1439,9 @@ func newTestReconciler(t *testing.T, secret string) (*Reconciler, *testReconcile
 		builds: make(map[string][]RemoteBuild), readFailures: make(map[string]error), createdBuckets: make(map[string]bool),
 		channels: make(map[string]map[string]RemoteChannel), deleteBucketErrors: make(map[string]error),
 		sboms: make(map[string][]RemoteSbom), uploadSbomErrors: make(map[string]error),
-		completeVersions: make(map[string]bool),
+		completeVersions:   make(map[string]bool),
+		artifacts:          make(map[string]map[string][]ArtifactSnapshot),
+		correlatedAtCreate: make(map[string]bool),
 	}
 	writer := &testAuditWriter{}
 	reconciler, err := NewReconciler(repository, sealer, Registry{
@@ -1389,6 +1552,8 @@ type testReconcileRun struct {
 	deletedBuilds      []string
 	deletedChannels    []string
 	completeVersions   map[string]bool
+	artifacts          map[string]map[string][]ArtifactSnapshot
+	correlatedAtCreate map[string]bool
 }
 
 func (r *testReconcileRun) GetBucket(_ context.Context, name string) (*RemoteBucket, bool, error) {
@@ -1420,6 +1585,7 @@ func (r *testReconcileRun) DeleteBucket(_ context.Context, name string) error {
 	}
 	delete(r.buckets, name)
 	delete(r.channels, name)
+	delete(r.artifacts, name)
 	r.deletedBuckets = append(r.deletedBuckets, name)
 	return nil
 }
@@ -1453,8 +1619,11 @@ func (r *testReconcileRun) RestoreVersion(_ context.Context, bucket, fingerprint
 	r.restoredVersions = append(r.restoredVersions, bucket+"/"+fingerprint)
 	return nil
 }
-func (r *testReconcileRun) DeleteVersion(_ context.Context, _, fingerprint string) error {
+func (r *testReconcileRun) DeleteVersion(_ context.Context, bucket, fingerprint string) error {
 	*r.events = append(*r.events, "delete-version:"+fingerprint)
+	for _, build := range r.builds[fingerprint] {
+		delete(r.artifacts[bucket], build.ID)
+	}
 	delete(r.versions, fingerprint)
 	delete(r.builds, fingerprint)
 	delete(r.completeVersions, fingerprint)
@@ -1475,6 +1644,16 @@ func (r *testReconcileRun) CreateBuild(_ context.Context, _, fingerprint string,
 		}
 	}
 	remote := RemoteBuild{ID: "remote-" + build.ComponentType, ComponentType: build.ComponentType, Status: "BUILD_PENDING"}
+	r.correlatedAtCreate[remote.ID] = false
+	for _, builds := range r.artifacts {
+		for _, artifacts := range builds {
+			for _, artifact := range artifacts {
+				if artifact.ExternalIdentifier == build.SourceExternalIdentifier {
+					r.correlatedAtCreate[remote.ID] = true
+				}
+			}
+		}
+	}
 	r.builds[fingerprint] = append(r.builds[fingerprint], remote)
 	return remote.ID, nil
 }
@@ -1488,7 +1667,7 @@ func (r *testReconcileRun) UpdateBuildRunning(_ context.Context, _, fingerprint,
 	r.completeVersionIfAllBuildsDone(fingerprint)
 	return nil
 }
-func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id string, build BuildSnapshot) error {
+func (r *testReconcileRun) UpdateBuild(_ context.Context, bucket, fingerprint, id string, build BuildSnapshot) error {
 	*r.events = append(*r.events, "update-build:"+build.ComponentType)
 	for i := range r.builds[fingerprint] {
 		if r.builds[fingerprint][i].ID == id {
@@ -1497,6 +1676,10 @@ func (r *testReconcileRun) UpdateBuild(_ context.Context, _, fingerprint, id str
 	}
 	r.completeVersionIfAllBuildsDone(fingerprint)
 	r.updatedArtifacts = append([]ArtifactSnapshot(nil), build.Artifacts...)
+	if r.artifacts[bucket] == nil {
+		r.artifacts[bucket] = make(map[string][]ArtifactSnapshot)
+	}
+	r.artifacts[bucket][id] = append([]ArtifactSnapshot(nil), build.Artifacts...)
 	return nil
 }
 
@@ -1512,7 +1695,7 @@ func (r *testReconcileRun) completeVersionIfAllBuildsDone(fingerprint string) {
 	}
 	r.completeVersions[fingerprint] = true
 }
-func (r *testReconcileRun) DeleteBuild(_ context.Context, _, fingerprint, id string) error {
+func (r *testReconcileRun) DeleteBuild(_ context.Context, bucket, fingerprint, id string) error {
 	*r.events = append(*r.events, "delete-build:"+id)
 	builds := r.builds[fingerprint]
 	for i := range builds {
@@ -1521,6 +1704,7 @@ func (r *testReconcileRun) DeleteBuild(_ context.Context, _, fingerprint, id str
 			break
 		}
 	}
+	delete(r.artifacts[bucket], id)
 	r.deletedBuilds = append(r.deletedBuilds, fingerprint+"/"+id)
 	return nil
 }

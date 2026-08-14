@@ -220,6 +220,93 @@ func backoffDelay(interval time.Duration, failures int) time.Duration {
 	return delay
 }
 
+func orderAssociationsByAncestry(
+	associations []Association, snapshots map[string]*BucketSnapshot,
+) []Association {
+	ordered := make([]Association, 0, len(associations))
+	if len(associations) < 2 {
+		return append(ordered, associations...)
+	}
+
+	artifacts := make(map[string][]int)
+	for associationIndex, association := range associations {
+		bucket := snapshots[association.BucketName]
+		if bucket == nil {
+			continue
+		}
+		for _, version := range bucket.Versions {
+			for _, build := range version.Builds {
+				for _, artifact := range build.Artifacts {
+					artifacts[artifact.ExternalIdentifier] = append(
+						artifacts[artifact.ExternalIdentifier], associationIndex,
+					)
+				}
+			}
+		}
+	}
+
+	edges := make([][]bool, len(associations))
+	for i := range edges {
+		edges[i] = make([]bool, len(associations))
+	}
+	for childIndex, association := range associations {
+		bucket := snapshots[association.BucketName]
+		if bucket == nil {
+			continue
+		}
+		for _, version := range bucket.Versions {
+			for _, build := range version.Builds {
+				for _, parentIndex := range artifacts[build.SourceExternalIdentifier] {
+					if parentIndex != childIndex {
+						edges[parentIndex][childIndex] = true
+					}
+				}
+			}
+		}
+	}
+
+	// Ignore ordering within cycles. Members of a cycle have the same external
+	// reachability, so the stable selection below emits them in input order.
+	reachable := make([][]bool, len(edges))
+	for i := range edges {
+		reachable[i] = append([]bool(nil), edges[i]...)
+	}
+	for through := range reachable {
+		for from := range reachable {
+			if !reachable[from][through] {
+				continue
+			}
+			for to := range reachable {
+				reachable[from][to] = reachable[from][to] || reachable[through][to]
+			}
+		}
+	}
+	indegree := make([]int, len(associations))
+	for from := range reachable {
+		for to := range reachable[from] {
+			if reachable[from][to] && !reachable[to][from] {
+				indegree[to]++
+			}
+		}
+	}
+
+	emitted := make([]bool, len(associations))
+	for range associations {
+		next := 0
+		for emitted[next] || indegree[next] != 0 {
+			next++
+		}
+		emitted[next] = true
+		ordered = append(ordered, associations[next])
+		for child := range reachable[next] {
+			if reachable[next][child] && !reachable[child][next] {
+				indegree[child]--
+			}
+		}
+	}
+	return ordered
+}
+
 func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) error {
 	record, err := r.repository.GetBagDropConfig(ctx, project.OrganizationID, project.ProjectID)
 	if err != nil || !record.Enabled {
@@ -238,19 +325,24 @@ func (r *Reconciler) ReconcileProject(ctx context.Context, project Project) erro
 	if err != nil {
 		return err
 	}
+	snapshots := make(map[string]*BucketSnapshot, len(associations))
+	for _, association := range associations {
+		if association.State != AssociationActive {
+			continue
+		}
+		snapshots[association.BucketName], err = r.repository.GetBagDropBucketSnapshot(
+			ctx, project.OrganizationID, project.ProjectID, association.BucketName,
+		)
+		if err != nil {
+			return err
+		}
+	}
+	associations = orderAssociationsByAncestry(associations, snapshots)
 	var run ReconcileRun
 	var runErr error
 	var failures []error
 	for _, association := range associations {
-		var bucket *BucketSnapshot
-		if association.State == AssociationActive {
-			bucket, err = r.repository.GetBagDropBucketSnapshot(
-				ctx, project.OrganizationID, project.ProjectID, association.BucketName,
-			)
-			if err != nil {
-				return err
-			}
-		}
+		bucket := snapshots[association.BucketName]
 		attemptedAt := r.now().UTC()
 		if err := r.repository.MarkBagDropAssociationAttempt(
 			ctx, project.OrganizationID, project.ProjectID, association.BucketName, attemptedAt,
