@@ -633,7 +633,7 @@ func TestHCPPackerReconcileToleratesAlreadyExistsCreates(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("CreateBuild 409/code-6 = %v", err)
 	}
-	if err := run.CreateChannel(context.Background(), "images", "production"); err != nil {
+	if err := run.CreateChannel(context.Background(), "images", ChannelSnapshot{Name: "production"}); err != nil {
 		t.Fatalf("CreateChannel 409/code-6 = %v", err)
 	}
 }

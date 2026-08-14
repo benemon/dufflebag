@@ -492,7 +492,7 @@ func (r *Repository) GetBagDropBucketSnapshot(
 		if channel.Managed {
 			continue
 		}
-		channelSnapshot := bagdrop.ChannelSnapshot{Name: channel.Name}
+		channelSnapshot := bagdrop.ChannelSnapshot{Name: channel.Name, Restricted: channel.Restricted}
 		if channel.Version != nil {
 			fingerprint := channel.Version.Fingerprint
 			channelSnapshot.AssignedVersionFingerprint = &fingerprint
