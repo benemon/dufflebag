@@ -224,17 +224,18 @@ async function api(token, method, requestPath, body) {
 }
 
 async function vaultPost(requestPath, body) {
-  const vaultAddress = process.env.VAULT_ADDR
+  const vaultAddress = process.env.DFBG_VAULT_ADDR || process.env.VAULT_ADDR
   const url = new URL(requestPath, `${vaultAddress.replace(/\/$/, '')}/`)
+  const vaultNamespace =
+    process.env.DFBG_VAULT_TRANSIT_NAMESPACE || process.env.VAULT_NAMESPACE
   const headers = {
     'Content-Type': 'application/json',
-    'X-Vault-Token': process.env.VAULT_TOKEN,
-    // The server under test reaches its namespaced transit through the SDK's
-    // ambient VAULT_NAMESPACE; this direct operator call must name the same
-    // namespace or it lands at root and is refused.
-    ...(process.env.VAULT_NAMESPACE
-      ? { 'X-Vault-Namespace': process.env.VAULT_NAMESPACE }
-      : {}),
+    'X-Vault-Token': process.env.DFBG_VAULT_TOKEN || process.env.VAULT_TOKEN,
+    // The server under test reaches its namespaced transit through
+    // DFBG_VAULT_TRANSIT_NAMESPACE (or the SDK's ambient escape hatch); this
+    // direct operator call must name the same namespace or it lands at root
+    // and is refused.
+    ...(vaultNamespace ? { 'X-Vault-Namespace': vaultNamespace } : {}),
   }
   const encoded = JSON.stringify(body)
 
@@ -670,8 +671,14 @@ test('stock Packer publishes registry metadata with paired file audit records', 
   await t.test('the encrypted keyring rotates without losing retained payloads', {
     skip: encrypted ? false : 'requires DFBG_KEY_PROVIDER and the lab Vault environment',
   }, async () => {
-    assert.ok(process.env.VAULT_ADDR, 'encrypted posture has no VAULT_ADDR')
-    assert.ok(process.env.VAULT_TOKEN, 'encrypted posture has no VAULT_TOKEN')
+    assert.ok(
+      process.env.DFBG_VAULT_ADDR || process.env.VAULT_ADDR,
+      'encrypted posture has no DFBG_VAULT_ADDR',
+    )
+    assert.ok(
+      process.env.DFBG_VAULT_TOKEN || process.env.VAULT_TOKEN,
+      'encrypted posture has no DFBG_VAULT_TOKEN',
+    )
     const transitMount = (process.env.DFBG_VAULT_TRANSIT_MOUNT || 'transit')
       .replace(/^\/+|\/+$/g, '')
     const transitKey = process.env.DFBG_VAULT_TRANSIT_KEY || 'dufflebag'
