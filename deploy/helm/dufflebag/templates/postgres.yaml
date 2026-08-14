@@ -9,16 +9,9 @@ data:
     #!/bin/sh
     set -eu
     psql -v ON_ERROR_STOP=1 --username postgres --dbname dufflebag \
-      --set=migrate_password="$POSTGRES_MIGRATE_PASSWORD" \
       --set=app_password="$POSTGRES_APP_PASSWORD" <<'SQL'
-    CREATE ROLE dufflebag_migrate LOGIN PASSWORD :'migrate_password';
-    ALTER DATABASE dufflebag OWNER TO dufflebag_migrate;
-    CREATE ROLE dufflebag_app LOGIN PASSWORD :'app_password' NOSUPERUSER NOBYPASSRLS;
-    GRANT CONNECT ON DATABASE dufflebag TO dufflebag_app;
-    GRANT USAGE ON SCHEMA public TO dufflebag_app;
-    GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app;
-    ALTER DEFAULT PRIVILEGES FOR ROLE dufflebag_migrate IN SCHEMA public
-      GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO dufflebag_app;
+    CREATE ROLE dufflebag LOGIN PASSWORD :'app_password' NOSUPERUSER NOBYPASSRLS;
+    ALTER DATABASE dufflebag OWNER TO dufflebag;
     SQL
 ---
 apiVersion: v1
@@ -90,11 +83,6 @@ spec:
                 secretKeyRef:
                   name: {{ include "dufflebag.fullname" . }}-postgres
                   key: postgres-password
-            - name: POSTGRES_MIGRATE_PASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "dufflebag.fullname" . }}-postgres
-                  key: migrate-password
             - name: POSTGRES_APP_PASSWORD
               valueFrom:
                 secretKeyRef:

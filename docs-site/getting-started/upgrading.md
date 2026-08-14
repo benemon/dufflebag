@@ -3,8 +3,8 @@
 Upgrading a deployment means replacing the dufflebag image with a newer tag.
 The server applies pending schema migrations at startup, so a single-role
 deployment upgrades by starting the new image — nothing else. On a hardened
-two-role deployment, the automation that runs the `migrate` subcommand (the
-Helm chart's init container, or your pre-deploy step) applies them instead.
+two-role deployment, the automation that runs the `migrate` subcommand (your
+init container or pre-deploy step) applies them instead.
 The [deployment reference](../deployment/index.md#migrations) defines both
 paths.
 

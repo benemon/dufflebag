@@ -31,6 +31,9 @@ helm install dufflebag deploy/helm/dufflebag \
   --namespace dufflebag --create-namespace
 ```
 
+The chart uses the single-role model: the server migrates at startup without a
+migration init container.
+
 The chart is also published as a Helm repository on the documentation site,
 versioned per merge to main:
 
@@ -118,8 +121,8 @@ the schema enforces `FORCE ROW LEVEL SECURITY`.
 
 Splitting migration from serving keeps schema-altering privileges out of the
 serving process entirely. With the split, migrations run under the privileged
-role in an init container or pre-deploy step — the bundled Helm chart does
-exactly this — never by hand. On PostgreSQL 15 and later, the database
+role in an init container or pre-deploy step of your own deployment — never by
+hand. On PostgreSQL 15 and later, the database
 ownership below is what confers `CREATE` on schema `public` (earlier versions
 granted it to every role by default). Create one role that owns the schema and
 one that uses it:
