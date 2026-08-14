@@ -168,3 +168,14 @@
   border-left: 2px solid var(--pf-t--global--border--color--default, #c7c7c7);
   padding-left: 10px;
 }
+
+/* PatternFly's dark theme never redefines the base background globals — its
+   components remap through other tokens (the sidebar's floating-secondary
+   flips; these do not). Anything here that consumes the base ladder directly
+   (the facet rail, the build-label tiles) therefore needs the dark ladder
+   stated, on PatternFly's own grey scale (duf-66xa). */
+:root.pf-v6-theme-dark {
+  --pf-t--global--background--color--100: #1f1f1f;
+  --pf-t--global--background--color--200: #292929;
+  --pf-t--global--background--color--300: #383838;
+}

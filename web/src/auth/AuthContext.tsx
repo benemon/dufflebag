@@ -53,6 +53,21 @@ export function applyOrganizationRefresh(
     : { organizations: current.organizations, failure: result.failure }
 }
 
+/**
+ * The empty string is organisation standing — the deliberate step above
+ * projects — and must survive a refresh exactly as it survives the oldest-
+ * project auto-select ('' is not nullish). A refresh triggered by opening the
+ * picker once raced the dash selection and stomped it to the oldest project.
+ */
+export function selectionAfterProjectsRefresh(
+  current: string | null,
+  ordered: ApiProject[],
+): string | null {
+  if (current === '') return current
+  if (current && ordered.some((project) => project.id === current)) return current
+  return ordered[0]?.id ?? null
+}
+
 export function selectionAfterOrganizationRefresh(
   current: string | null,
   organizations: ApiOrganization[],
@@ -500,9 +515,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           : await listProjects(state.token, organizationID)
       const ordered = [...projects].sort((a, b) => a.created_at.localeCompare(b.created_at))
       setOrganizationProjects(ordered)
-      setSelectedProject((current) => current && ordered.some((project) => project.id === current)
-        ? current
-        : ordered[0]?.id ?? null)
+      setSelectedProject((current) => selectionAfterProjectsRefresh(current, ordered))
       return ordered
     } catch (err: unknown) {
       if (signOutIfUnauthorized(err, signOut)) return null

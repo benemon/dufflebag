@@ -20,6 +20,7 @@ let startOrganizationRefresh
 let scheduleSessionRenewal
 let renewConsoleSession
 let refreshOnPickerOpen
+let selectionAfterProjectsRefresh
 let grantableRoles
 let PrincipalsView
 let BucketsView
@@ -42,6 +43,7 @@ before(async () => {
     AuthContext, applyOrganizationRefresh, selectionAfterInitialOrganizationLoad,
     selectionAfterOrganizationRefresh,
     startOrganizationRefresh, scheduleSessionRenewal, renewConsoleSession,
+    selectionAfterProjectsRefresh,
   } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
   ;({
     TenantSwitcher, refreshOnPickerOpen,
@@ -296,6 +298,20 @@ test('masthead pickers carry visible captions and loading uses a compact skeleto
   const failed = switcherMarkup(session({ organizationFailure: 'network unavailable' }))
   assert.match(failed, /Organisation:[\s\S]*Organisations could not be loaded/)
   assert.doesNotMatch(failed, /pf-v6-c-skeleton|No organisations exist/)
+})
+
+test('a projects refresh preserves organisation standing and dead selections fall to oldest', async () => {
+  const projects = [
+    { id: 'p-old', created_at: '2026-01-01T00:00:00Z' },
+    { id: 'p-new', created_at: '2026-02-01T00:00:00Z' },
+  ]
+  // '' is the deliberate dash — organisation standing — and must survive the
+  // refresh a picker-open now triggers (it once raced and got stomped).
+  assert.equal(selectionAfterProjectsRefresh('', projects), '')
+  assert.equal(selectionAfterProjectsRefresh('p-new', projects), 'p-new')
+  assert.equal(selectionAfterProjectsRefresh('p-gone', projects), 'p-old')
+  assert.equal(selectionAfterProjectsRefresh(null, projects), 'p-old')
+  assert.equal(selectionAfterProjectsRefresh(null, []), null)
 })
 
 test('opening a picker refreshes once, while closing it does not', async () => {
