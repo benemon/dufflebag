@@ -53,10 +53,9 @@ DEMO_VAULT_TOKEN     ?= demo-root
 # DEMO_CLAIM=0 stops after the stack serves, leaving the instance unclaimed
 # for a first-run wizard walkthrough. Never expose an unclaimed instance.
 DEMO_CLAIM           ?= 1
-# Tenancy for demo-publish. make demo-up writes these to $(DEMO_DIR); an
-# instance claimed through the wizard supplies them here instead.
-DEMO_ORGANIZATION_ID ?=
-DEMO_PROJECT_ID      ?=
+# demo-publish takes its tenancy from the SDK's own environment
+# (HCP_ORGANIZATION_ID/HCP_PROJECT_ID — the Instance page's connection block
+# exports exactly these), falling back to the files make demo-up writes.
 # First run is SPN, then organisation, then project. /sys/init mints only the
 # principal; tenancy is created through the ordinary authenticated endpoints,
 # which is what the console wizard does and what this target emulates. Claiming
@@ -714,7 +713,7 @@ demo-expose: ## Expose the claimed demo instance over ngrok (refuses if unclaime
 	echo "EXPOSED https://$(DEMO_NGROK_URL)"
 
 .PHONY: demo-publish
-demo-publish: ## Publish the parent/child lineage plus one bucket per corpus distro
+demo-publish: ## Publish the demo corpus (wizard-claimed: supply the HCP_* env from the Instance page)
 	@set -e; \
 	command -v $(PACKER_E2E_PACKER) >/dev/null || { echo "FAIL demo-publish: packer is required"; exit 1; }; \
 	command -v $(PACKER_E2E_DOCKER) >/dev/null || { echo "FAIL demo-publish: docker is required"; exit 1; }; \
@@ -723,12 +722,12 @@ demo-publish: ## Publish the parent/child lineage plus one bucket per corpus dis
 	fi; \
 	test -n "$$HCP_CLIENT_ID" || { echo "FAIL demo-publish: HCP_CLIENT_ID is required — make demo-up mints $(DEMO_DIR)/builder.env"; exit 1; }; \
 	test -n "$$HCP_CLIENT_SECRET" || { echo "FAIL demo-publish: HCP_CLIENT_SECRET is required"; exit 1; }; \
-	org="$(DEMO_ORGANIZATION_ID)"; \
+	org="$${HCP_ORGANIZATION_ID:-}"; \
 	if [ -z "$$org" ] && [ -r "$(DEMO_DIR)/organization_id" ]; then org=$$(cat "$(DEMO_DIR)/organization_id"); fi; \
-	test -n "$$org" || { echo "FAIL demo-publish: set DEMO_ORGANIZATION_ID, or run make demo-up (writes $(DEMO_DIR)/organization_id)"; exit 1; }; \
-	project="$(DEMO_PROJECT_ID)"; \
+	test -n "$$org" || { echo "FAIL demo-publish: set HCP_ORGANIZATION_ID, or run make demo-up (writes $(DEMO_DIR)/organization_id)"; exit 1; }; \
+	project="$${HCP_PROJECT_ID:-}"; \
 	if [ -z "$$project" ] && [ -r "$(DEMO_DIR)/project_id" ]; then project=$$(cat "$(DEMO_DIR)/project_id"); fi; \
-	test -n "$$project" || { echo "FAIL demo-publish: set DEMO_PROJECT_ID, or run make demo-up (writes $(DEMO_DIR)/project_id)"; exit 1; }; \
+	test -n "$$project" || { echo "FAIL demo-publish: set HCP_PROJECT_ID, or run make demo-up (writes $(DEMO_DIR)/project_id)"; exit 1; }; \
 	test -r "$(PACKER_E2E_CA_FILE)" || { echo "FAIL demo-publish: no CA chain at $(PACKER_E2E_CA_FILE)"; exit 1; }; \
 	base="https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)"; \
 	curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" "$$base/sys/health" >/dev/null || { \
