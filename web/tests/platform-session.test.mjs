@@ -19,7 +19,7 @@ let selectionAfterOrganizationRefresh
 let startOrganizationRefresh
 let scheduleSessionRenewal
 let renewConsoleSession
-let refreshOrganizationsOnPickerOpen
+let refreshOnPickerOpen
 let grantableRoles
 let PrincipalsView
 let BucketsView
@@ -44,7 +44,7 @@ before(async () => {
     startOrganizationRefresh, scheduleSessionRenewal, renewConsoleSession,
   } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
   ;({
-    TenantSwitcher, refreshOrganizationsOnPickerOpen,
+    TenantSwitcher, refreshOnPickerOpen,
   } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
@@ -298,13 +298,21 @@ test('masthead pickers carry visible captions and loading uses a compact skeleto
   assert.doesNotMatch(failed, /pf-v6-c-skeleton|No organisations exist/)
 })
 
-test('opening the organisation picker refreshes once, while closing it does not', async () => {
+test('opening a picker refreshes once, while closing it does not', async () => {
   let refreshes = 0
   const refresh = async () => { refreshes++ }
-  refreshOrganizationsOnPickerOpen(false, refresh)
+  refreshOnPickerOpen(false, refresh)
   assert.equal(refreshes, 0)
-  refreshOrganizationsOnPickerOpen(true, refresh)
+  refreshOnPickerOpen(true, refresh)
   assert.equal(refreshes, 1)
+})
+
+// duf-4hje: newly created projects only appeared after an organisation
+// round-trip, because the project picker opened onto a cached list. Both
+// pickers must wire the open-refresh, not just the organisation one.
+test('both pickers refresh their listing on open', () => {
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshOrganizations\)/)
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshProjects\)/)
 })
 
 test('concurrent organisation refresh signals share one request', async () => {
