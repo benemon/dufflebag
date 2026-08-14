@@ -153,8 +153,11 @@ export function BucketsView({
     const bucket = buckets.find((candidate) => candidate.name === pin.bucket_name)
     return bucket ? [bucket] : []
   })
-  const awaitingFirstCompletedVersion = buckets.length > 0 && buckets.every(
-    (bucket) => !bucket.newestVersion || bucket.newestVersion.state === 'incomplete',
+  // Any version at all — v0 included — is proof Packer has connected, so the
+  // connection hint would be stale advice mid-build (duf-r0j6). It shows only
+  // while every bucket has never seen a build.
+  const awaitingFirstBuild = buckets.length > 0 && buckets.every(
+    (bucket) => !bucket.newestVersion,
   )
 
   useEffect(() => {
@@ -285,7 +288,7 @@ export function BucketsView({
               </EmptyState>
             ) : (
               <>
-                {showConnectionHint && awaitingFirstCompletedVersion ? (
+                {showConnectionHint && awaitingFirstBuild ? (
                   <Hint
                     actions={(
                       <Button
