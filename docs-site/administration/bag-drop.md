@@ -159,6 +159,11 @@ Version revocation state mirrors in both directions. Bag Drop pushes local
 revocation schedules and messages. It restores a remotely revoked version when
 its local source is active.
 
+Destination-side revocation inheritance is owned by the destination. A
+destination that applies inheritance when a parent's revocation is scheduled
+can show descendants as inherited before this registry does. The steady state
+converges once the parent's revocation mirrors.
+
 ## Status
 
 The **Bag Drop** screen and `GET …/bagdrop/status` report whether the project is
