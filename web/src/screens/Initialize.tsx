@@ -104,11 +104,11 @@ export function StoreCredentials({
         style={{ marginTop: 16 }}
       >
         <Content component="p">
-          The credentials grant full administrative access and are hashed with argon2id on
-          write. If they are lost, presenting the required recovery shares to
-          POST /sys/recovery mints a fresh root principal — store them offline,
-          separately from the credentials. If both are lost, only the break-glass
-          database procedure remains.
+          The credentials grant full administrative access and can never be
+          retrieved again. If they are lost, presenting the required recovery
+          shares to POST /sys/recovery mints a fresh root principal — store them
+          offline, separately from the credentials. If both are lost, only the
+          break-glass database procedure remains.
           Use a client ID that has never authenticated against another registry; clients
           cache tokens by client ID and a collision produces confusing 401s.
         </Content>

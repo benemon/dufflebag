@@ -85,15 +85,10 @@ failure reports `credential_refused`, `project_not_found`, `unreachable`, or
 The client secret is required the first time. When editing an existing
 configuration, leave it blank to keep the stored credential.
 
-### Verify a destination
-
-Prerequisites: A stored Bag Drop configuration.
-
-1. Select **Verify**.
-
-Verification repeats the same destination resolution used by enable. It reads
-the stored configuration and changes nothing on either side. Use it to confirm
-that a destination is still reachable without editing the configuration.
+To confirm that a stored destination is still reachable without changing
+anything, use the API's read-only verification —
+`POST .../bagdrop/verify` repeats the same resolution enable performs and
+persists nothing. The console offers enable only.
 
 ### Disable a destination
 

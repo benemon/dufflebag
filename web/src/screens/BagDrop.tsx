@@ -16,7 +16,7 @@ import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternf
 import {
   ApiError, deleteBagDropAssociation, deleteBagDropConfig, disableBagDrop, enableBagDrop,
   getBagDropConfig, getBagDropStatus, listBagDropAssociations, listBuckets,
-  reconcileBagDrop, setBagDropAssociation, verifyBagDrop,
+  reconcileBagDrop, setBagDropAssociation,
   type ApiBagDropAssociation, type ApiBagDropConfig, type ApiBagDropConfigWrite,
   type ApiBagDropEnableResult, type ApiBagDropStatus, type ApiBagDropVerificationResult,
   type ApiBucket,
@@ -203,12 +203,6 @@ export function BagDrop() {
     <BagDropView
       callerRole={callerRole} canConfigure={canConfigure}
       config={config} configLoading={configLoading} configFailure={configFailure}
-      onVerify={async () => {
-        const result = await verifyBagDrop(token, tenant)
-        await loadMaintainer()
-        await loadStatus(true)
-        return result
-      }}
       onEnable={async (write) => {
         const result = await enableBagDrop(token, tenant, write)
         if (result.kind === 'enabled') {
@@ -267,7 +261,6 @@ type BagDropViewProps = {
   config: ApiBagDropConfig | null
   configLoading: boolean
   configFailure: string | null
-  onVerify: () => Promise<ApiBagDropVerificationResult>
   onEnable: (write: ApiBagDropConfigWrite) => Promise<ApiBagDropEnableResult>
   onDisable: () => Promise<ApiBagDropConfig>
   onDelete: () => Promise<void>
@@ -309,9 +302,9 @@ export function BagDropView(props: BagDropViewProps) {
 }
 
 export function DestinationZone({
-  config, configLoading, configFailure, onVerify, onEnable, onDisable, onDelete,
+  config, configLoading, configFailure, onEnable, onDisable, onDelete,
 }: Pick<BagDropViewProps,
-  'config' | 'configLoading' | 'configFailure' | 'onVerify' | 'onEnable' |
+  'config' | 'configLoading' | 'configFailure' | 'onEnable' |
   'onDisable' | 'onDelete'>) {
   const [draft, setDraft] = useState<DestinationDraft>(() => draftForBagDropConfig(config))
   const [baseline, setBaseline] = useState<DestinationDraft>(() => draftForBagDropConfig(config))
@@ -359,7 +352,6 @@ export function DestinationZone({
           <DestinationFormView
             config={config} draft={draft} dirty={dirty} busy={busy}
             onDraftChange={setDraft}
-            onVerify={() => run('verify', async () => setVerification(await onVerify()))}
             onEnable={() => run('enable', async () => {
               const result = await onEnable(bagDropWrite(draft))
               if (result.kind === 'refused') {
@@ -445,14 +437,13 @@ export function DestinationActionFailure({
 }
 
 export function DestinationFormView({
-  config, draft, dirty, busy, onDraftChange, onVerify, onEnable, onDisable, onDelete,
+  config, draft, dirty, busy, onDraftChange, onEnable, onDisable, onDelete,
 }: {
   config: ApiBagDropConfig | null
   draft: DestinationDraft
   dirty: boolean
   busy: string | null
   onDraftChange: (draft: DestinationDraft) => void
-  onVerify: () => void
   onEnable: () => void
   onDisable: () => void
   onDelete: () => void
@@ -519,12 +510,6 @@ export function DestinationFormView({
         >
           Enable
         </Button>
-        <Button
-          variant="secondary"
-          /* MUTATION_VERIFY_DIRTY: verify always resolves the stored configuration. */
-          isDisabled={dirty || !config || busy !== null}
-          isLoading={busy === 'verify'} onClick={onVerify}
-        >Verify</Button>
         {config?.enabled ? (
           <Button
             variant="secondary" isDisabled={dirty || busy !== null}
