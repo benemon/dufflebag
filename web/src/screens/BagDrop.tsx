@@ -92,6 +92,17 @@ function draftIsValid(draft: DestinationDraft, config: ApiBagDropConfig | null):
   return draft.adapter !== 'dufflebag' || draft.endpoint.trim() !== ''
 }
 
+export async function refreshBagDrop(
+  loadStatus: () => Promise<unknown>,
+  loadMaintainer: () => Promise<void>,
+  canConfigure: boolean,
+): Promise<void> {
+  await Promise.all([
+    loadStatus(),
+    ...(canConfigure ? [loadMaintainer()] : []),
+  ])
+}
+
 export function BagDrop() {
   const { state, self, selectedOrganization, selectedProject } = useAuth()
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? null
@@ -198,30 +209,33 @@ export function BagDrop() {
     setAssociations(await listBagDropAssociations(token, tenant))
     await loadStatus(true)
   }
+  const reloadAll = () => refreshBagDrop(() => loadStatus(), loadMaintainer, canConfigure)
 
   return (
     <BagDropView
       callerRole={callerRole} canConfigure={canConfigure}
       config={config} configLoading={configLoading} configFailure={configFailure}
+      onRefresh={reloadAll}
+      refreshing={statusLoading || (canConfigure && (configLoading || associationsLoading))}
       onEnable={async (write) => {
         const result = await enableBagDrop(token, tenant, write)
         if (result.kind === 'enabled') {
           setConfig(result.config)
-          await loadStatus(true)
+          await reloadAll()
         }
         return result
       }}
       onDisable={async () => {
         const stored = await disableBagDrop(token, tenant)
         setConfig(stored)
-        await loadStatus(true)
+        await reloadAll()
         return stored
       }}
       onDelete={async () => {
         await deleteBagDropConfig(token, tenant)
         setConfig(null)
         setAssociations([])
-        await loadStatus(true)
+        await reloadAll()
       }}
       buckets={buckets} associations={associations}
       associationsLoading={associationsLoading} associationsFailure={associationsFailure}
@@ -237,7 +251,7 @@ export function BagDrop() {
       onReconcile={async () => {
         await reconcileBagDrop(token, tenant)
         setPollAfterReconcile(true)
-        await loadStatus(true)
+        await reloadAll()
       }}
     />
   )
@@ -261,6 +275,8 @@ type BagDropViewProps = {
   config: ApiBagDropConfig | null
   configLoading: boolean
   configFailure: string | null
+  onRefresh: () => void | Promise<void>
+  refreshing: boolean
   onEnable: (write: ApiBagDropConfigWrite) => Promise<ApiBagDropEnableResult>
   onDisable: () => Promise<ApiBagDropConfig>
   onDelete: () => Promise<void>
@@ -281,6 +297,8 @@ export function BagDropView(props: BagDropViewProps) {
     <>
       <ScreenHeader
         title="Bag Drop"
+        onRefresh={props.onRefresh}
+        refreshing={props.refreshing}
         description="Mirror selected buckets to another registry while keeping this project authoritative."
       />
       <PageSection variant="secondary" isFilled hasBodyWrapper={false}>

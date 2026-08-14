@@ -11,6 +11,7 @@ let enableBagDrop
 let AssociationSelectorView
 let BagDropStatusTableView
 let BagDropView
+let refreshBagDrop
 let BucketRemovalConfirmation
 let BucketSetRemovalConfirmation
 let DestinationActionFailure
@@ -34,7 +35,7 @@ before(async () => {
     AssociationSelectorView, BagDropStatusTableView, BagDropView, BucketRemovalConfirmation,
     BucketSetRemovalConfirmation,
     DeleteBagDropConfigConfirmation, DestinationActionFailure, DestinationFormView,
-    DestinationZone, bagDropWrite,
+    DestinationZone, bagDropWrite, refreshBagDrop,
     enableFailureMessage,
   } = await vite.ssrLoadModule('/src/screens/BagDrop.tsx'))
   ;({ TypedConfirmModalView } =
@@ -93,6 +94,7 @@ const viewProps = (over = {}) => ({
   config: config(), configLoading: false, configFailure: null,
   onEnable: async () => ({ kind: 'enabled', config: config({ enabled: true }) }),
   onDisable: async () => config(), onDelete: async () => {},
+  onRefresh: async () => {}, refreshing: false,
   buckets: [{ name: 'images' }, { name: 'workers' }], associations: [association()],
   associationsLoading: false, associationsFailure: null,
   onAssociate: async () => {}, onUnassociate: async () => {},
@@ -133,6 +135,37 @@ test('reader renders the status zone only while maintainer renders all three zon
   assert.match(maintainer, /aria-label="Mirrored buckets"/)
   assert.match(maintainer, /aria-label="Status"/)
 })
+
+test('manual refresh loads status and maintainer associations together', async () => {
+  let statusLoads = 0
+  let maintainerAssociationLoads = 0
+  await refreshBagDrop(
+    async () => { statusLoads++ },
+    async () => { maintainerAssociationLoads++ },
+    true,
+  )
+  assert.equal(statusLoads, 1)
+  assert.equal(maintainerAssociationLoads, 1)
+
+  await refreshBagDrop(
+    async () => { statusLoads++ },
+    async () => { maintainerAssociationLoads++ },
+    false,
+  )
+  assert.equal(statusLoads, 2)
+  assert.equal(maintainerAssociationLoads, 1)
+})
+
+for (const [mutation, pattern] of [
+  ['enable', /onEnable=\{async \(write\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?return result/],
+  ['disable', /onDisable=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?return stored/],
+  ['delete', /onDelete=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?\}\}/],
+  ['reconcile', /onReconcile=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?\}\}/],
+]) {
+  test(`${mutation} invalidates status and associations through the paired loader`, () => {
+    assert.match(bagdropScreenSource, pattern)
+  })
+}
 
 test('Enable is the only resolution action; no Verify button renders', () => {
   let enabled = false

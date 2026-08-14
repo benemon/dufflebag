@@ -44,6 +44,8 @@ export function EncryptionView({
     <>
       <ScreenHeader
         title="Encryption"
+        onRefresh={reload}
+        refreshing={loading}
         description={(
           <>
             Encryption at rest protects stored data with a keyring backed by an external key

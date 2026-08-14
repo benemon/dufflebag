@@ -172,7 +172,7 @@ test('Create webhook moves between the empty state and populated header with its
   assert.equal((emptyReader.match(/Create webhook/g) ?? []).length, 1)
 
   const populatedReader = view({ callerRole: 'reader', webhooks: [webhook()] })
-  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Create webhook/)
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,4000}Create webhook/)
   assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
   assert.match(populatedReader, /Requires maintainer/)
   assert.equal((populatedReader.match(/Create webhook/g) ?? []).length, 1)

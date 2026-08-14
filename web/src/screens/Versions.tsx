@@ -210,6 +210,8 @@ export function VersionsView({
   return (
     <>
       <ScreenHeader
+        onRefresh={onRefresh}
+        refreshing={loading}
         breadcrumbs={(
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBack}>

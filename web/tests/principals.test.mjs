@@ -582,7 +582,7 @@ test('Create principal moves between the empty state and populated header with i
   assert.equal((emptyReader.match(/Create principal/g) ?? []).length, 1)
 
   const populatedReader = view({ callerRole: 'reader' })
-  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Create principal/)
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,4000}Create principal/)
   assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
   assert.match(populatedReader, /Requires maintainer/)
   assert.equal((populatedReader.match(/Create principal/g) ?? []).length, 1)

@@ -56,6 +56,7 @@ export function Buckets() {
   return (
     <BucketsView
       {...bucketData}
+      onRefresh={() => setRefresh((current) => current + 1)}
       callerRole={self?.role ?? null}
       openBucket={(bucket) => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       openInstance={() => navigate('/instance')}
@@ -97,6 +98,7 @@ export function BucketsView({
   openInstance = () => {},
   onDeleteBucket = () => Promise.reject(new Error('No session.')),
   onCheckMirrored,
+  onRefresh = () => {},
 }: {
   buckets: Bucket[]
   total: number
@@ -116,6 +118,7 @@ export function BucketsView({
   openInstance?: () => void
   onDeleteBucket?: (bucket: string) => Promise<void>
   onCheckMirrored?: (bucket: string) => Promise<boolean>
+  onRefresh?: () => void
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const [nameFilter, setNameFilter] = useState('')
@@ -177,6 +180,8 @@ export function BucketsView({
   return (
     <>
       <ScreenHeader
+        onRefresh={onRefresh}
+        refreshing={loading}
         title="Buckets"
         description={!loading && !failure && !gap ? (
           <>
