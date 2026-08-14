@@ -1610,6 +1610,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('team=platform')
     await waitForText('purpose=browser-proof')
     await waitForText('Bucket details')
+    // The facet rail consumes the base background token ladder, which
+    // PatternFly's dark theme never redefines — the rail once stayed white in
+    // dark mode (duf-66xa). Prove it follows the theme like the sidebar does.
+    const railBackground = () => page.$eval(
+      '.registry-facet-heading', (el) => getComputedStyle(el).backgroundColor)
+    const lightRail = await railBackground()
+    await page.click('button[aria-label="Switch to dark theme"]')
+    assert.notEqual(await railBackground(), lightRail)
+    await page.click('button[aria-label="Switch to light theme"]')
+    assert.equal(await railBackground(), lightRail)
     assert.equal(await facetHeading('Bucket facets'), 'This bucket')
     assert.deepEqual(await facetItems('Bucket facets'), [
       { label: 'Overview', count: '' },
