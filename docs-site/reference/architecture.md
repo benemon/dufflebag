@@ -185,9 +185,10 @@ control, while encrypted deployments additionally seal each object before
 upload. Two further external dependencies are optional and deployment-shaped:
 a key service (Vault transit) behind `internal/keyring` when encryption at
 rest was chosen at first boot, and an OSV-compatible scanner endpoint when
-scanning is configured. Migrations are embedded in the binary and run via the
-`migrate` subcommand under a privileged role; the serving role cannot alter
-schema. See [Deploying dufflebag](../deployment/index.md).
+scanning is configured. Migrations are embedded in the binary and apply at
+startup; the hardened two-role deployment runs them via the `migrate`
+subcommand under a privileged role instead, keeping schema changes away from
+the serving role. See [Deploying dufflebag](../deployment/index.md).
 
 Migrations are written expand-only, and an expand/contract gate exists
 (`cmd/schema-compat`, `make expand-contract`) that runs the previous release's

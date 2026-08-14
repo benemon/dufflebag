@@ -97,14 +97,32 @@ Behind a proxy or OpenShift Route, set `DFBG_TRUSTED_PROXIES` to the proxy or
 ingress egress range, or the per-caller token throttle collapses to one shared
 bucket. Never include ranges that clients can occupy.
 
-## PostgreSQL: two roles
+## PostgreSQL
 
-Migrations legitimately need privileges the serving process must not hold. The
-serving role is refused at startup if it is a superuser or holds `BYPASSRLS`,
-because either would disable row-level security — the tenancy boundary —
-without any error. On PostgreSQL 15 and later, the database ownership below is
-what confers `CREATE` on schema `public` (earlier versions granted it to every
-role by default). Create one role that owns the schema and one that uses it:
+Provide a database owned by a role that is neither a superuser nor holds
+`BYPASSRLS`. That is the whole requirement — the server creates its schema at
+first boot and applies pending migrations itself on every start, so a
+single-role setup has no migration step:
+
+```sql
+CREATE ROLE dufflebag LOGIN PASSWORD '<password>' NOSUPERUSER NOBYPASSRLS;
+CREATE DATABASE dufflebag OWNER dufflebag;
+```
+
+The serving role is refused at startup if it is a superuser or holds
+`BYPASSRLS`, because either would disable row-level security — the tenancy
+boundary — without any error. Table owners are subject to the same policies:
+the schema enforces `FORCE ROW LEVEL SECURITY`.
+
+### Hardened: two roles
+
+Splitting migration from serving keeps schema-altering privileges out of the
+serving process entirely. With the split, migrations run under the privileged
+role in an init container or pre-deploy step — the bundled Helm chart does
+exactly this — never by hand. On PostgreSQL 15 and later, the database
+ownership below is what confers `CREATE` on schema `public` (earlier versions
+granted it to every role by default). Create one role that owns the schema and
+one that uses it:
 
 ```sql
 CREATE DATABASE dufflebag;
@@ -133,8 +151,14 @@ grant step.
 
 ## Migrations
 
-The same image is the migration tool. Run it with the privileged role before
-(or as an init container alongside) the serving process:
+The server applies pending schema migrations at startup, under an advisory
+lock, so concurrently starting replicas serialize. On a single-role setup that
+is the whole story: first boot creates the schema, and an upgraded image
+migrates the database before it serves. There is no migrate command to run.
+
+On a [two-role setup](#hardened-two-roles) the serving role cannot alter
+schema, so the same image is the migration tool. Run it with the privileged
+role in an init container or pre-deploy step:
 
 ```sh
 docker run --rm \
@@ -143,10 +167,9 @@ docker run --rm \
 ```
 
 It applies any pending schema migrations and exits zero; running it again is a
-no-op, so it is safe on every deploy. The server also attempts migration at
-startup — on a database the migrate step has prepared, that attempt does
-nothing, and on a schema change it cannot apply with the serving role it fails
-rather than serving a schema it does not understand.
+no-op, so it is safe on every deploy. A schema change the serving role cannot
+apply fails startup rather than serving a schema the server does not
+understand.
 
 ## First run
 
