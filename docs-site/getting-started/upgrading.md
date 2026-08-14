@@ -1,9 +1,12 @@
 # Upgrading
 
 Upgrading a deployment means replacing the dufflebag image with a newer tag.
-Run the newer image's `migrate` subcommand before that image starts serving.
-The [deployment reference](../deployment/index.md#migrations) defines this
-migrate-then-serve contract.
+The server applies pending schema migrations at startup, so a single-role
+deployment upgrades by starting the new image — nothing else. On a hardened
+two-role deployment, the automation that runs the `migrate` subcommand (the
+Helm chart's init container, or your pre-deploy step) applies them instead.
+The [deployment reference](../deployment/index.md#migrations) defines both
+paths.
 
 ## Before 1.0
 
@@ -30,20 +33,22 @@ rolling upgrade with this chart. See the
 
 ## Upgrade an instance
 
-Prerequisites: Access to the deployment configuration, the privileged
-PostgreSQL migration role, and the unprivileged serving role described in the
-[deployment reference](../deployment/index.md#postgresql-two-roles). Select the
+Prerequisites: Access to the deployment configuration. On a
+[hardened two-role deployment](../deployment/index.md#hardened-two-roles),
+also the automation that runs migrations with the privileged role. Select the
 target tag after reading its GitHub release notes.
 
 1. Replace the dufflebag image tag in the deployment configuration with the
    target release tag. The [image reference](../deployment/index.md#the-image)
    describes the published tag forms.
 
-2. Run the target image's `migrate` subcommand with the migration role. Wait
-   for it to finish before starting the target image's serving process. See
-   [Migrations](../deployment/index.md#migrations).
+2. On a two-role deployment only: let your automation run the target image's
+   `migrate` subcommand with the migration role, and wait for it to finish
+   before the target image serves. See
+   [Migrations](../deployment/index.md#migrations). A single-role deployment
+   skips this step; the server migrates at startup.
 
-3. Start the target image with the serving role. See
+3. Start the target image. See
    [Serving](../deployment/operations.md#serving) for the container layout.
 
 4. Request `GET /sys/health` without credentials. Confirm that it returns 200.

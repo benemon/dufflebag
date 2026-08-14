@@ -59,19 +59,18 @@ helm install dufflebag dufflebag/dufflebag \
 
 A single container runs against a PostgreSQL instance that you provide.
 
-Prerequisites: Create a migration owner and a serving role. The serving role
-must hold neither superuser nor `BYPASSRLS`. Create both roles exactly as the
-[PostgreSQL section](../deployment/index.md#postgresql-two-roles) specifies.
+Prerequisites: A PostgreSQL database owned by a role that holds neither
+superuser nor `BYPASSRLS`, created as the
+[PostgreSQL section](../deployment/index.md#postgresql) shows. The server
+creates its schema at first boot and migrates it on upgrades; no migrate
+command is run. To keep schema privileges out of the serving process instead,
+use the [hardened two-role setup](../deployment/index.md#hardened-two-roles).
 
-1. Run the migration, then serve with the same image:
+1. Start the container:
 
 ```sh
-docker run --rm \
-  -e DFBG_DATABASE_URL='postgres://dufflebag_migrate:<migration password>@db/dufflebag' \
-  quay.io/benjamin_holmes/dufflebag:<tag> migrate
-
 docker run -d --name dufflebag -p 8443:8443 \
-  -e DFBG_DATABASE_URL='postgres://dufflebag_app:<serving password>@db/dufflebag' \
+  -e DFBG_DATABASE_URL='postgres://dufflebag:<password>@db/dufflebag' \
   -e DFBG_HTTP_ADDR=:8443 \
   -e DFBG_TOKEN_SIGNING_KEY='<at least 32 random bytes>' \
   -e DFBG_TOKEN_ISSUER='https://registry.example.com' \
@@ -80,7 +79,7 @@ docker run -d --name dufflebag -p 8443:8443 \
   quay.io/benjamin_holmes/dufflebag:<tag>
 ```
 
-   Podman accepts the same invocations.
+   Podman accepts the same invocation.
 
 2. Serve the instance at the root of the hostname. The Packer SDK silently
    discards any path prefix.
