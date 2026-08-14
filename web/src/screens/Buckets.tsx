@@ -269,11 +269,11 @@ export function BucketsView({
                   <EmptyStateActions>
                     <Button
                       component="a"
-                      href="https://developer.hashicorp.com/packer/docs/hcp"
+                      href="https://developer.hashicorp.com/packer/docs"
                       target="_blank"
                       variant="link"
                     >
-                      Packer HCP docs
+                      Packer docs
                     </Button>
                   </EmptyStateActions>
                 </EmptyStateFooter>

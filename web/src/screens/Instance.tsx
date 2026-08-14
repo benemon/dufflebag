@@ -143,9 +143,9 @@ export function BuildCard({
             <BuildField label="API versions" value={instance?.api_versions?.join(', ')} />
             <BuildField label="Initialized" value={<When iso={instance?.initialized_at} />} />
             <BuildField
-              label="Store"
+              label="Database"
               value={typeof instance?.store === 'boolean'
-                ? (instance.store ? 'reachable' : 'unreachable')
+                ? (instance.store ? 'ok' : 'unreachable')
                 : undefined}
             />
             <BuildField label="Object storage" value={instance?.object_storage} />

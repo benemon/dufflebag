@@ -73,13 +73,6 @@
     0 0 0.125rem 0 rgb(3 3 3 / 6%);
 }
 
-:root {
-  --sf0: var(--pf-t--global--background--color--100);
-  --sf1: var(--pf-t--global--background--color--200);
-  --tx1: var(--pf-t--global--text--color--200);
-  --bd: var(--pf-t--global--border--color--100);
-}
-
 .dfbg-bootstrap .pf-v6-c-login__main {
   /* The first-run wizard needs room for its step rail beside the active form. */
   width: min(70rem, calc(100vw - 2rem));
@@ -91,14 +84,14 @@
   --pf-v6-c-page__sidebar--Width: 212px;
   --pf-v6-c-page__sidebar--Width--base: 212px;
   --pf-v6-c-page__sidebar--xl--Width: 212px;
-  --pf-v6-c-page__sidebar--BackgroundColor: var(--sf0);
-  --pf-v6-c-page__sidebar--xl--BackgroundColor: var(--sf0);
+  --pf-v6-c-page__sidebar--BackgroundColor: var(--pf-t--global--background--color--floating--secondary--default);
+  --pf-v6-c-page__sidebar--xl--BackgroundColor: var(--pf-t--global--background--color--floating--secondary--default);
   --pf-v6-c-page__sidebar--MarginInlineEnd: 0;
   --pf-v6-c-page__sidebar--PaddingBlockEnd: 8px;
   --pf-v6-c-page__sidebar--PaddingInlineStart: 0;
   --pf-v6-c-page__sidebar--PaddingInlineEnd: 0;
   --pf-v6-c-page__sidebar--BorderInlineEndWidth: 1px;
-  --pf-v6-c-page__sidebar--BorderInlineEndColor: var(--bd);
+  --pf-v6-c-page__sidebar--BorderInlineEndColor: var(--pf-t--global--border--color--subtle);
   /* PatternFly only draws the secondary section's top border in its glass and
      high-contrast themes (the width token is unset otherwise). The design
      wants the line under every page header, including across the facet rail. */
@@ -126,7 +119,7 @@
 .app-global-nav .pf-v6-c-nav__section-title {
   padding: 16px 16px 6px;
   font: 500 14px/1.4 "Red Hat Display", sans-serif;
-  color: var(--tx1);
+  color: var(--pf-t--global--text--color--subtle);
 }
 
 .app-global-nav .pf-v6-c-nav__list {

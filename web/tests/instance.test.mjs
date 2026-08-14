@@ -65,12 +65,23 @@ test('the build card renders only endpoint-supplied values', () => {
   const markup = view()
   for (const supplied of [
     '1.2.3', 'abc123', '/packer/2023-01-01',
-    'reachable', 'ok', 'degraded', 'enabled',
+    'ok', 'degraded', 'enabled',
   ]) {
     assert.match(markup, new RegExp(supplied.replaceAll('/', '\\/')))
   }
+  assert.match(markup, /Database/)
+  assert.doesNotMatch(markup, /reachable/)
   assert.match(markup, /<time[^>]*dateTime="2026-08-05T09:00:00Z"/)
   assert.doesNotMatch(markup, /postgres 16/)
+})
+
+test('the database row maps an unreachable store without changing the payload shape', () => {
+  const markup = renderToStaticMarkup(React.createElement(BuildCard, {
+    instance: { store: false }, loading: false, failure: null,
+  }))
+  assert.match(markup, /Database/)
+  assert.match(markup, /unreachable/)
+  assert.doesNotMatch(markup, />Store</)
 })
 
 test('the build card distinguishes loading, failure, and honest absence', () => {

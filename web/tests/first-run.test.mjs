@@ -10,11 +10,16 @@ let AuthContext
 let Login
 let ServicePrincipalForm
 let Initialize
+let ClaimFooter
+let ClaimParametersForm
 let StoreCredentials
 let StoreCredentialsFooter
 let credentialsFileContent
+let sharesFileContent
 let createOrganization
 let createProject
+let initialize
+let validateRecoveryParameters
 
 before(async () => {
   vite = await createServer({
@@ -28,11 +33,15 @@ before(async () => {
   ;({ Login, ServicePrincipalForm } = await vite.ssrLoadModule('/src/screens/Login.tsx'))
   ;({
     Initialize,
+    ClaimFooter,
+    ClaimParametersForm,
     StoreCredentials,
     StoreCredentialsFooter,
     credentialsFileContent,
+    sharesFileContent,
+    validateRecoveryParameters,
   } = await vite.ssrLoadModule('/src/screens/Initialize.tsx'))
-  ;({ createOrganization, createProject } = await vite.ssrLoadModule('/src/api/client.ts'))
+  ;({ createOrganization, createProject, initialize } = await vite.ssrLoadModule('/src/api/client.ts'))
 })
 
 after(async () => {
@@ -94,7 +103,28 @@ test('the first-run screen uses the bootstrap shell and four-step wizard', () =>
   assert.match(wizard, />Project</)
   assert.match(wizard, /Initialize this instance/)
   assert.match(wizard, /creates only the first root principal/)
+  assert.match(wizard, /<input(?=[^>]*id="recovery-share-count")(?=[^>]*type="number")(?=[^>]*value="1")[^>]*>/)
+  assert.match(wizard, /<input(?=[^>]*id="recovery-threshold")(?=[^>]*type="number")(?=[^>]*value="1")[^>]*>/)
   assert.doesNotMatch(wizard, />Next<|>Back<|>Cancel</)
+})
+
+test('recovery threshold cannot exceed the share count', () => {
+  const validation = validateRecoveryParameters('2', '3')
+  const form = renderToStaticMarkup(React.createElement(ClaimParametersForm, {
+    shareCount: '2',
+    threshold: '3',
+    validation,
+    onShareCountChange: () => {},
+    onThresholdChange: () => {},
+    onClaim: () => {},
+  }))
+  const footer = renderToStaticMarkup(React.createElement(ClaimFooter, {
+    validation,
+    submitting: false,
+  }))
+  assert.match(form, /Recovery threshold cannot exceed the share count\./)
+  assert.match(form, /<input(?=[^>]*id="recovery-threshold")(?=[^>]*aria-invalid="true")[^>]*>/)
+  assert.match(footer, /<button(?=[^>]*form="initialize-claim")(?=[^>]*disabled)[^>]*>/)
 })
 
 test('sign-in and bootstrap use the lowercase wordmark', () => {
@@ -147,17 +177,67 @@ test('recovery shares are expanded by default', () => {
   for (const share of credentials.recovery_shares) assert.match(markup, new RegExp(share))
 })
 
-test('credential download contains every shown secret and recovery share', () => {
+test('the stored-credentials checkbox keeps its input and label together', () => {
+  const markup = storeCredentials()
+  assert.match(
+    markup,
+    /<div style="margin-top:16px"><div class="pf-v6-c-check"><input[^>]*id="init-stored"[^>]*><label class="pf-v6-c-check__label" for="init-stored">/,
+  )
+  assert.doesNotMatch(markup, /<input[^>]*id="init-stored"[^>]*style=/)
+})
+
+test('initialization posts non-default recovery share parameters', async () => {
+  const originalFetch = globalThis.fetch
+  let call
+  globalThis.fetch = async (path, options) => {
+    call = { path, options }
+    return new Response(JSON.stringify(credentials), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  try {
+    await initialize({ recovery_share_count: 5, recovery_threshold: 3 })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual({
+    path: call.path,
+    method: call.options.method,
+    contentType: call.options.headers['Content-Type'],
+    body: call.options.body,
+  }, {
+    path: '/sys/init',
+    method: 'POST',
+    contentType: 'application/json',
+    body: JSON.stringify({ recovery_share_count: 5, recovery_threshold: 3 }),
+  })
+})
+
+test('credential download holds the secret and deliberately no recovery shares', () => {
   const contents = credentialsFileContent(credentials)
   assert.match(contents, /^# dufflebag administrative credentials$/m)
   assert.match(contents, /^# Store this file like the secret it contains\.$/m)
-  assert.match(contents, /^# The recovery share must be stored offline, separately from the credentials\.$/m)
-  assert.match(contents, /^# Recovery: POST \/sys\/recovery with the share mints a fresh root principal\.$/m)
+  assert.match(contents, /deliberately not in this file/)
   assert.match(contents, new RegExp(`^client_id: ${credentials.client_id}$`, 'm'))
   assert.match(contents, new RegExp(`^client_secret: ${credentials.client_secret}$`, 'm'))
+  // Custody separation: the credentials file must never carry a share.
+  for (const share of credentials.recovery_shares) {
+    assert.ok(!contents.includes(share), 'credentials file contains a recovery share')
+  }
+})
+
+test('shares download carries every share and no credential', () => {
+  const contents = sharesFileContent(credentials)
+  assert.match(contents, new RegExp(
+    `^# dufflebag recovery shares \\(${credentials.recovery_threshold}-of-${credentials.recovery_shares.length}\\)$`, 'm',
+  ))
+  assert.match(contents, /^# Store offline, separately from the administrative credentials\.$/m)
   credentials.recovery_shares.forEach((share, index) => {
     assert.match(contents, new RegExp(`^recovery_share_${index + 1}: ${share}$`, 'm'))
   })
+  assert.ok(!contents.includes(credentials.client_secret), 'shares file contains the client secret')
+  assert.ok(!contents.includes(credentials.client_id), 'shares file contains the client id')
 })
 
 test('tenancy steps use the authenticated platform endpoint shapes', async () => {

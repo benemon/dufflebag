@@ -257,7 +257,7 @@ test('an empty project owns the connect affordance and never doubles it with the
   assert.match(markup, /<h2[^>]*>No buckets yet<\/h2>/)
   assert.match(markup, /pf-v6-c-empty-state__body">Buckets appear when Packer publishes a version/)
   assert.match(markup, /pf-v6-c-empty-state__actions">[\s\S]{0,500}Connect a client/)
-  assert.match(markup, /href="https:\/\/developer\.hashicorp\.com\/packer\/docs\/hcp"[^>]*target="_blank"/)
+  assert.match(markup, /href="https:\/\/developer\.hashicorp\.com\/packer\/docs"[^>]*target="_blank"/)
   assert.doesNotMatch(markup, /Waiting on a first build/)
 })
 
