@@ -14,10 +14,13 @@ import (
 	vaultkubernetes "github.com/hashicorp/vault/api/auth/kubernetes"
 )
 
-// Transit-specific settings. Vault connection settings use the SDK's own
-// environment (VAULT_ADDR, VAULT_TOKEN, VAULT_NAMESPACE, VAULT_CACERT, ...);
-// dufflebag's settings select the native login method and transit paths.
+// DFBG_ variables are the documented Vault configuration surface. The SDK's
+// native environment remains an escape hatch; DFBG_ wins on conflict.
 const (
+	vaultAddressEnv             = "DFBG_VAULT_ADDR"
+	vaultTokenEnv               = "DFBG_VAULT_TOKEN"
+	vaultCACertEnv              = "DFBG_VAULT_CACERT"
+	vaultTransitNamespaceEnv    = "DFBG_VAULT_TRANSIT_NAMESPACE"
 	transitMountEnv             = "DFBG_VAULT_TRANSIT_MOUNT"
 	transitKeyEnv               = "DFBG_VAULT_TRANSIT_KEY"
 	vaultAuthMethodEnv          = "DFBG_VAULT_AUTH_METHOD"
@@ -61,26 +64,40 @@ func transitFromEnvironment(ctx context.Context) (Provider, error) {
 	}
 	// Checked against the environment, not client.Address(): DefaultConfig
 	// always seeds https://127.0.0.1:8200, so an address-emptiness guard can
-	// never fire and an unset VAULT_ADDR would silently target localhost and
-	// surface as "sealed" (duf-tsp6). An operator genuinely running Vault on
-	// localhost sets the address explicitly and is unaffected.
-	if auth.method != "token" && os.Getenv("VAULT_ADDR") == "" {
-		return nil, fmt.Errorf("VAULT_ADDR is required when %s=vault and %s=%s", ProviderEnv, vaultAuthMethodEnv, auth.method)
+	// never fire and an unset DFBG_VAULT_ADDR/VAULT_ADDR would silently target
+	// localhost and surface as "sealed" (duf-tsp6). An operator genuinely
+	// running Vault on localhost sets the address explicitly and is unaffected.
+	if auth.method != "token" && os.Getenv(vaultAddressEnv) == "" && os.Getenv("VAULT_ADDR") == "" {
+		return nil, fmt.Errorf("%s is required when %s=vault and %s=%s", vaultAddressEnv, ProviderEnv, vaultAuthMethodEnv, auth.method)
 	}
-	if os.Getenv("VAULT_ADDR") == "" &&
+	if os.Getenv(vaultAddressEnv) == "" && os.Getenv("VAULT_ADDR") == "" &&
 		os.Getenv("VAULT_AGENT_ADDR") == "" && os.Getenv("VAULT_PROXY_ADDR") == "" {
 		return nil, fmt.Errorf(
-			"VAULT_ADDR is required when %s=vault (or VAULT_AGENT_ADDR/VAULT_PROXY_ADDR for agent-injected auth)",
-			ProviderEnv,
+			"%s is required when %s=vault (or VAULT_AGENT_ADDR/VAULT_PROXY_ADDR for agent-injected auth)",
+			vaultAddressEnv, ProviderEnv,
 		)
 	}
 	config := vault.DefaultConfig()
 	if err := config.Error; err != nil {
 		return nil, fmt.Errorf("vault configuration: %w", err)
 	}
+	if address := os.Getenv(vaultAddressEnv); address != "" {
+		config.Address = address
+	}
+	if caCert := os.Getenv(vaultCACertEnv); caCert != "" {
+		if err := config.ConfigureTLS(&vault.TLSConfig{CACert: caCert}); err != nil {
+			return nil, fmt.Errorf("vault TLS configuration: %w", err)
+		}
+	}
 	client, err := vault.NewClient(config)
 	if err != nil {
 		return nil, fmt.Errorf("vault client: %w", err)
+	}
+	if namespace := os.Getenv(vaultTransitNamespaceEnv); namespace != "" {
+		client.SetNamespace(namespace)
+	}
+	if token := os.Getenv(vaultTokenEnv); token != "" {
+		client.SetToken(token)
 	}
 	mount := os.Getenv(transitMountEnv)
 	if mount == "" {

@@ -20,12 +20,14 @@ awk 'BEGIN { RS="---" } /kind: Deployment/ && /app.kubernetes.io\/component: duf
 
 grep -q 'name: migrate' "$work/deployment.yaml" || fail "migrate init container is absent"
 grep -q 'key: admin-database-url' "$work/deployment.yaml" || fail "migrate does not use the admin DSN"
-for variable in DFBG_KEY_PROVIDER VAULT_ADDR DFBG_VAULT_AUTH_METHOD DFBG_VAULT_K8S_ROLE DFBG_VAULT_K8S_MOUNT DFBG_VAULT_K8S_TOKEN_PATH; do
+for variable in DFBG_KEY_PROVIDER DFBG_VAULT_ADDR DFBG_VAULT_AUTH_METHOD DFBG_VAULT_K8S_ROLE DFBG_VAULT_K8S_MOUNT DFBG_VAULT_K8S_TOKEN_PATH; do
 	grep -q -- "- name: $variable" "$work/deployment.yaml" || fail "$variable is absent from the dufflebag Deployment"
 done
-if grep -q -- '- name: VAULT_TOKEN' "$work/deployment.yaml"; then
-	fail "dufflebag env contains VAULT_TOKEN"
-fi
+for variable in VAULT_TOKEN DFBG_VAULT_TOKEN; do
+	if grep -q -- "- name: $variable" "$work/deployment.yaml"; then
+		fail "dufflebag env contains $variable"
+	fi
+done
 
 awk 'BEGIN { RS="---" } /kind: Job/ && /name: dufflebag-vault-bootstrap/ { print }' \
 	"$work/default.yaml" > "$work/vault-job.yaml"

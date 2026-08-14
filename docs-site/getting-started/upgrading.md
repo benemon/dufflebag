@@ -16,6 +16,11 @@ note does not state.
 Deployments that set `DFBG_VAULT_AUTH_METHOD=env` must set it to `token`
 instead. The process refuses to start with the old value and names the rename.
 
+Primary Vault connection configuration moved to `DFBG_VAULT_ADDR`,
+`DFBG_VAULT_TOKEN`, `DFBG_VAULT_CACERT`, and
+`DFBG_VAULT_TRANSIT_NAMESPACE`. The native variables still function, but the
+documented surface is `DFBG_`.
+
 ::: warning
 The bundled Helm chart runs one dufflebag replica and does not provide leader
 election or other high-availability machinery. Do not use a multi-replica or

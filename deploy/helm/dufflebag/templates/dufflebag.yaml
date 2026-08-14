@@ -106,7 +106,7 @@ spec:
               value: :8080
             - name: DFBG_KEY_PROVIDER
               value: vault
-            - name: VAULT_ADDR
+            - name: DFBG_VAULT_ADDR
               value: http://{{ include "dufflebag.fullname" . }}-vault:8200
             - name: DFBG_VAULT_AUTH_METHOD
               value: kubernetes

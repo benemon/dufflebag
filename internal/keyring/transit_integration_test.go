@@ -178,8 +178,14 @@ path "transit/decrypt/dufflebag" { capabilities = ["update"] }
 		if err := os.WriteFile(tokenPath, []byte(token), 0o600); err != nil {
 			t.Fatalf("write service-account token: %v", err)
 		}
-		t.Setenv("VAULT_ADDR", address)
+		t.Setenv(vaultAddressEnv, address)
+		t.Setenv(vaultTokenEnv, "")
+		t.Setenv(vaultCACertEnv, "")
+		t.Setenv(vaultTransitNamespaceEnv, "")
+		t.Setenv("VAULT_ADDR", "")
 		t.Setenv("VAULT_TOKEN", "")
+		t.Setenv("VAULT_CACERT", "")
+		t.Setenv("VAULT_NAMESPACE", "")
 		t.Setenv("VAULT_AGENT_ADDR", "")
 		t.Setenv("VAULT_PROXY_ADDR", "")
 		t.Setenv(vaultAuthMethodEnv, "kubernetes")
@@ -325,8 +331,13 @@ path "transit/rewrap/dufflebag" { capabilities = ["update"] }
 		t.Fatalf("write AppRole secret ID: %v", err)
 	}
 
-	t.Setenv("VAULT_ADDR", address)
+	t.Setenv(vaultAddressEnv, address)
+	t.Setenv(vaultTokenEnv, "")
+	t.Setenv(vaultCACertEnv, "")
+	t.Setenv(vaultTransitNamespaceEnv, "")
+	t.Setenv("VAULT_ADDR", "")
 	t.Setenv("VAULT_TOKEN", "")
+	t.Setenv("VAULT_CACERT", "")
 	t.Setenv("VAULT_NAMESPACE", "")
 	t.Setenv("VAULT_AGENT_ADDR", "")
 	t.Setenv("VAULT_PROXY_ADDR", "")

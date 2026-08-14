@@ -331,7 +331,7 @@ test-e2e-terraform-encrypted: ## Run the Terraform gate encrypted against a Vaul
 	done; \
 	curl -sf -X POST -H "X-Vault-Token: $$token" -d '{"type":"transit"}' \
 		"$$addr/v1/sys/mounts/transit" >/dev/null; \
-	VAULT_ADDR="$$addr" VAULT_TOKEN="$$token" \
+	DFBG_VAULT_ADDR="$$addr" DFBG_VAULT_TOKEN="$$token" \
 	DFBG_KEY_PROVIDER=vault DFBG_VAULT_TRANSIT_MOUNT=transit DFBG_VAULT_TRANSIT_KEY=dufflebag \
 	$(MAKE) test-e2e-terraform
 
@@ -467,7 +467,7 @@ test-packer-ci-encrypted: ## Run the packer gate encrypted against a Vault dev c
 	done; \
 	curl -sf -X POST -H "X-Vault-Token: $$token" -d '{"type":"transit"}' \
 		"$$addr/v1/sys/mounts/transit" >/dev/null; \
-	VAULT_ADDR="$$addr" VAULT_TOKEN="$$token" \
+	DFBG_VAULT_ADDR="$$addr" DFBG_VAULT_TOKEN="$$token" \
 	DFBG_KEY_PROVIDER=vault DFBG_VAULT_TRANSIT_MOUNT=transit DFBG_VAULT_TRANSIT_KEY=dufflebag \
 	$(MAKE) test-packer \
 		PACKER_E2E_HOSTNAME=$(PACKER_CI_HOSTNAME) \
@@ -624,7 +624,7 @@ demo-up: ## Stand up a long-lived demo instance and claim it
 		-e DFBG_DATABASE_URL="postgres://dufflebag_app:app@postgres:5432/dufflebag?sslmode=disable" \
 		-e DFBG_HTTP_ADDR=0.0.0.0:$(DEMO_PORT) \
 		-e DFBG_TLS_CERT_FILE=/tls/tls.crt -e DFBG_TLS_KEY_FILE=/tls/tls.key \
-		-e DFBG_KEY_PROVIDER=vault -e VAULT_ADDR="http://vault:8200" -e VAULT_TOKEN=$(DEMO_VAULT_TOKEN) \
+		-e DFBG_KEY_PROVIDER=vault -e DFBG_VAULT_ADDR="http://vault:8200" -e DFBG_VAULT_TOKEN=$(DEMO_VAULT_TOKEN) \
 		-e DFBG_OBJECT_STORAGE_ENDPOINT="http://s3:8000" -e DFBG_OBJECT_STORAGE_REGION=us-east-1 \
 		-e DFBG_OBJECT_STORAGE_BUCKET=$(DEMO_S3_BUCKET) \
 		-e DFBG_OBJECT_STORAGE_ACCESS_KEY=demoaccess -e DFBG_OBJECT_STORAGE_SECRET_KEY=demosecret \

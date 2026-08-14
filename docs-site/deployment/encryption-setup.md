@@ -15,19 +15,19 @@ accepted as unrecoverable, exactly as lost Vault unseal keys are.
 Configure it by pointing at the key service before the **first** boot:
 
 ```sh
-DFBG_KEY_PROVIDER=vault          # the only provider currently implemented
-VAULT_ADDR=https://vault.example.com:8200
-# plus the Vault SDK's own environment: VAULT_TOKEN, VAULT_NAMESPACE,
-# VAULT_CACERT, ...
-DFBG_VAULT_AUTH_METHOD=token     # default
-DFBG_VAULT_TRANSIT_MOUNT=transit # default
-DFBG_VAULT_TRANSIT_KEY=dufflebag # default; created on first use
+DFBG_KEY_PROVIDER=vault                    # the only provider currently implemented
+DFBG_VAULT_ADDR=https://vault.example.com:8200
+DFBG_VAULT_TOKEN=...                       # token mode
+DFBG_VAULT_CACERT=/etc/ssl/vault-ca.pem    # optional
+DFBG_VAULT_TRANSIT_NAMESPACE=platform      # optional
+DFBG_VAULT_AUTH_METHOD=token               # default
+DFBG_VAULT_TRANSIT_MOUNT=transit           # default
+DFBG_VAULT_TRANSIT_KEY=dufflebag           # default; created on first use
 ```
 
-`DFBG_VAULT_AUTH_METHOD=token` is the default and uses the Vault SDK's
-ambient contract: `VAULT_TOKEN`, or `VAULT_AGENT_ADDR`/`VAULT_PROXY_ADDR`
-pointing at a co-located agent or proxy, supplies the credential. dufflebag
-does not renew this token; the operator owns its rotation.
+`DFBG_VAULT_AUTH_METHOD=token` is the default and uses
+`DFBG_VAULT_TOKEN`. dufflebag does not renew this token; the operator owns its
+rotation.
 
 `DFBG_VAULT_AUTH_METHOD=kubernetes` performs native Kubernetes login. It
 requires `DFBG_VAULT_K8S_ROLE`, renews its Vault token, and logs in again when
@@ -44,18 +44,26 @@ that file. The auth mount defaults to `approle` and can be changed with
 `DFBG_VAULT_APPROLE_MOUNT`. AppRole renews its Vault token and logs in again on
 the same lifecycle as Kubernetes authentication.
 
-`VAULT_ADDR` is required: with no address configured (and, in `token` mode, no
-`VAULT_AGENT_ADDR`/`VAULT_PROXY_ADDR`), the process refuses to start with a
-message naming it rather than silently targeting the SDK's localhost default.
-Kubernetes and AppRole modes always require `VAULT_ADDR`; an agent or proxy
-address does not satisfy it because dufflebag performs the login itself.
+::: warning
+The Vault SDK's native environment variables (`VAULT_ADDR`, `VAULT_TOKEN`, ...)
+remain honored for edge cases. dufflebag's `DFBG_VAULT_*` values take
+precedence where both are set. See the
+[Vault documentation](https://developer.hashicorp.com/vault/docs/commands#environment-variables)
+for the native variables.
+:::
+
+`DFBG_VAULT_ADDR` identifies the Vault service. With no accepted address, the
+process refuses to start with a message naming `DFBG_VAULT_ADDR` rather than
+silently targeting the SDK's localhost default. Kubernetes and AppRole modes
+require `DFBG_VAULT_ADDR` or the native address escape hatch because dufflebag
+performs the login itself.
 
 ::: info
-`VAULT_NAMESPACE` is the operating namespace and governs transit.
+`DFBG_VAULT_TRANSIT_NAMESPACE` is the operating namespace and governs transit.
 `DFBG_VAULT_AUTH_NAMESPACE` scopes only the login and the token renewal that
 follows it. Set it when a Vault Enterprise auth mount lives in a different
 namespace from the transit engine. When it is unset, login happens in the
-operating namespace.
+transit namespace.
 :::
 
 What to know before choosing it:
