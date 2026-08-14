@@ -24,6 +24,13 @@ Primary Vault connection configuration moved to `DFBG_VAULT_ADDR`,
 `DFBG_VAULT_TRANSIT_NAMESPACE`. The native variables still function, but the
 documented surface is `DFBG_`.
 
+Restricted-channel authorization is now enforced. Restricted user channels
+are invisible below `builder`, while their creation, assignment, update and
+deletion require `maintainer`. Reader principals also lose access to the
+restricted managed `latest` channel; create an unrestricted channel for
+reader consumption before upgrading. Automation principals that manage
+restricted user channels must be raised to `maintainer` before upgrading.
+
 ::: warning
 The bundled Helm chart runs one dufflebag replica and does not provide leader
 election or other high-availability machinery. Do not use a multi-replica or

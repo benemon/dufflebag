@@ -13,17 +13,18 @@ import "fmt"
 type Role string
 
 const (
-	// RoleReader sees buckets, versions, builds and channels.
+	// RoleReader sees buckets, versions, builds and unrestricted channels.
 	RoleReader Role = "reader"
-	// RoleBuilder additionally creates buckets, versions and builds. This is what
-	// a Packer CLI principal holds — the smallest role that completes a build.
+	// RoleBuilder additionally creates buckets, versions and builds, and consumes
+	// restricted channels. This is what a Packer CLI principal holds — the
+	// smallest role that completes a build.
 	RoleBuilder Role = "builder"
 	// RolePublisher additionally assigns channels. Separate from builder because
 	// declaring a channel is asking to promote, and a CI credential that can
 	// promote straight to production is fine until it is not.
 	RolePublisher Role = "publisher"
-	// RoleMaintainer additionally manages principals and role bindings within its
-	// scope. Named to avoid OpenShift's meaning of "operator".
+	// RoleMaintainer additionally manages restricted channels, principals and role
+	// bindings within its scope. Named to avoid OpenShift's meaning of "operator".
 	RoleMaintainer Role = "maintainer"
 	// RoleRoot may do anything, including creating organisations and configuring
 	// authentication and audit. Platform scope only.

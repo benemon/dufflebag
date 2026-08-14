@@ -83,6 +83,214 @@ func TestVulnerabilityReadsRequireReaderInScope(t *testing.T) {
 	}
 }
 
+func TestRestrictedChannelAuthorization(t *testing.T) {
+	newServer := func(role identity.Role) (*fakeRepository, http.Handler) {
+		repository := newFakeRepository()
+		repository.buckets["images"] = &store.Bucket{
+			ID: registry.NewID(testTime), Name: "images", Labels: map[string]string{},
+			CreatedAt: testTime, UpdatedAt: testTime,
+		}
+		version, err := registry.RestoreVersion(registry.Version{
+			ID: registry.NewID(testTime.Add(time.Second)), BucketName: "images",
+			Fingerprint: "fp", TemplateType: registry.TemplateHCL2,
+			CreatedAt: testTime, UpdatedAt: testTime,
+		}, true, 1, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		repository.versions["images/fp"] = version
+		for i, channel := range []store.Channel{
+			{Name: "latest", Restricted: true, Managed: true, Version: version},
+			{Name: "open", Version: version},
+			{Name: "restricted", Restricted: true},
+		} {
+			channel.ID = registry.NewID(testTime.Add(time.Duration(i+2) * time.Second))
+			channel.BucketName = "images"
+			channel.CreatedAt = testTime
+			channel.UpdatedAt = testTime
+			repository.channels["images/"+channel.Name] = &channel
+		}
+		return repository, newHandler(
+			repository, fakePrincipals{role: role}, testAuthenticator{}, testLogger(),
+			func() time.Time { return testTime },
+		)
+	}
+	channelsPath := testBase + "/buckets/images/channels"
+
+	t.Run("reader get is byte-identical to absent channel", func(t *testing.T) {
+		_, server := newServer(identity.RoleReader)
+		restricted := request(t, server, http.MethodGet, channelsPath+"/restricted", nil)
+		absentRepository, absentServer := newServer(identity.RoleReader)
+		delete(absentRepository.channels, "images/restricted")
+		absent := request(t, absentServer, http.MethodGet, channelsPath+"/restricted", nil)
+		if restricted.Code != absent.Code || restricted.Body.String() != absent.Body.String() {
+			t.Fatalf("restricted and absent differ:\n restricted: %d %s\n absent: %d %s",
+				restricted.Code, restricted.Body, absent.Code, absent.Body)
+		}
+	})
+
+	t.Run("reader history is byte-identical to absent channel", func(t *testing.T) {
+		_, server := newServer(identity.RoleReader)
+		restricted := request(t, server, http.MethodGet, channelsPath+"/restricted/history", nil)
+		absentRepository, absentServer := newServer(identity.RoleReader)
+		delete(absentRepository.channels, "images/restricted")
+		absent := request(t, absentServer, http.MethodGet, channelsPath+"/restricted/history", nil)
+		if restricted.Code != absent.Code || restricted.Body.String() != absent.Body.String() {
+			t.Fatalf("restricted and absent histories differ:\n restricted: %d %s\n absent: %d %s",
+				restricted.Code, restricted.Body, absent.Code, absent.Body)
+		}
+	})
+
+	t.Run("reader list filters all restricted channels", func(t *testing.T) {
+		_, server := newServer(identity.RoleReader)
+		response := request(t, server, http.MethodGet, channelsPath, nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", response.Code, response.Body)
+		}
+		var body struct {
+			Channels []struct {
+				Name string `json:"name"`
+			} `json:"channels"`
+		}
+		decodeResponse(t, response, &body)
+		var names []string
+		for _, channel := range body.Channels {
+			names = append(names, channel.Name)
+		}
+		if got, want := strings.Join(names, ","), "open"; got != want {
+			t.Fatalf("channels = %q, want %q", got, want)
+		}
+	})
+
+	t.Run("builder consumes restricted", func(t *testing.T) {
+		_, server := newServer(identity.RoleBuilder)
+		response := request(t, server, http.MethodGet, channelsPath+"/restricted", nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", response.Code, response.Body)
+		}
+	})
+
+	t.Run("reader latest is byte-identical to absent channel", func(t *testing.T) {
+		_, server := newServer(identity.RoleReader)
+		restricted := request(t, server, http.MethodGet, channelsPath+"/latest", nil)
+		absentRepository, absentServer := newServer(identity.RoleReader)
+		delete(absentRepository.channels, "images/latest")
+		absent := request(t, absentServer, http.MethodGet, channelsPath+"/latest", nil)
+		if restricted.Code != absent.Code || restricted.Body.String() != absent.Body.String() {
+			t.Fatalf("restricted latest and absent latest differ:\n restricted: %d %s\n absent: %d %s",
+				restricted.Code, restricted.Body, absent.Code, absent.Body)
+		}
+	})
+
+	t.Run("builder consumes managed latest", func(t *testing.T) {
+		_, server := newServer(identity.RoleBuilder)
+		response := request(t, server, http.MethodGet, channelsPath+"/latest", nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200; body %s", response.Code, response.Body)
+		}
+	})
+
+	assertRoleRefusal := func(t *testing.T, response *httptest.ResponseRecorder) {
+		t.Helper()
+		_, reader := newServer(identity.RoleReader)
+		want := request(t, reader, http.MethodPut, testBase+"/buckets", map[string]any{"name": "new"})
+		if response.Code != want.Code || response.Body.String() != want.Body.String() {
+			t.Fatalf("response = %d %s, want role refusal %d %s",
+				response.Code, response.Body, want.Code, want.Body)
+		}
+	}
+
+	for _, c := range []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"assign restricted", http.MethodPost, channelsPath + "/assign",
+			map[string]any{"source_channel": "open", "target_channel": "restricted"}},
+		{"update restricted", http.MethodPatch, channelsPath + "/restricted",
+			map[string]any{"update_mask": "versionFingerprint", "version_fingerprint": "fp"}},
+		{"delete restricted", http.MethodDelete, channelsPath + "/restricted", nil},
+		{"create restricted", http.MethodPost, channelsPath,
+			map[string]any{"name": "private", "restricted": true}},
+		{"set restricted mask", http.MethodPatch, channelsPath + "/open",
+			map[string]any{"update_mask": "restricted", "restricted": true}},
+		{"clear restricted mask", http.MethodPatch, channelsPath + "/restricted",
+			map[string]any{"update_mask": "restricted", "restricted": false}},
+	} {
+		t.Run("publisher cannot "+c.name, func(t *testing.T) {
+			_, server := newServer(identity.RolePublisher)
+			assertRoleRefusal(t, request(t, server, c.method, c.path, c.body))
+		})
+	}
+
+	for _, c := range []struct {
+		name   string
+		method string
+		path   string
+		body   any
+	}{
+		{"assign restricted", http.MethodPost, channelsPath + "/assign",
+			map[string]any{"source_channel": "open", "target_channel": "restricted"}},
+		{"update restricted", http.MethodPatch, channelsPath + "/restricted",
+			map[string]any{"update_mask": "versionFingerprint", "version_fingerprint": "fp"}},
+		{"delete restricted", http.MethodDelete, channelsPath + "/restricted", nil},
+		{"create restricted", http.MethodPost, channelsPath,
+			map[string]any{"name": "private", "restricted": true}},
+		{"clear restricted mask", http.MethodPatch, channelsPath + "/restricted",
+			map[string]any{"update_mask": "restricted", "restricted": false}},
+	} {
+		t.Run("maintainer may "+c.name, func(t *testing.T) {
+			_, server := newServer(identity.RoleMaintainer)
+			response := request(t, server, c.method, c.path, c.body)
+			if response.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
+func TestRestrictedChannelRefusalAuditReasons(t *testing.T) {
+	repository := newFakeRepository()
+	repository.buckets["images"] = &store.Bucket{
+		ID: registry.NewID(testTime), Name: "images", Labels: map[string]string{},
+		CreatedAt: testTime, UpdatedAt: testTime,
+	}
+	repository.channels["images/restricted"] = &store.Channel{
+		ID: registry.NewID(testTime.Add(time.Second)), BucketName: "images", Name: "restricted",
+		Restricted: true, CreatedAt: testTime, UpdatedAt: testTime,
+	}
+
+	for _, c := range []struct {
+		name, reason string
+		role         identity.Role
+		method, path string
+	}{
+		{"consumption", "restricted_channel_consumption", identity.RoleReader,
+			http.MethodGet, testBase + "/buckets/images/channels/restricted"},
+		{"management", "restricted_channel_management", identity.RolePublisher,
+			http.MethodDelete, testBase + "/buckets/images/channels/restricted"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			server := newHandler(repository, fakePrincipals{role: c.role}, testAuthenticator{},
+				testLogger(), func() time.Time { return testTime })
+			trail := &auditTrail{}
+			audited := audit.NewHTTPHandler(
+				trail, server.(audit.Resolver), server,
+				audit.StaticHMACKey("test-v1", []byte("test-audit-hmac-key")),
+			)
+			request(t, audited, c.method, c.path, nil)
+			responses := trail.responses(t)
+			if len(responses) != 1 {
+				t.Fatalf("response records = %d, want 1", len(responses))
+			}
+			assertAuditFields(t, responses[0], map[string]any{
+				"outcome": "refused", "reason": c.reason,
+			})
+		})
+	}
+}
+
 func TestListRemainderRoutesRefuseAnotherTenant(t *testing.T) {
 	repository := newFakeRepository()
 	seed := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })

@@ -608,6 +608,17 @@ test('managed channel rows never render a kebab', () => {
   }
 })
 
+test('restricted channel controls require maintainer', () => {
+  const restricted = [channelFixture({ name: 'production', restricted: true })]
+  const publisher = channelFacetMarkup('publisher', restricted)
+  assert.match(publisher, /aria-label="Actions for production"[^>]*disabled/)
+  assert.match(publisher, /Requires maintainer/)
+
+  const maintainer = channelFacetMarkup('maintainer', restricted)
+  assert.match(maintainer, /aria-label="Actions for production"/)
+  assert.doesNotMatch(maintainer, /Requires maintainer/)
+})
+
 test('channel version selects contain only active complete versions, newest first', () => {
   const create = renderToStaticMarkup(React.createElement(CreateChannelModalView, {
     bucket: 'images', versions: channelVersions, callerRole: 'publisher', name: 'staging',
@@ -710,6 +721,16 @@ test('Promote is live for publisher, role-restricted below publisher, and absent
     assert.doesNotMatch(markup, /<button[^>]*>Promote<\/button>/)
     assert.match(markup, /hcp_packer_channel_assignment/)
   }
+})
+
+test('promoting to a restricted channel requires maintainer', () => {
+  const render = (callerRole) => renderToStaticMarkup(React.createElement(OperationsCard, {
+    bucket: 'images', version: actionVersion('complete'),
+    channels: [channelFixture({ name: 'production', restricted: true })],
+    callerRole, onPromote: async () => {},
+  }))
+  assert.match(render('publisher'), /Requires maintainer/)
+  assert.doesNotMatch(render('maintainer'), /Requires maintainer/)
 })
 
 test('channel clients send exact compat-plane paths and bodies', async () => {

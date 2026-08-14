@@ -15,6 +15,7 @@ import (
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/compat/hcp2023/models"
+	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/scan"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -592,7 +593,7 @@ func TestChannelAndBucketListEndpoints(t *testing.T) {
 	repository.buckets["images"].LatestVersionBuilds = []store.StoredBuild{latestBuild}
 	repository.buckets["images"].Platforms = []string{"docker"}
 	now := testTime.Add(4 * time.Second)
-	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time {
+	server := newHandler(repository, fakePrincipals{role: identity.RoleMaintainer}, testAuthenticator{}, testLogger(), func() time.Time {
 		now = now.Add(time.Second)
 		return now
 	})
@@ -2548,7 +2549,7 @@ func TestChannelUnassignment(t *testing.T) {
 	}
 	repository.versions["images/complete"] = complete
 	now := testTime.Add(2 * time.Second)
-	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time {
+	server := newHandler(repository, fakePrincipals{role: identity.RoleMaintainer}, testAuthenticator{}, testLogger(), func() time.Time {
 		now = now.Add(time.Second)
 		return now
 	})

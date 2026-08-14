@@ -732,6 +732,19 @@ demo-publish: ## Publish the demo corpus (wizard-claimed: supply the HCP_* env f
 	base="https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)"; \
 	curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" "$$base/sys/health" >/dev/null || { \
 		echo "FAIL demo-publish: nothing serving at $$base — run make demo-up"; exit 1; }; \
+	channel_client="$$HCP_CLIENT_ID"; channel_secret="$$HCP_CLIENT_SECRET"; channel_credentials=provided; \
+	if [ -r "$(DEMO_DIR)/root.json" ]; then \
+		channel_client=$$(sed -n 's/.*"client_id":"\([^"]*\)".*/\1/p' "$(DEMO_DIR)/root.json"); \
+		channel_secret=$$(sed -n 's/.*"client_secret":"\([^"]*\)".*/\1/p' "$(DEMO_DIR)/root.json"); \
+		channel_credentials=root; \
+		test -n "$$channel_client" -a -n "$$channel_secret" || { \
+			echo "FAIL demo-publish: $(DEMO_DIR)/root.json contains no root credentials"; exit 1; }; \
+	fi; \
+	channel_token=$$(curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" -X POST "$$base/oauth2/token" \
+		-u "$$channel_client:$$channel_secret" -H 'content-type: application/x-www-form-urlencoded' \
+		-d 'grant_type=client_credentials&audience=https://api.hashicorp.cloud' \
+		| sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'); \
+	test -n "$$channel_token" || { echo "FAIL demo-publish: could not exchange channel credentials"; exit 1; }; \
 	packer_home="$(DEMO_DIR)/packer-home"; \
 	mkdir -p "$$packer_home"; \
 	epoch=$$(date +%s); \
@@ -749,6 +762,38 @@ demo-publish: ## Publish the demo corpus (wizard-claimed: supply the HCP_* env f
 		HCP_API_ADDRESS="$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)" \
 		HCP_ORGANIZATION_ID="$$org" HCP_PROJECT_ID="$$project" HCP_SKIP_STATUS_CHECK=true \
 		$(PACKER_E2E_PACKER) init e2e/packer/demo-distro.pkr.hcl; \
+	build_distro() { \
+		distro_bucket="$$1"; distro_image="$$2"; \
+		env HOME="$$packer_home" SSL_CERT_FILE="$(PACKER_E2E_CA_FILE)" HCP_AUTH_URL="$$base" \
+			HCP_API_ADDRESS="$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)" \
+			HCP_ORGANIZATION_ID="$$org" HCP_PROJECT_ID="$$project" HCP_SKIP_STATUS_CHECK=true \
+			$(PACKER_E2E_PACKER) build -color=false \
+			-var "base_image=$$distro_image" -var "bucket_name=$$distro_bucket" -var "run_label=$$run_label" \
+			e2e/packer/demo-distro.pkr.hcl || { \
+				echo "FAIL demo-publish: $$distro_bucket build failed"; exit 1; }; \
+	}; \
+	create_release_channel() { \
+		release_bucket="$$1"; \
+		latest=$$(curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" \
+			-H "authorization: Bearer $$channel_token" \
+			"$$base/packer/2023-01-01/organizations/$$org/projects/$$project/buckets/$$release_bucket/channels/latest"); \
+		v1_fingerprint=$$(printf '%s' "$$latest" | sed -n 's/.*"fingerprint":"\([^"]*\)".*/\1/p'); \
+		test -n "$$v1_fingerprint" || { \
+			echo "FAIL demo-publish: $$release_bucket latest has no v1 fingerprint"; exit 1; }; \
+		release_result=$$(curl -sS --cacert "$(PACKER_E2E_CA_FILE)" -X POST \
+			-H "authorization: Bearer $$channel_token" -H 'content-type: application/json' \
+			-d "{\"name\":\"release\",\"restricted\":false,\"version_fingerprint\":\"$$v1_fingerprint\"}" \
+			-w '\n%{http_code}' \
+			"$$base/packer/2023-01-01/organizations/$$org/projects/$$project/buckets/$$release_bucket/channels"); \
+		release_status=$$(printf '%s\n' "$$release_result" | tail -n 1); \
+		if [ "$$release_status" = 200 ]; then \
+			echo "pinned $$release_bucket release to v1 $$v1_fingerprint"; \
+		elif [ "$$release_status" = 403 ] && [ "$$channel_credentials" = provided ]; then \
+			echo "SKIP demo-publish: $$release_bucket release channel needs publisher+; provided HCP_CLIENT principal was refused"; \
+		else \
+			echo "FAIL demo-publish: $$release_bucket release channel answered HTTP $$release_status"; exit 1; \
+		fi; \
+	}; \
 	env HOME="$$packer_home" SSL_CERT_FILE="$(PACKER_E2E_CA_FILE)" HCP_AUTH_URL="$$base" \
 		HCP_API_ADDRESS="$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)" \
 		HCP_ORGANIZATION_ID="$$org" HCP_PROJECT_ID="$$project" HCP_SKIP_STATUS_CHECK=true \
@@ -777,13 +822,13 @@ demo-publish: ## Publish the demo corpus (wizard-claimed: supply the HCP_* env f
 		bucket=$${spec%%=*}; image=$${spec#*=}; \
 		echo "building $$bucket from $$image"; \
 		$(PACKER_E2E_DOCKER) pull "$$image" >/dev/null; \
-		env HOME="$$packer_home" SSL_CERT_FILE="$(PACKER_E2E_CA_FILE)" HCP_AUTH_URL="$$base" \
-			HCP_API_ADDRESS="$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)" \
-			HCP_ORGANIZATION_ID="$$org" HCP_PROJECT_ID="$$project" HCP_SKIP_STATUS_CHECK=true \
-			$(PACKER_E2E_PACKER) build -color=false \
-			-var "base_image=$$image" -var "bucket_name=$$bucket" -var "run_label=$$run_label" \
-			e2e/packer/demo-distro.pkr.hcl || { \
-				echo "FAIL demo-publish: $$bucket build failed"; exit 1; }; \
+		build_distro "$$bucket" "$$image"; \
+		case "$$bucket" in \
+			demo-ubi|demo-ubuntu) \
+				create_release_channel "$$bucket"; \
+				build_distro "$$bucket" "$$image"; \
+				;; \
+		esac; \
 	done; \
 	echo "PUBLISHED distro buckets: $(DEMO_DISTROS)"
 

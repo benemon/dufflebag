@@ -15,14 +15,19 @@ Roles are strictly ordered. Each role adds to the one below it:
 
 | Role | Adds |
 |---|---|
-| `reader` | Sees buckets, versions, builds, channels, SBOMs and findings. |
-| `builder` | Creates buckets, versions and builds — the smallest role that completes a `packer build`, and what a CI build credential should hold. |
-| `publisher` | Assigns channels and promotes, revokes and restores versions, deletes buckets, versions and builds. |
-| `maintainer` | Manages principals and role bindings within its scope, and operational configuration such as Bag Drop. |
+| `reader` | Sees buckets, versions, builds, unrestricted channels, SBOMs and findings. |
+| `builder` | Creates buckets, versions and builds, and sees and consumes restricted channels — the smallest role that completes a `packer build`, and what a CI build credential should hold. |
+| `publisher` | Assigns and manages unrestricted channels, promotes, revokes and restores versions, and deletes buckets, versions and builds. |
+| `maintainer` | Creates, assigns, updates and deletes restricted channels, and manages principals, role bindings and operational configuration such as Bag Drop within its scope. |
 | `root` | Everything, including creating organisations and configuring authentication and audit. Platform scope only. |
 
 The `builder` and `publisher` roles separate builds from promotion. Declaring a
 channel requests promotion.
+
+Restricted channels, including the managed `latest`, are invisible below
+`builder`. Restricted user channels require `maintainer` to create or manage;
+the existing service-managed mutation refusals continue to govern `latest` for
+every role.
 
 ::: warning
 A CI credential with promotion access can promote directly to production. Give

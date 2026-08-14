@@ -14,6 +14,8 @@ export const ACTION_REQUIREMENTS = {
   deleteVersions: 'publisher',
   // Compatibility-plane channel lifecycle and assignment authorize RolePublisher.
   manageChannels: 'publisher',
+  // Restricted channel lifecycle and assignment escalate in-handler to RoleMaintainer.
+  manageRestrictedChannels: 'maintainer',
   // Compatibility-plane bucket deletion authorizes RolePublisher.
   deleteBuckets: 'publisher',
   // internal/platform/v1/audit_targets.go checks RoleRoot for create/delete.
