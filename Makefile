@@ -50,6 +50,9 @@ DEMO_S3_BUCKET    ?= dufflebag-demo
 DEMO_VAULT_CONTAINER ?= dufflebag-demo-vault
 DEMO_VAULT_IMAGE     ?= hashicorp/vault:2.0.3
 DEMO_VAULT_TOKEN     ?= demo-root
+# DEMO_CLAIM=0 stops after the stack serves, leaving the instance unclaimed
+# for a first-run wizard walkthrough. Never expose an unclaimed instance.
+DEMO_CLAIM           ?= 1
 # First run is SPN, then organisation, then project. /sys/init mints only the
 # principal; tenancy is created through the ordinary authenticated endpoints,
 # which is what the console wizard does and what this target emulates. Claiming
@@ -568,7 +571,7 @@ check-markers: ## Fail on AI-tooling markers in tracked files
 # recreate, so /sys/init would otherwise reach a stale instance.
 # Unlike every CI gate, the demo deliberately sends versioned purl-derived
 # package metadata to live api.osv.dev and therefore requires internet egress.
-demo-up: ## Stand up a long-lived demo instance and claim it
+demo-up: ## Stand up a long-lived demo instance and claim it (DEMO_CLAIM=0 leaves it unclaimed)
 	@set -e; \
 	command -v $(PACKER_E2E_DOCKER) >/dev/null || { echo "FAIL demo-up: docker is required"; exit 1; }; \
 	test -r "$(PACKER_E2E_CERT_FILE)" || { echo "FAIL demo-up: no TLS certificate at $(PACKER_E2E_CERT_FILE)"; exit 1; }; \
@@ -577,6 +580,8 @@ demo-up: ## Stand up a long-lived demo instance and claim it
 	pkill -f "$(DEMO_DIR)/dufflebag" 2>/dev/null || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_SERVER_CONTAINER) >/dev/null 2>&1 || true; \
 	rm -f "$(DEMO_DIR)/server.pid"; \
+	rm -f "$(DEMO_DIR)/root.json" "$(DEMO_DIR)/builder.env" \
+		"$(DEMO_DIR)/organization_id" "$(DEMO_DIR)/project_id"; \
 	$(PACKER_E2E_DOCKER) pull $(DEMO_IMAGE); \
 	$(PACKER_E2E_DOCKER) network create $(DEMO_NET) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) rm -f $(DEMO_CONTAINER) >/dev/null 2>&1 || true; \
@@ -632,6 +637,12 @@ demo-up: ## Stand up a long-lived demo instance and claim it
 		$(DEMO_IMAGE) >/dev/null; \
 	for _ in $$(seq 1 60); do curl -s --cacert "$(PACKER_E2E_CA_FILE)" "https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)/sys/health" >/dev/null 2>&1 && break; sleep 1; done; \
 	base="https://$(PACKER_E2E_HOSTNAME):$(DEMO_PORT)"; \
+	if [ "$(DEMO_CLAIM)" != "1" ]; then \
+		echo "UNCLAIMED $$base"; \
+		echo "claim it via the console wizard, or: curl -sX POST --cacert $(PACKER_E2E_CA_FILE) $$base/sys/init -d '{}'"; \
+		echo "do NOT expose an unclaimed instance: whoever reaches /sys/init first owns it"; \
+		exit 0; \
+	fi; \
 	curl -sSf --cacert "$(PACKER_E2E_CA_FILE)" -X POST "$$base/sys/init" \
 		-H 'content-type: application/json' -d '{}' > "$(DEMO_DIR)/root.json"; \
 	chmod 600 "$(DEMO_DIR)/root.json"; \
