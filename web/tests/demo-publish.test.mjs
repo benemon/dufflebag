@@ -33,7 +33,9 @@ test('demo-publish builds parent, child, parent, parent without moving the child
 })
 
 test('the demo publishes one bucket per corpus distro, each deliberately old', () => {
-  const matrix = makefile.slice(makefile.indexOf('DEMO_DISTROS ?='), makefile.indexOf('DEMO_ORG'))
+  // 'DEMO_ORG ' with the trailing space: DEMO_ORGANIZATION_ID would otherwise
+  // match first and sit before DEMO_DISTROS, collapsing the slice to nothing.
+  const matrix = makefile.slice(makefile.indexOf('DEMO_DISTROS ?='), makefile.indexOf('DEMO_ORG '))
   // Deliberately old: a current image would very likely show nothing, and a
   // console reading "no known findings" teaches the reader nothing about what
   // the scanner does.
