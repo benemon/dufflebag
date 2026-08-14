@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import { getInstance, signOutIfUnauthorized, type ApiInstance } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 
-export function useInstance() {
+export function useInstance(refresh: number) {
   const { state, signOut } = useAuth()
   const [instance, setInstance] = useState<ApiInstance | null>(null)
   const [loading, setLoading] = useState(true)
@@ -33,7 +33,7 @@ export function useInstance() {
     return () => {
       cancelled = true
     }
-  }, [state, signOut])
+  }, [state, signOut, refresh])
 
   return { instance, loading, failure }
 }

@@ -51,6 +51,8 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
     <>
       <ScreenHeader
         title="Audit"
+        onRefresh={reload}
+        refreshing={loading}
         description={(
           <>
             Audit targets are append-only files that receive every request and response record.

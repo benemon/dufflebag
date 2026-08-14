@@ -94,7 +94,7 @@ test('Add target moves between the empty state and populated header with its rol
   assert.equal((emptyReader.match(/Add target/g) ?? []).length, 1)
 
   const populatedReader = view({ callerRole: 'reader', targets: [target()] })
-  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,2000}Add target/)
+  assert.match(populatedReader, /pf-v6-c-page__main-section[\s\S]{0,4000}Add target/)
   assert.doesNotMatch(populatedReader, /pf-v6-c-empty-state/)
   assert.match(populatedReader, /Requires root/)
   assert.equal((populatedReader.match(/Add target/g) ?? []).length, 1)

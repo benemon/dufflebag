@@ -115,6 +115,8 @@ export function WebhooksView({
     <>
       <ScreenHeader
         title="Webhooks"
+        onRefresh={onRefresh}
+        refreshing={loading}
         description="Send signed project events to an HTTP endpoint after its activation handshake succeeds."
         actions={!creating && (loading || failure || webhooks.length > 0) ? (
           <RoleRestrictedButton

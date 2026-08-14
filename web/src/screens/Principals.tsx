@@ -84,6 +84,8 @@ export function PrincipalsView({
     <>
       <ScreenHeader
         title="Principals"
+        onRefresh={reload}
+        refreshing={loading}
         description={(
           <>
             Service principals authenticate with a client id and secret, and receive a

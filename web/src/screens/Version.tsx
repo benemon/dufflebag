@@ -66,6 +66,7 @@ export function Version() {
       loading={loading}
       failure={failure}
       gap={gap}
+      onRefresh={reload}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onOpenBuild={(build) => navigate(
@@ -137,6 +138,7 @@ export function VersionView({
   onRestore = () => Promise.reject(new Error('No session.')),
   onDelete = () => Promise.reject(new Error('No session.')),
   onPromote = () => Promise.reject(new Error('No session.')),
+  onRefresh = () => {},
 }: {
   bucket: string
   detail?: VersionDetail | null
@@ -157,6 +159,7 @@ export function VersionView({
   onRestore?: () => Promise<void>
   onDelete?: () => Promise<void>
   onPromote?: (channel: string) => Promise<void>
+  onRefresh?: () => void
 }) {
   const version = detail?.version ?? suppliedVersion ?? null
   const [facet, setFacet] = useState<'overview' | 'builds'>('overview')
@@ -165,6 +168,8 @@ export function VersionView({
   return (
     <>
       <ScreenHeader
+        onRefresh={onRefresh}
+        refreshing={loading}
         breadcrumbs={(
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBackToRegistry}>

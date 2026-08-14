@@ -20,7 +20,8 @@ import { SkeletonRows } from '../components/Loading'
  */
 export function Instance() {
   const { state, selectedOrganization, selectedProject } = useAuth()
-  const { instance, loading, failure } = useInstance()
+  const [refresh, setRefresh] = useState(0)
+  const { instance, loading, failure } = useInstance(refresh)
   return (
     <InstanceView
       host={typeof window === 'undefined' ? '' : window.location.host}
@@ -34,12 +35,13 @@ export function Instance() {
       instance={instance}
       loading={loading}
       failure={failure}
+      onRefresh={() => setRefresh((current) => current + 1)}
     />
   )
 }
 
 export function InstanceView({
-  host, secure, organizationID, projectID, instance, loading, failure,
+  host, secure, organizationID, projectID, instance, loading, failure, onRefresh = () => {},
 }: {
   host: string
   secure: boolean
@@ -48,10 +50,16 @@ export function InstanceView({
   instance: ApiInstance | null
   loading: boolean
   failure: string | null
+  onRefresh?: () => void
 }) {
   return (
     <>
-      <ScreenHeader title="Instance" description="What a client needs to point at this registry." />
+      <ScreenHeader
+        title="Instance"
+        description="What a client needs to point at this registry."
+        onRefresh={onRefresh}
+        refreshing={loading}
+      />
 
       {/* One section, no body wrapper: the cards sit directly in the section's
           flex column so its row gap spaces them, and a second section would
