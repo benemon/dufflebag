@@ -2232,6 +2232,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // the maintainer ruling that superseded ADR-0025's save/verify/enable
     // ceremony: a failed resolution leaves no half-saved configuration.
     const deadPort = await closedPort()
+    // The heading text lands before React renders the form; select() does not
+    // wait, so anchor on the element itself.
+    await page.waitForSelector('#bagdrop-adapter')
     await page.select('#bagdrop-adapter', 'dufflebag')
     await page.type('#bagdrop-endpoint', `https://127.0.0.1:${deadPort}`)
     await page.type('#bagdrop-organization-id', seeded.organization.id)
@@ -2249,6 +2252,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bag Drop is not configured')
     // Against a resolvable destination the same single action saves, verifies,
     // and enables.
+    await page.waitForSelector('#bagdrop-adapter')
     await page.select('#bagdrop-adapter', 'dufflebag')
     await page.type('#bagdrop-endpoint', stub.url)
     await page.type('#bagdrop-ca-chain', stub.caChain)
