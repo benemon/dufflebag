@@ -261,22 +261,29 @@ test('an empty project owns the connect affordance and never doubles it with the
   assert.doesNotMatch(markup, /Waiting on a first build/)
 })
 
-test('the first-build hint appears only when buckets exist without a completed newest version', () => {
+test('the first-build hint appears only while no bucket has ever seen a build', () => {
   const render = (buckets) => renderToStaticMarkup(React.createElement(BucketsView, {
     buckets, total: buckets.length, loading: false, failure: null,
     openBucket: () => {}, openInstance: () => {},
   }))
   const waiting = render([
     { ...galleryBucket('empty'), versionCount: 0, newestVersion: null },
-    {
-      ...galleryBucket('building'),
-      newestVersion: { name: 'v0', fingerprint: 'building-v0', state: 'incomplete' },
-    },
   ])
   assert.match(waiting, /class="pf-v6-c-hint"/)
   assert.match(waiting, /Waiting on a first build/)
   assert.match(waiting, /Open Instance/)
   assert.match(waiting, /aria-label="Dismiss client connection hint"/)
+
+  // An incomplete v0 is proof Packer already connected — connection guidance
+  // mid-build is stale advice (duf-r0j6).
+  const building = render([
+    { ...galleryBucket('empty'), versionCount: 0, newestVersion: null },
+    {
+      ...galleryBucket('building'),
+      newestVersion: { name: 'v0', fingerprint: 'building-v0', state: 'incomplete' },
+    },
+  ])
+  assert.doesNotMatch(building, /Waiting on a first build/)
 
   const completed = render([galleryBucket('ready')])
   assert.doesNotMatch(completed, /Waiting on a first build/)
