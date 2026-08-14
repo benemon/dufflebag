@@ -3,7 +3,7 @@
 The **audit trail** records what the instance did. **Encryption at rest**
 protects what it stores. These operator concerns are independent. Roots manage
 both from the console's **Audit** and **Encryption** pages or the equivalent
-[platform API](/platform-api.html) endpoints. The
+[platform API](pathname:///platform-api.html) endpoints. The
 [deployment guide](../deployment/index.md) defines the operational contract.
 
 ## The audit trail

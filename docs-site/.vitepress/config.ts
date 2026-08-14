@@ -67,7 +67,7 @@ export default defineConfig({
   themeConfig: {
     nav: [
       { text: 'Guides', link: '/getting-started/installation' },
-      { text: 'API Reference', link: '/platform-api.html' },
+      { text: 'API Reference', link: '/platform-api.html', target: '_self' },
       { text: 'Compatibility', link: '/reference/compatibility' },
     ],
     sidebar: {
