@@ -602,13 +602,21 @@ export type InitResponse = {
   recovery_threshold: number
 }
 
+export type InitRequest = {
+  recovery_share_count: number
+  recovery_threshold: number
+}
+
 /**
  * Initialize an unclaimed instance. Returns credentials and recovery shares
- * shown exactly once. The wizard takes the 1-of-1 default; automation may POST
- * its own share parameters to the same endpoint.
+ * shown exactly once.
  */
-export async function initialize(): Promise<InitResponse> {
-  const response = await fetch('/sys/init', { method: 'POST' })
+export async function initialize(request: InitRequest): Promise<InitResponse> {
+  const response = await fetch('/sys/init', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request),
+  })
   if (response.status === 409) {
     throw new ApiError(409, 'This instance has already been initialized.')
   }

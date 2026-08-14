@@ -7,6 +7,7 @@ import {
 } from '@patternfly/react-core'
 import BarsIcon from '@patternfly/react-icons/dist/esm/icons/bars-icon'
 import MoonIcon from '@patternfly/react-icons/dist/esm/icons/moon-icon'
+import OutlinedQuestionCircleIcon from '@patternfly/react-icons/dist/esm/icons/outlined-question-circle-icon'
 import SunIcon from '@patternfly/react-icons/dist/esm/icons/sun-icon'
 
 import { useAuth } from '../auth/AuthContext'
@@ -74,6 +75,18 @@ function AppMasthead({
             </ToolbarItem>
             <ToolbarItem align={{ default: 'alignEnd' }}>
               <ThemeToggleButton theme={theme} onThemeChange={onThemeChange} />
+            </ToolbarItem>
+            <ToolbarItem>
+              <Button
+                component="a"
+                variant="plain"
+                href="https://benemon.github.io/dufflebag"
+                target="_blank"
+                rel="noreferrer"
+                aria-label="Documentation"
+              >
+                <OutlinedQuestionCircleIcon />
+              </Button>
             </ToolbarItem>
             <ToolbarItem>
               <SignOutButton signOut={signOut} />

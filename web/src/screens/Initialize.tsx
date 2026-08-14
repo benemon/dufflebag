@@ -7,12 +7,19 @@ import {
 
 import {
   ApiError, createOrganization, createProject, initialize, requestToken,
-  type ApiOrganization, type InitResponse,
+  type ApiOrganization, type InitRequest, type InitResponse,
 } from '../api/client'
+import { ClaimParametersForm, validateRecoveryParameters } from './ClaimParameters'
 import { TenancyForm } from '../components/TenancyForm'
+
+// Re-exported so the first-run tests keep loading every wizard piece from one
+// module; the form lives in its own file because tenancy-creation.test.mjs
+// guards this one against inline inputs (tenancy fields must be TenancyForm).
+export { ClaimParametersForm, validateRecoveryParameters }
 
 type Credentials = { client_id: string; client_secret: string }
 type Step = 'initialize' | 'credentials' | 'organization' | 'project'
+
 
 const stepIndex: Record<Step, number> = {
   initialize: 1,
@@ -31,29 +38,48 @@ function BootstrapPage({ children, host }: { children: ReactNode; host: string }
 }
 
 export function credentialsFileContent(credentials: InitResponse) {
+  const shares = credentials.recovery_shares.length === 1 ? 'share' : 'shares'
   return [
     '# dufflebag administrative credentials',
     '# Store this file like the secret it contains.',
-    '# The recovery share must be stored offline, separately from the credentials.',
-    '# Recovery: POST /sys/recovery with the share mints a fresh root principal.',
+    `# The recovery ${shares} are deliberately not in this file: download them`,
+    '# separately and store them offline, apart from these credentials.',
     `client_id: ${credentials.client_id}`,
     `client_secret: ${credentials.client_secret}`,
+    '',
+  ].join('\n')
+}
+
+export function sharesFileContent(credentials: InitResponse) {
+  const count = credentials.recovery_shares.length
+  return [
+    `# dufflebag recovery shares (${credentials.recovery_threshold}-of-${count})`,
+    '# Store offline, separately from the administrative credentials.',
+    `# Recovery: POST /sys/recovery with ${credentials.recovery_threshold} ${credentials.recovery_threshold === 1 ? 'share' : 'shares'} mints a fresh root principal.`,
     ...credentials.recovery_shares.map((share, index) => `recovery_share_${index + 1}: ${share}`),
     '',
   ].join('\n')
 }
 
-function downloadCredentials(credentials: InitResponse) {
-  const blob = new Blob([credentialsFileContent(credentials)], { type: 'text/plain;charset=utf-8' })
+function downloadTextFile(name: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = 'dufflebag-credentials.txt'
+  link.download = name
   try {
     link.click()
   } finally {
     URL.revokeObjectURL(url)
   }
+}
+
+function downloadCredentials(credentials: InitResponse) {
+  downloadTextFile('dufflebag-credentials.txt', credentialsFileContent(credentials))
+}
+
+function downloadShares(credentials: InitResponse) {
+  downloadTextFile('dufflebag-recovery-shares.txt', sharesFileContent(credentials))
 }
 
 export function StoreCredentials({
@@ -79,9 +105,10 @@ export function StoreCredentials({
       >
         <Content component="p">
           The credentials grant full administrative access and are hashed with argon2id on
-          write. If they are lost, presenting the recovery share to POST /sys/recovery
-          mints a fresh root principal — store it offline, separately from the
-          credentials. If both are lost, only the break-glass database procedure remains.
+          write. If they are lost, presenting the required recovery shares to
+          POST /sys/recovery mints a fresh root principal — store them offline,
+          separately from the credentials. If both are lost, only the break-glass
+          database procedure remains.
           Use a client ID that has never authenticated against another registry; clients
           cache tokens by client ID and a collision produces confusing 401s.
         </Content>
@@ -118,7 +145,9 @@ export function StoreCredentials({
 
       <Title headingLevel="h3" size="md" style={{ marginTop: 24 }}>Recovery</Title>
       <Content component="p">
-        Store the recovery share offline, separately from the credentials.
+        {credentials.recovery_shares.length === 1
+          ? 'Store the recovery share offline, separately from the credentials.'
+          : 'Store the recovery shares offline, separately from the credentials.'}
       </Content>
       <Form style={{ marginTop: 16 }}>
         {credentials.recovery_shares.map((share, index) => (
@@ -141,15 +170,24 @@ export function StoreCredentials({
             </ClipboardCopy>
           </FormGroup>
         ))}
+        <Button variant="secondary" onClick={() => downloadShares(credentials)}>
+          Download all key shares
+        </Button>
+        <Content component="small" style={{ display: 'block', marginTop: 8 }}>
+          The file contains every share — store it offline, apart from the credentials.
+        </Content>
       </Form>
 
-      <Checkbox
-        id="init-stored"
-        label="I have stored these credentials and the recovery share"
-        isChecked={stored}
-        onChange={(_event, checked) => onStoredChange(checked)}
-        style={{ marginTop: 16 }}
-      />
+      <div style={{ marginTop: 16 }}>
+        <Checkbox
+          id="init-stored"
+          label={credentials.recovery_shares.length === 1
+            ? 'I have stored these credentials and the recovery share'
+            : 'I have stored these credentials and the recovery shares'}
+          isChecked={stored}
+          onChange={(_event, checked) => onStoredChange(checked)}
+        />
+      </div>
     </>
   )
 }
@@ -177,6 +215,28 @@ export function StoreCredentialsFooter({
   )
 }
 
+export function ClaimFooter({
+  validation,
+  submitting,
+}: {
+  validation: ReturnType<typeof validateRecoveryParameters>
+  submitting: boolean
+}) {
+  return (
+    <WizardFooterWrapper>
+      <Button
+        type="submit"
+        form="initialize-claim"
+        variant="primary"
+        isLoading={submitting}
+        isDisabled={submitting || validation.request === null}
+      >
+        Initialize this instance
+      </Button>
+    </WizardFooterWrapper>
+  )
+}
+
 /** First-run bootstrap through the same public APIs available to automation. */
 export function Initialize({
   host,
@@ -192,12 +252,15 @@ export function Initialize({
   const [failure, setFailure] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [stored, setStored] = useState(false)
+  const [shareCount, setShareCount] = useState('1')
+  const [threshold, setThreshold] = useState('1')
+  const recoveryParameters = validateRecoveryParameters(shareCount, threshold)
 
-  const claim = async () => {
+  const claim = async (request: InitRequest) => {
     setSubmitting(true)
     setFailure(null)
     try {
-      const minted = await initialize()
+      const minted = await initialize(request)
       setCredentials(minted)
       setStep('credentials')
     } catch (err) {
@@ -270,30 +333,16 @@ export function Initialize({
           id="initialize-step"
           name="Initialize"
           isDisabled={step !== 'initialize'}
-          footer={(
-            <WizardFooterWrapper>
-              <Button
-                variant="primary"
-                isLoading={submitting}
-                isDisabled={submitting}
-                onClick={() => void claim()}
-              >
-                Initialize this instance
-              </Button>
-            </WizardFooterWrapper>
-          )}
+          footer={<ClaimFooter validation={recoveryParameters} submitting={submitting} />}
         >
-          <Alert variant="warning" isInline title="This instance is uninitialized">
-            <Content component="p">
-              Whoever completes this flow first owns the deployment. Do not expose an uninitialized
-              instance publicly.
-            </Content>
-          </Alert>
-          <Title headingLevel="h2" size="xl" style={{ marginTop: 16 }}>Before you continue</Title>
-          <Content component="p">
-            Initialization happens once and cannot be repeated or undone. It creates only the
-            first root principal; you will name the first tenancy in the next two steps.
-          </Content>
+          <ClaimParametersForm
+            shareCount={shareCount}
+            threshold={threshold}
+            validation={recoveryParameters}
+            onShareCountChange={setShareCount}
+            onThresholdChange={setThreshold}
+            onClaim={(request) => void claim(request)}
+          />
         </WizardStep>
 
         <WizardStep

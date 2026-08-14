@@ -819,17 +819,24 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
+    // The sidebar is asserted separately: it once pinned its surface to a
+    // light-scoped token and stayed white in dark mode.
     const pageBackground = () => page.$eval(
       '.pf-v6-c-page', (el) => getComputedStyle(el).backgroundColor)
+    const sidebarBackground = () => page.$eval(
+      '.pf-v6-c-page__sidebar', (el) => getComputedStyle(el).backgroundColor)
     const lightBackground = await pageBackground()
+    const lightSidebar = await sidebarBackground()
     await page.click('button[aria-label="Switch to dark theme"]')
     assert.equal(await page.evaluate(() =>
       document.documentElement.classList.contains('pf-v6-theme-dark')), true)
     assert.notEqual(await pageBackground(), lightBackground)
+    assert.notEqual(await sidebarBackground(), lightSidebar)
     await page.click('button[aria-label="Switch to light theme"]')
     assert.equal(await page.evaluate(() =>
       document.documentElement.classList.contains('pf-v6-theme-dark')), false)
     assert.equal(await pageBackground(), lightBackground)
+    assert.equal(await sidebarBackground(), lightSidebar)
   })
 
   await t.test('a reload keeps the session', async () => {

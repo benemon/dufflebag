@@ -81,3 +81,18 @@ test('the console palette is scoped to light theme so PatternFly dark tokens win
   assert.match(builtCSS, /:root:not\(\.pf-v6-theme-dark\)\{[^}]*--pf-t--global--background--color--100:#fff/)
   assert.match(builtCSS, /:root:where\(\.pf-v6-theme-dark\)\{/)
 })
+
+test('the sidebar surface follows semantic tokens in both themes', () => {
+  const page = rule('.pf-v6-c-page.app-page')
+  const navTitle = rule('.app-global-nav .pf-v6-c-nav__section-title')
+  assert.match(
+    page,
+    /--pf-v6-c-page__sidebar--BackgroundColor: var\(--pf-t--global--background--color--floating--secondary--default\);/,
+  )
+  assert.match(
+    page,
+    /--pf-v6-c-page__sidebar--BorderInlineEndColor: var\(--pf-t--global--border--color--subtle\);/,
+  )
+  assert.match(navTitle, /color: var\(--pf-t--global--text--color--subtle\);/)
+  assert.doesNotMatch(theme, /--sf[01]:|--tx1:|--bd:/)
+})
