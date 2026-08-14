@@ -175,6 +175,7 @@ type BucketSnapshot struct {
 
 type ChannelSnapshot struct {
 	Name                       string
+	Restricted                 bool
 	AssignedVersionFingerprint *string
 }
 
@@ -234,6 +235,7 @@ type RemoteSbom struct {
 type RemoteChannel struct {
 	Name                       string
 	Managed                    bool
+	Restricted                 bool
 	AssignedVersionFingerprint *string
 }
 

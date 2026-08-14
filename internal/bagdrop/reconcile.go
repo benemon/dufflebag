@@ -657,7 +657,7 @@ func (r *Reconciler) reconcileChannels(
 		remoteChannel, exists := ordinaryRemote[channel.Name]
 		if !exists {
 			if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.create", "channel", channel.Name, "",
-				func() error { return run.CreateChannel(ctx, bucket.Name, channel.Name) }); err != nil {
+				func() error { return run.CreateChannel(ctx, bucket.Name, channel) }); err != nil {
 				return err
 			}
 			// Re-observe after create so a 409/code-6 adoption converges the
@@ -677,6 +677,18 @@ func (r *Reconciler) reconcileChannels(
 			}
 			if !found {
 				return errors.New("created destination channel was not returned by ListChannels")
+			}
+		}
+		if remoteChannel.Restricted != channel.Restricted {
+			detail := "restricted false"
+			if channel.Restricted {
+				detail = "restricted true"
+			}
+			if err := r.mutate(ctx, project, destination, "bagdrop.sync.channel.update", "channel", channel.Name, detail,
+				func() error {
+					return run.UpdateChannelRestriction(ctx, bucket.Name, channel.Name, channel.Restricted)
+				}); err != nil {
+				return err
 			}
 		}
 		if sameFingerprint(channel.AssignedVersionFingerprint, remoteChannel.AssignedVersionFingerprint) {

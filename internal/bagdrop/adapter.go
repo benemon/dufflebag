@@ -44,8 +44,9 @@ type ReconcileRun interface {
 	ListSboms(context.Context, string, string, string) ([]RemoteSbom, error)
 	UploadSbom(context.Context, string, string, string, SbomSnapshot) error
 	ListChannels(context.Context, string) ([]RemoteChannel, error)
-	CreateChannel(context.Context, string, string) error
+	CreateChannel(context.Context, string, ChannelSnapshot) error
 	UpdateChannelAssignment(context.Context, string, string, *string) error
+	UpdateChannelRestriction(context.Context, string, string, bool) error
 	DeleteChannel(context.Context, string, string) error
 }
 
@@ -501,9 +502,10 @@ func (r *destinationReconcileRun) UploadSbom(
 func (r *destinationReconcileRun) ListChannels(ctx context.Context, bucket string) ([]RemoteChannel, error) {
 	var response struct {
 		Channels []struct {
-			Name    string `json:"name"`
-			Managed bool   `json:"managed"`
-			Version *struct {
+			Name       string `json:"name"`
+			Managed    bool   `json:"managed"`
+			Restricted bool   `json:"restricted"`
+			Version    *struct {
 				Fingerprint string `json:"fingerprint"`
 			} `json:"version"`
 		} `json:"channels"`
@@ -511,7 +513,7 @@ func (r *destinationReconcileRun) ListChannels(ctx context.Context, bucket strin
 	err := r.do(ctx, http.MethodGet, r.channelPath(bucket), nil, &response)
 	channels := make([]RemoteChannel, 0, len(response.Channels))
 	for _, channel := range response.Channels {
-		remote := RemoteChannel{Name: channel.Name, Managed: channel.Managed}
+		remote := RemoteChannel{Name: channel.Name, Managed: channel.Managed, Restricted: channel.Restricted}
 		if channel.Version != nil {
 			fingerprint := channel.Version.Fingerprint
 			remote.AssignedVersionFingerprint = &fingerprint
@@ -521,12 +523,25 @@ func (r *destinationReconcileRun) ListChannels(ctx context.Context, bucket strin
 	return channels, err
 }
 
-func (r *destinationReconcileRun) CreateChannel(ctx context.Context, bucket, name string) error {
-	err := r.do(ctx, http.MethodPost, r.channelPath(bucket), map[string]any{"name": name}, nil)
+func (r *destinationReconcileRun) CreateChannel(ctx context.Context, bucket string, channel ChannelSnapshot) error {
+	body := map[string]any{"name": channel.Name}
+	if channel.Restricted {
+		body["restricted"] = true
+	}
+	err := r.do(ctx, http.MethodPost, r.channelPath(bucket), body, nil)
 	if remoteError(err, http.StatusConflict, 6) {
 		return nil
 	}
 	return err
+}
+
+func (r *destinationReconcileRun) UpdateChannelRestriction(
+	ctx context.Context, bucket, name string, restricted bool,
+) error {
+	return r.do(ctx, http.MethodPatch, r.channelPath(bucket)+"/"+url.PathEscape(name), map[string]any{
+		"restricted":  restricted,
+		"update_mask": "restricted",
+	}, nil)
 }
 
 func (r *destinationReconcileRun) UpdateChannelAssignment(

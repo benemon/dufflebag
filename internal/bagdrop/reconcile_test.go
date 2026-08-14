@@ -1007,6 +1007,49 @@ func TestReconcileConvergesOrdinaryChannelPointers(t *testing.T) {
 	}
 }
 
+// A locally restricted channel must arrive restricted, and restriction drift
+// converges — the flag was silently dropped once (duf-cmh7).
+func TestReconcileConvergesChannelRestriction(t *testing.T) {
+	t.Run("created restricted", func(t *testing.T) {
+		reconciler, repository, run, _ := newTestReconciler(t, "secret")
+		repository.associations = []Association{testAssociation("images")}
+		repository.snapshots["images"] = &BucketSnapshot{
+			Name:     "images",
+			Channels: []ChannelSnapshot{{Name: "production", Restricted: true}},
+		}
+		run.buckets["images"] = RemoteBucket{}
+		run.channels["images"] = map[string]RemoteChannel{}
+		if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+			t.Fatal(err)
+		}
+		if !run.channels["images"]["production"].Restricted {
+			t.Fatalf("created channel is not restricted: %#v", run.channels["images"]["production"])
+		}
+	})
+	t.Run("drifted restriction converges", func(t *testing.T) {
+		reconciler, repository, run, _ := newTestReconciler(t, "secret")
+		repository.associations = []Association{testAssociation("images")}
+		repository.snapshots["images"] = &BucketSnapshot{
+			Name:     "images",
+			Channels: []ChannelSnapshot{{Name: "production", Restricted: true}},
+		}
+		run.buckets["images"] = RemoteBucket{}
+		run.channels["images"] = map[string]RemoteChannel{
+			"production": {Name: "production", Restricted: false},
+		}
+		if err := reconciler.ReconcileProject(context.Background(), repository.project); err != nil {
+			t.Fatal(err)
+		}
+		if !run.channels["images"]["production"].Restricted {
+			t.Fatalf("restriction drift did not converge: %#v", run.channels["images"]["production"])
+		}
+		joined := strings.Join(*run.events, ",")
+		if !strings.Contains(joined, "update-channel-restriction:production:true") {
+			t.Fatalf("no restriction update event: %s", joined)
+		}
+	})
+}
+
 func TestReconcileChannelMutationsAreAuditFailClosed(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -1748,13 +1791,25 @@ func (r *testReconcileRun) ListChannels(_ context.Context, bucket string) ([]Rem
 	}
 	return listed, nil
 }
-func (r *testReconcileRun) CreateChannel(_ context.Context, bucket, name string) error {
-	*r.events = append(*r.events, "create-channel:"+name)
+func (r *testReconcileRun) CreateChannel(_ context.Context, bucket string, channel ChannelSnapshot) error {
+	*r.events = append(*r.events, "create-channel:"+channel.Name)
 	if r.channels[bucket] == nil {
 		r.channels[bucket] = make(map[string]RemoteChannel)
 	}
-	r.channels[bucket][name] = RemoteChannel{Name: name}
-	r.createdChannels = append(r.createdChannels, name)
+	r.channels[bucket][channel.Name] = RemoteChannel{Name: channel.Name, Restricted: channel.Restricted}
+	r.createdChannels = append(r.createdChannels, channel.Name)
+	return nil
+}
+
+func (r *testReconcileRun) UpdateChannelRestriction(_ context.Context, bucket, name string, restricted bool) error {
+	detail := "false"
+	if restricted {
+		detail = "true"
+	}
+	*r.events = append(*r.events, "update-channel-restriction:"+name+":"+detail)
+	channel := r.channels[bucket][name]
+	channel.Restricted = restricted
+	r.channels[bucket][name] = channel
 	return nil
 }
 func (r *testReconcileRun) UpdateChannelAssignment(
