@@ -123,13 +123,13 @@ func TestVaultAuthSelector(t *testing.T) {
 	}
 }
 
-// An unset VAULT_ADDR must refuse with a message naming it rather than letting
-// the SDK's localhost default report as "sealed" (duf-tsp6). Agent and proxy
-// addresses are each an accepted substitute; an explicit localhost is honoured.
+// An unset DFBG_VAULT_ADDR must refuse with a message naming it rather than
+// letting the SDK's localhost default report as "sealed" (duf-tsp6). The native
+// address remains accepted, and agent/proxy addresses satisfy token mode only.
 func TestTransitRefusesAnUndiagnosedVaultAddress(t *testing.T) {
 	t.Setenv(vaultAuthMethodEnv, "")
 	t.Setenv(vaultAuthNamespaceEnv, "")
-	for _, name := range []string{"VAULT_ADDR", "VAULT_AGENT_ADDR", "VAULT_PROXY_ADDR"} {
+	for _, name := range []string{vaultAddressEnv, "VAULT_ADDR", "VAULT_AGENT_ADDR", "VAULT_PROXY_ADDR"} {
 		t.Setenv(name, "")
 		if err := os.Unsetenv(name); err != nil {
 			t.Fatal(err)
@@ -137,11 +137,11 @@ func TestTransitRefusesAnUndiagnosedVaultAddress(t *testing.T) {
 	}
 
 	if _, err := transitFromEnvironment(context.Background()); err == nil ||
-		!strings.Contains(err.Error(), "VAULT_ADDR is required") {
-		t.Fatalf("unset address = %v, want a refusal naming VAULT_ADDR", err)
+		!strings.Contains(err.Error(), vaultAddressEnv+" is required") {
+		t.Fatalf("unset address = %v, want a refusal naming %s", err, vaultAddressEnv)
 	}
 
-	for _, accepted := range []string{"VAULT_ADDR", "VAULT_AGENT_ADDR", "VAULT_PROXY_ADDR"} {
+	for _, accepted := range []string{vaultAddressEnv, "VAULT_ADDR", "VAULT_AGENT_ADDR", "VAULT_PROXY_ADDR"} {
 		t.Run(accepted, func(t *testing.T) {
 			t.Setenv(accepted, "https://127.0.0.1:8200")
 			if _, err := transitFromEnvironment(context.Background()); err != nil {
@@ -150,24 +150,24 @@ func TestTransitRefusesAnUndiagnosedVaultAddress(t *testing.T) {
 		})
 	}
 
-	t.Run("kubernetes requires VAULT_ADDR", func(t *testing.T) {
+	t.Run("kubernetes requires DFBG or ambient address", func(t *testing.T) {
 		t.Setenv(vaultAuthMethodEnv, "kubernetes")
 		t.Setenv(vaultKubernetesRoleEnv, "dufflebag")
 		t.Setenv("VAULT_AGENT_ADDR", "https://127.0.0.1:8200")
 		if _, err := transitFromEnvironment(context.Background()); err == nil ||
-			!strings.Contains(err.Error(), "VAULT_ADDR is required") {
-			t.Fatalf("agent-only Kubernetes address = %v, want a refusal naming VAULT_ADDR", err)
+			!strings.Contains(err.Error(), vaultAddressEnv+" is required") {
+			t.Fatalf("agent-only Kubernetes address = %v, want a refusal naming %s", err, vaultAddressEnv)
 		}
 	})
 
-	t.Run("approle requires VAULT_ADDR", func(t *testing.T) {
+	t.Run("approle requires DFBG or ambient address", func(t *testing.T) {
 		t.Setenv(vaultAuthMethodEnv, "approle")
 		t.Setenv(vaultAppRoleRoleIDEnv, "dufflebag")
 		t.Setenv(vaultAppRoleSecretIDFileEnv, "/run/secrets/dufflebag-vault-secret-id")
 		t.Setenv("VAULT_AGENT_ADDR", "https://127.0.0.1:8200")
 		if _, err := transitFromEnvironment(context.Background()); err == nil ||
-			!strings.Contains(err.Error(), "VAULT_ADDR is required") {
-			t.Fatalf("agent-only AppRole address = %v, want a refusal naming VAULT_ADDR", err)
+			!strings.Contains(err.Error(), vaultAddressEnv+" is required") {
+			t.Fatalf("agent-only AppRole address = %v, want a refusal naming %s", err, vaultAddressEnv)
 		}
 	})
 }
@@ -241,8 +241,13 @@ func (f *fakeTransitVault) snapshot() []recordedVaultRequest {
 
 func configureFakeVaultEnvironment(t *testing.T, address string) {
 	t.Helper()
-	t.Setenv("VAULT_ADDR", address)
+	t.Setenv(vaultAddressEnv, address)
+	t.Setenv(vaultTokenEnv, "")
+	t.Setenv(vaultCACertEnv, "")
+	t.Setenv(vaultTransitNamespaceEnv, "")
+	t.Setenv("VAULT_ADDR", "")
 	t.Setenv("VAULT_TOKEN", "")
+	t.Setenv("VAULT_CACERT", "")
 	t.Setenv("VAULT_NAMESPACE", "")
 	t.Setenv("VAULT_AGENT_ADDR", "")
 	t.Setenv("VAULT_PROXY_ADDR", "")
@@ -277,7 +282,7 @@ func TestTransitAppRoleSplitNamespaces(t *testing.T) {
 	if err := os.WriteFile(secretIDPath, []byte("secret-from-file"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VAULT_NAMESPACE", "operating-ns")
+	t.Setenv(vaultTransitNamespaceEnv, "operating-ns")
 	t.Setenv(vaultAuthMethodEnv, "approle")
 	t.Setenv(vaultAuthNamespaceEnv, "auth-ns")
 	t.Setenv(vaultAppRoleRoleIDEnv, "role-from-environment")
@@ -325,7 +330,7 @@ func TestTransitKubernetesSplitNamespaces(t *testing.T) {
 	if err := os.WriteFile(tokenPath, []byte("projected-jwt"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VAULT_NAMESPACE", "operating-ns")
+	t.Setenv(vaultTransitNamespaceEnv, "operating-ns")
 	t.Setenv(vaultAuthMethodEnv, "kubernetes")
 	t.Setenv(vaultAuthNamespaceEnv, "auth-ns")
 	t.Setenv(vaultKubernetesRoleEnv, "dufflebag")
@@ -371,7 +376,7 @@ func TestTransitAuthNamespaceDefaultsToOperatingNamespace(t *testing.T) {
 	if err := os.WriteFile(secretIDPath, []byte("secret-id"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("VAULT_NAMESPACE", "operating-ns")
+	t.Setenv(vaultTransitNamespaceEnv, "operating-ns")
 	t.Setenv(vaultAuthMethodEnv, "approle")
 	t.Setenv(vaultAppRoleRoleIDEnv, "dufflebag")
 	t.Setenv(vaultAppRoleSecretIDFileEnv, secretIDPath)
@@ -387,12 +392,12 @@ func TestTransitAuthNamespaceDefaultsToOperatingNamespace(t *testing.T) {
 	}
 }
 
-func TestTransitTokenModeUsesSDKCredentialWithoutLogin(t *testing.T) {
+func TestTransitTokenModeUsesDFBGCredentialWithoutLogin(t *testing.T) {
 	fake := &fakeTransitVault{}
 	server := httptest.NewServer(fake)
 	t.Cleanup(server.Close)
 	configureFakeVaultEnvironment(t, server.URL)
-	t.Setenv("VAULT_TOKEN", "static-token")
+	t.Setenv(vaultTokenEnv, "static-token")
 
 	provider, err := transitFromEnvironment(context.Background())
 	if err != nil {
@@ -411,6 +416,87 @@ func TestTransitTokenModeUsesSDKCredentialWithoutLogin(t *testing.T) {
 	wrap := requestAtPath(t, requests, "/v1/transit/encrypt/dufflebag")
 	if wrap.token != "static-token" {
 		t.Fatalf("transit token = %q, want static-token", wrap.token)
+	}
+}
+
+func TestTransitDFBGAddressOverridesAmbientAddress(t *testing.T) {
+	fake := &fakeTransitVault{}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	configureFakeVaultEnvironment(t, server.URL)
+	t.Setenv("VAULT_ADDR", "http://127.0.0.1:1")
+	t.Setenv(vaultTokenEnv, "dfbg-token")
+
+	provider, err := transitFromEnvironment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := provider.Wrap(context.Background(), []byte("plaintext")); err != nil {
+		t.Fatal(err)
+	}
+	requestAtPath(t, fake.snapshot(), "/v1/transit/encrypt/dufflebag")
+}
+
+func TestTransitDFBGTokenOverridesAmbientToken(t *testing.T) {
+	fake := &fakeTransitVault{}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	configureFakeVaultEnvironment(t, server.URL)
+	t.Setenv("VAULT_TOKEN", "ambient-token")
+	t.Setenv(vaultTokenEnv, "dfbg-token")
+
+	provider, err := transitFromEnvironment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := provider.Wrap(context.Background(), []byte("plaintext")); err != nil {
+		t.Fatal(err)
+	}
+	wrap := requestAtPath(t, fake.snapshot(), "/v1/transit/encrypt/dufflebag")
+	if wrap.token != "dfbg-token" {
+		t.Fatalf("transit token = %q, want dfbg-token", wrap.token)
+	}
+}
+
+func TestTransitDFBGTransitNamespaceOverridesAmbientNamespace(t *testing.T) {
+	fake := &fakeTransitVault{}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	configureFakeVaultEnvironment(t, server.URL)
+	t.Setenv("VAULT_NAMESPACE", "ambient-ns")
+	t.Setenv(vaultTransitNamespaceEnv, "dfbg-ns")
+
+	provider, err := transitFromEnvironment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := provider.Wrap(context.Background(), []byte("plaintext")); err != nil {
+		t.Fatal(err)
+	}
+	wrap := requestAtPath(t, fake.snapshot(), "/v1/transit/encrypt/dufflebag")
+	if wrap.namespace != "dfbg-ns" {
+		t.Fatalf("transit namespace = %q, want dfbg-ns", wrap.namespace)
+	}
+}
+
+func TestTransitAmbientVaultEnvironmentEscapeHatch(t *testing.T) {
+	fake := &fakeTransitVault{}
+	server := httptest.NewServer(fake)
+	t.Cleanup(server.Close)
+	configureFakeVaultEnvironment(t, "")
+	t.Setenv("VAULT_ADDR", server.URL)
+	t.Setenv("VAULT_TOKEN", "ambient-token")
+
+	provider, err := transitFromEnvironment(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := provider.Wrap(context.Background(), []byte("plaintext")); err != nil {
+		t.Fatal(err)
+	}
+	wrap := requestAtPath(t, fake.snapshot(), "/v1/transit/encrypt/dufflebag")
+	if wrap.token != "ambient-token" {
+		t.Fatalf("transit token = %q, want ambient-token", wrap.token)
 	}
 }
 

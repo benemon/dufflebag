@@ -73,8 +73,8 @@ func startVaultDev(t *testing.T) string {
 func encryptedEnvironment(vaultAddress string) map[string]string {
 	return map[string]string{
 		"DFBG_KEY_PROVIDER":           "vault",
-		"VAULT_ADDR":                  vaultAddress,
-		"VAULT_TOKEN":                 "runtime-root",
+		"DFBG_VAULT_ADDR":             vaultAddress,
+		"DFBG_VAULT_TOKEN":            "runtime-root",
 		"DFBG_TOKEN_SIGNING_KEY":      "",
 		"DFBG_SHUTDOWN_GRACE_PERIOD":  "1s",
 		"DFBG_AUDIT_HMAC_KEY":         "",
@@ -177,7 +177,7 @@ func TestUnencryptedInstanceRefusesLateEncryption(t *testing.T) {
 	command := runtimeCommand(database.appURL, reserveAddress(t), map[string]string{
 		"DFBG_KEY_PROVIDER": "vault",
 		// Never dialled: the mode marker refuses before any key-service call.
-		"VAULT_ADDR":             "http://127.0.0.1:1",
+		"DFBG_VAULT_ADDR":        "http://127.0.0.1:1",
 		"VAULT_MAX_RETRIES":      "0",
 		"DFBG_TOKEN_SIGNING_KEY": "",
 	})
@@ -190,7 +190,7 @@ func TestEncryptedStartupSealsWhenKeyServiceUnreachable(t *testing.T) {
 	database := newRuntimeDatabase(t)
 	command := runtimeCommand(database.appURL, reserveAddress(t), map[string]string{
 		"DFBG_KEY_PROVIDER":      "vault",
-		"VAULT_ADDR":             "http://127.0.0.1:1",
+		"DFBG_VAULT_ADDR":        "http://127.0.0.1:1",
 		"VAULT_MAX_RETRIES":      "0",
 		"DFBG_TOKEN_SIGNING_KEY": "",
 	})
@@ -203,7 +203,7 @@ func TestEnvironmentKeysAreRefusedAlongsideAKeyProvider(t *testing.T) {
 	database := newRuntimeDatabase(t)
 	command := runtimeCommand(database.appURL, reserveAddress(t), map[string]string{
 		"DFBG_KEY_PROVIDER": "vault",
-		"VAULT_ADDR":        "http://127.0.0.1:1",
+		"DFBG_VAULT_ADDR":   "http://127.0.0.1:1",
 	})
 	assertStartupRefusal(t, command, "DFBG_TOKEN_SIGNING_KEY must not be set when DFBG_KEY_PROVIDER is configured")
 }
@@ -212,7 +212,7 @@ func TestBagDropEnvironmentKeyIsRefusedAlongsideAKeyProvider(t *testing.T) {
 	database := newRuntimeDatabase(t)
 	command := runtimeCommand(database.appURL, reserveAddress(t), map[string]string{
 		"DFBG_KEY_PROVIDER":      "vault",
-		"VAULT_ADDR":             "http://127.0.0.1:1",
+		"DFBG_VAULT_ADDR":        "http://127.0.0.1:1",
 		"DFBG_TOKEN_SIGNING_KEY": "",
 		bagdrop.CredentialKeyEnv: "0123456789abcdef0123456789abcdef",
 	})

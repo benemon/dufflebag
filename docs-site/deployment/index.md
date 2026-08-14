@@ -210,17 +210,21 @@ database or object-store credentials through the platform API.
 
 Optional, chosen at the first boot and permanent for the instance's lifetime —
 see the [encryption setup](./encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot)
-before setting it. The Vault connection itself uses the Vault SDK's own
-environment (`VAULT_ADDR`, `VAULT_TOKEN`, `VAULT_NAMESPACE`, `VAULT_CACERT`, ...);
-dufflebag's variables select the native login method when required.
+before setting it. The table includes the documented Vault connection and
+authentication settings. The SDK-native escape hatch is described in the
+[encryption setup warning](./encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot).
 
 | Variable | Default | Description |
 |---|---|---|
 | `DFBG_KEY_PROVIDER` | — | Key service wrapping the keyring. `vault` (transit) is the only provider; unset means no encryption at rest |
+| `DFBG_VAULT_ADDR` | — | Vault address; required when `DFBG_KEY_PROVIDER=vault` |
+| `DFBG_VAULT_TOKEN` | — | Vault token credential for `token` authentication |
+| `DFBG_VAULT_CACERT` | — | Path to a CA certificate for the Vault connection |
+| `DFBG_VAULT_TRANSIT_NAMESPACE` | — | Operating namespace governing transit operations |
 | `DFBG_VAULT_TRANSIT_MOUNT` | `transit` | Transit engine mount path |
 | `DFBG_VAULT_TRANSIT_KEY` | `dufflebag` | Transit key name; created on first use |
-| `DFBG_VAULT_AUTH_METHOD` | `token` | Vault authentication: `token` uses the SDK's ambient credential; `kubernetes` and `approle` perform native login |
-| `DFBG_VAULT_AUTH_NAMESPACE` | — | Namespace for native login and token renewal; unset uses the operating `VAULT_NAMESPACE`; invalid with `token` |
+| `DFBG_VAULT_AUTH_METHOD` | `token` | Vault authentication: `token` uses `DFBG_VAULT_TOKEN`; `kubernetes` and `approle` perform native login |
+| `DFBG_VAULT_AUTH_NAMESPACE` | — | Namespace for native login and token renewal; unset uses `DFBG_VAULT_TRANSIT_NAMESPACE`; invalid with `token` |
 | `DFBG_VAULT_K8S_ROLE` | — | Vault Kubernetes auth role; required when `DFBG_VAULT_AUTH_METHOD=kubernetes` |
 | `DFBG_VAULT_K8S_MOUNT` | `kubernetes` | Vault Kubernetes auth mount path |
 | `DFBG_VAULT_K8S_TOKEN_PATH` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | Projected service-account token path; override for non-standard projections |

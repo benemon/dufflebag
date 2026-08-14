@@ -37,9 +37,8 @@ type Rewrapper interface {
 const ProviderEnv = "DFBG_KEY_PROVIDER"
 
 // ProviderFromEnvironment builds the configured provider, or returns nil when
-// none is configured. Provider connection details stay in each provider's
-// native vocabulary (VAULT_ADDR and kin); only dufflebag-born variables carry
-// the DFBG_ prefix.
+// none is configured. DFBG_ variables are the documented configuration surface;
+// provider-native environment remains an escape hatch, with DFBG_ precedence.
 func ProviderFromEnvironment(ctx context.Context) (Provider, error) {
 	switch name := os.Getenv(ProviderEnv); name {
 	case "":
