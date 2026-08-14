@@ -714,7 +714,7 @@ demo-expose: ## Expose the claimed demo instance over ngrok (refuses if unclaime
 	echo "EXPOSED https://$(DEMO_NGROK_URL)"
 
 .PHONY: demo-publish
-demo-publish: ## Publish the parent/child lineage plus one bucket per corpus distro
+demo-publish: ## Publish the demo corpus (wizard-claimed: set DEMO_ORGANIZATION_ID/DEMO_PROJECT_ID + HCP creds)
 	@set -e; \
 	command -v $(PACKER_E2E_PACKER) >/dev/null || { echo "FAIL demo-publish: packer is required"; exit 1; }; \
 	command -v $(PACKER_E2E_DOCKER) >/dev/null || { echo "FAIL demo-publish: docker is required"; exit 1; }; \
