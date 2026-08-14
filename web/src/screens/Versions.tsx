@@ -50,8 +50,9 @@ const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions wi
  * The design's custom timeline rail is a deliberate non-PatternFly addition
  * and is omitted; the state Labels carry the same information.
  *
- * Packer creates versions. Publishers manage channel lifecycle and assignments
- * here; Terraform remains the automation path.
+ * Packer creates versions. Publishers manage unrestricted channel lifecycle
+ * and assignments here; restricted targets require maintainer. Terraform
+ * remains the automation path.
  */
 export function Versions() {
   const { bucket = '' } = useParams()
@@ -1174,8 +1175,9 @@ function ChannelActions({
   onDelete: () => void
 }) {
   const [open, setOpen] = useState(false)
-  const refused = !permitsAction(callerRole, 'manageChannels')
-  const reason = requirementReason('manageChannels')
+  const requiredAction = channel.restricted ? 'manageRestrictedChannels' : 'manageChannels'
+  const refused = !permitsAction(callerRole, requiredAction)
+  const reason = requirementReason(requiredAction)
   const toggle = (ref: Ref<MenuToggleElement>) => (
     <MenuToggle
       ref={ref}
@@ -1303,6 +1305,18 @@ export function CreateChannelModalView({
   onClose: () => void
 }) {
   const completeVersions = completeChannelVersions(versions)
+  const restrictedRefused = !permitsAction(callerRole, 'manageRestrictedChannels')
+  const restrictedReason = requirementReason('manageRestrictedChannels')
+  const restrictedCheckbox = (
+    <Checkbox
+      id="channel-restricted"
+      label="Restricted"
+      description="Builders and above may consume it; maintainers and above may manage it."
+      isChecked={restricted}
+      isDisabled={restrictedRefused}
+      onChange={(_event, checked) => onRestrictedChange(checked)}
+    />
+  )
   return (
     <>
       <ModalHeader labelId="create-channel-modal-title" title={`Create channel in ${bucket}`} />
@@ -1320,13 +1334,13 @@ export function CreateChannelModalView({
               onChange={(_event, value) => onNameChange(value)}
             />
           </FormGroup>
-          <Checkbox
-            id="channel-restricted"
-            label="Restricted"
-            description="Only explicitly authorised consumers can use this channel."
-            isChecked={restricted}
-            onChange={(_event, checked) => onRestrictedChange(checked)}
-          />
+          {restrictedRefused ? (
+            <Tooltip content={restrictedReason}>
+              <span tabIndex={0} aria-label={restrictedReason} style={{ display: 'inline-block' }}>
+                {restrictedCheckbox}
+              </span>
+            </Tooltip>
+          ) : restrictedCheckbox}
           <FormGroup label="Initial version" fieldId="channel-initial-version">
             <FormSelect
               id="channel-initial-version"
@@ -1347,7 +1361,7 @@ export function CreateChannelModalView({
       </ModalBody>
       <ModalFooter>
         <RoleRestrictedButton
-          action="manageChannels"
+          action={restricted ? 'manageRestrictedChannels' : 'manageChannels'}
           callerRole={callerRole}
           variant="primary"
           isLoading={submitting}
@@ -1469,7 +1483,7 @@ export function AssignChannelModalView({
       </ModalBody>
       <ModalFooter>
         <RoleRestrictedButton
-          action="manageChannels"
+          action={channel.restricted ? 'manageRestrictedChannels' : 'manageChannels'}
           callerRole={callerRole}
           variant="primary"
           isLoading={submitting}

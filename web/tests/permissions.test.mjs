@@ -5,6 +5,8 @@ import { createServer } from 'vite'
 
 let vite
 let allowedActions
+let permitsAction
+let requirementReason
 let visibleNavItems
 
 before(async () => {
@@ -12,7 +14,8 @@ before(async () => {
     root: process.cwd(), logLevel: 'silent',
     server: { middlewareMode: true }, appType: 'custom',
   })
-  ;({ allowedActions, visibleNavItems } = await vite.ssrLoadModule('/src/auth/permissions.ts'))
+  ;({ allowedActions, permitsAction, requirementReason, visibleNavItems } =
+    await vite.ssrLoadModule('/src/auth/permissions.ts'))
 })
 
 after(async () => { await vite.close() })
@@ -28,14 +31,15 @@ test('each role gets the nested console action snapshot declared by the server',
     allowedActions('maintainer'),
     [
       'createProjects',
-      'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets',
+      'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels',
+      'manageRestrictedChannels', 'deleteBuckets',
       'managePrincipals', 'configureBagDrop', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
     'createOrganizations', 'createProjects', 'pinBuckets', 'revokeVersions', 'deleteVersions',
-    'manageChannels', 'deleteBuckets', 'configureAudit', 'manageEncryption', 'managePrincipals',
-    'configureBagDrop', 'configureWebhooks',
+    'manageChannels', 'manageRestrictedChannels', 'deleteBuckets', 'configureAudit',
+    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configureWebhooks',
   ])
   assert.deepEqual(allowedActions(null), [])
 })
@@ -74,6 +78,12 @@ test('manageChannels permission mapping requires publisher', () => {
   assert.equal(allowedActions('builder').includes('manageChannels'), false)
   assert.equal(allowedActions('publisher').includes('manageChannels'), true)
   assert.equal(allowedActions('maintainer').includes('manageChannels'), true)
+})
+
+test('restricted-channel management requires maintainer', () => {
+  assert.equal(permitsAction('publisher', 'manageRestrictedChannels'), false)
+  assert.equal(permitsAction('maintainer', 'manageRestrictedChannels'), true)
+  assert.equal(requirementReason('manageRestrictedChannels'), 'Requires maintainer')
 })
 
 test('deleteBuckets permission mapping requires publisher', () => {

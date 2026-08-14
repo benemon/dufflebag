@@ -819,25 +819,23 @@ at completion, and refuse mutation with the shapes above.
 > `Dufflebag` under the same branding rule, and pre-migration rows carry the
 > honest explicit unknown `""` because their actor was never stored.
 
-### Channel restriction — stored, not enforced (recorded divergence, 2026-08-12)
+### Secure channel access (implemented 2026-08-14)
 
-The `restricted` flag round-trips faithfully: `CreateChannel` and
-`UpdateChannel` persist it, `GetChannel`/`ListChannels` render it, and the
-managed `latest` carries `restricted: true` as live HCP does. What dufflebag
-deliberately does **not** implement is the access semantics HCP's user
-documentation attaches to the flag — restricted channels being invisible to
-viewer-role users. No dufflebag read path filters on `restricted`; a reader
-sees every channel.
+Dufflebag enforces HCP's documented secure-channel-access semantics, calibrated
+to its own role ladder. Every restricted channel, including the managed
+`latest`, is omitted from lists and cannot be resolved below `builder`;
+`builder` and above may consume it. Creating or managing a restricted user
+channel requires `maintainer`, and an update mask naming `restricted` requires
+`maintainer` in either direction. Unrestricted channel management retains its
+`publisher` minimum. The existing managed-channel mutation refusals for
+`latest` remain unchanged for every role.
 
-This is a recorded divergence, not an oversight. HCP's documented behaviour
-interacts with the data-source path in a way only a live probe can pin down —
-`latest` is restricted by default upstream, yet `channel_name = "latest"`
-resolution with reader-grade credentials is the commonest consumption pattern,
-so HCP evidently grants data-source access through registry roles rather than
-the flag alone. Enforcing from the documentation without that observation
-risks breaking working reader-credential builds, the exact asymmetry the
-be-permissive rule exists to avoid. If enforcement is ever taken up, a
-viewer-role probe of the channel list and `latest` resolution comes first.
+HCP's exact unauthorized-consumption wire response has not been live-probed.
+Dufflebag therefore follows ADR-0017's disclosure rule honestly: resolving a
+restricted channel below `builder` returns the route's byte-identical
+not-found/code-5 form, and listing filters the channel out. A caller that can
+see a restricted channel but lacks `maintainer` receives the compatibility
+plane's established insufficient-role 403/code-7 response.
 
 ---
 

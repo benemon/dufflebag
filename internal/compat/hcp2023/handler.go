@@ -275,11 +275,24 @@ func (h *handler) getBucket(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, &models.HashicorpCloudPacker20230101GetBucketResponse{Bucket: wire})
 }
 
+func canConsumeChannel(r *http.Request, channel *store.Channel) bool {
+	return !channel.Restricted || requesterRole(r).AtLeast(identity.RoleBuilder)
+}
+
+func mayManageRestrictedChannels(r *http.Request) bool {
+	return requesterRole(r).AtLeast(identity.RoleMaintainer)
+}
+
 func (h *handler) getChannel(w http.ResponseWriter, r *http.Request) {
 	channel, err := h.repository.GetChannel(
 		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("channel"),
 	)
 	if !h.writeChannelError(w, r, r.PathValue("channel"), err) {
+		return
+	}
+	if !canConsumeChannel(r, channel) {
+		auditRefusal(r, "restricted_channel_consumption")
+		h.writeChannelError(w, r, r.PathValue("channel"), registry.ErrNotFound)
 		return
 	}
 	wire, err := renderChannel(tenant(r), channel, h.now().UTC())
@@ -304,6 +317,9 @@ func (h *handler) listChannels(w http.ResponseWriter, r *http.Request) {
 	}
 	wireChannels := make([]*models.HashicorpCloudPacker20230101Channel, 0, len(channels))
 	for i := range channels {
+		if !canConsumeChannel(r, &channels[i]) {
+			continue
+		}
 		wire, err := renderChannel(tenant(r), &channels[i], h.now().UTC())
 		if err != nil {
 			h.writeInternal(w, r, "render channel", err)
@@ -323,6 +339,10 @@ func (h *handler) createChannel(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Name == "" {
 		writeRPCError(w, http.StatusBadRequest, 3, "channel name is required")
+		return
+	}
+	if body.Restricted && !mayManageRestrictedChannels(r) {
+		writeInsufficientRole(w, r, "restricted_channel_management")
 		return
 	}
 	if _, err := h.repository.GetBucket(r.Context(), tenant(r), r.PathValue("bucket")); err != nil {
@@ -407,6 +427,10 @@ func (h *handler) updateChannel(w http.ResponseWriter, r *http.Request) {
 		))
 		return
 	}
+	if (channel.Restricted || updateRestricted) && !mayManageRestrictedChannels(r) {
+		writeInsufficientRole(w, r, "restricted_channel_management")
+		return
+	}
 	// An empty fingerprint under the versionFingerprint mask means CLEAR the
 	// assignment, not a malformed request. The provider's destroy path calls
 	// UpdatePackerChannelAssignment with an empty fingerprint, and its
@@ -471,6 +495,10 @@ func (h *handler) assignChannelVersion(w http.ResponseWriter, r *http.Request) {
 		writeManagedAssignmentRefusal(w, target.Name)
 		return
 	}
+	if target.Restricted && !mayManageRestrictedChannels(r) {
+		writeInsufficientRole(w, r, "restricted_channel_management")
+		return
+	}
 	source, target, err := h.repository.AssignChannelVersion(
 		r.Context(),
 		tenant(r),
@@ -524,6 +552,10 @@ func (h *handler) deleteChannel(w http.ResponseWriter, r *http.Request) {
 		))
 		return
 	}
+	if channel.Restricted && !mayManageRestrictedChannels(r) {
+		writeInsufficientRole(w, r, "restricted_channel_management")
+		return
+	}
 	err = h.repository.DeleteChannel(
 		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("channel"),
 	)
@@ -535,10 +567,15 @@ func (h *handler) deleteChannel(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *handler) listChannelAssignmentHistory(w http.ResponseWriter, r *http.Request) {
-	_, err := h.repository.GetChannel(
+	channel, err := h.repository.GetChannel(
 		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("channel"),
 	)
 	if !h.writeChannelError(w, r, r.PathValue("channel"), err) {
+		return
+	}
+	if !canConsumeChannel(r, channel) {
+		auditRefusal(r, "restricted_channel_consumption")
+		h.writeChannelError(w, r, r.PathValue("channel"), registry.ErrNotFound)
 		return
 	}
 	history, err := h.repository.ListChannelAssignmentHistory(

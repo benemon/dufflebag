@@ -13,7 +13,8 @@ contract, refusal messages, and edge cases.
 ::: info
 Every write on this page requires the `publisher` role on the project. When a
 principal has a lower role, the console disables the action and shows the
-refusal reason.
+refusal reason. Creating or managing a restricted channel requires
+`maintainer` instead.
 :::
 
 ## Working with channels
@@ -22,8 +23,9 @@ A bucket starts with the managed `latest` channel. Dufflebag reassigns it when
 a version completes. Requests to delete or assign `latest` are refused,
 matching HCP Packer.
 
-Prerequisites: The `publisher` role and a bucket. Assigning a channel also
-requires a complete, active version.
+Prerequisites: The `publisher` role and a bucket; use `maintainer` when the
+channel is restricted. Assigning a channel also requires a complete, active
+version.
 
 1. Create a user channel from **Create channel** on the bucket's **Channels**
    tab. Provide a name and, optionally, the restricted flag and an initial
@@ -39,13 +41,13 @@ requires a complete, active version.
 Only complete, active versions are offered for assignment. An incomplete
 (`v0`) or revoked version cannot be promoted. The API enforces the same rule.
 
-::: warning
-The `restricted` flag is stored, returned, and shown in the console, but
-dufflebag does not enforce restricted-channel visibility. Every role that can
-read a bucket can read each of its channels. The
-[compatibility reference](../reference/compatibility.md) records this
-divergence from HCP Packer's documented behavior.
-:::
+Restricted channels are hidden from readers: they are omitted from channel
+lists, and resolving one returns the same not-found response as an absent
+channel. Builders and above may see and consume them. Creating a restricted
+channel, changing its restriction flag in either direction, or assigning,
+updating or deleting it requires `maintainer`. The managed `latest` channel is
+also restricted and hidden from readers. Its existing managed-channel
+refusals still prevent every role from managing it through these operations.
 
 On the wire, assignment is `UpdateChannel` with a field mask:
 

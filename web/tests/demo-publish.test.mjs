@@ -50,12 +50,27 @@ test('the demo publishes one bucket per corpus distro, each deliberately old', (
   // The loop must build the distro template, not the lineage one, or every
   // distro would land in the lineage bucket.
   assert.match(target, /for spec in \$\(DEMO_DISTROS\)/)
-  assert.match(target, /-var "bucket_name=\$\$bucket"/)
+  assert.match(target, /-var "bucket_name=\$\$distro_bucket"/)
   assert.match(target, /e2e\/packer\/demo-distro\.pkr\.hcl/)
 })
 
 test('a failed distro build fails the target rather than being skipped', () => {
-  assert.match(target, /FAIL demo-publish: \$\$bucket build failed/)
+  assert.match(target, /FAIL demo-publish: \$\$distro_bucket build failed/)
+})
+
+test('UBI and Ubuntu publish v1, pin release through the compat API, then publish v2', () => {
+  const unescaped = target.replaceAll('\\', '')
+  assert.match(
+    target,
+    /for spec in \$\(DEMO_DISTROS\)[\s\S]*?build_distro "\$\$bucket" "\$\$image";[\s\S]*?case "\$\$bucket" in[\s\S]*?demo-ubi\|demo-ubuntu\)[\s\S]*?create_release_channel "\$\$bucket";[\s\S]*?build_distro "\$\$bucket" "\$\$image";/,
+  )
+  assert.match(unescaped, /"name":"release","restricted":false,"version_fingerprint":"\$\$v1_fingerprint"/)
+  assert.match(target, /\$\$release_bucket\/channels\/latest/)
+  assert.match(target, /\$\(DEMO_DIR\)\/root\.json/)
+  assert.match(
+    target,
+    /SKIP demo-publish: \$\$release_bucket release channel needs publisher\+; provided HCP_CLIENT principal was refused/,
+  )
 })
 
 test('the demo child correlates to the parent through the latest channel', () => {

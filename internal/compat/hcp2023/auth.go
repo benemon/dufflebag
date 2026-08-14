@@ -75,6 +75,7 @@ func unauthenticated(w http.ResponseWriter, message string) {
 type tenantKey struct{}
 type principalIDKey struct{}
 type principalNameKey struct{}
+type requesterRoleKey struct{}
 
 // scoped authorizes the tenant in the path against the authenticated principal,
 // and refuses the request if it does not match.
@@ -153,17 +154,14 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 			// conceal — and answering not-found would send someone hunting for a typo
 			// in a name that is correct. Hiding a reason only helps when the reason is
 			// a secret.
-			auditRefusal(r, "insufficient_role")
-			writeRPCError(
-				w, http.StatusForbidden, 7,
-				"the principal's role does not permit this operation",
-			)
+			writeInsufficientRole(w, r, "insufficient_role")
 			return
 		}
 
 		ctx := context.WithValue(r.Context(), tenantKey{}, parsed)
 		ctx = context.WithValue(ctx, principalIDKey{}, principal.ID)
 		ctx = context.WithValue(ctx, principalNameKey{}, principal.Name)
+		ctx = context.WithValue(ctx, requesterRoleKey{}, principal.Role)
 		ctx = identity.WithActor(ctx, principal.ID, principal.Name)
 		next(w, r.WithContext(ctx))
 	}
@@ -197,6 +195,22 @@ func principalID(r *http.Request) string {
 func principalName(r *http.Request) string {
 	name, _ := r.Context().Value(principalNameKey{}).(string)
 	return name
+}
+
+// requesterRole returns the authority scoped already resolved from storage.
+// Handlers use it only for target-dependent escalation beyond a route's
+// unrestricted minimum.
+func requesterRole(r *http.Request) identity.Role {
+	role, _ := r.Context().Value(requesterRoleKey{}).(identity.Role)
+	return role
+}
+
+func writeInsufficientRole(w http.ResponseWriter, r *http.Request, reason string) {
+	auditRefusal(r, reason)
+	writeRPCError(
+		w, http.StatusForbidden, 7,
+		"the principal's role does not permit this operation",
+	)
 }
 
 // auditRefusal records a refused request. Both reasons answer the caller

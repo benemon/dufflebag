@@ -736,6 +736,7 @@ export function OperationsCard({
   const [submitting, setSubmitting] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   if (promotable.length === 0) return null
+  const target = promotable.find((option) => option.name === channel)
   const promote = async () => {
     setSubmitting(true)
     setFailure(null)
@@ -770,7 +771,7 @@ export function OperationsCard({
               </FormSelect>
             </FormGroup>
             <RoleRestrictedButton
-              action="manageChannels"
+              action={target?.restricted ? 'manageRestrictedChannels' : 'manageChannels'}
               callerRole={callerRole}
               variant="primary"
               isLoading={submitting}

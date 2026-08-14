@@ -36,7 +36,8 @@ Actions by role:
 | Action | Minimum role |
 |---|---|
 | Pin buckets | `builder` |
-| Revoke / restore versions, delete versions, manage channels, delete buckets | `publisher` |
+| Revoke / restore versions, delete versions, manage unrestricted channels, delete buckets | `publisher` |
+| Manage restricted channels | `maintainer` |
 | Manage principals and secrets, configure Bag Drop | `maintainer` |
 | Configure audit targets, manage encryption | `root` |
 
@@ -85,9 +86,10 @@ completion and revocation state.
 
 ![Dufflebag bucket screen showing bucket details, ancestry, versions, and channels](/screenshots/bucket-facets.png)
 
-Publishers use the channels tab to create channels, assign versions, and delete
-channels. Only complete, active versions are offered for assignment. The
-managed `latest` channel cannot be edited. See
+Publishers use the channels tab to create, assign and delete unrestricted
+channels; restricted targets require a maintainer. Only complete, active
+versions are offered for assignment. The managed `latest` channel cannot be
+edited. See
 [Revocation, restore and channels](../using/revocation-channels.md) for the
 semantics.
 
