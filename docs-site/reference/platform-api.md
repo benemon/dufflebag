@@ -5,7 +5,7 @@ operational configuration.
 
 ::: info
 The OpenAPI document defines endpoint, request, and response details. See the
-[generated API reference](/platform-api.html).
+[generated API reference](pathname:///platform-api.html).
 :::
 
 ## Authentication
@@ -38,5 +38,5 @@ Roles are ordered tiers within a principal's scope:
 A caller can grant or modify only roles at or below its own tier.
 :::
 
-The [generated API reference](/platform-api.html) records the required role for
+The [generated API reference](pathname:///platform-api.html) records the required role for
 each operation.

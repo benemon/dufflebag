@@ -54,7 +54,7 @@ Prerequisites: The initial root client ID and client secret from initialization.
 
 2. Continue through the console wizard to create an organisation and a project.
    For a headless setup, use the organisation and project operations in the
-   [platform API reference](/platform-api.html).
+   [platform API reference](pathname:///platform-api.html).
 
 ## Mint a builder principal
 
@@ -62,10 +62,10 @@ Prerequisites: An organisation and project.
 
 1. Create a project-scoped service principal with the `builder` role. The
    console supports this operation. The equivalent principal operation is in
-   the [platform API reference](/platform-api.html).
+   the [platform API reference](pathname:///platform-api.html).
 
 2. Issue the principal's first secret. The equivalent secret operation is also
-   in the [platform API reference](/platform-api.html).
+   in the [platform API reference](pathname:///platform-api.html).
 
 3. Retain the client ID and the one-time secret for the client environment.
 
