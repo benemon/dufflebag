@@ -2312,7 +2312,7 @@ func (r *contractRepository) ListVersions(
 	_ context.Context,
 	_ store.Tenant,
 	bucket string,
-) ([]*registry.Version, error) {
+) ([]*registry.Version, map[string][]store.StoredBuild, error) {
 	var versions []*registry.Version
 	for key, version := range r.versions {
 		if strings.HasPrefix(key, bucket+"/") {
@@ -2322,7 +2322,11 @@ func (r *contractRepository) ListVersions(
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[i].Fingerprint > versions[j].Fingerprint
 	})
-	return versions, nil
+	buildsByFingerprint := make(map[string][]store.StoredBuild, len(versions))
+	for _, version := range versions {
+		buildsByFingerprint[version.Fingerprint] = r.builds[bucket+"/"+version.Fingerprint]
+	}
+	return versions, buildsByFingerprint, nil
 }
 
 func (r *contractRepository) CreateBuild(

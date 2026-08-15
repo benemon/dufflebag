@@ -679,29 +679,31 @@ func (r *Repository) ListVersions(
 	ctx context.Context,
 	tenant Tenant,
 	bucketName string,
-) ([]*registry.Version, error) {
+) ([]*registry.Version, map[string][]StoredBuild, error) {
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	rows, err := q.ListVersionsByBucket(ctx, bucketName)
 	if err != nil {
-		return nil, fmt.Errorf("list versions: %w", err)
+		return nil, nil, fmt.Errorf("list versions: %w", err)
 	}
 	versions := make([]*registry.Version, 0, len(rows))
+	buildsByFingerprint := make(map[string][]StoredBuild, len(rows))
 	for _, row := range rows {
-		version, err := r.restoreVersion(ctx, q, tenant, postgresdb.GetVersionByFingerprintRow(row))
+		version, builds, err := r.restoreVersionWithBuilds(ctx, q, tenant, postgresdb.GetVersionByFingerprintRow(row))
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		versions = append(versions, version)
+		buildsByFingerprint[version.Fingerprint] = builds
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("commit list versions: %w", err)
+		return nil, nil, fmt.Errorf("commit list versions: %w", err)
 	}
-	return versions, nil
+	return versions, buildsByFingerprint, nil
 }
 
 func (r *Repository) CreateBuild(
@@ -1573,6 +1575,16 @@ func (r *Repository) restoreVersion(
 	tenant Tenant,
 	row postgresdb.GetVersionByFingerprintRow,
 ) (*registry.Version, error) {
+	version, _, err := r.restoreVersionWithBuilds(ctx, q, tenant, row)
+	return version, err
+}
+
+func (r *Repository) restoreVersionWithBuilds(
+	ctx context.Context,
+	q *postgresdb.Queries,
+	tenant Tenant,
+	row postgresdb.GetVersionByFingerprintRow,
+) (*registry.Version, []StoredBuild, error) {
 	if err := r.verifyRowMAC("version "+row.ID, row.IntegrityMac, versionMACMessage(postgresdb.Version{
 		OrganizationID: row.OrganizationID, ProjectID: row.ProjectID, ID: row.ID,
 		BucketID: row.BucketID, Fingerprint: row.Fingerprint, TemplateType: row.TemplateType,
@@ -1580,15 +1592,15 @@ func (r *Repository) restoreVersion(
 		RevokeAt: row.RevokeAt, RevocationAuthor: row.RevocationAuthor,
 		RevocationInheritedFromID: row.RevocationInheritedFromID,
 	})); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	id, err := registry.ParseID(row.ID)
 	if err != nil {
-		return nil, fmt.Errorf("restore version id: %w", err)
+		return nil, nil, fmt.Errorf("restore version id: %w", err)
 	}
 	builds, err := r.listBuilds(ctx, q, tenant, row.BucketName, row.Fingerprint)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	domainBuilds := make([]registry.Build, len(builds))
 	for i := range builds {
@@ -1596,7 +1608,7 @@ func (r *Repository) restoreVersion(
 	}
 	relationships, err := q.GetVersionRelationships(ctx, row.ID)
 	if err != nil {
-		return nil, fmt.Errorf("get version relationships: %w", err)
+		return nil, nil, fmt.Errorf("get version relationships: %w", err)
 	}
 	var parents *registry.VersionParents
 	if relationships.ParentsStatus != "" {
@@ -1605,7 +1617,7 @@ func (r *Repository) restoreVersion(
 		case registry.AncestryUndetermined, registry.AncestryUpToDate, registry.AncestryOutOfDate:
 			parents = &registry.VersionParents{Status: status}
 		default:
-			return nil, fmt.Errorf("restore version parents status %q: %w", status, registry.ErrInvalid)
+			return nil, nil, fmt.Errorf("restore version parents status %q: %w", status, registry.ErrInvalid)
 		}
 	}
 	sequence := 0
@@ -1618,7 +1630,7 @@ func (r *Repository) restoreVersion(
 		row.RevocationInheritedFromFingerprint, row.RevocationInheritedFromName,
 	)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	version, err := registry.RestoreVersion(registry.Version{
 		ID:             id,
@@ -1633,9 +1645,9 @@ func (r *Repository) restoreVersion(
 		UpdatedAt:      row.UpdatedAt,
 	}, row.Complete, sequence, revocation)
 	if err != nil {
-		return nil, fmt.Errorf("restore version: %w", err)
+		return nil, nil, fmt.Errorf("restore version: %w", err)
 	}
-	return version, nil
+	return version, builds, nil
 }
 
 // rowRevocation rebuilds a version's revocation state from its columns.

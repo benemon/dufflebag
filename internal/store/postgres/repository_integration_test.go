@@ -146,6 +146,13 @@ func TestRepositoryRoundTripsRegistryAggregate(t *testing.T) {
 		builds[1].Artifacts[1].ExternalIdentifier != "ami-123" {
 		t.Fatalf("build aggregate round trip = %#v", builds)
 	}
+	_, listedBuilds, err := repository.ListVersions(ctx, tenant, bucket.Name)
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if got := listedBuilds[version.Fingerprint]; !reflect.DeepEqual(got, builds) {
+		t.Fatalf("ListVersions builds = %#v, want standalone ListBuilds result %#v", got, builds)
+	}
 }
 
 func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
@@ -542,7 +549,7 @@ func TestRepositoryCreateSequenceIsIdempotent(t *testing.T) {
 	if !secondBuild.CreatedAt.Equal(firstBuild.CreatedAt) {
 		t.Fatalf("CreateBuild returned a replacement: first=%#v second=%#v", firstBuild, secondBuild)
 	}
-	versions, err := repository.ListVersions(ctx, tenant, bucket.Name)
+	versions, _, err := repository.ListVersions(ctx, tenant, bucket.Name)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -695,7 +702,7 @@ func TestRepositoryConcurrentCreateSequenceIsIdempotent(t *testing.T) {
 		t.Error(failure)
 	}
 
-	versions, err := repository.ListVersions(ctx, tenant, bucket.Name)
+	versions, _, err := repository.ListVersions(ctx, tenant, bucket.Name)
 	if err != nil {
 		t.Fatal(err)
 	}

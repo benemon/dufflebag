@@ -47,7 +47,7 @@ type Repository interface {
 	ListBucketAncestry(context.Context, store.Tenant, string, string, string, string) ([]store.BucketAncestry, error)
 	CreateVersion(context.Context, store.Tenant, *registry.Version) (*registry.Version, error)
 	GetVersion(context.Context, store.Tenant, string, string) (*registry.Version, error)
-	ListVersions(context.Context, store.Tenant, string) ([]*registry.Version, error)
+	ListVersions(context.Context, store.Tenant, string) ([]*registry.Version, map[string][]store.StoredBuild, error)
 	DeleteVersion(context.Context, store.Tenant, string, string, time.Time) error
 	CreateBuild(context.Context, store.Tenant, string, string, registry.TemplateType, store.StoredBuild, func(*registry.Version) string) (*store.StoredBuild, error)
 	ListBuilds(context.Context, store.Tenant, string, string) ([]store.StoredBuild, error)

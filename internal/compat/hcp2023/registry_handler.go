@@ -90,20 +90,14 @@ func (h *handler) listVersions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	versions, err := h.repository.ListVersions(r.Context(), tenant(r), bucket)
+	versions, buildsByFingerprint, err := h.repository.ListVersions(r.Context(), tenant(r), bucket)
 	if err != nil {
 		h.writeInternal(w, r, "compat request failed", err)
 		return
 	}
-
 	rendered := make([]*models.HashicorpCloudPacker20230101Version, 0, len(versions))
 	for _, version := range versions {
-		builds, err := h.repository.ListBuilds(r.Context(), tenant(r), bucket, version.Fingerprint)
-		if err != nil {
-			h.writeInternal(w, r, "compat request failed", err)
-			return
-		}
-		wire, err := renderVersion(tenant(r), version, builds, h.now().UTC())
+		wire, err := renderVersion(tenant(r), version, buildsByFingerprint[version.Fingerprint], h.now().UTC())
 		if err != nil {
 			h.writeInternal(w, r, "render version", err)
 			return

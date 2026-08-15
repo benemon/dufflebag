@@ -1843,7 +1843,7 @@ func (r *fakeRepository) ListVersions(
 	_ context.Context,
 	_ store.Tenant,
 	bucket string,
-) ([]*registry.Version, error) {
+) ([]*registry.Version, map[string][]store.StoredBuild, error) {
 	// Sorted so the fake matches the repository's contract: the handler's output
 	// order is part of what the tests assert.
 	var versions []*registry.Version
@@ -1855,7 +1855,11 @@ func (r *fakeRepository) ListVersions(
 	sort.Slice(versions, func(i, j int) bool {
 		return versions[i].Fingerprint > versions[j].Fingerprint
 	})
-	return versions, nil
+	buildsByFingerprint := make(map[string][]store.StoredBuild, len(versions))
+	for _, version := range versions {
+		buildsByFingerprint[version.Fingerprint] = r.builds[bucket+"/"+version.Fingerprint]
+	}
+	return versions, buildsByFingerprint, nil
 }
 
 func (r *fakeRepository) CreateBuild(
