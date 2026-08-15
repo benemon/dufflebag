@@ -1399,6 +1399,48 @@ func (q *Queries) InsertPin(ctx context.Context, arg InsertPinParams) error {
 	return err
 }
 
+const listArtifactsByBucketBuilds = `-- name: ListArtifactsByBucketBuilds :many
+SELECT artifacts.organization_id, artifacts.project_id, artifacts.id, artifacts.build_id, artifacts.external_identifier, artifacts.region, artifacts.created_at, artifacts.integrity_mac
+FROM artifacts
+JOIN builds ON builds.id = artifacts.build_id
+JOIN versions ON versions.id = builds.version_id
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE buckets.name = $1
+ORDER BY artifacts.build_id, artifacts.id DESC
+`
+
+func (q *Queries) ListArtifactsByBucketBuilds(ctx context.Context, name string) ([]Artifact, error) {
+	rows, err := q.db.QueryContext(ctx, listArtifactsByBucketBuilds, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Artifact
+	for rows.Next() {
+		var i Artifact
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.ProjectID,
+			&i.ID,
+			&i.BuildID,
+			&i.ExternalIdentifier,
+			&i.Region,
+			&i.CreatedAt,
+			&i.IntegrityMac,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listArtifactsByBuild = `-- name: ListArtifactsByBuild :many
 SELECT organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac FROM artifacts WHERE build_id = $1 ORDER BY id DESC
 `
@@ -1495,6 +1537,56 @@ func (q *Queries) ListBagDropAssociations(ctx context.Context) ([]BagdropAssocia
 			&i.UpdatedAt,
 			&i.LastAttemptAt,
 			&i.LastSyncError,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listBuildsByBucket = `-- name: ListBuildsByBucket :many
+SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac
+FROM builds
+JOIN versions ON versions.id = builds.version_id
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE buckets.name = $1
+ORDER BY builds.version_id, builds.id DESC
+`
+
+func (q *Queries) ListBuildsByBucket(ctx context.Context, name string) ([]Build, error) {
+	rows, err := q.db.QueryContext(ctx, listBuildsByBucket, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Build
+	for rows.Next() {
+		var i Build
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.ProjectID,
+			&i.ID,
+			&i.VersionID,
+			&i.ComponentType,
+			&i.Status,
+			&i.Platform,
+			&i.MetadataSeen,
+			&i.PackerRunUuid,
+			&i.Labels,
+			&i.SourceExternalIdentifier,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentVersionID,
+			&i.ParentChannelID,
+			&i.Metadata,
+			&i.IntegrityMac,
 		); err != nil {
 			return nil, err
 		}
@@ -1932,6 +2024,85 @@ func (q *Queries) ListVersionDescendants(ctx context.Context, versionID string) 
 			&i.RevocationInheritedFromName,
 			&i.BucketName,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listVersionRelationshipsByBucket = `-- name: ListVersionRelationshipsByBucket :many
+WITH bucket_versions AS (
+    SELECT versions.id
+    FROM versions
+    JOIN buckets ON buckets.id = versions.bucket_id
+    WHERE buckets.name = $1
+), parents AS (
+    SELECT builds.version_id AS child_version_id,
+           builds.parent_version_id,
+           parent_versions.id AS existing_parent_id,
+           current_assignment.version_id AS channel_version_id
+    FROM builds
+    JOIN bucket_versions ON bucket_versions.id = builds.version_id
+    LEFT JOIN versions AS parent_versions ON parent_versions.id = builds.parent_version_id
+    LEFT JOIN channels AS parent_channels ON parent_channels.id = builds.parent_channel_id
+    LEFT JOIN LATERAL (
+        SELECT assignments.version_id
+        FROM channel_assignments AS assignments
+        WHERE assignments.channel_id = parent_channels.id
+        ORDER BY assignments.assigned_at DESC, assignments.id DESC
+        LIMIT 1
+    ) AS current_assignment ON true
+    WHERE builds.parent_version_id IS NOT NULL
+)
+SELECT bucket_versions.id AS version_id,
+       EXISTS (
+           SELECT 1 FROM builds
+           WHERE builds.parent_version_id = bucket_versions.id
+       ) AS has_descendants,
+       CASE
+           WHEN NOT EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+           ) THEN ''
+           WHEN EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+                 AND parents.channel_version_id IS NOT NULL
+                 AND parents.channel_version_id <> parents.parent_version_id
+           ) THEN 'out_of_date'
+           WHEN EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+                 AND (parents.existing_parent_id IS NULL OR parents.channel_version_id IS NULL)
+           ) THEN 'undetermined'
+           ELSE 'up_to_date'
+       END AS parents_status
+FROM bucket_versions
+`
+
+type ListVersionRelationshipsByBucketRow struct {
+	VersionID      string `json:"version_id"`
+	HasDescendants bool   `json:"has_descendants"`
+	ParentsStatus  string `json:"parents_status"`
+}
+
+func (q *Queries) ListVersionRelationshipsByBucket(ctx context.Context, name string) ([]ListVersionRelationshipsByBucketRow, error) {
+	rows, err := q.db.QueryContext(ctx, listVersionRelationshipsByBucket, name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListVersionRelationshipsByBucketRow
+	for rows.Next() {
+		var i ListVersionRelationshipsByBucketRow
+		if err := rows.Scan(&i.VersionID, &i.HasDescendants, &i.ParentsStatus); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

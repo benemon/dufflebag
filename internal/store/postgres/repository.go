@@ -690,10 +690,51 @@ func (r *Repository) ListVersions(
 	if err != nil {
 		return nil, nil, fmt.Errorf("list versions: %w", err)
 	}
+	buildRows, err := q.ListBuildsByBucket(ctx, bucketName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list bucket builds: %w", err)
+	}
+	artifactRows, err := q.ListArtifactsByBucketBuilds(ctx, bucketName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list bucket build artifacts: %w", err)
+	}
+	relationshipRows, err := q.ListVersionRelationshipsByBucket(ctx, bucketName)
+	if err != nil {
+		return nil, nil, fmt.Errorf("list bucket version relationships: %w", err)
+	}
+
+	buildRowsByVersion := make(map[string][]postgresdb.Build, len(rows))
+	for _, row := range buildRows {
+		buildRowsByVersion[row.VersionID] = append(buildRowsByVersion[row.VersionID], row)
+	}
+	artifactRowsByBuild := make(map[string][]postgresdb.Artifact, len(buildRows))
+	for _, row := range artifactRows {
+		artifactRowsByBuild[row.BuildID] = append(artifactRowsByBuild[row.BuildID], row)
+	}
+	relationshipsByVersion := make(map[string]postgresdb.ListVersionRelationshipsByBucketRow, len(relationshipRows))
+	for _, row := range relationshipRows {
+		relationshipsByVersion[row.VersionID] = row
+	}
+
 	versions := make([]*registry.Version, 0, len(rows))
 	buildsByFingerprint := make(map[string][]StoredBuild, len(rows))
 	for _, row := range rows {
-		version, builds, err := r.restoreVersionWithBuilds(ctx, q, tenant, postgresdb.GetVersionByFingerprintRow(row))
+		builds := make([]StoredBuild, 0, len(buildRowsByVersion[row.ID]))
+		for _, buildRow := range buildRowsByVersion[row.ID] {
+			build, err := r.restoreBuildFromRows(tenant, buildRow, artifactRowsByBuild[buildRow.ID])
+			if err != nil {
+				return nil, nil, err
+			}
+			builds = append(builds, *build)
+		}
+		relationships, ok := relationshipsByVersion[row.ID]
+		if !ok {
+			return nil, nil, fmt.Errorf("version %s missing from relationships batch", row.ID)
+		}
+		version, err := r.restoreVersionFromRows(
+			postgresdb.GetVersionByFingerprintRow(row), builds,
+			relationships.HasDescendants, relationships.ParentsStatus,
+		)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1585,6 +1626,26 @@ func (r *Repository) restoreVersionWithBuilds(
 	tenant Tenant,
 	row postgresdb.GetVersionByFingerprintRow,
 ) (*registry.Version, []StoredBuild, error) {
+	builds, err := r.listBuilds(ctx, q, tenant, row.BucketName, row.Fingerprint)
+	if err != nil {
+		return nil, nil, err
+	}
+	relationships, err := q.GetVersionRelationships(ctx, row.ID)
+	if err != nil {
+		return nil, nil, fmt.Errorf("get version relationships: %w", err)
+	}
+	version, err := r.restoreVersionFromRows(
+		row, builds, relationships.HasDescendants, relationships.ParentsStatus,
+	)
+	return version, builds, err
+}
+
+func (r *Repository) restoreVersionFromRows(
+	row postgresdb.GetVersionByFingerprintRow,
+	builds []StoredBuild,
+	hasDescendants bool,
+	parentsStatus string,
+) (*registry.Version, error) {
 	if err := r.verifyRowMAC("version "+row.ID, row.IntegrityMac, versionMACMessage(postgresdb.Version{
 		OrganizationID: row.OrganizationID, ProjectID: row.ProjectID, ID: row.ID,
 		BucketID: row.BucketID, Fingerprint: row.Fingerprint, TemplateType: row.TemplateType,
@@ -1592,32 +1653,24 @@ func (r *Repository) restoreVersionWithBuilds(
 		RevokeAt: row.RevokeAt, RevocationAuthor: row.RevocationAuthor,
 		RevocationInheritedFromID: row.RevocationInheritedFromID,
 	})); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	id, err := registry.ParseID(row.ID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("restore version id: %w", err)
-	}
-	builds, err := r.listBuilds(ctx, q, tenant, row.BucketName, row.Fingerprint)
-	if err != nil {
-		return nil, nil, err
+		return nil, fmt.Errorf("restore version id: %w", err)
 	}
 	domainBuilds := make([]registry.Build, len(builds))
 	for i := range builds {
 		domainBuilds[i] = builds[i].Build
 	}
-	relationships, err := q.GetVersionRelationships(ctx, row.ID)
-	if err != nil {
-		return nil, nil, fmt.Errorf("get version relationships: %w", err)
-	}
 	var parents *registry.VersionParents
-	if relationships.ParentsStatus != "" {
-		status := registry.AncestryStatus(relationships.ParentsStatus)
+	if parentsStatus != "" {
+		status := registry.AncestryStatus(parentsStatus)
 		switch status {
 		case registry.AncestryUndetermined, registry.AncestryUpToDate, registry.AncestryOutOfDate:
 			parents = &registry.VersionParents{Status: status}
 		default:
-			return nil, nil, fmt.Errorf("restore version parents status %q: %w", status, registry.ErrInvalid)
+			return nil, fmt.Errorf("restore version parents status %q: %w", status, registry.ErrInvalid)
 		}
 	}
 	sequence := 0
@@ -1630,7 +1683,7 @@ func (r *Repository) restoreVersionWithBuilds(
 		row.RevocationInheritedFromFingerprint, row.RevocationInheritedFromName,
 	)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	version, err := registry.RestoreVersion(registry.Version{
 		ID:             id,
@@ -1638,16 +1691,16 @@ func (r *Repository) restoreVersionWithBuilds(
 		Fingerprint:    row.Fingerprint,
 		TemplateType:   registry.TemplateType(row.TemplateType),
 		AuthorID:       row.AuthorID,
-		HasDescendants: relationships.HasDescendants,
+		HasDescendants: hasDescendants,
 		Parents:        parents,
 		Builds:         domainBuilds,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 	}, row.Complete, sequence, revocation)
 	if err != nil {
-		return nil, nil, fmt.Errorf("restore version: %w", err)
+		return nil, fmt.Errorf("restore version: %w", err)
 	}
-	return version, builds, nil
+	return version, nil
 }
 
 // rowRevocation rebuilds a version's revocation state from its columns.
@@ -1727,12 +1780,20 @@ func (r *Repository) restoreBuild(
 	tenant Tenant,
 	row postgresdb.Build,
 ) (*StoredBuild, error) {
-	if err := r.verifyRowMAC("build "+row.ID, row.IntegrityMac, buildMACMessage(row)); err != nil {
-		return nil, err
-	}
 	artifactRows, err := q.ListArtifactsByBuild(ctx, row.ID)
 	if err != nil {
 		return nil, fmt.Errorf("list build artifacts: %w", err)
+	}
+	return r.restoreBuildFromRows(tenant, row, artifactRows)
+}
+
+func (r *Repository) restoreBuildFromRows(
+	tenant Tenant,
+	row postgresdb.Build,
+	artifactRows []postgresdb.Artifact,
+) (*StoredBuild, error) {
+	if err := r.verifyRowMAC("build "+row.ID, row.IntegrityMac, buildMACMessage(row)); err != nil {
+		return nil, err
 	}
 	artifacts := make([]Artifact, 0, len(artifactRows))
 	for _, artifactRow := range artifactRows {

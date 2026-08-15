@@ -155,6 +155,152 @@ func TestRepositoryRoundTripsRegistryAggregate(t *testing.T) {
 	}
 }
 
+func TestListVersionsIncludesDescendantsForVersionsWithoutBuilds(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 15, 10, 0, 0, 0, time.UTC)
+	bucket, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "relationship-batch", Labels: map[string]string{}, CreatedAt: at,
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+
+	parent, err := registry.NewVersion(
+		registry.NewID(at.Add(time.Second)), bucket.Name, "parent-without-builds",
+		registry.TemplateHCL2, at.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewVersion parent: %v", err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, parent); err != nil {
+		t.Fatalf("CreateVersion parent: %v", err)
+	}
+	child, err := registry.NewVersion(
+		registry.NewID(at.Add(2*time.Second)), bucket.Name, "child-with-parent",
+		registry.TemplateHCL2, at.Add(2*time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewVersion child: %v", err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, child); err != nil {
+		t.Fatalf("CreateVersion child: %v", err)
+	}
+	if _, err := repository.CreateBuild(
+		ctx, tenant, bucket.Name, child.Fingerprint, registry.TemplateHCL2,
+		store.StoredBuild{
+			Build: registry.Build{
+				ID: registry.NewID(at.Add(3 * time.Second)), ComponentType: "docker",
+				Status: registry.BuildRunning, Platform: "docker",
+			},
+			ParentVersionID: parent.ID.String(), Labels: map[string]string{}, CreatedAt: at.Add(3 * time.Second),
+		}, testVersionName,
+	); err != nil {
+		t.Fatalf("CreateBuild child: %v", err)
+	}
+
+	listed, _, err := repository.ListVersions(ctx, tenant, bucket.Name)
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("ListVersions count = %d, want 2", len(listed))
+	}
+	listedByFingerprint := make(map[string]*registry.Version, len(listed))
+	for _, version := range listed {
+		listedByFingerprint[version.Fingerprint] = version
+	}
+	for _, fingerprint := range []string{parent.Fingerprint, child.Fingerprint} {
+		standalone, err := repository.GetVersion(ctx, tenant, bucket.Name, fingerprint)
+		if err != nil {
+			t.Fatalf("GetVersion %s: %v", fingerprint, err)
+		}
+		batched, ok := listedByFingerprint[fingerprint]
+		if !ok {
+			t.Fatalf("ListVersions missing %s", fingerprint)
+		}
+		if batched.HasDescendants != standalone.HasDescendants || !reflect.DeepEqual(batched.Parents, standalone.Parents) {
+			t.Errorf(
+				"batched relationships for %s = descendants %v, parents %#v; standalone = descendants %v, parents %#v",
+				fingerprint, batched.HasDescendants, batched.Parents, standalone.HasDescendants, standalone.Parents,
+			)
+		}
+	}
+	if got := listedByFingerprint[parent.Fingerprint]; !got.HasDescendants || got.Parents != nil {
+		t.Errorf("parent relationships = descendants %v, parents %#v; want true, nil", got.HasDescendants, got.Parents)
+	}
+	if got := listedByFingerprint[child.Fingerprint]; got.HasDescendants || got.Parents == nil || got.Parents.Status != registry.AncestryUndetermined {
+		t.Errorf("child relationships = descendants %v, parents %#v; want false, undetermined", got.HasDescendants, got.Parents)
+	}
+}
+
+func TestListVersionsRejectsTamperedArtifactMAC(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	repository.SetKeyring(testRing(t))
+	at := time.Date(2026, 8, 15, 11, 0, 0, 0, time.UTC)
+	bucket, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "tampered-list-versions", Labels: map[string]string{}, CreatedAt: at,
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	version, err := registry.NewVersion(
+		registry.NewID(at.Add(time.Second)), bucket.Name, "tampered-artifact",
+		registry.TemplateHCL2, at.Add(time.Second),
+	)
+	if err != nil {
+		t.Fatalf("NewVersion: %v", err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
+		t.Fatalf("CreateVersion: %v", err)
+	}
+	artifactID := registry.NewID(at.Add(3 * time.Second))
+	if _, err := repository.CreateBuild(
+		ctx, tenant, bucket.Name, version.Fingerprint, registry.TemplateHCL2,
+		store.StoredBuild{
+			Build: registry.Build{
+				ID: registry.NewID(at.Add(2 * time.Second)), ComponentType: "docker",
+				Status: registry.BuildRunning, Platform: "docker",
+			},
+			Labels: map[string]string{},
+			Artifacts: []store.Artifact{{
+				ID: artifactID, ExternalIdentifier: "registry.example/image@sha256:123", Region: "global",
+				CreatedAt: at.Add(3 * time.Second),
+			}},
+			CreatedAt: at.Add(2 * time.Second),
+		}, testVersionName,
+	); err != nil {
+		t.Fatalf("CreateBuild: %v", err)
+	}
+
+	tamper, err := store.BeginTenant(ctx, db, orgA, projectA)
+	if err != nil {
+		t.Fatalf("begin tamper: %v", err)
+	}
+	if _, err := tamper.Exec(`UPDATE artifacts SET integrity_mac = $2 WHERE id = $1`, artifactID.String(), []byte("tampered")); err != nil {
+		_ = tamper.Rollback()
+		t.Fatalf("tamper artifact MAC: %v", err)
+	}
+	if err := tamper.Commit(); err != nil {
+		t.Fatalf("commit tamper: %v", err)
+	}
+
+	if _, _, err := repository.ListVersions(ctx, tenant, bucket.Name); err == nil {
+		t.Fatal("ListVersions served a build with a tampered artifact MAC")
+	} else if !strings.Contains(err.Error(), "integrity verification failed") {
+		t.Fatalf("ListVersions error = %v, want integrity failure", err)
+	}
+}
+
 func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -401,6 +547,37 @@ func TestRepositoryPersistsAndProjectsBuildAncestry(t *testing.T) {
 	projectedEmpty := byName["empty"]
 	if projectedEmpty.LatestVersion != nil || projectedEmpty.ChildrenStatus != nil {
 		t.Fatalf("empty bucket ancestry = %#v, want absent", projectedEmpty)
+	}
+
+	// The batched relationships must agree with the per-version projection
+	// across every parents-status arm — this graph exercises both
+	// out_of_date (childVersion, via the moved production channel) and
+	// up_to_date (childVersion2) at this point.
+	batchedDerived, _, err := repository.ListVersions(ctx, tenant, childBucket.Name)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batchedStatuses := make(map[string]registry.AncestryStatus, len(batchedDerived))
+	for _, version := range batchedDerived {
+		standalone, err := repository.GetVersion(ctx, tenant, childBucket.Name, version.Fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if version.HasDescendants != standalone.HasDescendants ||
+			!reflect.DeepEqual(version.Parents, standalone.Parents) {
+			t.Fatalf(
+				"batched relationships for %s = descendants %v, parents %#v; standalone = descendants %v, parents %#v",
+				version.Fingerprint, version.HasDescendants, version.Parents,
+				standalone.HasDescendants, standalone.Parents,
+			)
+		}
+		if version.Parents != nil {
+			batchedStatuses[version.Fingerprint] = version.Parents.Status
+		}
+	}
+	if batchedStatuses[childVersion.Fingerprint] != registry.AncestryOutOfDate ||
+		batchedStatuses[childVersion2.Fingerprint] != registry.AncestryUpToDate {
+		t.Fatalf("batched parent statuses = %#v, want out_of_date and up_to_date", batchedStatuses)
 	}
 
 	if _, err := repository.UpdateChannel(

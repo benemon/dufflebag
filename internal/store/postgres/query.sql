@@ -301,6 +301,55 @@ SELECT EXISTS (
            ELSE 'up_to_date'
        END AS parents_status;
 
+-- name: ListVersionRelationshipsByBucket :many
+WITH bucket_versions AS (
+    SELECT versions.id
+    FROM versions
+    JOIN buckets ON buckets.id = versions.bucket_id
+    WHERE buckets.name = $1
+), parents AS (
+    SELECT builds.version_id AS child_version_id,
+           builds.parent_version_id,
+           parent_versions.id AS existing_parent_id,
+           current_assignment.version_id AS channel_version_id
+    FROM builds
+    JOIN bucket_versions ON bucket_versions.id = builds.version_id
+    LEFT JOIN versions AS parent_versions ON parent_versions.id = builds.parent_version_id
+    LEFT JOIN channels AS parent_channels ON parent_channels.id = builds.parent_channel_id
+    LEFT JOIN LATERAL (
+        SELECT assignments.version_id
+        FROM channel_assignments AS assignments
+        WHERE assignments.channel_id = parent_channels.id
+        ORDER BY assignments.assigned_at DESC, assignments.id DESC
+        LIMIT 1
+    ) AS current_assignment ON true
+    WHERE builds.parent_version_id IS NOT NULL
+)
+SELECT bucket_versions.id AS version_id,
+       EXISTS (
+           SELECT 1 FROM builds
+           WHERE builds.parent_version_id = bucket_versions.id
+       ) AS has_descendants,
+       CASE
+           WHEN NOT EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+           ) THEN ''
+           WHEN EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+                 AND parents.channel_version_id IS NOT NULL
+                 AND parents.channel_version_id <> parents.parent_version_id
+           ) THEN 'out_of_date'
+           WHEN EXISTS (
+               SELECT 1 FROM parents
+               WHERE parents.child_version_id = bucket_versions.id
+                 AND (parents.existing_parent_id IS NULL OR parents.channel_version_id IS NULL)
+           ) THEN 'undetermined'
+           ELSE 'up_to_date'
+       END AS parents_status
+FROM bucket_versions;
+
 -- name: ListBuildsByVersion :many
 SELECT builds.*
 FROM builds
@@ -308,6 +357,14 @@ JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id
 WHERE buckets.name = $1 AND versions.fingerprint = $2
 ORDER BY builds.id DESC;
+
+-- name: ListBuildsByBucket :many
+SELECT builds.*
+FROM builds
+JOIN versions ON versions.id = builds.version_id
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE buckets.name = $1
+ORDER BY builds.version_id, builds.id DESC;
 
 -- name: GetBuild :one
 SELECT builds.*
@@ -340,6 +397,15 @@ RETURNING *;
 
 -- name: ListArtifactsByBuild :many
 SELECT * FROM artifacts WHERE build_id = $1 ORDER BY id DESC;
+
+-- name: ListArtifactsByBucketBuilds :many
+SELECT artifacts.*
+FROM artifacts
+JOIN builds ON builds.id = artifacts.build_id
+JOIN versions ON versions.id = builds.version_id
+JOIN buckets ON buckets.id = versions.bucket_id
+WHERE buckets.name = $1
+ORDER BY artifacts.build_id, artifacts.id DESC;
 
 -- name: UpdateBuild :one
 UPDATE builds
