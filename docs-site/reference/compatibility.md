@@ -830,12 +830,20 @@ channel requires `maintainer`, and an update mask naming `restricted` requires
 `publisher` minimum. The existing managed-channel mutation refusals for
 `latest` remain unchanged for every role.
 
-HCP's exact unauthorized-consumption wire response has not been live-probed.
-Dufflebag therefore follows ADR-0017's disclosure rule honestly: resolving a
-restricted channel below `builder` returns the route's byte-identical
-not-found/code-5 form, and listing filters the channel out. A caller that can
-see a restricted channel but lacks `maintainer` receives the compatibility
-plane's established insufficient-role 403/code-7 response.
+HCP's unauthorized-consumption wire response was live-probed on 2026-08-15
+with a viewer-level service principal: HCP answers a viewer's resolution of a
+restricted channel with `403`/`code: 7` and a message that names the channel
+and its restriction — it discloses that the channel exists. Listing behaviour
+matches Dufflebag's: the restricted channel is filtered out. On the
+resolution path Dufflebag **deliberately diverges**: ADR-0017's disclosure
+rule holds, so resolving a restricted channel below `builder` returns the
+route's byte-identical not-found/code-5 form rather than HCP's disclosing
+403. Probe limits, recorded honestly: the managed `latest` was unassigned
+when probed, and only the managed restricted channel was reachable — the
+probing principal could not create a custom restricted channel, which itself
+corroborates the maintainer-tier management rule. A caller that can see a
+restricted channel but lacks `maintainer` receives the compatibility plane's
+established insufficient-role 403/code-7 response.
 
 ---
 
