@@ -78,10 +78,12 @@ const association = (over = {}) => ({
 })
 
 // Fixture fields follow components.schemas.BagDropStatus in
-// spec/platform/openapi.yaml: configured and associations are the required reader surface.
+// spec/platform/openapi.yaml, including required nullable reconciler timing fields.
 const status = (over = {}) => ({
   configured: true, adapter: 'hcp-packer', enabled: false,
-  last_verification: null, associations: [association()], ...over,
+  last_verification: null, associations: [association()], reconciling: false,
+  next_pass_at: '2026-08-11T09:10:00Z', last_pass_at: '2026-08-11T09:05:00Z',
+  reconcile_interval_seconds: 300, backoff_failures: 0, ...over,
 })
 
 const draft = (over = {}) => ({
@@ -98,7 +100,7 @@ const viewProps = (over = {}) => ({
   buckets: [{ name: 'images' }, { name: 'workers' }], associations: [association()],
   associationsLoading: false, associationsFailure: null,
   onAssociate: async () => {}, onUnassociate: async () => {},
-  status: status(), statusLoading: false, statusFailure: null, onReconcile: async () => {},
+  status: status(), statusLoading: false, statusFailure: null, onRetry: async () => {},
   ...over,
 })
 
@@ -123,6 +125,10 @@ const renderTyped = (element) => renderToStaticMarkup(React.createElement(
   TypedConfirmModalView,
   { ...element.props, confirmation: '', onConfirmationChange: () => {} },
 ))
+
+const localClock = (iso) => new Date(iso).toLocaleTimeString([], {
+  hour: '2-digit', minute: '2-digit', hour12: false,
+})
 
 test('reader renders the status zone only while maintainer renders all three zones', () => {
   const reader = renderView({ callerRole: 'reader', canConfigure: false })
@@ -157,10 +163,12 @@ test('manual refresh loads status and maintainer associations together', async (
 })
 
 for (const [mutation, pattern] of [
-  ['enable', /onEnable=\{async \(write\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?return result/],
+  ['enable', /onEnable=\{async \(write\) => \{[\s\S]*?setPollAfterMutation\(true\)[\s\S]*?await reloadAll\(\)[\s\S]*?return result/],
+  ['associate', /onAssociate=\{async \(bucketName\) => \{[\s\S]*?setPollAfterMutation\(true\)[\s\S]*?await reloadAssociations\(\)/],
+  ['unassociate', /onUnassociate=\{async \(bucketName\) => \{[\s\S]*?setPollAfterMutation\(true\)[\s\S]*?await reloadAssociations\(\)/],
+  ['retry', /onRetry=\{async \(\) => \{[\s\S]*?setPollAfterMutation\(true\)[\s\S]*?await reloadAll\(\)/],
   ['disable', /onDisable=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?return stored/],
   ['delete', /onDelete=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?\}\}/],
-  ['reconcile', /onReconcile=\{async \(\) => \{[\s\S]*?await reloadAll\(\)[\s\S]*?\}\}/],
 ]) {
   test(`${mutation} invalidates status and associations through the paired loader`, () => {
     assert.match(bagdropScreenSource, pattern)
@@ -338,7 +346,7 @@ test('only rows carrying last_sync_error have a visible error expander', () => {
       association({ bucket_name: 'clean' }),
       association({ bucket_name: 'failed', last_sync_error: 'destination returned HTTP 500' }),
     ],
-    expanded: null, onToggle: () => {},
+    reconciling: false, expanded: null, onToggle: () => {},
   }))
   assert.equal(markup.split('<button').length - 1, 1)
   assert.match(markup, /<button[^>]*aria-label="Details"/)
@@ -365,7 +373,7 @@ test('error sync status renders a danger label and visible error text', () => {
     last_sync_error: 'destination returned HTTP 500',
   })
   const tree = BagDropStatusTableView({
-    associations: [failed], expanded: null, onToggle: () => {},
+    associations: [failed], reconciling: false, expanded: null, onToggle: () => {},
   })
   const danger = findElement(
     tree, (element) => element.props.status === 'danger' && element.props.children === 'error',
@@ -374,6 +382,85 @@ test('error sync status renders a danger label and visible error text', () => {
   const markup = renderToStaticMarkup(tree)
   assert.match(markup, /destination returned HTTP 500/)
   assert.match(markup, /color:var\(--pf-t--global--color--status--danger--default\)/)
+})
+
+test('pending status is queued at rest and syncing with a spinner during a pass', () => {
+  const pending = association({ sync_status: 'pending', last_synced_at: null })
+  const queued = BagDropStatusTableView({
+    associations: [pending], reconciling: false, expanded: null, onToggle: () => {},
+  })
+  const queuedLabel = findElement(queued, (element) => element.props.children === 'queued')
+  assert.ok(queuedLabel)
+  assert.equal(queuedLabel.props.icon, undefined)
+
+  const syncing = BagDropStatusTableView({
+    associations: [pending], reconciling: true, expanded: null, onToggle: () => {},
+  })
+  const syncingLabel = findElement(syncing, (element) => element.props.children === 'syncing')
+  assert.ok(syncingLabel)
+  assert.equal(syncingLabel.props.icon.props.isInline, true)
+  assert.equal(syncingLabel.props.icon.props['aria-label'], 'Syncing')
+})
+
+test('the status zone feeds the payload reconciling flag to the pill derivation', () => {
+  const pending = association({ sync_status: 'pending', last_synced_at: null })
+  const atRest = renderView({
+    status: status({ reconciling: false, associations: [pending] }),
+  })
+  assert.match(atRest, />queued</)
+  assert.doesNotMatch(atRest, />syncing</)
+
+  const duringPass = renderView({
+    status: status({ reconciling: true, associations: [pending] }),
+  })
+  assert.match(duringPass, />syncing</)
+  assert.doesNotMatch(duringPass, />queued</)
+})
+
+test('healthy status has no manual reconcile control and retry appears only during backoff', () => {
+  const healthy = renderView()
+  assert.doesNotMatch(healthy, /Reconcile now/)
+  assert.doesNotMatch(healthy, /Retry now/)
+  assert.doesNotMatch(bagdropScreenSource, /onReconcile/)
+
+  const failedStatus = status({ backoff_failures: 2 })
+  const maintainer = renderView({ status: failedStatus })
+  assert.match(maintainer, /Retrying at/)
+  assert.match(maintainer, /after 2 failures/)
+  assert.match(maintainer, /Retry now/)
+  assert.match(maintainer, /pf-m-link/)
+
+  const reader = renderView({ callerRole: 'reader', canConfigure: false, status: failedStatus })
+  assert.match(reader, /Retrying at/)
+  assert.doesNotMatch(reader, /Retry now/)
+})
+
+test('status header shows cadence and its unknown-interval fallback', () => {
+  const nextPass = '2026-08-11T09:10:00Z'
+  const cadence = renderView({ status: status({ next_pass_at: nextPass }) })
+  assert.ok(cadence.includes(
+    `Syncs automatically every 5 minutes · next pass ~${localClock(nextPass)}`,
+  ))
+
+  const fallback = renderView({
+    status: status({ reconcile_interval_seconds: null, next_pass_at: nextPass }),
+  })
+  assert.match(fallback, /Syncs automatically/)
+  assert.doesNotMatch(fallback, /next pass/)
+})
+
+test('association errors include the last-attempt time inline and when expanded', () => {
+  const attemptedAt = '2026-08-11T09:07:00Z'
+  const tree = BagDropStatusTableView({
+    associations: [association({
+      sync_status: 'error', last_sync_error: 'destination returned HTTP 500',
+      last_attempt_at: attemptedAt,
+    })],
+    reconciling: false, expanded: 'images', onToggle: () => {},
+  })
+  const markup = renderToStaticMarkup(tree)
+  const describedError = `destination returned HTTP 500 as of ${localClock(attemptedAt)}`
+  assert.equal(markup.split(describedError).length - 1, 2)
 })
 
 test('Bag Drop zones render honest loading, error, and empty states', () => {
@@ -396,7 +483,7 @@ test('Bag Drop zones render honest loading, error, and empty states', () => {
   assert.match(failed, /status refused/)
 
   const empty = renderView({
-    config: null, associations: [], status: { configured: false, associations: [] },
+    config: null, associations: [], status: status({ configured: false, associations: [] }),
   })
   assert.match(empty, /Configure a destination before mirroring buckets/)
   assert.match(empty, /<h2[^>]*>Bag Drop is not configured<\/h2>/)
@@ -404,7 +491,7 @@ test('Bag Drop zones render honest loading, error, and empty states', () => {
   assert.match(empty, /No buckets are being mirrored from this project/)
 
   const noAssociations = renderView({
-    status: { configured: true, associations: [] },
+    status: status({ configured: true, associations: [] }),
   })
   assert.match(noAssociations, /<h2[^>]*>No buckets are mirrored<\/h2>/)
   assert.match(noAssociations, /destination is configured, but it has no bucket associations/)

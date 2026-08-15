@@ -736,11 +736,16 @@ type BagDropLastVerification struct {
 
 // BagDropStatus defines model for BagDropStatus.
 type BagDropStatus struct {
-	Adapter          *BagDropAdapter          `json:"adapter,omitempty"`
-	Associations     []BagDropAssociation     `json:"associations"`
-	Configured       bool                     `json:"configured"`
-	Enabled          *bool                    `json:"enabled,omitempty"`
-	LastVerification *BagDropLastVerification `json:"last_verification,omitempty"`
+	Adapter                  *BagDropAdapter          `json:"adapter,omitempty"`
+	Associations             []BagDropAssociation     `json:"associations"`
+	BackoffFailures          int                      `json:"backoff_failures"`
+	Configured               bool                     `json:"configured"`
+	Enabled                  *bool                    `json:"enabled,omitempty"`
+	LastPassAt               *time.Time               `json:"last_pass_at"`
+	LastVerification         *BagDropLastVerification `json:"last_verification,omitempty"`
+	NextPassAt               *time.Time               `json:"next_pass_at"`
+	ReconcileIntervalSeconds *int                     `json:"reconcile_interval_seconds"`
+	Reconciling              bool                     `json:"reconciling"`
 }
 
 // BagDropSyncStatus defines model for BagDropSyncStatus.

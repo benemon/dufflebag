@@ -2122,7 +2122,20 @@ components:
         associations:
           type: array
           items: { $ref: "#/components/schemas/BagDropAssociation" }
-      required: [configured, associations]
+        reconciling: { type: boolean }
+        next_pass_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_pass_at:
+          type: string
+          format: date-time
+          nullable: true
+        reconcile_interval_seconds:
+          type: integer
+          nullable: true
+        backoff_failures: { type: integer }
+      required: [configured, associations, reconciling, next_pass_at, last_pass_at, reconcile_interval_seconds, backoff_failures]
 
     BagDropConflict:
       type: object

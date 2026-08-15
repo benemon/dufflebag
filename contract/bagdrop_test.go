@@ -33,6 +33,8 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 		"enum: [hcp-packer, dufflebag]", "enum: [resolved, failed]",
 		"enum: [active, pending_removal]", "enum: [pending, synced, error, removing]",
 		"enum: [credential_refused, project_not_found, unreachable, tls_failure]",
+		"reconciling: { type: boolean }", "backoff_failures: { type: integer }",
+		"required: [configured, associations, reconciling, next_pass_at, last_pass_at, reconcile_interval_seconds, backoff_failures]",
 	} {
 		if !strings.Contains(spec, required) {
 			t.Errorf("platform spec lacks %q", required)
@@ -93,6 +95,13 @@ func TestBagDropPlatformContractIsGeneratedAndSecretIsWriteOnly(t *testing.T) {
 	for _, field := range []string{"LastAttemptAt", "LastSyncError"} {
 		if !structFields["BagDropAssociation"][field] {
 			t.Errorf("generated BagDropAssociation lacks %s", field)
+		}
+	}
+	for _, field := range []string{
+		"Reconciling", "NextPassAt", "LastPassAt", "ReconcileIntervalSeconds", "BackoffFailures",
+	} {
+		if !structFields["BagDropStatus"][field] {
+			t.Errorf("generated BagDropStatus lacks %s", field)
 		}
 	}
 	for _, response := range []string{

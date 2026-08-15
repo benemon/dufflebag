@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/bagdrop"
@@ -186,6 +187,7 @@ func (s *server) SetBagDropAssociation(
 		return nil, err
 	}
 	audited.succeeded(request.BucketName, "")
+	s.triggerBagDropReconcile(ctx, organizationID, projectID)
 	return SetBagDropAssociation200JSONResponse(renderBagDropAssociation(*association)), nil
 }
 
@@ -212,6 +214,7 @@ func (s *server) DeleteBagDropAssociation(
 		return nil, err
 	}
 	audited.succeeded(request.BucketName, string(outcome))
+	s.triggerBagDropReconcile(ctx, organizationID, projectID)
 	return DeleteBagDropAssociation204Response{}, nil
 }
 
@@ -236,8 +239,15 @@ func (s *server) GetBagDropStatus(
 		audited.failed("storage_failed")
 		return nil, err
 	}
+	var reconcileStatus *bagdrop.ReconcilerStatus
+	if reconciler, ok := s.bagDrop.(BagDropReconciler); ok {
+		observed := reconciler.ReconcileStatus(organizationID, projectID)
+		reconcileStatus = &observed
+	}
 	audited.succeeded("", "")
-	return GetBagDropStatus200JSONResponse(renderBagDropStatus(status, s.bagDrop.CredentialProtection())), nil
+	return GetBagDropStatus200JSONResponse(renderBagDropStatus(
+		status, s.bagDrop.CredentialProtection(), reconcileStatus,
+	)), nil
 }
 
 func renderBagDropAssociation(association bagdrop.Association) BagDropAssociation {
@@ -254,10 +264,20 @@ func renderBagDropAssociation(association bagdrop.Association) BagDropAssociatio
 	}
 }
 
-func renderBagDropStatus(status *bagdrop.Status, credentialProtection string) BagDropStatus {
+func renderBagDropStatus(
+	status *bagdrop.Status, credentialProtection string, reconcileStatus *bagdrop.ReconcilerStatus,
+) BagDropStatus {
 	response := BagDropStatus{
 		Configured:   status.Configured,
 		Associations: make([]BagDropAssociation, 0, len(status.Associations)),
+	}
+	if reconcileStatus != nil {
+		intervalSeconds := int(reconcileStatus.Interval / time.Second)
+		response.Reconciling = reconcileStatus.Reconciling
+		response.NextPassAt = reconcileStatus.NextPass
+		response.LastPassAt = reconcileStatus.LastPass
+		response.ReconcileIntervalSeconds = &intervalSeconds
+		response.BackoffFailures = reconcileStatus.BackoffFailures
 	}
 	for _, association := range status.Associations {
 		response.Associations = append(response.Associations, renderBagDropAssociation(association))
@@ -380,7 +400,19 @@ func (s *server) EnableBagDrop(
 		return nil, err
 	}
 	audited.succeeded("", "")
+	s.triggerBagDropReconcile(ctx, organizationID, projectID)
 	return EnableBagDrop200JSONResponse(renderBagDropConfig(config, s.bagDrop.CredentialProtection())), nil
+}
+
+func (s *server) triggerBagDropReconcile(ctx context.Context, organizationID, projectID string) {
+	reconciler, ok := s.bagDrop.(BagDropReconciler)
+	if !ok {
+		return
+	}
+	if err := reconciler.Trigger(ctx, organizationID, projectID); err != nil {
+		s.logger.Debug("Bag Drop mutation reconcile could not be queued",
+			"organization_id", organizationID, "project_id", projectID, "error", err)
+	}
 }
 
 func (s *server) DisableBagDrop(

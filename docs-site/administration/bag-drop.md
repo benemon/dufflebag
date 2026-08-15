@@ -178,10 +178,16 @@ console displays a red label and the error text in the row. A destination that
 continues refusing work therefore remains visibly in error instead of appearing
 as `pending`.
 
-The reconciler runs on a level basis. The default interval is five minutes,
-with per-project backoff after a failure. It does not run on the serving path,
-so a slow or unreachable destination cannot affect Packer builds or API reads.
-Use `POST …/bagdrop/reconcile` to trigger a reconcile on demand.
+The reconciler runs on a level basis. Associating or un-associating a bucket,
+or enabling Bag Drop, enqueues a reconcile immediately. The regular interval
+remains five minutes by default, with the same per-project backoff after a
+failure. Reconciliation does not run on the serving path, so a slow or
+unreachable destination cannot affect Packer builds or API reads. The
+`POST …/bagdrop/reconcile` endpoint remains available for on-demand runs.
+
+The console distinguishes work that is `queued` from work actively `syncing`.
+It offers a manual **Retry now** action only while the project is backing off
+after a failed pass.
 
 Destination mutations are audit fail-closed. If no audit sink can record them,
 sync pauses until the next tick while ordinary serving continues.

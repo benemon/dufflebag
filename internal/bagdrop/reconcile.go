@@ -47,11 +47,14 @@ type Reconciler struct {
 	started    chan struct{}
 	startOnce  sync.Once
 
-	mu       sync.Mutex
-	running  bool
-	pending  map[Project]bool
-	queue    []Project
-	backoffs map[Project]projectBackoff
+	mu          sync.Mutex
+	running     bool
+	pending     map[Project]bool
+	queue       []Project
+	backoffs    map[Project]projectBackoff
+	reconciling map[Project]bool
+	lastPass    map[Project]time.Time
+	nextTimer   time.Time
 }
 
 // Runtime composes the request-facing configuration service with the
@@ -64,6 +67,14 @@ type Runtime struct {
 type projectBackoff struct {
 	failures int
 	next     time.Time
+}
+
+type ReconcilerStatus struct {
+	Reconciling     bool
+	NextPass        *time.Time
+	LastPass        *time.Time
+	Interval        time.Duration
+	BackoffFailures int
 }
 
 func NewReconciler(
@@ -84,6 +95,7 @@ func NewReconciler(
 		audit: audit.NewBagDropEmitter(writer), interval: interval, now: time.Now, logger: logger,
 		trigger: make(chan struct{}, 1), started: make(chan struct{}),
 		pending: make(map[Project]bool), backoffs: make(map[Project]projectBackoff),
+		reconciling: make(map[Project]bool), lastPass: make(map[Project]time.Time),
 	}, nil
 }
 
@@ -99,6 +111,9 @@ func (r *Reconciler) Run(ctx context.Context) {
 	}()
 
 	timer := time.NewTimer(0)
+	r.mu.Lock()
+	r.nextTimer = r.now()
+	r.mu.Unlock()
 	defer timer.Stop()
 	paused := false
 	for {
@@ -112,7 +127,11 @@ func (r *Reconciler) Run(ctx context.Context) {
 			} else if err != nil && ctx.Err() == nil {
 				r.logger.Warn("Bag Drop reconcile pass failed")
 			}
+			nextTimer := r.now().Add(r.interval)
 			timer.Reset(r.interval)
+			r.mu.Lock()
+			r.nextTimer = nextTimer
+			r.mu.Unlock()
 		case <-r.trigger:
 			for {
 				project, ok := r.nextTriggeredProject()
@@ -122,7 +141,7 @@ func (r *Reconciler) Run(ctx context.Context) {
 				if paused {
 					continue
 				}
-				if err := r.reconcileAndBackoff(ctx, project); errors.Is(err, ErrAuditUnavailable) {
+				if err := r.reconcilePass(ctx, project); errors.Is(err, ErrAuditUnavailable) {
 					paused = true
 				} else if err != nil && ctx.Err() == nil {
 					r.logger.Warn("Bag Drop project reconcile failed",
@@ -155,6 +174,30 @@ func (r *Reconciler) Trigger(_ context.Context, organizationID, projectID string
 	return nil
 }
 
+func (r *Reconciler) ReconcileStatus(organizationID, projectID string) ReconcilerStatus {
+	project := Project{OrganizationID: organizationID, ProjectID: projectID}
+	now := r.now()
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	status := ReconcilerStatus{
+		Reconciling: r.reconciling[project], Interval: r.interval,
+	}
+	backoff := r.backoffs[project]
+	status.BackoffFailures = backoff.failures
+	if now.Before(backoff.next) {
+		next := backoff.next
+		status.NextPass = &next
+	} else if !r.nextTimer.IsZero() {
+		next := r.nextTimer
+		status.NextPass = &next
+	}
+	if last, ok := r.lastPass[project]; ok {
+		status.LastPass = &last
+	}
+	return status
+}
+
 func (r *Reconciler) nextTriggeredProject() (Project, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -179,11 +222,25 @@ func (r *Reconciler) ReconcileAll(ctx context.Context) error {
 		if r.now().Before(backoff.next) {
 			continue
 		}
-		if err := r.reconcileAndBackoff(ctx, project); errors.Is(err, ErrAuditUnavailable) {
+		if err := r.reconcilePass(ctx, project); errors.Is(err, ErrAuditUnavailable) {
 			return err
 		}
 	}
 	return nil
+}
+
+func (r *Reconciler) reconcilePass(ctx context.Context, project Project) (err error) {
+	r.mu.Lock()
+	r.reconciling[project] = true
+	r.mu.Unlock()
+	defer func() {
+		completedAt := r.now().UTC()
+		r.mu.Lock()
+		delete(r.reconciling, project)
+		r.lastPass[project] = completedAt
+		r.mu.Unlock()
+	}()
+	return r.reconcileAndBackoff(ctx, project)
 }
 
 func (r *Reconciler) reconcileAndBackoff(ctx context.Context, project Project) error {
