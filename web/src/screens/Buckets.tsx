@@ -21,6 +21,7 @@ import { DeleteBucketModal } from '../components/DeleteBucketModal'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import { useBuckets, type AncestryLink, type Bucket } from '../data/buckets'
+import { useAutoRefresh } from '../data/polling'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, requirementReason, type Role } from '../auth/permissions'
 import { deleteBucket, getBagDropStatus, signOutIfUnauthorized, type ApiPin } from '../api/client'
@@ -48,7 +49,12 @@ export function Buckets() {
   const location = useLocation()
   const navigate = useNavigate()
   const [refresh, setRefresh] = useState(0)
-  const bucketData = useBuckets(`${location.key}:${refresh}`)
+  const bucketData = useBuckets(location.key, refresh)
+  const reload = () => setRefresh((current) => current + 1)
+  const hot = bucketData.buckets.some((bucket) =>
+    bucket.newestVersion?.state === 'incomplete' ||
+    bucket.drift.kind === 'behind' || bucket.drift.kind === 'absent')
+  useAutoRefresh({ hot, onRefresh: reload })
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
@@ -56,7 +62,7 @@ export function Buckets() {
   return (
     <BucketsView
       {...bucketData}
-      onRefresh={() => setRefresh((current) => current + 1)}
+      onRefresh={reload}
       callerRole={self?.role ?? null}
       openBucket={(bucket) => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       openInstance={() => navigate('/instance')}
@@ -86,6 +92,7 @@ export function BucketsView({
   buckets,
   total,
   loading,
+  refreshing = false,
   failure,
   pins = [],
   pinsLoading = false,
@@ -103,6 +110,7 @@ export function BucketsView({
   buckets: Bucket[]
   total: number
   loading: boolean
+  refreshing?: boolean
   failure: string | null
   pins?: ApiPin[]
   pinsLoading?: boolean
@@ -184,7 +192,7 @@ export function BucketsView({
     <>
       <ScreenHeader
         onRefresh={onRefresh}
-        refreshing={loading}
+        refreshing={refreshing}
         title="Buckets"
         description={!loading && !failure && !gap ? (
           <>

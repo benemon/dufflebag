@@ -11,7 +11,6 @@ let enableBagDrop
 let AssociationSelectorView
 let BagDropStatusTableView
 let BagDropView
-let refreshBagDrop
 let BucketRemovalConfirmation
 let BucketSetRemovalConfirmation
 let DestinationActionFailure
@@ -35,7 +34,7 @@ before(async () => {
     AssociationSelectorView, BagDropStatusTableView, BagDropView, BucketRemovalConfirmation,
     BucketSetRemovalConfirmation,
     DeleteBagDropConfigConfirmation, DestinationActionFailure, DestinationFormView,
-    DestinationZone, bagDropWrite, refreshBagDrop,
+    DestinationZone, bagDropWrite,
     enableFailureMessage,
   } = await vite.ssrLoadModule('/src/screens/BagDrop.tsx'))
   ;({ TypedConfirmModalView } =
@@ -142,24 +141,38 @@ test('reader renders the status zone only while maintainer renders all three zon
   assert.match(maintainer, /aria-label="Status"/)
 })
 
-test('manual refresh loads status and maintainer associations together', async () => {
-  let statusLoads = 0
-  let maintainerAssociationLoads = 0
-  await refreshBagDrop(
-    async () => { statusLoads++ },
-    async () => { maintainerAssociationLoads++ },
-    true,
+test('manual refresh loads status and maintainer data through the quiet path', () => {
+  assert.match(
+    bagdropScreenSource,
+    /const reloadAll = useCallback\(async \(\) => \{[\s\S]*?loadStatus\(true\)[\s\S]*?loadMaintainer\(true\)/,
   )
-  assert.equal(statusLoads, 1)
-  assert.equal(maintainerAssociationLoads, 1)
+  assert.match(bagdropScreenSource, /onRefresh=\{reloadAll\}/)
+})
 
-  await refreshBagDrop(
-    async () => { statusLoads++ },
-    async () => { maintainerAssociationLoads++ },
-    false,
+test('Bag Drop delegates polling with reconciling, association, and sticky hotness', () => {
+  assert.match(
+    bagdropScreenSource,
+    /const transient = Boolean\(status\?\.reconciling \|\| status\?\.associations\.some\([\s\S]*?sync_status === 'pending' \|\| association\.sync_status === 'removing'/,
   )
-  assert.equal(statusLoads, 2)
-  assert.equal(maintainerAssociationLoads, 1)
+  assert.match(
+    bagdropScreenSource,
+    /useAutoRefresh\(\{\s+hot: transient \|\| pollAfterMutation,[\s\S]*?reloadAll\(\)/,
+  )
+  assert.doesNotMatch(bagdropScreenSource, /setInterval\(/)
+  assert.match(
+    bagdropScreenSource,
+    /pollAfterMutation && loaded && !loaded\.reconciling[\s\S]*?setPollAfterMutation\(false\)/,
+  )
+})
+
+test('Bag Drop refreshing leaves all settled zones rendered without skeletons', () => {
+  const markup = renderView({ refreshing: true })
+  assert.doesNotMatch(markup, /Loading Bag Drop configuration/)
+  assert.doesNotMatch(markup, /Loading mirrored buckets/)
+  assert.doesNotMatch(markup, /Loading Bag Drop status/)
+  assert.match(markup, /aria-label="Destination"/)
+  assert.match(markup, /aria-label="Mirrored buckets"/)
+  assert.match(markup, /aria-label="Status"/)
 })
 
 for (const [mutation, pattern] of [

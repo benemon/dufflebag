@@ -1286,20 +1286,38 @@ test('package count follows every page rather than treating the first page as th
   assert.deepEqual(detail.build.packageInventory.packages.map(({ name }) => name), ['openssl', 'zlib'])
 })
 
-test('package inventory refetches while a build is in progress', () => {
+test('Versions, Version, and Build declare their auto-refresh hotness', () => {
+  assert.match(
+    versionsScreenSource,
+    /const hot = data\?\.versions\.some\([\s\S]*?state === 'incomplete'[\s\S]*?some\(buildIsInProgress\)[\s\S]*?useAutoRefresh\(\{ hot, onRefresh: reload \}\)/,
+  )
+  assert.match(
+    versionScreenSource,
+    /const hot = data\?\.version\.state === 'incomplete'[\s\S]*?some\(buildIsInProgress\)[\s\S]*?useAutoRefresh\(\{ hot, onRefresh: reload \}\)/,
+  )
+  assert.match(
+    buildScreenSource,
+    /useAutoRefresh\(\{ hot: data \? buildIsInProgress\(data\.build\) : false, onRefresh: reload \}\)/,
+  )
+})
+
+test('MUTATION_QUIET_REVISION separates identity resets from revision refreshes', () => {
   assert.match(
     versionDataSource,
-    /useVersionData<VersionDetail \| null>\([\s\S]*?some\(buildIsInProgress\)/,
+    /useVersions\([\s\S]*?useVersionData<BucketPage \| null>\([\s\S]*?bucket,\s+revision,/,
   )
   assert.match(
     versionDataSource,
-    /useVersionData<BuildDetail \| null>\([\s\S]*?buildIsInProgress\(detail\.build\)/,
+    /useBuild\([\s\S]*?const \[revision, setRevision\][\s\S]*?reload:/,
   )
-  assert.match(
-    versionDataSource,
-    /reloadWhile\?\.\(loaded\)\) retry = setTimeout\(refresh, 500\)/,
+  const quietBranch = versionDataSource.match(
+    /if \(identityChanged\) \{[\s\S]*?\} else \{([\s\S]*?)\n    \}/,
   )
-  assert.match(versionDataSource, /if \(retry\) clearTimeout\(retry\)/)
+  assert.ok(quietBranch, 'quiet revision branch')
+  assert.match(quietBranch[1], /setRefreshing\(true\)/)
+  assert.doesNotMatch(quietBranch[1], /setData\(/)
+  assert.doesNotMatch(quietBranch[1], /setLoading\(/)
+  assert.doesNotMatch(versionDataSource, /reloadWhile|setTimeout\(refresh, 500\)/)
 })
 
 test('an incomplete version page states the absence of builds plainly', async () => {

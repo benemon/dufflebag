@@ -27,6 +27,7 @@ import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { When } from '../components/When'
 import { SkeletonRows } from '../components/Loading'
+import { useAutoRefresh } from '../data/polling'
 
 type DestinationDraft = {
   adapter: 'hcp-packer' | 'dufflebag'
@@ -92,17 +93,6 @@ function draftIsValid(draft: DestinationDraft, config: ApiBagDropConfig | null):
   return draft.adapter !== 'dufflebag' || draft.endpoint.trim() !== ''
 }
 
-export async function refreshBagDrop(
-  loadStatus: () => Promise<unknown>,
-  loadMaintainer: () => Promise<void>,
-  canConfigure: boolean,
-): Promise<void> {
-  await Promise.all([
-    loadStatus(),
-    ...(canConfigure ? [loadMaintainer()] : []),
-  ])
-}
-
 export function BagDrop() {
   const { state, self, selectedOrganization, selectedProject } = useAuth()
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? null
@@ -123,41 +113,48 @@ export function BagDrop() {
   const [statusLoading, setStatusLoading] = useState(true)
   const [statusFailure, setStatusFailure] = useState<string | null>(null)
   const [pollAfterMutation, setPollAfterMutation] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
 
   const loadStatus = useCallback(async (quiet = false): Promise<ApiBagDropStatus | null> => {
     if (!tenant || token === '') return null
     if (!quiet) setStatusLoading(true)
-    setStatusFailure(null)
+    if (!quiet) setStatusFailure(null)
     try {
       const loaded = await getBagDropStatus(token, tenant)
       setStatus(loaded)
+      setStatusFailure(null)
       return loaded
     } catch (err: unknown) {
-      setStatusFailure(messageFor(err, 'Bag Drop status could not be loaded.'))
+      if (!quiet) setStatusFailure(messageFor(err, 'Bag Drop status could not be loaded.'))
       return null
     } finally {
       if (!quiet) setStatusLoading(false)
     }
   }, [tenant?.organizationID, tenant?.projectID, token])
 
-  const loadMaintainer = useCallback(async () => {
+  const loadMaintainer = useCallback(async (quiet = false) => {
     if (!tenant || token === '' || !canConfigure) return
-    setConfigLoading(true)
-    setAssociationsLoading(true)
-    setConfigFailure(null)
-    setAssociationsFailure(null)
+    if (!quiet) {
+      setConfigLoading(true)
+      setAssociationsLoading(true)
+    }
+    if (!quiet) {
+      setConfigFailure(null)
+      setAssociationsFailure(null)
+    }
     let loadedConfig: ApiBagDropConfig | null = null
     try {
       loadedConfig = await getBagDropConfig(token, tenant)
       setConfig(loadedConfig)
+      setConfigFailure(null)
     } catch (err: unknown) {
       if (err instanceof ApiError && err.status === 404) {
         setConfig(null)
-      } else {
+      } else if (!quiet) {
         setConfigFailure(messageFor(err, 'Bag Drop configuration could not be loaded.'))
       }
     } finally {
-      setConfigLoading(false)
+      if (!quiet) setConfigLoading(false)
     }
     try {
       const [loadedBuckets, loadedAssociations] = await Promise.all([
@@ -166,10 +163,11 @@ export function BagDrop() {
       ])
       setBuckets(loadedBuckets)
       setAssociations(loadedAssociations)
+      setAssociationsFailure(null)
     } catch (err: unknown) {
-      setAssociationsFailure(messageFor(err, 'Mirrored buckets could not be loaded.'))
+      if (!quiet) setAssociationsFailure(messageFor(err, 'Mirrored buckets could not be loaded.'))
     } finally {
-      setAssociationsLoading(false)
+      if (!quiet) setAssociationsLoading(false)
     }
   }, [canConfigure, tenant?.organizationID, tenant?.projectID, token])
 
@@ -187,17 +185,24 @@ export function BagDrop() {
   const transient = Boolean(status?.reconciling || status?.associations.some(
     (association) => association.sync_status === 'pending' || association.sync_status === 'removing',
   ))
-  useEffect(() => {
-    if (!transient && !pollAfterMutation) return
-    const timer = window.setInterval(() => {
-      void loadStatus(true).then((loaded) => {
-        if (pollAfterMutation && loaded && !loaded.reconciling && !loaded.associations.some(
-          (association) => association.sync_status === 'pending' || association.sync_status === 'removing',
-        )) setPollAfterMutation(false)
-      })
-    }, 10_000)
-    return () => window.clearInterval(timer)
-  }, [loadStatus, pollAfterMutation, transient])
+  const reloadAll = useCallback(async () => {
+    setRefreshing(true)
+    try {
+      const [loaded] = await Promise.all([
+        loadStatus(true),
+        ...(canConfigure ? [loadMaintainer(true)] : []),
+      ])
+      if (pollAfterMutation && loaded && !loaded.reconciling && !loaded.associations.some(
+        (association) => association.sync_status === 'pending' || association.sync_status === 'removing',
+      )) setPollAfterMutation(false)
+    } finally {
+      setRefreshing(false)
+    }
+  }, [canConfigure, loadMaintainer, loadStatus, pollAfterMutation])
+  useAutoRefresh({
+    hot: transient || pollAfterMutation,
+    onRefresh: () => { void reloadAll() },
+  })
 
   if (!tenant) {
     return (
@@ -209,14 +214,12 @@ export function BagDrop() {
     setAssociations(await listBagDropAssociations(token, tenant))
     await loadStatus(true)
   }
-  const reloadAll = () => refreshBagDrop(() => loadStatus(), loadMaintainer, canConfigure)
-
   return (
     <BagDropView
       callerRole={callerRole} canConfigure={canConfigure}
       config={config} configLoading={configLoading} configFailure={configFailure}
       onRefresh={reloadAll}
-      refreshing={statusLoading || (canConfigure && (configLoading || associationsLoading))}
+      refreshing={refreshing}
       onEnable={async (write) => {
         const result = await enableBagDrop(token, tenant, write)
         if (result.kind === 'enabled') {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   deletePin, listBuckets, listChannels, listPins, listVersions, setPin, signOutIfUnauthorized,
@@ -70,7 +70,7 @@ export type Bucket = {
  * client (docs/architecture.md: wire models are never domain models).
  */
 
-export function useBuckets(refreshKey = '') {
+export function useBuckets(identityKey = '', revision = 0) {
   const {
     state, self, selectedOrganization, selectedProject, signOut,
     organizations, organizationsLoading, organizationFailure,
@@ -78,10 +78,14 @@ export function useBuckets(refreshKey = '') {
   } = useAuth()
   const [buckets, setBuckets] = useState<Bucket[]>([])
   const [loading, setLoading] = useState(true)
+  const [bucketsRefreshing, setBucketsRefreshing] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
   const [pins, setPins] = useState<ApiPin[]>([])
   const [pinsLoading, setPinsLoading] = useState(false)
+  const [pinsRefreshing, setPinsRefreshing] = useState(false)
   const [pinsFailure, setPinsFailure] = useState<string | null>(null)
+  const previousBucketsIdentity = useRef<string | undefined>(undefined)
+  const previousPinsIdentity = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     // The organisation comes from the session's selection — for a platform
@@ -90,13 +94,24 @@ export function useBuckets(refreshKey = '') {
     if (!state || !selectedOrganization || !selectedProject) {
       setBuckets([])
       setLoading(false)
+      setBucketsRefreshing(false)
       setFailure(null)
+      previousBucketsIdentity.current = undefined
       return
     }
     let cancelled = false
-    setBuckets([])
-    setLoading(true)
-    setFailure(null)
+    let settled = false
+    const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
+    const identityChanged = previousBucketsIdentity.current !== identity
+    previousBucketsIdentity.current = identity
+    if (identityChanged) {
+      setBuckets([])
+      setLoading(true)
+      setBucketsRefreshing(false)
+      setFailure(null)
+    } else {
+      setBucketsRefreshing(true)
+    }
     const tenant = { organizationID: selectedOrganization, projectID: selectedProject }
 
     // Buckets first, then each bucket's versions and channels concurrently.
@@ -112,16 +127,25 @@ export function useBuckets(refreshKey = '') {
       .catch((err: unknown) => {
         if (cancelled) return
         if (signOutIfUnauthorized(err, signOut)) return
-        setBuckets([])
-        setFailure(err instanceof Error ? err.message : 'Could not load buckets.')
+        if (identityChanged) {
+          setBuckets([])
+          setFailure(err instanceof Error ? err.message : 'Could not load buckets.')
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        settled = true
+        if (!cancelled) {
+          if (identityChanged) setLoading(false)
+          else setBucketsRefreshing(false)
+        }
       })
     return () => {
       cancelled = true
+      if (identityChanged && !settled && previousBucketsIdentity.current === identity) {
+        previousBucketsIdentity.current = undefined
+      }
     }
-  }, [state, selectedOrganization, selectedProject, signOut, refreshKey])
+  }, [state, selectedOrganization, selectedProject, signOut, identityKey, revision])
 
   useEffect(() => {
     // A tenancy gap is not a project. Do not issue a pins request until both
@@ -129,28 +153,54 @@ export function useBuckets(refreshKey = '') {
     if (!state || !selectedOrganization || !selectedProject) {
       setPins([])
       setPinsLoading(false)
+      setPinsRefreshing(false)
       setPinsFailure(null)
+      previousPinsIdentity.current = undefined
       return
     }
     let cancelled = false
-    setPins([])
-    setPinsLoading(true)
-    setPinsFailure(null)
+    let settled = false
+    const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
+    const identityChanged = previousPinsIdentity.current !== identity
+    previousPinsIdentity.current = identity
+    if (identityChanged) {
+      setPins([])
+      setPinsLoading(true)
+      setPinsRefreshing(false)
+      setPinsFailure(null)
+    } else {
+      setPinsRefreshing(true)
+    }
     const tenant = { organizationID: selectedOrganization, projectID: selectedProject }
     void listPins(state.token, tenant)
       .then((listed) => {
-        if (!cancelled) setPins(listed)
+        if (!cancelled) {
+          setPins(listed)
+          setPinsFailure(null)
+        }
       })
       .catch((err: unknown) => {
         if (cancelled) return
         if (signOutIfUnauthorized(err, signOut)) return
-        setPinsFailure(err instanceof Error ? err.message : 'Could not load pinned buckets.')
+        if (identityChanged) {
+          setPins([])
+          setPinsFailure(err instanceof Error ? err.message : 'Could not load pinned buckets.')
+        }
       })
       .finally(() => {
-        if (!cancelled) setPinsLoading(false)
+        settled = true
+        if (!cancelled) {
+          if (identityChanged) setPinsLoading(false)
+          else setPinsRefreshing(false)
+        }
       })
-    return () => { cancelled = true }
-  }, [state, selectedOrganization, selectedProject, signOut, refreshKey])
+    return () => {
+      cancelled = true
+      if (identityChanged && !settled && previousPinsIdentity.current === identity) {
+        previousPinsIdentity.current = undefined
+      }
+    }
+  }, [state, selectedOrganization, selectedProject, signOut, identityKey, revision])
 
   const togglePin = useCallback(async (bucketName: string, pinned: boolean) => {
     if (!state || !selectedOrganization || !selectedProject) return
@@ -186,6 +236,7 @@ export function useBuckets(refreshKey = '') {
     buckets,
     total: buckets.length,
     loading: loading || discovering,
+    refreshing: bucketsRefreshing || pinsRefreshing,
     failure: failure ?? discoveryFailure,
     pins,
     pinsLoading,
