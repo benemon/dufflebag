@@ -407,12 +407,16 @@ async function seedFixtures(credentials) {
   const publisher = await createPrincipal(rootToken, {
     name: 'release-manager', role: 'publisher', ...scope,
   })
+  const maintainer = await createPrincipal(rootToken, {
+    name: 'registry-maintainer', role: 'maintainer', ...scope,
+  })
   await createPrincipal(rootToken, {
     name: 'catalog-reader', role: 'reader', ...scope,
   })
 
   const builderToken = await tokenFor(builder.client_id, builder.secret)
   const publisherToken = await tokenFor(publisher.client_id, publisher.secret)
+  const maintainerToken = await tokenFor(maintainer.client_id, maintainer.secret)
   const bucketBase =
     `/packer/2023-01-01/organizations/${organization.id}` +
     `/projects/${project.id}/buckets`
@@ -450,10 +454,10 @@ async function seedFixtures(credentials) {
   await api(builderToken, 'POST', baseVersions, {
     fingerprint: 'ubuntu-2404-candidate', template_type: 'HCL2',
   })
-  await api(publisherToken, 'POST', `${bucketBase}/base-images/channels`, {
+  await api(maintainerToken, 'POST', `${bucketBase}/base-images/channels`, {
     name: 'production', restricted: true,
   })
-  await api(publisherToken, 'PATCH', `${bucketBase}/base-images/channels/production`, {
+  await api(maintainerToken, 'PATCH', `${bucketBase}/base-images/channels/production`, {
     update_mask: 'versionFingerprint', version_fingerprint: 'ubuntu-2404-2026-08',
   })
 

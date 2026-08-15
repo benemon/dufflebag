@@ -276,7 +276,7 @@ func TestSecretEchoGateBagDropReadResponsesNeverContainClientSecret(t *testing.T
 	}
 	encoded, err = json.Marshal(renderBagDropStatus(&bagdrop.Status{
 		Configured: true, Config: service.config(), Associations: []bagdrop.Association{},
-	}, service.CredentialProtection()))
+	}, service.CredentialProtection(), nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -417,7 +417,7 @@ func TestBagDropStatusWithoutConfigAndForeignProject(t *testing.T) {
 		bagDropPath("status"), nil, testToken,
 	)
 	if response.Code != http.StatusOK ||
-		response.Body.String() != "{\"associations\":[],\"configured\":false}\n" {
+		response.Body.String() != "{\"associations\":[],\"backoff_failures\":0,\"configured\":false,\"last_pass_at\":null,\"next_pass_at\":null,\"reconcile_interval_seconds\":null,\"reconciling\":false}\n" {
 		t.Fatalf("unconfigured status = %d: %s", response.Code, response.Body)
 	}
 	foreign := pinIdentity{
@@ -450,8 +450,8 @@ func TestBagDropReconcileTriggerAvailabilityAndRole(t *testing.T) {
 	runtime := &fakeBagDropRuntime{fakeBagDropService: &fakeBagDropService{}}
 	handler, trail := auditedPlatform(t, bagDropHandler(identity.RoleMaintainer, runtime))
 	response := call(t, handler, http.MethodPost, bagDropPath("reconcile"), nil, testToken)
-	if response.Code != http.StatusAccepted || runtime.calls != 1 {
-		t.Fatalf("running trigger = %d calls=%d: %s", response.Code, runtime.calls, response.Body)
+	if response.Code != http.StatusAccepted || len(runtime.calls) != 1 {
+		t.Fatalf("running trigger = %d calls=%d: %s", response.Code, len(runtime.calls), response.Body)
 	}
 	if event := trail.response(t); event["operation"] != "bagdrop.reconcile" || event["outcome"] != "success" {
 		t.Fatalf("trigger audit = %#v", event)
@@ -481,8 +481,97 @@ func TestBagDropReconcileTriggerConcealsForeignProject(t *testing.T) {
 		testLogger(), runtime, time.Now,
 	)
 	response := call(t, handler, http.MethodPost, bagDropPath("reconcile"), nil, testToken)
-	if response.Code != http.StatusNotFound || runtime.calls != 0 {
-		t.Fatalf("foreign trigger = %d calls=%d: %s", response.Code, runtime.calls, response.Body)
+	if response.Code != http.StatusNotFound || len(runtime.calls) != 0 {
+		t.Fatalf("foreign trigger = %d calls=%d: %s", response.Code, len(runtime.calls), response.Body)
+	}
+}
+
+func TestBagDropSuccessfulMutationsTriggerReconcile(t *testing.T) {
+	for _, operation := range []struct {
+		name, method, path string
+		body               any
+		want               int
+	}{
+		{name: "associate", method: http.MethodPut, path: bagDropPath("buckets/images"), want: http.StatusOK},
+		{name: "unassociate", method: http.MethodDelete, path: bagDropPath("buckets/images"), want: http.StatusNoContent},
+		{name: "enable", method: http.MethodPost, path: bagDropPath("enable"), want: http.StatusOK},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			runtime := &fakeBagDropRuntime{fakeBagDropService: &fakeBagDropService{}}
+			response := call(t, bagDropHandler(identity.RoleMaintainer, runtime),
+				operation.method, operation.path, operation.body, testToken)
+			if response.Code != operation.want || len(runtime.calls) != 1 ||
+				runtime.calls[0] != (bagdrop.Project{OrganizationID: testOrgID, ProjectID: testProjID}) {
+				t.Fatalf("%s response=%d triggers=%#v: %s",
+					operation.name, response.Code, runtime.calls, response.Body)
+			}
+		})
+	}
+}
+
+func TestBagDropOtherMutationsDoNotTriggerReconcile(t *testing.T) {
+	for _, operation := range []struct{ name, method, path string }{
+		{name: "disable", method: http.MethodPost, path: bagDropPath("disable")},
+		{name: "delete", method: http.MethodDelete, path: bagDropPath("")},
+		{name: "verify", method: http.MethodPost, path: bagDropPath("verify")},
+	} {
+		t.Run(operation.name, func(t *testing.T) {
+			runtime := &fakeBagDropRuntime{fakeBagDropService: &fakeBagDropService{}}
+			response := call(t, bagDropHandler(identity.RoleMaintainer, runtime),
+				operation.method, operation.path, nil, testToken)
+			if response.Code < http.StatusOK || response.Code >= http.StatusMultipleChoices || len(runtime.calls) != 0 {
+				t.Fatalf("%s response=%d triggers=%#v: %s",
+					operation.name, response.Code, runtime.calls, response.Body)
+			}
+		})
+	}
+}
+
+func TestBagDropMutationTriggerFailureIsBestEffort(t *testing.T) {
+	runtime := &fakeBagDropRuntime{
+		fakeBagDropService: &fakeBagDropService{}, triggerErr: bagdrop.ErrReconcilerNotRunning,
+	}
+	response := call(t, bagDropHandler(identity.RoleMaintainer, runtime),
+		http.MethodPut, bagDropPath("buckets/images"), nil, testToken)
+	if response.Code != http.StatusOK || len(runtime.calls) != 1 {
+		t.Fatalf("associate response=%d triggers=%#v: %s", response.Code, runtime.calls, response.Body)
+	}
+}
+
+func TestBagDropStatusRendersReconcilerState(t *testing.T) {
+	nextPass := initTestTime.Add(10 * time.Minute)
+	lastPass := initTestTime.Add(-time.Minute)
+	runtime := &fakeBagDropRuntime{
+		fakeBagDropService: &fakeBagDropService{},
+		reconcileStatus: bagdrop.ReconcilerStatus{
+			Reconciling: true, NextPass: &nextPass, LastPass: &lastPass,
+			Interval: 5 * time.Minute, BackoffFailures: 2,
+		},
+	}
+	response := call(t, bagDropHandler(identity.RoleReader, runtime),
+		http.MethodGet, bagDropPath("status"), nil, testToken)
+	var body BagDropStatus
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || !body.Reconciling || body.NextPassAt == nil ||
+		!body.NextPassAt.Equal(nextPass) || body.LastPassAt == nil || !body.LastPassAt.Equal(lastPass) ||
+		body.ReconcileIntervalSeconds == nil || *body.ReconcileIntervalSeconds != 300 ||
+		body.BackoffFailures != 2 {
+		t.Fatalf("status response=%d body=%#v", response.Code, body)
+	}
+}
+
+func TestBagDropStatusWithoutReconcilerUsesUnknownCadence(t *testing.T) {
+	response := call(t, bagDropHandler(identity.RoleReader, &fakeBagDropService{}),
+		http.MethodGet, bagDropPath("status"), nil, testToken)
+	var body BagDropStatus
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if response.Code != http.StatusOK || body.Reconciling || body.NextPassAt != nil ||
+		body.LastPassAt != nil || body.ReconcileIntervalSeconds != nil || body.BackoffFailures != 0 {
+		t.Fatalf("status response=%d body=%#v", response.Code, body)
 	}
 }
 
@@ -589,13 +678,18 @@ func (s *fakeBagDropService) CredentialProtection() string {
 
 type fakeBagDropRuntime struct {
 	*fakeBagDropService
-	triggerErr error
-	calls      int
+	triggerErr      error
+	calls           []bagdrop.Project
+	reconcileStatus bagdrop.ReconcilerStatus
 }
 
-func (r *fakeBagDropRuntime) Trigger(context.Context, string, string) error {
-	r.calls++
+func (r *fakeBagDropRuntime) Trigger(_ context.Context, organizationID, projectID string) error {
+	r.calls = append(r.calls, bagdrop.Project{OrganizationID: organizationID, ProjectID: projectID})
 	return r.triggerErr
+}
+
+func (r *fakeBagDropRuntime) ReconcileStatus(string, string) bagdrop.ReconcilerStatus {
+	return r.reconcileStatus
 }
 
 func (s *fakeBagDropService) config() *bagdrop.Config {

@@ -783,6 +783,11 @@ export type ApiBagDropStatus = {
   enabled?: boolean
   last_verification?: ApiBagDropLastVerification | null
   associations: ApiBagDropAssociation[]
+  reconciling: boolean
+  next_pass_at: string | null
+  last_pass_at: string | null
+  reconcile_interval_seconds: number | null
+  backoff_failures: number
 }
 
 function bagDropPath(tenant: Tenant, suffix = ''): string {

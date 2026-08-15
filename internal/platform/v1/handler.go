@@ -109,6 +109,7 @@ type BagDropService interface {
 
 type BagDropReconciler interface {
 	Trigger(context.Context, string, string) error
+	ReconcileStatus(string, string) bagdrop.ReconcilerStatus
 }
 
 type WebhookService interface {

@@ -26,6 +26,58 @@ func TestBackoffDelay(t *testing.T) {
 	}
 }
 
+func TestReconcilerStatusReportsReconcilingAndLastPass(t *testing.T) {
+	reconciler, repository, _, _ := newTestReconciler(t, "secret")
+	passTime := time.Date(2026, 8, 15, 10, 30, 0, 0, time.UTC)
+	reconciler.now = func() time.Time { return passTime }
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = testSnapshot("images")
+	adapter := reconciler.adapters[AdapterHCPPacker].(*testReconcileAdapter)
+	adapter.beginStarted = make(chan struct{})
+	adapter.beginContinue = make(chan struct{})
+
+	done := make(chan error, 1)
+	go func() { done <- reconciler.ReconcileAll(context.Background()) }()
+	<-adapter.beginStarted
+	status := reconciler.ReconcileStatus(testOrganization, testProject)
+	if !status.Reconciling || status.LastPass != nil {
+		t.Fatalf("status during pass = %#v", status)
+	}
+	close(adapter.beginContinue)
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	status = reconciler.ReconcileStatus(testOrganization, testProject)
+	if status.Reconciling || status.LastPass == nil || !status.LastPass.Equal(passTime) {
+		t.Fatalf("status after pass = %#v, want last pass %s", status, passTime)
+	}
+}
+
+func TestReconcilerStatusPrefersProjectBackoff(t *testing.T) {
+	reconciler, repository, _, _ := newTestReconciler(t, "secret")
+	passTime := time.Date(2026, 8, 15, 11, 0, 0, 0, time.UTC)
+	reconciler.now = func() time.Time { return passTime }
+	reconciler.mu.Lock()
+	reconciler.nextTimer = passTime.Add(reconciler.interval)
+	reconciler.mu.Unlock()
+	repository.associations = []Association{testAssociation("images")}
+	repository.snapshots["images"] = testSnapshot("images")
+	adapter := reconciler.adapters[AdapterHCPPacker].(*testReconcileAdapter)
+	adapter.beginErr = errors.New("destination unavailable")
+
+	if err := reconciler.reconcilePass(context.Background(), repository.project); err == nil {
+		t.Fatal("reconcile succeeded despite destination failure")
+	}
+	status := reconciler.ReconcileStatus(testOrganization, testProject)
+	wantNext := passTime.Add(10 * time.Minute)
+	if status.NextPass == nil || !status.NextPass.Equal(wantNext) ||
+		status.LastPass == nil || !status.LastPass.Equal(passTime) ||
+		status.BackoffFailures != 1 || status.Interval != 5*time.Minute {
+		t.Fatalf("status after failure = %#v, want next=%s last=%s failures=1 interval=5m",
+			status, wantNext, passTime)
+	}
+}
+
 func TestAssociationSyncStatus(t *testing.T) {
 	now := time.Now()
 	failure := "failed"
@@ -1562,13 +1614,22 @@ func (r *testReconcileRepository) DeleteBagDropAssociation(_ context.Context, _,
 	return errors.New("association not found")
 }
 
-type testReconcileAdapter struct{ run ReconcileRun }
+type testReconcileAdapter struct {
+	run           ReconcileRun
+	beginStarted  chan struct{}
+	beginContinue chan struct{}
+	beginErr      error
+}
 
 func (*testReconcileAdapter) Resolve(context.Context, Destination) VerificationResult {
 	return VerificationResult{Outcome: OutcomeResolved}
 }
 func (a *testReconcileAdapter) BeginReconcile(context.Context, Destination) (ReconcileRun, error) {
-	return a.run, nil
+	if a.beginStarted != nil {
+		close(a.beginStarted)
+		<-a.beginContinue
+	}
+	return a.run, a.beginErr
 }
 
 type testReconcileRun struct {

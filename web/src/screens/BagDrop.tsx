@@ -5,7 +5,7 @@ import {
   DualListSelector, DualListSelectorControl, DualListSelectorControlsWrapper,
   DualListSelectorList, DualListSelectorListItem, DualListSelectorPane,
   EmptyState, EmptyStateBody, Form, FormGroup, FormSelect, FormSelectOption, Label, PageSection, TextArea,
-  TextInput,
+  Spinner, TextInput,
 } from '@patternfly/react-core'
 import AngleLeftIcon from '@patternfly/react-icons/dist/esm/icons/angle-left-icon'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
@@ -122,7 +122,7 @@ export function BagDrop() {
   const [status, setStatus] = useState<ApiBagDropStatus | null>(null)
   const [statusLoading, setStatusLoading] = useState(true)
   const [statusFailure, setStatusFailure] = useState<string | null>(null)
-  const [pollAfterReconcile, setPollAfterReconcile] = useState(false)
+  const [pollAfterMutation, setPollAfterMutation] = useState(false)
 
   const loadStatus = useCallback(async (quiet = false): Promise<ApiBagDropStatus | null> => {
     if (!tenant || token === '') return null
@@ -178,26 +178,26 @@ export function BagDrop() {
     setBuckets([])
     setAssociations([])
     setStatus(null)
-    setPollAfterReconcile(false)
+    setPollAfterMutation(false)
     if (!tenant || token === '') return
     void loadStatus()
     if (canConfigure) void loadMaintainer()
   }, [canConfigure, loadMaintainer, loadStatus, tenant?.organizationID, tenant?.projectID, token])
 
-  const transient = status?.associations.some(
+  const transient = Boolean(status?.reconciling || status?.associations.some(
     (association) => association.sync_status === 'pending' || association.sync_status === 'removing',
-  ) ?? false
+  ))
   useEffect(() => {
-    if (!transient && !pollAfterReconcile) return
+    if (!transient && !pollAfterMutation) return
     const timer = window.setInterval(() => {
       void loadStatus(true).then((loaded) => {
-        if (pollAfterReconcile && loaded && !loaded.associations.some(
+        if (pollAfterMutation && loaded && !loaded.reconciling && !loaded.associations.some(
           (association) => association.sync_status === 'pending' || association.sync_status === 'removing',
-        )) setPollAfterReconcile(false)
+        )) setPollAfterMutation(false)
       })
     }, 10_000)
     return () => window.clearInterval(timer)
-  }, [loadStatus, pollAfterReconcile, transient])
+  }, [loadStatus, pollAfterMutation, transient])
 
   if (!tenant) {
     return (
@@ -221,6 +221,7 @@ export function BagDrop() {
         const result = await enableBagDrop(token, tenant, write)
         if (result.kind === 'enabled') {
           setConfig(result.config)
+          setPollAfterMutation(true)
           await reloadAll()
         }
         return result
@@ -241,16 +242,18 @@ export function BagDrop() {
       associationsLoading={associationsLoading} associationsFailure={associationsFailure}
       onAssociate={async (bucketName) => {
         await setBagDropAssociation(token, tenant, bucketName)
+        setPollAfterMutation(true)
         await reloadAssociations()
       }}
       onUnassociate={async (bucketName) => {
         await deleteBagDropAssociation(token, tenant, bucketName)
+        setPollAfterMutation(true)
         await reloadAssociations()
       }}
       status={status} statusLoading={statusLoading} statusFailure={statusFailure}
-      onReconcile={async () => {
+      onRetry={async () => {
         await reconcileBagDrop(token, tenant)
-        setPollAfterReconcile(true)
+        setPollAfterMutation(true)
         await reloadAll()
       }}
     />
@@ -289,7 +292,7 @@ type BagDropViewProps = {
   status: ApiBagDropStatus | null
   statusLoading: boolean
   statusFailure: string | null
-  onReconcile: () => Promise<void>
+  onRetry: () => Promise<void>
 }
 
 export function BagDropView(props: BagDropViewProps) {
@@ -312,7 +315,7 @@ export function BagDropView(props: BagDropViewProps) {
         <StatusZone
           status={props.status} loading={props.statusLoading} failure={props.statusFailure}
           canConfigure={props.canConfigure} callerRole={props.callerRole}
-          onReconcile={props.onReconcile}
+          onRetry={props.onRetry}
         />
       </PageSection>
     </>
@@ -827,20 +830,32 @@ export function BucketRemovalConfirmation({
 }
 
 export function StatusZone({
-  status, loading, failure, canConfigure, callerRole, onReconcile,
+  status, loading, failure, canConfigure, callerRole, onRetry,
 }: {
   status: ApiBagDropStatus | null
   loading: boolean
   failure: string | null
   canConfigure: boolean
   callerRole: Role | null
-  onReconcile: () => Promise<void>
+  onRetry: () => Promise<void>
 }) {
   const [actionFailure, setActionFailure] = useState<string | null>(null)
-  const [reconciling, setReconciling] = useState(false)
+  const [requestingRetry, setRequestingRetry] = useState(false)
+  const nextPass = status?.next_pass_at ? formatBagDropTime(status.next_pass_at) : null
+  const cadence = status?.reconcile_interval_seconds == null
+    ? 'Syncs automatically'
+    : `Syncs automatically every ${Math.round(status.reconcile_interval_seconds / 60)} minutes${
+      nextPass ? ` · next pass ~${nextPass}` : ''
+    }`
+  const retryLine = status?.backoff_failures
+    ? `${nextPass ? `Retrying at ${nextPass}` : 'Retrying'} after ${status.backoff_failures} failures`
+    : null
   return (
     <Card aria-label="Status">
-      <CardTitle>Status</CardTitle>
+      <CardTitle>
+        <div>Status</div>
+        {status?.configured ? <div>{cadence}</div> : null}
+      </CardTitle>
       <CardBody>
         {failure ? (
           <Alert variant="danger" isInline title="Bag Drop status could not be loaded">
@@ -852,20 +867,24 @@ export function StatusZone({
             <Content component="p">{actionFailure}</Content>
           </Alert>
         ) : null}
-        {canConfigure && !loading && !failure && status?.configured ? (
-          <Button
-            variant="secondary" isLoading={reconciling} isDisabled={reconciling}
-            spinnerAriaValueText="Requesting Bag Drop reconciliation"
-            onClick={() => {
-              setReconciling(true)
-              setActionFailure(null)
-              void onReconcile()
-                .catch((err: unknown) => setActionFailure(
-                  messageFor(err, 'Reconciliation could not be requested.'),
-                ))
-                .finally(() => setReconciling(false))
-            }}
-          >Reconcile now</Button>
+        {!loading && !failure && status?.configured && retryLine ? (
+          <Alert
+            variant="danger" isInline title={retryLine}
+            actionLinks={canConfigure ? (
+              <Button
+                variant="link" isDisabled={requestingRetry}
+                onClick={() => {
+                  setRequestingRetry(true)
+                  setActionFailure(null)
+                  void onRetry()
+                    .catch((err: unknown) => setActionFailure(
+                      messageFor(err, 'Reconciliation could not be requested.'),
+                    ))
+                    .finally(() => setRequestingRetry(false))
+                }}
+              >Retry now</Button>
+            ) : undefined}
+          />
         ) : null}
         {loading ? (
           <SkeletonRows screenreaderText="Loading Bag Drop status…" />
@@ -880,7 +899,9 @@ export function StatusZone({
             </EmptyStateBody>
           </EmptyState>
         ) : (
-          <BagDropStatusTable associations={status.associations} />
+          <BagDropStatusTable
+            associations={status.associations} reconciling={status.reconciling}
+          />
         )}
         {!canConfigure && callerRole ? (
           <Content component="p">Destination configuration is available to maintainers.</Content>
@@ -890,20 +911,26 @@ export function StatusZone({
   )
 }
 
-export function BagDropStatusTable({ associations }: { associations: ApiBagDropAssociation[] }) {
+export function BagDropStatusTable({
+  associations, reconciling,
+}: {
+  associations: ApiBagDropAssociation[]
+  reconciling: boolean
+}) {
   const [expanded, setExpanded] = useState<string | null>(null)
   return (
     <BagDropStatusTableView
-      associations={associations} expanded={expanded}
+      associations={associations} reconciling={reconciling} expanded={expanded}
       onToggle={(bucketName) => setExpanded(expanded === bucketName ? null : bucketName)}
     />
   )
 }
 
 export function BagDropStatusTableView({
-  associations, expanded, onToggle,
+  associations, reconciling, expanded, onToggle,
 }: {
   associations: ApiBagDropAssociation[]
+  reconciling: boolean
   expanded: string | null
   onToggle: (bucketName: string) => void
 }) {
@@ -918,6 +945,16 @@ export function BagDropStatusTableView({
       {associations.map((association, index) => {
         const hasError = Boolean(association.last_sync_error)
         const isExpanded = hasError && expanded === association.bucket_name
+        const changing = association.sync_status === 'pending' || association.sync_status === 'removing'
+        const syncing = reconciling && changing
+        const label = syncing ? 'syncing' : association.sync_status === 'pending'
+          ? 'queued' : association.sync_status
+        const attemptTime = association.last_attempt_at
+          ? formatBagDropTime(association.last_attempt_at)
+          : null
+        const errorText = association.last_sync_error
+          ? `${association.last_sync_error}${attemptTime ? ` as of ${attemptTime}` : ''}`
+          : null
         return (
           <Tbody key={association.bucket_name} isExpanded={isExpanded}>
             <Tr>
@@ -931,13 +968,14 @@ export function BagDropStatusTableView({
               <Td dataLabel="Sync status">
                 <Label
                   isCompact status={association.sync_status === 'error' ? 'danger' : undefined}
-                >{association.sync_status}</Label>
-                {association.sync_status === 'error' && association.last_sync_error ? (
+                  icon={syncing ? <Spinner isInline aria-label="Syncing" /> : undefined}
+                >{label}</Label>
+                {association.sync_status === 'error' && errorText ? (
                   <> <span style={{
                     color: 'var(--pf-t--global--color--status--danger--default)',
                     display: 'inline-block', maxWidth: '24rem', overflow: 'hidden',
                     textOverflow: 'ellipsis', verticalAlign: 'middle', whiteSpace: 'nowrap',
-                  }}>{association.last_sync_error}</span></>
+                  }}>{errorText}</span></>
                 ) : null}
               </Td>
               <Td dataLabel="Last synced"><When iso={association.last_synced_at} emptyText="Never" /></Td>
@@ -946,7 +984,7 @@ export function BagDropStatusTableView({
             {hasError ? (
               <Tr isExpanded={isExpanded}>
                 <Td colSpan={5}>
-                  <ExpandableRowContent>{association.last_sync_error}</ExpandableRowContent>
+                  <ExpandableRowContent>{errorText}</ExpandableRowContent>
                 </Td>
               </Tr>
             ) : null}
@@ -955,4 +993,10 @@ export function BagDropStatusTableView({
       })}
     </Table>
   )
+}
+
+function formatBagDropTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString([], {
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
 }
