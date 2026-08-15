@@ -5,6 +5,9 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/benemon/dufflebag/internal/domain/registry"
+	store "github.com/benemon/dufflebag/internal/store/postgres"
 )
 
 // One of Packer's four resolution paths errors unless a non-nil registry comes
@@ -120,6 +123,24 @@ func TestListVersionsReturnsTheBucketsVersions(t *testing.T) {
 			t.Fatalf("create version %s: %d %s", fingerprint, response.Code, response.Body)
 		}
 	}
+	completed, err := registry.RestoreVersion(*repository.versions["images/fp-1"], true, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.versions["images/fp-1"] = completed
+	buildID := registry.NewID(testTime.Add(time.Second))
+	artifactID := registry.NewID(testTime.Add(2 * time.Second))
+	repository.builds["images/fp-1"] = []store.StoredBuild{{
+		Build: registry.Build{
+			ID: buildID, ComponentType: "amazon-ebs", Status: registry.BuildDone,
+		},
+		VersionID: completed.ID,
+		Artifacts: []store.Artifact{{
+			ID: artifactID, ExternalIdentifier: "ami-123", Region: "eu-west-2", CreatedAt: testTime,
+		}},
+		CreatedAt: testTime,
+		UpdatedAt: testTime,
+	}}
 
 	response := request(t, server, http.MethodGet, testBase+"/buckets/images/versions", nil)
 	if response.Code != http.StatusOK {
@@ -129,12 +150,41 @@ func TestListVersionsReturnsTheBucketsVersions(t *testing.T) {
 		Versions []struct {
 			Fingerprint string `json:"fingerprint"`
 			Name        string `json:"name"`
+			Builds      []struct {
+				ID            string `json:"id"`
+				ComponentType string `json:"component_type"`
+				Status        string `json:"status"`
+				Artifacts     []struct {
+					ID                 string `json:"id"`
+					ExternalIdentifier string `json:"external_identifier"`
+					Region             string `json:"region"`
+				} `json:"artifacts"`
+			} `json:"builds"`
 		} `json:"versions"`
 	}
 	decodeResponse(t, response, &body)
 	if len(body.Versions) != 2 {
 		t.Fatalf("%d versions, want 2: %s", len(body.Versions), response.Body)
 	}
+	for _, version := range body.Versions {
+		if version.Fingerprint != "fp-1" {
+			continue
+		}
+		if version.Name != "v1" || len(version.Builds) != 1 {
+			t.Fatalf("completed version = %#v, want v1 with one build", version)
+		}
+		build := version.Builds[0]
+		if build.ID != buildID.String() || build.ComponentType != "amazon-ebs" ||
+			build.Status != "BUILD_DONE" || len(build.Artifacts) != 1 {
+			t.Fatalf("listed build = %#v", build)
+		}
+		artifact := build.Artifacts[0]
+		if artifact.ID != artifactID.String() || artifact.ExternalIdentifier != "ami-123" || artifact.Region != "eu-west-2" {
+			t.Fatalf("listed artifact = %#v", artifact)
+		}
+		return
+	}
+	t.Fatal("completed fp-1 version was not listed")
 }
 
 // An empty bucket and a missing bucket are different claims, and only one of
