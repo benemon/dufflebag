@@ -4,7 +4,7 @@ import {
   CodeBlockCode, Content, DataList, DataListCell, DataListItem, DataListItemCells,
   DataListItemRow, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, FormSelect, FormSelectOption, Label, PageSection, Pagination,
-  TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Truncate,
+  TextInput, Toolbar, ToolbarContent, ToolbarItem, Truncate,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
@@ -12,11 +12,15 @@ import { useNavigate, useParams } from 'react-router'
 
 import { PlatformLabel } from '../components/PlatformLabel'
 import { SkeletonRows } from '../components/Loading'
+import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { downloadSbom, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
-import { useBuild, type Build, type BuildDetail, type Package, type SbomRef } from '../data/versions'
+import {
+  buildIsInProgress, useBuild, type Build, type BuildDetail, type Package, type SbomRef,
+} from '../data/versions'
+import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
 import { BuildStateLabel, packageSummary, pluginSummary } from './Version'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
@@ -33,7 +37,8 @@ const darkCodeStyle: CSSProperties = {
 export function Build() {
   const { bucket = '', fingerprint = '', build = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, failure, gap } = useBuild(bucket, fingerprint, build)
+  const { data, loading, refreshing, failure, gap, reload } = useBuild(bucket, fingerprint, build)
+  useAutoRefresh({ hot: data ? buildIsInProgress(data.build) : false, onRefresh: reload })
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const fetchSbom = async (sbom: SbomRef): Promise<ArrayBuffer> => {
     if (!state || !selectedOrganization || !selectedProject) {
@@ -59,12 +64,14 @@ export function Build() {
       bucket={bucket}
       detail={data}
       loading={loading}
+      refreshing={refreshing}
       failure={failure}
       gap={gap}
       callerRole={self?.role ?? null}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onBackToVersion={() => navigate(versionPath)}
+      onRefresh={reload}
       fetchSbom={fetchSbom}
     />
   )
@@ -74,23 +81,27 @@ export function BuildView({
   bucket,
   detail,
   loading,
+  refreshing = false,
   failure,
   gap,
   callerRole = null,
   onBackToRegistry,
   onBackToBucket,
   onBackToVersion,
+  onRefresh = () => {},
   fetchSbom = () => Promise.reject(new Error('No session.')),
 }: {
   bucket: string
   detail: BuildDetail | null
   loading: boolean
+  refreshing?: boolean
   failure: string | null
   gap?: TenancyGap | null
   callerRole?: Role | null
   onBackToRegistry: () => void
   onBackToBucket: () => void
   onBackToVersion: () => void
+  onRefresh?: () => void
   /** Fetches one stored SBOM's bytes; the view saves them as a file. */
   fetchSbom?: (sbom: SbomRef) => Promise<ArrayBuffer>
 }) {
@@ -98,29 +109,27 @@ export function BuildView({
   const build = detail?.build
   return (
     <>
-      <PageSection variant="default">
-        <Breadcrumb>
+      <ScreenHeader
+        onRefresh={onRefresh}
+        refreshing={refreshing}
+        breadcrumbs={<Breadcrumb>
           <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
           <BreadcrumbItem component="button" onClick={onBackToBucket}>{bucket}</BreadcrumbItem>
           <BreadcrumbItem component="button" onClick={onBackToVersion}>
             {detail?.version.name ?? '…'}
           </BreadcrumbItem>
           <BreadcrumbItem isActive>{build?.component ?? '…'}</BreadcrumbItem>
-        </Breadcrumb>
-        {build && (
-          <>
-            <Title headingLevel="h1" size="2xl">
-              <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                {build.component}
-                <BuildStateLabel state={build.state} />
-              </span>
-            </Title>
-            <Content component="p">
-              {countLabel(build.artifacts.length, 'artifact')} · {packageSummary(build)}
-            </Content>
-          </>
-        )}
-      </PageSection>
+        </Breadcrumb>}
+        title={build ? (
+          <span style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            {build.component}
+            <BuildStateLabel state={build.state} />
+          </span>
+        ) : null}
+        description={build
+          ? `${countLabel(build.artifacts.length, 'artifact')} · ${packageSummary(build)}`
+          : null}
+      />
 
       {/* The rail sits flush against the header and left edge; only the facet
           content carries the grey well's padding. Alert states have no rail,

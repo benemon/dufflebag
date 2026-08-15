@@ -65,6 +65,12 @@ flows still require the resource name.
 
 ## The screens
 
+Console screens refresh automatically every few seconds while work is in motion,
+such as running builds, incomplete versions, or Bag Drop convergence, and every
+half-minute when the screen is stable. Refresh pauses while the browser tab is
+hidden. The manual refresh button starts an immediate background refresh without
+blanking the screen or replacing its current data with a loading state.
+
 ### Buckets
 
 The **Buckets** screen lists the project's registry.

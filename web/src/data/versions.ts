@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 
 import {
   ApiError, getBucket, getVersion, listBucketAncestry, listBuildPackages,
@@ -202,7 +202,8 @@ export function useVersions(bucket: string) {
   const result = useVersionData<BucketPage | null>(
     null,
     (token, tenant) => loadBucketPage(token, tenant, bucket),
-    bucket + '/' + revision,
+    bucket,
+    revision,
   )
   return { ...result, reload: () => setRevision((current) => current + 1) }
 }
@@ -222,20 +223,22 @@ export function useVersion(bucket: string, fingerprint: string) {
   const result = useVersionData<VersionDetail | null>(
     null,
     (token, tenant) => loadVersionDetail(token, tenant, bucket, fingerprint),
-    bucket + '/' + fingerprint + '/' + revision,
-    (detail) => detail?.version.builds.some(buildIsInProgress) ?? false,
+    bucket + '/' + fingerprint,
+    revision,
   )
   return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** One build by id, including its package-inventory status. */
 export function useBuild(bucket: string, fingerprint: string, build: string) {
-  return useVersionData<BuildDetail | null>(
+  const [revision, setRevision] = useState(0)
+  const result = useVersionData<BuildDetail | null>(
     null,
     (token, tenant) => loadBuildDetail(token, tenant, bucket, fingerprint, build),
     bucket + '/' + fingerprint + '/' + build,
-    (detail) => detail ? buildIsInProgress(detail.build) : false,
+    revision,
   )
+  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** Assignment history is fetched only while its channel row is expanded. */
@@ -257,9 +260,15 @@ export function useChannelHistory(bucket: string, channel: string, currentFinger
 function useVersionData<T>(
   empty: T,
   load: (token: string, tenant: ApiTenant) => Promise<T>,
-  key: string,
-  reloadWhile?: (loaded: T) => boolean,
-): { data: T; loading: boolean; failure: string | null; gap: TenancyGap | null } {
+  identityKey: string,
+  revision = 0,
+): {
+  data: T
+  loading: boolean
+  refreshing: boolean
+  failure: string | null
+  gap: TenancyGap | null
+} {
   const {
     state, selectedOrganization, selectedProject, signOut,
     organizations, organizationsLoading, organizationFailure,
@@ -267,7 +276,9 @@ function useVersionData<T>(
   } = useAuth()
   const [data, setData] = useState<T>(empty)
   const [loading, setLoading] = useState(true)
+  const [refreshing, setRefreshing] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  const previousIdentity = useRef<string | undefined>(undefined)
 
   useEffect(() => {
     // Same gate as useBuckets: for a platform session there is no organisation
@@ -276,41 +287,57 @@ function useVersionData<T>(
     if (!state || !selectedOrganization || !selectedProject) {
       setData(empty)
       setLoading(false)
+      setRefreshing(false)
       setFailure(null)
+      previousIdentity.current = undefined
       return
     }
     let cancelled = false
-    setData(empty)
-    setLoading(true)
-    setFailure(null)
+    let settled = false
+    const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
+    const identityChanged = previousIdentity.current !== identity
+    previousIdentity.current = identity
+    if (identityChanged) {
+      setData(empty)
+      setLoading(true)
+      setRefreshing(false)
+      setFailure(null)
+    } else {
+      setRefreshing(true)
+    }
     const tenant = { organizationID: selectedOrganization, projectID: selectedProject }
 
-    let retry: ReturnType<typeof setTimeout> | undefined
-    const refresh = () => void load(state.token, tenant)
+    void load(state.token, tenant)
       .then((loaded) => {
         if (!cancelled) {
           setData(loaded)
           setFailure(null)
-          if (reloadWhile?.(loaded)) retry = setTimeout(refresh, 500)
         }
       })
       .catch((err: unknown) => {
         if (cancelled) return
         if (signOutIfUnauthorized(err, signOut)) return
-        setData(empty)
-        setFailure(err instanceof Error ? err.message : 'Could not load versions.')
+        if (identityChanged) {
+          setData(empty)
+          setFailure(err instanceof Error ? err.message : 'Could not load versions.')
+        }
       })
       .finally(() => {
-        if (!cancelled) setLoading(false)
+        settled = true
+        if (!cancelled) {
+          if (identityChanged) setLoading(false)
+          else setRefreshing(false)
+        }
       })
-    refresh()
     return () => {
       cancelled = true
-      if (retry) clearTimeout(retry)
+      if (identityChanged && !settled && previousIdentity.current === identity) {
+        previousIdentity.current = undefined
+      }
     }
-    // `key` names what `load` closes over; `load`, `empty`, and `reloadWhile`
-    // themselves are fresh values every render and must not retrigger the effect.
-  }, [state, selectedOrganization, selectedProject, signOut, key])
+    // `identityKey` and `revision` name what `load` closes over; `load` and
+    // `empty` themselves are fresh values every render and must not retrigger the effect.
+  }, [state, selectedOrganization, selectedProject, signOut, identityKey, revision])
 
   const platform = state !== null && state.claims.organizationID === null
   const aboveProjects = state !== null && state.claims.projectID === null
@@ -319,6 +346,7 @@ function useVersionData<T>(
   return {
     data,
     loading: loading || discovering,
+    refreshing,
     failure: failure ?? discoveryFailure,
     gap:
       aboveProjects && !discovering && !discoveryFailure
@@ -333,7 +361,7 @@ function useVersionData<T>(
   }
 }
 
-function buildIsInProgress(build: Build): boolean {
+export function buildIsInProgress(build: Build): boolean {
   return build.state === 'pending' || build.state === 'running'
 }
 

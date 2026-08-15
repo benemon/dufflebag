@@ -34,9 +34,11 @@ import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import { permitsAction, requirementReason, type Role } from '../auth/permissions'
 import {
-  useChannelHistory, useEnforcedProvisioners, useVersions, type BucketChannel, type BucketPage,
+  buildIsInProgress, useChannelHistory, useEnforcedProvisioners, useVersions,
+  type BucketChannel, type BucketPage,
   type ChannelHistoryEntry, type ParentFreshness, type Version,
 } from '../data/versions'
+import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
 
@@ -57,17 +59,21 @@ const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions wi
 export function Versions() {
   const { bucket = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, failure, gap, reload } = useVersions(bucket)
+  const { data, loading, refreshing, failure, gap, reload } = useVersions(bucket)
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null
   const enforcedProvisioners = useEnforcedProvisioners(bucket)
+  const hot = data?.versions.some((version) =>
+    version.state === 'incomplete' || version.builds.some(buildIsInProgress)) ?? false
+  useAutoRefresh({ hot, onRefresh: reload })
   return (
     <VersionsView
       bucket={bucket}
       bucketData={data}
       loading={loading}
+      refreshing={refreshing}
       failure={failure}
       gap={gap}
       enforcedProvisioners={enforcedProvisioners.data}
@@ -156,6 +162,7 @@ export function VersionsView({
   bucketData,
   versions: suppliedVersions,
   loading,
+  refreshing = false,
   failure,
   gap,
   enforcedProvisioners = [],
@@ -178,6 +185,7 @@ export function VersionsView({
   /** Kept for focused view tests that do not need the bucket-level fetch. */
   versions?: Version[]
   loading: boolean
+  refreshing?: boolean
   failure: string | null
   /** A platform session with no tenancy chosen yet — stated, never fetched around. */
   gap?: TenancyGap | null
@@ -212,7 +220,7 @@ export function VersionsView({
     <>
       <ScreenHeader
         onRefresh={onRefresh}
-        refreshing={loading}
+        refreshing={refreshing}
         breadcrumbs={(
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBack}>

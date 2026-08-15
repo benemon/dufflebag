@@ -26,9 +26,10 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import {
-  useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
+  buildIsInProgress, useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
   type BuildState, type Version as VersionData, type VersionDetail,
 } from '../data/versions'
+import { useAutoRefresh } from '../data/polling'
 import { VersionSecurityCard } from '../components/VersionSecurity'
 import type { BuildFindings } from '../data/findings'
 import { VersionStateLabel } from './Versions'
@@ -46,7 +47,10 @@ import { FacetRail, knownCount } from './RegistryFacets'
 export function Version() {
   const { bucket = '', fingerprint = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, failure, gap, reload } = useVersion(bucket, fingerprint)
+  const { data, loading, refreshing, failure, gap, reload } = useVersion(bucket, fingerprint)
+  const hot = data?.version.state === 'incomplete' ||
+    (data?.version.builds.some(buildIsInProgress) ?? false)
+  useAutoRefresh({ hot, onRefresh: reload })
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
@@ -64,6 +68,7 @@ export function Version() {
       detail={data}
       findings={findings}
       loading={loading}
+      refreshing={refreshing}
       failure={failure}
       gap={gap}
       onRefresh={reload}
@@ -127,6 +132,7 @@ export function VersionView({
   version: suppliedVersion,
   findings = [],
   loading,
+  refreshing = false,
   failure,
   gap,
   onBackToRegistry,
@@ -147,6 +153,7 @@ export function VersionView({
   /** Per-build inventories, fetched by the container like every other read. */
   findings?: BuildFindings[]
   loading: boolean
+  refreshing?: boolean
   failure: string | null
   /** A platform session with no tenancy chosen yet — stated, never fetched around. */
   gap?: TenancyGap | null
@@ -169,7 +176,7 @@ export function VersionView({
     <>
       <ScreenHeader
         onRefresh={onRefresh}
-        refreshing={loading}
+        refreshing={refreshing}
         breadcrumbs={(
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBackToRegistry}>
