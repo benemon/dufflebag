@@ -196,6 +196,17 @@ func TestPlatformRefusesAnUnresolvablePrincipal(t *testing.T) {
 	}
 }
 
+func TestPlatformAuditsARevokedCredential(t *testing.T) {
+	server, trail := auditedPlatform(t, platformServer(testRoles{revoked: true}))
+	response := call(t, server, http.MethodGet, "/api/v1/organizations", nil, testToken)
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401; body %s", response.Code, response.Body)
+	}
+	if reason := trail.response(t)["reason"]; reason != "credential_revoked" {
+		t.Fatalf("audit reason = %v, want credential_revoked", reason)
+	}
+}
+
 // Finding 1 of the 2026-07-31 review: any authenticated principal could
 // enumerate every organisation on the instance. Organisation identifiers are
 // half of every compatibility-plane tenant path, so listing them wholesale

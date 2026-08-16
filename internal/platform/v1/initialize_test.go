@@ -331,6 +331,7 @@ type testRoles struct {
 	role    identity.Role
 	scope   identity.Scope
 	missing bool
+	revoked bool
 }
 
 func (r testRoles) GetPrincipalByID(_ context.Context, id string) (*identity.Principal, error) {
@@ -341,7 +342,11 @@ func (r testRoles) GetPrincipalByID(_ context.Context, id string) (*identity.Pri
 	if role == "" {
 		role = identity.RoleRoot
 	}
-	return identity.RestorePrincipal(id, "test", "client", r.scope, role, initTestTime, testSecrets())
+	secrets := testSecrets()
+	if r.revoked {
+		secrets = nil
+	}
+	return identity.RestorePrincipal(id, "test", "client", r.scope, role, initTestTime, secrets)
 }
 
 func (testRoles) TouchSecretLastUsed(context.Context, string, time.Time) error { return nil }
