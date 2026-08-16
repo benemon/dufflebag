@@ -29,7 +29,7 @@ auth, resource-manager and registry contracts. Its wire models are generated
 from vendored Swagger specifications; handlers preserve client-observed
 behaviour, including its accidents. The platform plane is dufflebag's own
 OpenAPI contract for tenancy, identity, audit and console sessions. See the
-[architecture reference](https://benemon.github.io/dufflebag/reference/architecture) and the
+[architecture reference](https://benemon.github.io/dufflebag/components/architecture) and the
 [compatibility reference](https://benemon.github.io/dufflebag/reference/compatibility).
 
 **Metadata, not machine images.** dufflebag records buckets, versions, builds,
@@ -48,23 +48,23 @@ Terraform surface is recorded in the
 
 ## Prerequisites
 
-The [deployment reference](https://benemon.github.io/dufflebag/deployment/)
+The [installation page](https://benemon.github.io/dufflebag/quick-start/installation)
 covers runtime prerequisites, optional backing services and their availability trade-offs.
 
 ## Getting started
 
-Follow [Deploying dufflebag](https://benemon.github.io/dufflebag/deployment/)
-to install and initialise an instance, then [Getting started](https://benemon.github.io/dufflebag/getting-started/first-use)
-to point stock Packer and Terraform clients at it.
+Follow [Installation](https://benemon.github.io/dufflebag/quick-start/installation)
+to install an instance, then [Bootstrap](https://benemon.github.io/dufflebag/quick-start/bootstrap)
+to initialise it and point stock Packer and Terraform clients at it.
 
 ## Configuration reference
 
-The [deployment environment reference](https://benemon.github.io/dufflebag/deployment/#configuration-reference)
+The [deployment environment reference](https://benemon.github.io/dufflebag/quick-start/installation#configuration-reference)
 lists server, backing-service, scanner and client-redirection variables.
 
 ## Storage and security
 
-The [architecture reference](https://benemon.github.io/dufflebag/reference/architecture)
+The [architecture reference](https://benemon.github.io/dufflebag/components/architecture)
 covers tenant isolation, audit availability and SBOM custody.
 
 ## Development and testing

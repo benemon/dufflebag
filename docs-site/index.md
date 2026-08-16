@@ -13,53 +13,61 @@ or endorsed by IBM or HashiCorp.
 
 This documentation tracks the current development branch.
 
-Getting started:
+Quick Start:
 
-- [Install an instance](./getting-started/installation.md) — run an instance with Helm,
-  on OpenShift, or as a container.
-- [Point Packer and Terraform at an instance](./getting-started/first-use.md) —
-  initialize an instance and connect the stock clients.
-- [Upgrade an instance](./getting-started/upgrading.md) — replace the image
-  and verify readiness; migrations apply at startup.
+- [Installation](./quick-start/installation.md) — a serving instance with
+  Helm, on OpenShift, or as a container, and the deployment detail.
+- [Bootstrap](./quick-start/bootstrap.md) — initialize the instance, create
+  an organisation and project, and mint a builder credential.
+- [Build an image with Packer](./quick-start/build-with-packer.md) — point
+  the stock client at the instance and publish build metadata.
+- [Manage dufflebag with Terraform](./quick-start/manage-with-terraform.md) —
+  look up published images and manage the registry declaratively.
+- [Upgrading](./quick-start/upgrading.md) — replace the image and verify
+  readiness; migrations apply at startup.
+
+Components:
+
+- [Architecture](./components/architecture.md) — the boundaries a change must
+  respect.
+- [The console](./components/console.md) — sign-in, role gates,
+  confirmations and refresh behaviour.
+- [Database](./components/database.md) — the PostgreSQL role model and
+  migrations.
+- [Object storage](./components/object-storage.md) — SBOM payloads and scan
+  transcripts in an S3-compatible service.
+- [Encryption](./components/encryption.md) — encryption at rest, key
+  rotation and recovery.
+- [Vulnerability scanning](./components/vulnerability-scanning.md) — the OSV
+  adapter and its operator contract.
 
 Administration:
 
-- [Roles, principals and credentials](./administration/roles-principals.md) — the role
-  ladder, service principals, secrets and recovery.
-- [The console](./administration/console.md) — the web console's screens, role gates
-  and confirmations.
-- [Audit](./administration/audit.md) — audit targets.
-- [Encryption](./administration/encryption.md) — encryption at rest.
-- [Mirror to another registry with Bag Drop](./administration/bag-drop.md) — mirror a
-  project's registry data to another registry.
-- [Send project events with webhooks](./administration/webhooks.md) — deliver signed
-  project events to an HTTP endpoint.
+- [Principals](./administration/principals.md) — the role ladder, service
+  principals, secrets and recovery.
+- [Audit](./administration/audit.md) — audit targets and the audit trail.
+- [Encryption](./administration/encryption.md) — the console's encryption
+  screen: posture, health and rotation.
+- [Bag Drop](./administration/bag-drop.md) — mirror a project's registry
+  data to another registry.
+- [Webhooks](./administration/webhooks.md) — deliver signed project events
+  to an HTTP endpoint.
+- [Instance](./administration/instance.md) — the client environment block
+  and instance health.
 
-Using the registry:
+Operations:
 
-- [Manage the registry with Terraform](./using/terraform.md) — manage buckets,
-  channels and assignments declaratively.
-- [Revocation, restore and channels](./using/revocation-channels.md) —
-  channels, promotion, and revoking and restoring versions.
-- [SBOMs and vulnerability findings](./using/sbom-findings.md) — upload SBOMs
-  and read package and vulnerability findings.
-
-Deployment:
-
-- [Deploy an instance](./deployment/index.md) — configure PostgreSQL, TLS,
-  migrations and first run.
-- [Configure object storage](./deployment/object-storage.md) — store SBOMs and
-  vulnerability-scanning transcripts in an S3-compatible service.
-- [Configure encryption](./deployment/encryption-setup.md) — connect the key
-  service and operate the encrypted posture.
-- [Operate an instance](./deployment/operations.md) — configure scanning,
-  webhooks and Bag Drop.
+- [Buckets](./operations/buckets.md) — the registry listing and the bucket
+  drill-down.
+- [Versions](./operations/versions.md) — versions, consumption, revocation
+  and restore.
+- [Channels](./operations/channels.md) — channels, promotion and
+  restriction.
+- [Builds](./operations/builds.md) — builds, SBOMs, packages and findings.
 
 Reference:
 
-- [Architecture](./reference/architecture.md) — the boundaries a change must
-  respect.
 - [HCP Packer API compatibility](./reference/compatibility.md) — the external
   client contract dufflebag serves.
-- [Use the platform API](./reference/platform-api.md) — authentication, tenancy
-  and the platform endpoints.
+- [Use the platform API](./reference/platform-api.md) — authentication,
+  tenancy and the platform endpoints.

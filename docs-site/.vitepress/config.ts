@@ -5,45 +5,49 @@ import { defineConfig } from 'vitepress'
 // a reader saw on arrival.
 const sidebar = [
   {
-    text: 'Getting started',
+    text: 'Quick Start',
     items: [
-      { text: 'Installation', link: '/getting-started/installation' },
-      { text: 'First use', link: '/getting-started/first-use' },
-      { text: 'Upgrading', link: '/getting-started/upgrading' },
+      { text: 'Installation', link: '/quick-start/installation' },
+      { text: 'Bootstrap', link: '/quick-start/bootstrap' },
+      { text: 'Build an image with Packer', link: '/quick-start/build-with-packer' },
+      { text: 'Manage dufflebag with Terraform', link: '/quick-start/manage-with-terraform' },
+      { text: 'Upgrading', link: '/quick-start/upgrading' },
+    ],
+  },
+  {
+    text: 'Components',
+    items: [
+      { text: 'Architecture', link: '/components/architecture' },
+      { text: 'The console', link: '/components/console' },
+      { text: 'Database', link: '/components/database' },
+      { text: 'Object storage', link: '/components/object-storage' },
+      { text: 'Encryption', link: '/components/encryption' },
+      { text: 'Vulnerability scanning', link: '/components/vulnerability-scanning' },
     ],
   },
   {
     text: 'Administration',
     items: [
-      { text: 'Roles & principals', link: '/administration/roles-principals' },
-      { text: 'The console', link: '/administration/console' },
+      { text: 'Principals', link: '/administration/principals' },
       { text: 'Audit', link: '/administration/audit' },
       { text: 'Encryption', link: '/administration/encryption' },
       { text: 'Bag Drop', link: '/administration/bag-drop' },
       { text: 'Webhooks', link: '/administration/webhooks' },
+      { text: 'Instance', link: '/administration/instance' },
     ],
   },
   {
-    text: 'Using the registry',
+    text: 'Operations',
     items: [
-      { text: 'Terraform provider', link: '/using/terraform' },
-      { text: 'Revocation & channels', link: '/using/revocation-channels' },
-      { text: 'SBOMs & findings', link: '/using/sbom-findings' },
-    ],
-  },
-  {
-    text: 'Deployment',
-    items: [
-      { text: 'Deploying dufflebag', link: '/deployment/' },
-      { text: 'Object storage', link: '/deployment/object-storage' },
-      { text: 'Encryption setup', link: '/deployment/encryption-setup' },
-      { text: 'Operations', link: '/deployment/operations' },
+      { text: 'Buckets', link: '/operations/buckets' },
+      { text: 'Versions', link: '/operations/versions' },
+      { text: 'Channels', link: '/operations/channels' },
+      { text: 'Builds', link: '/operations/builds' },
     ],
   },
   {
     text: 'Reference',
     items: [
-      { text: 'Architecture', link: '/reference/architecture' },
       { text: 'Compatibility', link: '/reference/compatibility' },
       { text: 'Platform API', link: '/reference/platform-api' },
     ],
