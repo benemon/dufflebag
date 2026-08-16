@@ -46,6 +46,12 @@ const sidebar = [
     ],
   },
   {
+    text: 'Integrations',
+    items: [
+      { text: 'MCP server', link: '/integrations/mcp-server' },
+    ],
+  },
+  {
     text: 'Reference',
     items: [
       { text: 'Compatibility', link: '/reference/compatibility' },
@@ -80,6 +86,7 @@ export default defineConfig({
       '/components/': sidebar,
       '/administration/': sidebar,
       '/operations/': sidebar,
+      '/integrations/': sidebar,
       '/reference/': sidebar,
     },
   },
