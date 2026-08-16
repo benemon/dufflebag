@@ -43,7 +43,7 @@ func run() error {
 	}()
 
 	ctx := context.Background()
-	tx, err := store.BeginTenant(ctx, db, compatOrganization, compatProject)
+	tx, err := store.BeginTenant(ctx, db, compatOrganization, compatProject, "")
 	if err != nil {
 		return err
 	}

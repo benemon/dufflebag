@@ -157,6 +157,24 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 			writeInsufficientRole(w, r, "insufficient_role")
 			return
 		}
+		if principal.Scope.BucketID != "" {
+			// Creating or deleting a bucket changes the set of buckets rather than
+			// acting inside the one named by this principal's scope.
+			if route.operation == "bucket.create" || route.operation == "bucket.delete" {
+				auditRefusal(r, "outside_principal_scope")
+				writeRPCError(w, http.StatusNotFound, route.notFoundCode, "not found")
+				return
+			}
+			if bucketName := r.PathValue("bucket"); bucketName != "" {
+				bucket, err := h.repository.GetBucket(r.Context(), parsed, bucketName)
+				if err != nil || bucket.ID.String() != principal.Scope.BucketID {
+					auditRefusal(r, "outside_principal_scope")
+					writeRPCError(w, http.StatusNotFound, route.notFoundCode, "not found")
+					return
+				}
+			}
+			parsed.BucketID = principal.Scope.BucketID
+		}
 
 		ctx := context.WithValue(r.Context(), tenantKey{}, parsed)
 		ctx = context.WithValue(ctx, principalIDKey{}, principal.ID)

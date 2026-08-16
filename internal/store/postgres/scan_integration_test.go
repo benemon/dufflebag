@@ -23,7 +23,7 @@ import (
 func seedScanParents(t *testing.T, db *sql.DB, org, project, suffix string) (buildID, sbomID string) {
 	t.Helper()
 	ctx := context.Background()
-	tx, err := store.BeginTenant(ctx, db, org, project)
+	tx, err := store.BeginTenant(ctx, db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,12 +38,12 @@ func seedScanParents(t *testing.T, db *sql.DB, org, project, suffix string) (bui
 			VALUES ($1,$2,'scanbucket-'||$3,'scan-'||$3,$4,$4)`, []any{org, project, suffix, now}},
 		{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at)
 			VALUES ($1,$2,'scanversion-'||$3,'scanbucket-'||$3,'fp-scan-'||$3,'HCL2',true,1,$4,$4)`, []any{org, project, suffix, now}},
-		{`INSERT INTO builds (organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
-			VALUES ($1,$2,$3,'scanversion-'||$4,'docker','done','docker',true,$5,$5)`, []any{org, project, buildID, suffix, now}},
-		{`INSERT INTO sboms (organization_id, project_id, id, build_id, name, format, object_key, created_at)
-			VALUES ($1,$2,$3,$4,'sbom.spdx.json','SPDX','scan-key-'||$5,$6)`, []any{org, project, sbomID, buildID, suffix, now}},
-		{`INSERT INTO sbom_packages (organization_id, project_id, sbom_id, name, version, purl)
-			VALUES ($1,$2,$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{org, project, sbomID}},
+		{`INSERT INTO builds (organization_id, project_id, id, bucket_id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,'scanbucket-'||$4,'scanversion-'||$4,'docker','done','docker',true,$5,$5)`, []any{org, project, buildID, suffix, now}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at)
+			VALUES ($1,$2,$3,'scanbucket-'||$5,$4,'sbom.spdx.json','SPDX','scan-key-'||$5,$6)`, []any{org, project, sbomID, buildID, suffix, now}},
+		{`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,'scanbucket-'||$4,$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{org, project, sbomID, suffix}},
 	} {
 		if _, err := tx.ExecContext(ctx, stmt.query, stmt.args...); err != nil {
 			t.Fatalf("seed scan parents: %v", err)
@@ -194,7 +194,7 @@ func TestScanStore(t *testing.T) {
 		if err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
 			t.Fatal(err)
 		}
-		tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -206,7 +206,7 @@ func TestScanStore(t *testing.T) {
 		}
 		_ = tx.Rollback()
 
-		tx, err = store.BeginTenant(ctx, db, orgA, projectA)
+		tx, err = store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -241,7 +241,7 @@ func TestScanStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		var objectKey string
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err := tx.QueryRowContext(ctx,
 			`SELECT object_key FROM scan_transcripts WHERE run_id = 'run-exp-1'`).Scan(&objectKey); err != nil {
 			t.Fatal(err)
@@ -341,7 +341,7 @@ func TestScanStore(t *testing.T) {
 			t.Fatal(err)
 		}
 		var objectKey string
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err := tx.QueryRowContext(ctx,
 			`SELECT object_key FROM scan_transcripts WHERE run_id = 'run-sealed-1'`).Scan(&objectKey); err != nil {
 			t.Fatal(err)
@@ -457,7 +457,7 @@ func TestScanStoreReviewFindings(t *testing.T) {
 			t.Fatal(err)
 		}
 		var victimKey string
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err := tx.QueryRowContext(ctx,
 			`SELECT object_key FROM scan_transcripts WHERE run_id = 'run-loc-1'`).Scan(&victimKey); err != nil {
 			t.Fatal(err)

@@ -174,8 +174,10 @@ func (s *ScannerService) enqueueDue(ctx context.Context, build dueBuild) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO pending_scans (organization_id, project_id, build_id, enqueued_at, reason)
-		VALUES ($1, $2, $3, $4, 'freshness')
+		INSERT INTO pending_scans (organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+		SELECT $1, $2, builds.bucket_id, builds.id, $4, 'freshness'
+		FROM builds
+		WHERE builds.id = $3
 		ON CONFLICT (organization_id, project_id, build_id) DO NOTHING
 	`, build.tenant.OrganizationID, build.tenant.ProjectID, build.buildID, s.config.Clock()); err != nil {
 		return fmt.Errorf("enqueue due build: %w", err)

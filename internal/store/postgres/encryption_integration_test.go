@@ -93,7 +93,7 @@ const metadataCanary = "canary-metadata-plaintext-value"
 // through a tenant-scoped session because the test role is RLS-bound.
 func rawMetadata(t *testing.T, db *sql.DB, organizationID, projectID, buildID string) []byte {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, organizationID, projectID)
+	tx, err := store.BeginTenant(context.Background(), db, organizationID, projectID, "")
 	if err != nil {
 		t.Fatalf("begin raw read: %v", err)
 	}
@@ -214,7 +214,7 @@ func TestSealedMetadataMovedAcrossTenantsFailsToRead(t *testing.T) {
 	// The relocation a database writer could perform: tenant A's envelope
 	// lands on tenant B's row.
 	sealed := rawMetadata(t, db, orgA, projectA, buildA.ID.String())
-	tx, err := store.BeginTenant(ctx, db, orgB, projectB)
+	tx, err := store.BeginTenant(ctx, db, orgB, projectB, "")
 	if err != nil {
 		t.Fatalf("begin tenant B session: %v", err)
 	}
@@ -463,7 +463,7 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 		func(*registry.Version) string { return "v0" }, forgedBuild.CreatedAt.Add(time.Minute)); err != nil {
 		t.Fatalf("revoke forged-restore fixture: %v", err)
 	}
-	forgedRestore, err := store.BeginTenant(ctx, db, orgA, projectA)
+	forgedRestore, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -485,7 +485,7 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 	}
 
 	// Mutation: forge the revocation author. The read must refuse, not serve it.
-	forge, err := store.BeginTenant(ctx, db, orgA, projectA)
+	forge, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -504,7 +504,7 @@ func TestEncryptedProvenanceRowsRoundTripAndDetectAlteration(t *testing.T) {
 
 	// Mutation: alter the version's author — a provenance lie — directly in
 	// the database. The read must refuse, not serve it.
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}

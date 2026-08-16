@@ -291,6 +291,9 @@ func authorizeOrganizationVisibility(
 func authorizeScope(
 	ctx context.Context, required identity.Role, scope identity.Scope,
 ) (*identity.Principal, refusal) {
+	if caller, ok := callerFrom(ctx); !ok || caller.Scope.BucketID != "" {
+		return nil, refusedTenancy
+	}
 	if scope.PlatformScoped() {
 		caller, ok := callerFrom(ctx)
 		if !ok {

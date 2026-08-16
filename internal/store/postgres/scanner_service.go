@@ -201,8 +201,10 @@ func (s *ScannerService) ManualRescan(ctx context.Context, tenant Tenant, buildI
 		return ErrScanIneligible
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO pending_scans (organization_id, project_id, build_id, enqueued_at, reason)
-		VALUES ($1, $2, $3, $4, 'manual_rescan')
+		INSERT INTO pending_scans (organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+		SELECT $1, $2, builds.bucket_id, builds.id, $4, 'manual_rescan'
+		FROM builds
+		WHERE builds.id = $3
 		ON CONFLICT (organization_id, project_id, build_id) DO NOTHING
 	`, tenant.OrganizationID, tenant.ProjectID, buildID, s.config.Clock()); err != nil {
 		return fmt.Errorf("enqueue manual rescan: %w", err)
@@ -444,7 +446,7 @@ func (s *ScannerService) dispatch(ctx context.Context, tenant Tenant, buildID st
 		Scope: identity.AuditScopeProject, OrganizationID: tenant.OrganizationID.String(), ProjectID: tenant.ProjectID.String(),
 	}
 
-	tx, err := BeginTenant(ctx, s.repository.db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err := BeginTenant(ctx, s.repository.db, tenant.OrganizationID.String(), tenant.ProjectID.String(), tenant.BucketID)
 	if err != nil {
 		s.finishCircuitRequest(false)
 		return false, err

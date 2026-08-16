@@ -157,6 +157,10 @@ func seedScannerBuild(t *testing.T, db *sql.DB, suffix string, assigned, queued 
 }
 
 func seedScannerBuildForTenant(t *testing.T, db *sql.DB, org, project, suffix string, assigned, queued bool) scannerSeed {
+	return seedScannerBuildInBucket(t, db, org, project, suffix, assigned, queued, "")
+}
+
+func seedScannerBuildInBucket(t *testing.T, db *sql.DB, org, project, suffix string, assigned, queued bool, bucketID string) scannerSeed {
 	t.Helper()
 	base := time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC).Add(time.Duration(len(suffix)) * time.Second)
 	seed := scannerSeed{
@@ -166,26 +170,36 @@ func seedScannerBuildForTenant(t *testing.T, db *sql.DB, org, project, suffix st
 		sbomID:    registry.NewID(base.Add(3 * time.Millisecond)).String(),
 		channelID: registry.NewID(base.Add(4 * time.Millisecond)).String(),
 	}
-	tx, err := store.BeginTenant(context.Background(), db, org, project)
+	createBucket := bucketID == ""
+	sequence := 1
+	if !createBucket {
+		seed.bucketID = bucketID
+		sequence = 2
+	}
+	tx, err := store.BeginTenant(context.Background(), db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	statements := []struct {
+	type statement struct {
 		query string
 		args  []any
-	}{
-		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,$5)`, []any{org, project, seed.bucketID, seed.bucketName, base}},
-		{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,$5,'HCL2',true,1,$6,$6)`, []any{org, project, seed.versionID, seed.bucketID, seed.fingerprint, base}},
-		{`INSERT INTO builds (organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'docker','done','docker',true,$5,$5)`, []any{org, project, seed.buildID, seed.versionID, base}},
-		{`INSERT INTO sboms (organization_id, project_id, id, build_id, name, format, object_key, created_at)
-			VALUES ($1,$2,$3,$4,'sbom','SPDX','fixture-key-'||$3,$5)`, []any{org, project, seed.sbomID, seed.buildID, base}},
-		{`INSERT INTO sbom_packages (organization_id, project_id, sbom_id, name, version, purl)
-			VALUES ($1,$2,$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{org, project, seed.sbomID}},
 	}
+	statements := []statement{}
+	if createBucket {
+		statements = append(statements, statement{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$5)`, []any{org, project, seed.bucketID, seed.bucketName, base}})
+	}
+	statements = append(statements,
+		statement{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'HCL2',true,$6,$7,$7)`, []any{org, project, seed.versionID, seed.bucketID, seed.fingerprint, sequence, base}},
+		statement{`INSERT INTO builds (organization_id, project_id, id, bucket_id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'docker','done','docker',true,$6,$6)`, []any{org, project, seed.buildID, seed.bucketID, seed.versionID, base}},
+		statement{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at)
+			VALUES ($1,$2,$3,$4,$5,'sbom','SPDX','fixture-key-'||$3,$6)`, []any{org, project, seed.sbomID, seed.bucketID, seed.buildID, base}},
+		statement{`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,$3,$4,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{org, project, seed.bucketID, seed.sbomID}},
+	)
 	if assigned {
 		statements = append(statements,
 			struct {
@@ -196,16 +210,16 @@ func seedScannerBuildForTenant(t *testing.T, db *sql.DB, org, project, suffix st
 			struct {
 				query string
 				args  []any
-			}{`INSERT INTO channel_assignments (organization_id, project_id, id, channel_id, version_id, author_id, assigned_at)
-				VALUES ($1,$2,$3,$4,$5,'fixture',$6)`, []any{org, project, registry.NewID(base.Add(5 * time.Millisecond)).String(), seed.channelID, seed.versionID, base}},
+			}{`INSERT INTO channel_assignments (organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at)
+				VALUES ($1,$2,$3,$4,$5,$6,'fixture',$7)`, []any{org, project, registry.NewID(base.Add(5 * time.Millisecond)).String(), seed.bucketID, seed.channelID, seed.versionID, base}},
 		)
 	}
 	if queued {
 		statements = append(statements, struct {
 			query string
 			args  []any
-		}{`INSERT INTO pending_scans (organization_id, project_id, build_id, enqueued_at, reason)
-			VALUES ($1,$2,$3,$4,'channel_assignment')`, []any{org, project, seed.buildID, base}})
+		}{`INSERT INTO pending_scans (organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+			VALUES ($1,$2,$3,$4,$5,'channel_assignment')`, []any{org, project, seed.bucketID, seed.buildID, base}})
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(context.Background(), statement.query, statement.args...); err != nil {
@@ -234,7 +248,7 @@ func newScannerService(t *testing.T, repository *store.Repository, adapter scan.
 
 func pendingCount(t *testing.T, db *sql.DB, buildID string) int {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA)
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +264,7 @@ func pendingCount(t *testing.T, db *sql.DB, buildID string) int {
 // leave work behind.
 func clearPendingScans(t *testing.T, db *sql.DB) {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA)
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -368,7 +382,7 @@ func TestScannerHubIntegration(t *testing.T) {
 
 	t.Run("SBOM upload alone does not enqueue", func(t *testing.T) {
 		seed := seedScannerBuild(t, db, "sbom-only", false, false)
-		tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+		tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -399,7 +413,7 @@ func TestScannerHubIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		_, _ = tx.Exec(`DELETE FROM pending_scans WHERE build_id = $1`, seed.buildID)
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
@@ -572,20 +586,17 @@ func TestScannerHubIntegration(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		newBuild := seedScannerBuild(t, db, "latest-new", false, false)
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		newBuild := seedScannerBuildInBucket(t, db, orgA, projectA, "latest-new", false, false, old.bucketID)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		movedAt := time.Date(2026, 8, 8, 0, 0, 0, 0, time.UTC)
-		// Put the new version in the old bucket so the old channel can move to it.
-		if _, err := tx.Exec(`UPDATE versions SET bucket_id = $1, sequence = 2 WHERE id = $2`, old.bucketID, newBuild.versionID); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := tx.Exec(`INSERT INTO channel_assignments (organization_id, project_id, id, channel_id, version_id, author_id, assigned_at)
-			VALUES ($1,$2,$3,$4,$5,'fixture',$6)`, orgA, projectA, registry.NewID(movedAt).String(), old.channelID, newBuild.versionID, movedAt); err != nil {
+		if _, err := tx.Exec(`INSERT INTO channel_assignments (organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at)
+			VALUES ($1,$2,$3,$4,$5,$6,'fixture',$7)`, orgA, projectA, registry.NewID(movedAt).String(), old.bucketID, old.channelID, newBuild.versionID, movedAt); err != nil {
 			t.Fatal(err)
 		}
 		for _, buildID := range []string{old.buildID, newBuild.buildID} {
-			if _, err := tx.Exec(`INSERT INTO pending_scans (organization_id, project_id, build_id, enqueued_at, reason)
-				VALUES ($1,$2,$3,$4,'channel_assignment') ON CONFLICT DO NOTHING`, orgA, projectA, buildID, time.Now()); err != nil {
+			if _, err := tx.Exec(`INSERT INTO pending_scans (organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+				SELECT $1,$2,builds.bucket_id,builds.id,$4,'channel_assignment' FROM builds WHERE builds.id = $3
+				ON CONFLICT DO NOTHING`, orgA, projectA, buildID, time.Now()); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -628,7 +639,7 @@ func TestScannerHubIntegration(t *testing.T) {
 		if err != nil || state != nil {
 			t.Fatalf("state = %#v, %v; want no mutation", state, err)
 		}
-		tx, _ := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, _ := store.BeginTenant(ctx, db, orgA, projectA, "")
 		var runs int
 		if err := tx.QueryRow(`SELECT count(*) FROM scan_runs WHERE build_id = $1`, seed.buildID).Scan(&runs); err != nil {
 			t.Fatal(err)

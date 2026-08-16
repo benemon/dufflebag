@@ -282,7 +282,7 @@ func TestListVersionsRejectsTamperedArtifactMAC(t *testing.T) {
 		t.Fatalf("CreateBuild: %v", err)
 	}
 
-	tamper, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tamper, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatalf("begin tamper: %v", err)
 	}
@@ -1133,16 +1133,16 @@ func TestRepositoryChannelLifecycleAndHistory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channel_assignments (
-			organization_id, project_id, id, channel_id, version_id, assigned_at
-		) VALUES ($1, $2, $3, $4, $5, $6)
+			organization_id, project_id, id, bucket_id, channel_id, version_id, assigned_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7)
 	`, tenant.OrganizationID, tenant.ProjectID, registry.NewID(at).String(),
-		legacy.ID.String(), incomplete.ID.String(), at); err != nil {
+		bucket.ID.String(), legacy.ID.String(), incomplete.ID.String(), at); err != nil {
 		_ = tx.Rollback()
 		t.Fatalf("insert legacy incomplete assignment: %v", err)
 	}
@@ -1256,7 +1256,7 @@ func TestRepositoryChannelLifecycleAndHistory(t *testing.T) {
 	); !errors.Is(err, registry.ErrNotFound) {
 		t.Fatalf("GetChannel after delete = %v, want ErrNotFound", err)
 	}
-	tx, err = store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err = store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2084,7 +2084,7 @@ func TestTenancyRepositoryLifecycle(t *testing.T) {
 	if err := repository.DeleteProject(ctx, organization.ID, oldest.ID); !errors.Is(err, registry.ErrConflict) {
 		t.Fatalf("DeleteProject with bucket = %v, want ErrConflict", err)
 	}
-	tx, err := store.BeginTenant(ctx, db, organization.ID, oldest.ID)
+	tx, err := store.BeginTenant(ctx, db, organization.ID, oldest.ID, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2311,7 +2311,7 @@ func TestUpdateChannelClearsTheAssignment(t *testing.T) {
 	); err != nil {
 		t.Fatalf("repeat clear: %v", err)
 	}
-	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2399,7 +2399,7 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 		t.Fatalf("UploadSbom: %v", err)
 	}
 	var bucketSBOMKey string
-	objectKeyTx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	objectKeyTx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2427,7 +2427,7 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 
 	// The trigger still rejects tampering with live history before the bucket
 	// goes: migration 000006 narrowed the invariant, it did not drop it.
-	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2452,7 +2452,7 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 		t.Fatalf("repeat DeleteBucket = %v, want ErrNotFound", err)
 	}
 
-	tx, err = store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err = store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2571,7 +2571,7 @@ func TestDeleteVersionAndDeleteBuildContracts(t *testing.T) {
 			t.Fatalf("UploadSbom %s/%s: %v", bucket, fingerprint, err)
 		}
 		var key string
-		tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2634,7 +2634,7 @@ func TestDeleteVersionAndDeleteBuildContracts(t *testing.T) {
 	if err := objects.CheckBucket(ctx); err != nil {
 		t.Fatalf("restore object-store health after absence check: %v", err)
 	}
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2731,7 +2731,7 @@ func TestDeleteVersionAndDeleteBuildContracts(t *testing.T) {
 	if _, err := objects.Get(ctx, buildObjectKey); err == nil {
 		t.Fatal("DeleteBuild left its SBOM object behind")
 	}
-	tx, err = store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err = store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2877,7 +2877,7 @@ func TestUploadSbomStoresAndReplaces(t *testing.T) {
 		t.Fatalf("stored sbom = %#v", first)
 	}
 	{
-		tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -2964,7 +2964,7 @@ func TestUploadSbomStoresAndReplaces(t *testing.T) {
 		t.Fatalf("unparseable read state = %#v, %v", unparseable, err)
 	}
 
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
