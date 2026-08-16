@@ -566,6 +566,7 @@ func TestEveryPackerRouteHasItsExactAuditDescriptor(t *testing.T) {
 		operation, targetType, targetIDParam string
 	}
 	expected := map[string]semantic{
+		"POST /_search/external_artifact":                                                   {"artifact.search", "artifact_collection", ""},
 		"GET /registry":                                                                     {"registry.read", "registry", ""},
 		"GET /enforced_blocks/bucket/{bucket}":                                              {"enforced_block.list", "bucket", "bucket"},
 		"GET /buckets":                                                                      {"bucket.list", "bucket_collection", ""},
@@ -776,6 +777,7 @@ func TestCreateBucketDistinguishesConflictFromFailure(t *testing.T) {
 // failure rather than a gap.
 func TestEveryRouteRequiresTheRoleItShould(t *testing.T) {
 	expected := map[string]identity.Role{
+		"POST /_search/external_artifact":                                                   identity.RoleReader,
 		"GET /registry":                                                                     identity.RoleReader,
 		"GET /enforced_blocks/bucket/{bucket}":                                              identity.RoleReader,
 		"GET /buckets":                                                                      identity.RoleReader,

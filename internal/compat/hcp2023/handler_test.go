@@ -89,6 +89,129 @@ func TestBucketEndpoints(t *testing.T) {
 	}
 }
 
+func TestSearchExternalArtifact(t *testing.T) {
+	repository := newFakeRepository()
+	repository.buckets["images"] = &store.Bucket{
+		ID: registry.NewID(testTime), Name: "images", Labels: map[string]string{"team": "platform"},
+		CreatedAt: testTime, UpdatedAt: testTime,
+	}
+	older, err := registry.RestoreVersion(registry.Version{
+		ID: registry.NewID(testTime.Add(time.Second)), BucketName: "images",
+		Fingerprint: "older", TemplateType: registry.TemplateHCL2, AuthorID: "builder-a",
+		CreatedAt: testTime.Add(time.Second), UpdatedAt: testTime.Add(time.Second),
+	}, true, 1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	revokedAt := testTime.Add(-time.Hour)
+	newer, err := registry.RestoreVersion(registry.Version{
+		ID: registry.NewID(testTime.Add(2 * time.Second)), BucketName: "images",
+		Fingerprint: "newer", TemplateType: registry.TemplateHCL2, AuthorID: "builder-b",
+		CreatedAt: testTime.Add(2 * time.Second), UpdatedAt: testTime.Add(3 * time.Second),
+	}, true, 2, &registry.Revocation{
+		RevokeAt: revokedAt, Message: "retired", Author: "security",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository.versions["images/older"] = older
+	repository.versions["images/newer"] = newer
+	repository.builds["images/older"] = []store.StoredBuild{{
+		Build: registry.Build{
+			ID: registry.NewID(testTime.Add(4 * time.Second)), ComponentType: "amazon-ebs",
+			Status: registry.BuildDone, Platform: "aws",
+		},
+		VersionID: older.ID, PackerRunUUID: "run-older", Labels: map[string]string{"arch": "amd64"},
+		Artifacts: []store.Artifact{{
+			ID: registry.NewID(testTime.Add(5 * time.Second)), ExternalIdentifier: "shared-digest",
+			Region: "eu-west-1", CreatedAt: testTime.Add(5 * time.Second),
+		}},
+		CreatedAt: testTime.Add(4 * time.Second), UpdatedAt: testTime.Add(5 * time.Second),
+	}}
+	repository.builds["images/newer"] = []store.StoredBuild{{
+		Build: registry.Build{
+			ID: registry.NewID(testTime.Add(6 * time.Second)), ComponentType: "googlecompute",
+			Status: registry.BuildDone, Platform: "gcp",
+		},
+		VersionID: newer.ID, PackerRunUUID: "run-newer", Labels: map[string]string{"arch": "arm64"},
+		Artifacts: []store.Artifact{{
+			ID: registry.NewID(testTime.Add(7 * time.Second)), ExternalIdentifier: "shared-digest",
+			Region: "europe-west1", CreatedAt: testTime.Add(7 * time.Second),
+		}},
+		CreatedAt: testTime.Add(6 * time.Second), UpdatedAt: testTime.Add(7 * time.Second),
+	}}
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	path := testBase + "/_search/external_artifact"
+
+	response := request(t, server, http.MethodPost, path, map[string]any{})
+	if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), `"code":3`) {
+		t.Fatalf("empty external identifier = %d %s, want 400/code 3", response.Code, response.Body)
+	}
+
+	search := func(t *testing.T, suffix string, body map[string]any) models.HashicorpCloudPacker20230101SearchExternalArtifactResponse {
+		t.Helper()
+		response := request(t, server, http.MethodPost, path+suffix, body)
+		if response.Code != http.StatusOK {
+			t.Fatalf("SearchExternalArtifact = %d: %s", response.Code, response.Body)
+		}
+		var decoded models.HashicorpCloudPacker20230101SearchExternalArtifactResponse
+		decodeResponse(t, response, &decoded)
+		return decoded
+	}
+
+	all := search(t, "", map[string]any{"external_identifier": "shared-digest"})
+	if len(all.Artifacts) != 2 {
+		t.Fatalf("unfiltered artifacts = %#v, want revoked and active versions", all.Artifacts)
+	}
+	first := all.Artifacts[0]
+	if first.Bucket == nil || first.Bucket.Name != "images" || first.Bucket.Labels["team"] != "platform" ||
+		first.Build == nil || first.Build.Platform != "gcp" || first.Build.ComponentType != "googlecompute" ||
+		first.Version == nil || first.Version.Fingerprint != "newer" {
+		t.Fatalf("newest artifact projection = %#v", first)
+	}
+	if first.Version.Status == nil ||
+		*first.Version.Status != models.HashicorpCloudPacker20230101VersionStatusVERSIONREVOKED ||
+		first.Version.RevocationType == nil ||
+		*first.Version.RevocationType != models.HashicorpCloudPacker20230101RevocationTypeMANUAL ||
+		first.Version.RevocationAuthor != "security" || first.Version.RevocationMessage != "retired" ||
+		time.Time(first.Version.RevokeAt) != revokedAt {
+		t.Fatalf("revoked external version = %#v", first.Version)
+	}
+
+	aws := search(t, "", map[string]any{"external_identifier": "shared-digest", "platform": "aws"})
+	if len(aws.Artifacts) != 1 || aws.Artifacts[0].Build.Platform != "aws" {
+		t.Fatalf("platform include = %#v", aws.Artifacts)
+	}
+	if excluded := search(t, "", map[string]any{
+		"external_identifier": "shared-digest", "platform": "azure",
+	}); len(excluded.Artifacts) != 0 {
+		t.Fatalf("platform exclude = %#v, want empty", excluded.Artifacts)
+	}
+	region := search(t, "", map[string]any{
+		"external_identifier": "shared-digest", "region": "europe-west1",
+	})
+	if len(region.Artifacts) != 1 || region.Artifacts[0].Version.Fingerprint != "newer" {
+		t.Fatalf("region include = %#v", region.Artifacts)
+	}
+	if excluded := search(t, "", map[string]any{
+		"external_identifier": "shared-digest", "region": "us-east-1",
+	}); len(excluded.Artifacts) != 0 {
+		t.Fatalf("region exclude = %#v, want empty", excluded.Artifacts)
+	}
+
+	pageOne := search(t, "?pagination.page_size=1", map[string]any{"external_identifier": "shared-digest"})
+	if len(pageOne.Artifacts) != 1 || pageOne.Artifacts[0].Version.Fingerprint != "newer" ||
+		pageOne.Pagination == nil || pageOne.Pagination.NextPageToken == "" {
+		t.Fatalf("page one = %#v", pageOne)
+	}
+	pageTwo := search(t, "?pagination.page_size=1&pagination.next_page_token="+
+		pageOne.Pagination.NextPageToken, map[string]any{"external_identifier": "shared-digest"})
+	if len(pageTwo.Artifacts) != 1 || pageTwo.Artifacts[0].Version.Fingerprint != "older" ||
+		pageTwo.Pagination == nil || pageTwo.Pagination.PreviousPageToken == "" {
+		t.Fatalf("page two = %#v", pageTwo)
+	}
+}
+
 func TestGetVersionNotFoundUsesAbortedStatus(t *testing.T) {
 	server := newHandler(newFakeRepository(), testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
 	trail := &auditTrail{}
@@ -1286,6 +1409,57 @@ func (r *fakeRepository) ListBucketAncestry(
 		}
 	}
 	return relations, nil
+}
+
+func (r *fakeRepository) SearchExternalArtifacts(
+	_ context.Context,
+	_ store.Tenant,
+	externalIdentifier, platform, region string,
+) ([]store.ExternalArtifactMatch, error) {
+	matches := make([]store.ExternalArtifactMatch, 0)
+	for key, builds := range r.builds {
+		version := r.versions[key]
+		if version == nil {
+			continue
+		}
+		bucket := r.buckets[version.BucketName]
+		if bucket == nil {
+			continue
+		}
+		for i := range builds {
+			build := &builds[i]
+			if platform != "" && build.Platform != platform {
+				continue
+			}
+			for _, artifact := range build.Artifacts {
+				if artifact.ExternalIdentifier == externalIdentifier &&
+					(region == "" || artifact.Region == region) {
+					matches = append(matches, store.ExternalArtifactMatch{
+						Bucket: *bucket, Build: *build, Version: version,
+					})
+				}
+			}
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		a, b := matches[i], matches[j]
+		aSequence, aComplete := a.Version.Sequence()
+		bSequence, bComplete := b.Version.Sequence()
+		if aComplete != bComplete {
+			return aComplete
+		}
+		if aSequence != bSequence {
+			return aSequence > bSequence
+		}
+		if !a.Version.CreatedAt.Equal(b.Version.CreatedAt) {
+			return a.Version.CreatedAt.After(b.Version.CreatedAt)
+		}
+		if a.Version.ID != b.Version.ID {
+			return a.Version.ID.String() > b.Version.ID.String()
+		}
+		return a.Build.ID.String() > b.Build.ID.String()
+	})
+	return matches, nil
 }
 
 func (r *fakeRepository) versionByID(id string) *registry.Version {
