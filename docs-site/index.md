@@ -65,6 +65,11 @@ Operations:
   restriction.
 - [Builds](./operations/builds.md) — builds, SBOMs, packages and findings.
 
+Integrations:
+
+- [MCP server](./integrations/mcp-server.md) — expose the registry to
+  agentic clients as a set of typed tools.
+
 Reference:
 
 - [HCP Packer API compatibility](./reference/compatibility.md) — the external
