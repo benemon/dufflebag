@@ -1,4 +1,4 @@
-# Encryption setup
+# Encryption
 
 ## Encryption at rest (optional, decided at first boot)
 
@@ -147,6 +147,26 @@ stops verifying. What changes at the boundary:
   heartbeat — up to about five minutes — and until then a payload or token
   minted under the new version by one replica does not verify on a peer.
   Rotate in a quiet window.
+
+## Configuration
+
+| Variable | Default | Description |
+|---|---|---|
+| `DFBG_KEY_PROVIDER` | — | Key service wrapping the keyring. `vault` (transit) is the only provider; unset means no encryption at rest |
+| `DFBG_VAULT_ADDR` | — | Vault address; required when `DFBG_KEY_PROVIDER=vault` |
+| `DFBG_VAULT_TOKEN` | — | Vault token credential for `token` authentication |
+| `DFBG_VAULT_CACERT` | — | Path to a CA certificate for the Vault connection |
+| `DFBG_VAULT_TRANSIT_NAMESPACE` | — | Operating namespace governing transit operations |
+| `DFBG_VAULT_TRANSIT_MOUNT` | `transit` | Transit engine mount path |
+| `DFBG_VAULT_TRANSIT_KEY` | `dufflebag` | Transit key name; created on first use |
+| `DFBG_VAULT_AUTH_METHOD` | `token` | Vault authentication: `token` uses `DFBG_VAULT_TOKEN`; `kubernetes` and `approle` perform native login |
+| `DFBG_VAULT_AUTH_NAMESPACE` | — | Namespace for native login and token renewal; unset uses `DFBG_VAULT_TRANSIT_NAMESPACE`; invalid with `token` |
+| `DFBG_VAULT_K8S_ROLE` | — | Vault Kubernetes auth role; required when `DFBG_VAULT_AUTH_METHOD=kubernetes` |
+| `DFBG_VAULT_K8S_MOUNT` | `kubernetes` | Vault Kubernetes auth mount path |
+| `DFBG_VAULT_K8S_TOKEN_PATH` | `/var/run/secrets/kubernetes.io/serviceaccount/token` | Projected service-account token path; override for non-standard projections |
+| `DFBG_VAULT_APPROLE_ROLE_ID` | — | Vault AppRole role ID; required when `DFBG_VAULT_AUTH_METHOD=approle` |
+| `DFBG_VAULT_APPROLE_SECRET_ID_FILE` | — | AppRole secret-id file; required for AppRole and read at every login |
+| `DFBG_VAULT_APPROLE_MOUNT` | `approle` | Vault AppRole auth mount path |
 
 ## Recovery
 

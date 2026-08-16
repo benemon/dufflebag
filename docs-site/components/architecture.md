@@ -1,7 +1,7 @@
 # Architecture
 
 The boundaries a change must respect, stated in present tense. The
-[compatibility reference](compatibility.md) governs everything an external
+[compatibility reference](../reference/compatibility.md) governs everything an external
 client can observe; this document covers everything else.
 
 ## Two API planes
@@ -14,7 +14,7 @@ One domain, two very different contracts:
   handlers preserve client-observed behaviour including its accidents, wire
   models are generated from vendored Swagger specs (`make generate`), and
   nothing extends it. If a behaviour here looks wrong, consult the
-  [compatibility reference](compatibility.md) before touching it — the
+  [compatibility reference](../reference/compatibility.md) before touching it — the
   strangeness is usually the contract.
 - **The platform plane** (`internal/platform/v1`, serving `/api/v1/...` plus
   the unversioned `/sys/*` surfaces — init, recovery, health, session) is
@@ -170,7 +170,7 @@ authorship (correlation keys are bucket names and version fingerprints —
 destination version *names* may diverge when local history has gaps),
 channel assignment history, bucket IAM, and SBOMs appearing after a
 destination build completed (the upload window has closed; they surface as
-permanent drift). See [operations](../deployment/operations.md#bag-drop) for the operational
+permanent drift). See [the Bag Drop operational contract](../administration/bag-drop.md#operational-contract) for the operational
 surface — egress, cadence, credential keys and their honest limits.
 
 ## Deployment shape
@@ -188,7 +188,7 @@ rest was chosen at first boot, and an OSV-compatible scanner endpoint when
 scanning is configured. Migrations are embedded in the binary and apply at
 startup; the hardened two-role deployment runs them via the `migrate`
 subcommand under a privileged role instead, keeping schema changes away from
-the serving role. See [Deploying dufflebag](../deployment/index.md).
+the serving role. See [Installation](../quick-start/installation.md).
 
 Migrations are written expand-only, and an expand/contract gate exists
 (`cmd/schema-compat`, `make expand-contract`) that runs the previous release's
