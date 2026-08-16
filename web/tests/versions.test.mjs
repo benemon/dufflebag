@@ -37,7 +37,10 @@ let loadChannelHistory
 let loadVersionDetail
 let loadBuildDetail
 let terraformConsumeSnippet
+let platformConsumeSnippet
+let availableConsumers
 let terraformPromotionSnippet
+let ConsumeCard
 let packerBuildCommand
 let sbomFileName
 let channelVersionGap
@@ -75,6 +78,7 @@ before(async () => {
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
   ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard, BuildTable,
+    ConsumeCard, availableConsumers, platformConsumeSnippet,
     terraformConsumeSnippet, terraformPromotionSnippet, BuildStateLabel } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
   ;({ BuildView, ArtifactsCard, PackagesCard, packerBuildCommand, sbomFileName } =
@@ -211,6 +215,12 @@ const actionVersion = (state = 'complete') => ({
   name: 'v7', fingerprint: 'fp-action', state, templateType: 'HCL2', channels: [],
   assignments: [], builds: [], parents: [], children: [], created: '2026-08-12T10:00:00.000Z',
 })
+
+const consumptionVersion = (builds, channels = ['latest']) => ({
+  ...actionVersion(), name: 'v3', fingerprint: 'fp-consume', channels, builds,
+})
+
+const consumptionBuild = (platform, artifacts) => ({ platform, artifacts })
 
 const channelFixture = (over = {}) => ({
   name: 'production', versionName: 'v7', fingerprint: 'fp-action', managed: false,
@@ -1659,6 +1669,105 @@ test('version detail renders persisted parent links and Terraform from real iden
   assert.match(promotion, /channel_name        = "production"/)
   assert.match(promotion, /version_fingerprint = "fp-complete"/)
   assert.doesNotMatch(promotion, /latest/)
+})
+
+test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', () => {
+  assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
+  ])), ['terraform', 'docker'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'us-east-1' }]),
+  ])), ['terraform', 'aws'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('vsphere', [{ externalIdentifier: 'template-1', region: 'dc1' }]),
+  ])), ['terraform'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('docker', []),
+  ])), ['terraform'])
+  assert.equal(platformConsumeSnippet('vsphere', 'images', consumptionVersion([
+    consumptionBuild('vsphere', [{ externalIdentifier: 'template-1', region: 'dc1' }]),
+  ])), null)
+
+  // The card itself must derive its toggles from availableConsumers — a
+  // hardcoded toggle list passes the function pins while shipping items
+  // the fallback rule forbids.
+  const vsphereMarkup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images',
+    version: consumptionVersion([
+      consumptionBuild('vsphere', [{ externalIdentifier: 'template-1', region: 'dc1' }]),
+    ]),
+  }))
+  assert.match(vsphereMarkup, /id="consume-terraform"/)
+  assert.doesNotMatch(vsphereMarkup, /id="consume-docker"/)
+  assert.doesNotMatch(vsphereMarkup, /id="consume-aws"/)
+})
+
+test('MUTATION_TERRAFORM_DEFAULT initially selects and renders the unchanged Terraform pane', () => {
+  const version = consumptionVersion([
+    consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
+  ])
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version,
+  }))
+
+  assert.match(markup, /aria-pressed="true"[^>]*id="consume-terraform"/)
+  assert.match(markup, /data &quot;hcp_packer_version&quot; &quot;images&quot;/)
+  assert.doesNotMatch(markup, /docker image inspect/)
+  assert.equal(
+    terraformConsumeSnippet('images', version),
+    'data "hcp_packer_version" "images" {\n' +
+      '  bucket_name  = "images"\n' +
+      '  channel_name = "latest"\n' +
+      '}\n\n' +
+      'data "hcp_packer_artifact" "images" {\n' +
+      '  bucket_name         = "images"\n' +
+      '  version_fingerprint = "fp-consume"\n' +
+      '  platform            = "docker"\n' +
+      '  region              = "docker"\n' +
+      '}',
+  )
+})
+
+test('MUTATION_SINGLE_CODEBLOCK keeps the selected Docker pane exclusive', () => {
+  const version = consumptionVersion([
+    consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
+  ])
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'docker',
+  }))
+
+  assert.match(markup, /aria-pressed="true"[^>]*id="consume-docker"/)
+  assert.match(markup, /# image digest recorded for this build/)
+  assert.match(markup, /docker pull &lt;repo&gt;@sha256:abc/)
+  assert.match(markup, /docker image inspect sha256:abc/)
+  assert.match(markup, /community\.docker\.docker_image_pull/)
+  assert.match(markup, /name: &quot;&lt;repo&gt;@sha256:abc&quot;/)
+  assert.doesNotMatch(markup, /hcp_packer_version|hcp_packer_artifact/)
+  assert.equal((markup.match(/\bpf-v6-c-code-block\b/g) ?? []).length, 1)
+})
+
+test('MUTATION_AWS_ALL_REGIONS includes every regional artifact in the AWS pane', () => {
+  const version = consumptionVersion([
+    consumptionBuild('aws', [
+      { externalIdentifier: 'ami-east', region: 'us-east-1' },
+      { externalIdentifier: 'ami-west', region: 'us-west-2' },
+    ]),
+  ])
+  const snippet = platformConsumeSnippet('aws', 'images', version)
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'aws',
+  }))
+
+  for (const command of [
+    'aws ec2 describe-images --image-ids ami-east --region us-east-1',
+    'aws ec2 describe-images --image-ids ami-west --region us-west-2',
+  ]) {
+    assert.match(snippet, new RegExp(command))
+    assert.match(markup, new RegExp(command))
+  }
+  assert.equal((snippet.match(/amazon\.aws\.ec2_instance/g) ?? []).length, 2)
+  assert.match(snippet, /image_id: "ami-east"[\s\S]*region: "us-east-1"/)
+  assert.match(snippet, /image_id: "ami-west"[\s\S]*region: "us-west-2"/)
 })
 
 test('a versions failure is visible instead of empty successful data', () => {

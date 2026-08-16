@@ -111,6 +111,10 @@ When a channel points at the version, the **Consume this version** card renders
 a copyable Terraform `hcp_packer_version` + `hcp_packer_artifact` block. The
 card provides the console's standing handoff to automation.
 
+The card offers Terraform plus platform-appropriate commands for platforms the
+version actually built. Terraform is always present and selected by default;
+platforms without a confident command mapping fall back to Terraform.
+
 ### Build
 
 A build shows its status history, artifacts and SBOMs.
