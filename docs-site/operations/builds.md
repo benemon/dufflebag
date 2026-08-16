@@ -10,6 +10,8 @@ A build shows its status history, artifacts and SBOMs. The **Packages** tab
 shows the package inventory projected from its SBOMs, with findings when a
 scanner is configured.
 
+![Dufflebag build screen showing the package inventory from an uploaded SBOM](/screenshots/build.png)
+
 ## SBOMs
 
 A build can carry one or more software bills of materials (SBOMs) uploaded
@@ -89,6 +91,8 @@ The console does not describe an unscanned state as clean.
 Only a current successful scan produces findings, including an empty
 findings list when the scan found nothing. A newer failed scan does not
 erase the findings from the previous successful run.
+
+![Dufflebag build packages tab showing vulnerability findings](/screenshots/scanner-findings.png)
 
 With a scanner configured:
 

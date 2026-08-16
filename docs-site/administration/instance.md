@@ -5,6 +5,8 @@ The **Instance** screen is available to every reader. It generates the
 points stock Packer and Terraform at the instance — and reports scanner and
 build information.
 
+![Dufflebag Instance screen showing health and the client environment block](/screenshots/instance.png)
+
 Export the generated block and use it as
 [Build an image with Packer](../quick-start/build-with-packer.md) and
 [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md)

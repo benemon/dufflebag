@@ -10,10 +10,13 @@ import assert from 'node:assert/strict'
 import { execFile as execFileCb, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
+import http from 'node:http'
 import net from 'node:net'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { zstdCompressSync } from 'node:zlib'
 
 import puppeteer from 'puppeteer-core'
 
@@ -26,6 +29,8 @@ const serverBinary = process.env.SMOKE_BIN
 const postgresContainer = `dufflebag-docs-shots-${process.pid}`
 const objectContainer = `dufflebag-docs-shots-s3-${process.pid}`
 const vaultContainer = `dufflebag-docs-shots-vault-${process.pid}`
+const scannerContainer = `dufflebag-docs-shots-osv-${process.pid}`
+const scannerImage = process.env.OSV_STUB_IMAGE || 'dufflebag-osv-stub:dev'
 const vaultToken = 'docs-shots-root'
 const objectStorageImage = 'quay.io/benjamin_holmes/ceph-aio:v20'
 const objectStorageBucket = 'dufflebag-docs-shots'
@@ -38,6 +43,9 @@ const screenshotsDir = fileURLToPath(
 
 let base
 let server
+let webhookReceiver
+let webhookReceiverPort
+let scannerBase
 let serverOutput = ''
 let browser
 let page
@@ -277,6 +285,27 @@ async function bootStack() {
   const serverPort = await freePort()
   base = `http://127.0.0.1:${serverPort}`
   serverOutput = ''
+  await execFile('docker', ['image', 'inspect', scannerImage]).catch((err) => {
+    throw new Error(
+      `missing ${scannerImage}; make docs-shots builds it before launching`,
+      { cause: err },
+    )
+  })
+  await execFile('docker', [
+    'run', '-d', '--rm', '--name', scannerContainer,
+    '-p', '127.0.0.1::8080', scannerImage,
+  ])
+  const { stdout: scannerPortLine } = await execFile(
+    'docker', ['port', scannerContainer, '8080/tcp'],
+  )
+  const scannerPort = scannerPortLine.trim().split('\n')[0].split(':').pop()
+  scannerBase = `http://127.0.0.1:${scannerPort}`
+  await until('the recorded OSV stub to answer', async () => {
+    const response = await fetch(`${scannerBase}/v1/vulns/GO-2026-4945`)
+    await response.arrayBuffer()
+    return response.status === 200
+  }, 60000, 100)
+
   server = startServer({
     DFBG_DATABASE_URL:
       `postgres://dufflebag_app:app@127.0.0.1:${postgresPort}/dufflebag?sslmode=disable`,
@@ -289,7 +318,19 @@ async function bootStack() {
     DFBG_OBJECT_STORAGE_BUCKET: objectStorageBucket,
     DFBG_OBJECT_STORAGE_ACCESS_KEY: 'testaccess',
     DFBG_OBJECT_STORAGE_SECRET_KEY: 'testsecret',
+    // The seeded webhook's receiver lives on loopback; the SSRF refusal is
+    // deliberately relaxed for this isolated capture stack only.
+    DFBG_WEBHOOK_ALLOW_PRIVATE: 'true',
+    DFBG_SCANNER_ADAPTER: 'osv',
+    DFBG_SCANNER_ENDPOINT: scannerBase,
+    DFBG_SCANNER_INTERVAL: '2s',
   })
+  webhookReceiver = http.createServer((_request, response) => {
+    response.statusCode = 200
+    response.end('ok')
+  })
+  await new Promise((resolve) => webhookReceiver.listen(0, '127.0.0.1', resolve))
+  webhookReceiverPort = webhookReceiver.address().port
   await until('the server to answer', async () => {
     const response = await fetch(`${base}/`)
     return response.status === 200
@@ -371,6 +412,19 @@ async function completeVersion(token, versionsPath, fixture) {
       artifacts: [],
     },
   )
+  if (fixture.sbom) {
+    // SBOM uploads are only accepted during the build's running window.
+    await api(token, 'PATCH', `${versionsPath}/${fixture.fingerprint}/builds/${build.id}`, {
+      status: 'BUILD_RUNNING',
+    })
+    await api(token, 'PUT', `${versionsPath}/${fixture.fingerprint}/builds/${build.id}/sboms`, {
+      name: fixture.sbom.name,
+      format: 'SPDX',
+      compressed_sbom: zstdCompressSync(
+        Buffer.from(JSON.stringify(fixture.sbom.document)),
+      ).toString('base64'),
+    })
+  }
   await api(token, 'PATCH', `${versionsPath}/${fixture.fingerprint}/builds/${build.id}`, {
     status: 'BUILD_DONE',
     platform: fixture.platform,
@@ -385,6 +439,7 @@ async function completeVersion(token, versionsPath, fixture) {
       },
     },
   })
+  return build
 }
 
 async function seedFixtures(credentials) {
@@ -427,7 +482,7 @@ async function seedFixtures(credentials) {
     labels: { owner: 'platform-engineering', lifecycle: 'managed' },
   })
   const baseVersions = `${bucketBase}/base-images/versions`
-  await completeVersion(builderToken, baseVersions, {
+  const ubuntuBuild = await completeVersion(builderToken, baseVersions, {
     fingerprint: 'ubuntu-2404-2026-08',
     component: 'amazon-ebs.ubuntu',
     platform: 'aws',
@@ -436,6 +491,58 @@ async function seedFixtures(credentials) {
     owner: 'platform-engineering',
     template: './images/ubuntu.pkr.hcl',
     os: 'ubuntu-24.04',
+    sbom: {
+      name: 'ubuntu-2404-base',
+      document: {
+        spdxVersion: 'SPDX-2.3',
+        dataLicense: 'CC0-1.0',
+        SPDXID: 'SPDXRef-DOCUMENT',
+        name: 'ubuntu-2404-base',
+        documentNamespace: 'https://registry.example.com/spdx/ubuntu-2404-base',
+        creationInfo: {
+          created: '2026-08-01T09:00:00Z',
+          creators: ['Tool: hcp-sbom'],
+        },
+        packages: [
+          {
+            SPDXID: 'SPDXRef-Package-openssl',
+            name: 'openssl',
+            versionInfo: '3.0.13-0ubuntu3.5',
+            downloadLocation: 'NOASSERTION',
+            externalRefs: [{
+              referenceCategory: 'PACKAGE-MANAGER',
+              referenceType: 'purl',
+              referenceLocator: 'pkg:deb/ubuntu/openssl@3.0.13-0ubuntu3.5',
+            }],
+          },
+          {
+            SPDXID: 'SPDXRef-Package-coreutils',
+            name: 'coreutils',
+            versionInfo: '9.4-3ubuntu6',
+            downloadLocation: 'NOASSERTION',
+            externalRefs: [{
+              referenceCategory: 'PACKAGE-MANAGER',
+              referenceType: 'purl',
+              referenceLocator: 'pkg:deb/ubuntu/coreutils@9.4-3ubuntu6',
+            }],
+          },
+          {
+            // The one queryable package: its purl resolves to the stub's
+            // recorded vulnerable go-jose captures, whose two advisory
+            // details are both recorded — a completable findings scan.
+            SPDXID: 'SPDXRef-Package-go-jose',
+            name: 'github.com/go-jose/go-jose/v4',
+            versionInfo: 'v4.1.1',
+            downloadLocation: 'NOASSERTION',
+            externalRefs: [{
+              referenceCategory: 'PACKAGE-MANAGER',
+              referenceType: 'purl',
+              referenceLocator: 'pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1',
+            }],
+          },
+        ],
+      },
+    },
   })
   await completeVersion(builderToken, baseVersions, {
     fingerprint: 'ubuntu-2404-2026-07',
@@ -466,7 +573,7 @@ async function seedFixtures(credentials) {
     description: 'Database images maintained by the reliability team',
     labels: { owner: 'database-reliability', lifecycle: 'managed' },
   })
-  await completeVersion(builderToken, `${bucketBase}/database-images/versions`, {
+  const postgresBuild = await completeVersion(builderToken, `${bucketBase}/database-images/versions`, {
     fingerprint: 'postgres-17-2026-08',
     component: 'docker.postgres',
     platform: 'docker',
@@ -475,6 +582,36 @@ async function seedFixtures(credentials) {
     owner: 'database-reliability',
     template: './images/postgres.pkr.hcl',
     os: 'alpine-3.22',
+    sbom: {
+      name: 'postgres-17-alpine',
+      document: {
+        spdxVersion: 'SPDX-2.3',
+        dataLicense: 'CC0-1.0',
+        SPDXID: 'SPDXRef-DOCUMENT',
+        name: 'postgres-17-alpine',
+        documentNamespace: 'https://registry.example.com/spdx/postgres-17-alpine',
+        creationInfo: {
+          created: '2026-08-01T09:00:00Z',
+          creators: ['Tool: hcp-sbom'],
+        },
+        // Exactly one queryable package: the recorded OSV stub matches
+        // request bodies byte-for-byte, and this purl resolves to its
+        // patched busybox capture — a clean successful scan.
+        packages: [
+          {
+            SPDXID: 'SPDXRef-Package-busybox',
+            name: 'busybox',
+            versionInfo: '1.36.1-r31',
+            downloadLocation: 'NOASSERTION',
+            externalRefs: [{
+              referenceCategory: 'PACKAGE-MANAGER',
+              referenceType: 'purl',
+              referenceLocator: 'pkg:apk/alpine/busybox@1.36.1-r31?arch=x86_64&distro=alpine-3.20.10',
+            }],
+          },
+        ],
+      },
+    },
   })
 
   await api(
@@ -483,9 +620,31 @@ async function seedFixtures(credentials) {
     `/api/v1/organizations/${organization.id}/projects/${project.id}/pins/base-images`,
   )
 
+  await api(rootToken, 'POST', '/api/v1/audit/targets', {
+    path: join(tmpdir(), `dufflebag-docs-shots-audit-${process.pid}.log`),
+  })
+
+  await api(
+    rootToken,
+    'POST',
+    `/api/v1/organizations/${organization.id}/projects/${project.id}/webhooks`,
+    {
+      name: 'ci-notifications',
+      url: `http://127.0.0.1:${webhookReceiverPort}/hooks/registry`,
+      description: 'Notify the pipeline when registry state changes.',
+      events: [],
+    },
+  )
+
+  return {
+    ubuntuBuildID: ubuntuBuild.id,
+    postgresBuildID: postgresBuild.id,
+    compatBase: `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`,
+    builderToken,
+  }
 }
 
-async function captureSeededScreens() {
+async function captureSeededScreens(seeded) {
   await page.goto(`${base}/buckets`, { waitUntil: 'domcontentloaded' })
   await waitForText('base-images')
   await waitForText('database-images')
@@ -498,6 +657,10 @@ async function captureSeededScreens() {
   await waitForText('Bucket details')
   await page.waitForSelector('nav[aria-label="Bucket facets"] button[role="tab"]')
   await capture('bucket-facets.png')
+
+  await clickByText('nav[aria-label="Bucket facets"] button', 'Channels')
+  await waitForText('production')
+  await capture('channels.png')
 
   await page.goto(
     `${base}/buckets/base-images/versions/ubuntu-2404-2026-08`,
@@ -529,6 +692,57 @@ async function captureSeededScreens() {
   await capture('typed-confirm.png')
   await clickByText('[role="dialog"] button', 'Cancel')
 
+  // The 2s-cadence scanner should have findings for the seeded vulnerable
+  // go module by now; wait on the API before photographing the build.
+  await until('the vulnerable package to carry findings', async () => {
+    const packages = await api(
+      seeded.builderToken,
+      'GET',
+      `${seeded.compatBase}/buckets/base-images/versions/ubuntu-2404-2026-08/builds/${seeded.ubuntuBuildID}/packages`,
+    )
+    return JSON.stringify(packages).includes('vuln')
+  }, 120000, 2000)
+  await page.goto(
+    `${base}/buckets/base-images/versions/ubuntu-2404-2026-08/builds/${seeded.ubuntuBuildID}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await waitForText('ubuntu-2404-base')
+  await capture('build.png')
+  await clickByText('button[role="tab"]', 'Packages')
+  await waitForText('with findings')
+  await until('the findings row to expand', async () => {
+    const expander = await page.$('.pf-v6-c-table__compound-expansion-toggle button')
+    if (!expander) return false
+    await expander.click()
+    return true
+  })
+  await waitForText('GHSA')
+  await capture('scanner-findings.png')
+
+  await page.goto(`${base}/audit`, { waitUntil: 'domcontentloaded' })
+  await waitForText('dufflebag-docs-shots-audit')
+  await capture('audit.png')
+
+  await page.goto(`${base}/encryption`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Encryption')
+  await waitForText('keyring')
+  await capture('encryption.png')
+
+  await page.goto(`${base}/webhooks`, { waitUntil: 'domcontentloaded' })
+  await waitForText('ci-notifications')
+  await capture('webhooks.png')
+
+  await page.goto(`${base}/instance`, { waitUntil: 'domcontentloaded' })
+  await waitForText('HCP_API_ADDRESS')
+  await until('the client environment card to be visible', () =>
+    page.$$eval('.pf-v6-c-card', (cards) => {
+      const card = cards.find((candidate) => candidate.innerText.includes('Client environment'))
+      if (!card) return false
+      card.scrollIntoView({ block: 'center' })
+      return card.getBoundingClientRect().height > 0
+    }))
+  await capture('instance.png')
+
   await page.goto(`${base}/principals`, { waitUntil: 'domcontentloaded' })
   await waitForText('Service principals')
   await waitForText('image-builder')
@@ -550,6 +764,7 @@ async function captureSeededScreens() {
 }
 
 async function cleanup() {
+  if (webhookReceiver) webhookReceiver.close()
   if (browser) await browser.close().catch(() => {})
   if (server && server.exitCode === null) {
     const exited = waitForExit(server)
@@ -560,6 +775,7 @@ async function cleanup() {
   await execFile('docker', ['rm', '-f', postgresContainer]).catch(() => {})
   await execFile('docker', ['rm', '-f', objectContainer]).catch(() => {})
   await execFile('docker', ['rm', '-f', vaultContainer]).catch(() => {})
+  await execFile('docker', ['rm', '-f', scannerContainer]).catch(() => {})
 }
 
 async function main() {
@@ -573,8 +789,8 @@ async function main() {
   await capture('first-run.png')
 
   const credentials = await initializeInstance()
-  await seedFixtures(credentials)
-  await captureSeededScreens()
+  const seeded = await seedFixtures(credentials)
+  await captureSeededScreens(seeded)
 }
 
 try {

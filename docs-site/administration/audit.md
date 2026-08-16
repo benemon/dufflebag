@@ -6,6 +6,8 @@ both from the console's **Audit** and **Encryption** pages or the equivalent
 [platform API](pathname:///platform-api.html) endpoints. The
 [installation page](../quick-start/installation.md#configuration-reference) defines the operational contract.
 
+![Dufflebag Audit screen showing a healthy file target](/screenshots/audit.png)
+
 ## The audit trail
 
 Every API request is audited as a request and response pair. UI asset serving,
