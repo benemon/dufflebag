@@ -115,6 +115,8 @@ The card offers Terraform plus platform-appropriate commands for platforms the
 version actually built. Terraform is always present and selected by default;
 platforms without a confident command mapping fall back to Terraform.
 
+![Dufflebag consumption card showing the Terraform and platform command toggle](/screenshots/version-consume.png)
+
 ### Build
 
 A build shows its status history, artifacts and SBOMs.

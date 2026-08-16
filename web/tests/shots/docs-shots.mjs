@@ -513,6 +513,14 @@ async function captureSeededScreens() {
       return card.getBoundingClientRect().height > 0
     }))
   await capture('version-operations.png')
+  await until('the Consume card to be visible', () =>
+    page.$$eval('.pf-v6-c-card', (cards) => {
+      const card = cards.find((candidate) => candidate.innerText.includes('Consume this version'))
+      if (!card) return false
+      card.scrollIntoView({ block: 'center' })
+      return card.getBoundingClientRect().height > 0
+    }))
+  await capture('version-consume.png')
 
   await clickByText('button', 'Revoke')
   await waitForText('Revoke base-images v1')
