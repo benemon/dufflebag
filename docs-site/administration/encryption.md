@@ -29,6 +29,8 @@ The key service is a startup dependency. If it is unreachable at boot, the
 process refuses to start and remains sealed. Running replicas continue serving
 during a key-service outage.
 
+![Dufflebag Encryption screen showing the keyring purposes and KEK versions](/screenshots/encryption.png)
+
 ## Health
 
 An encrypted instance heartbeats the key service about every five minutes by

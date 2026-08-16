@@ -363,8 +363,9 @@ test-smoke: $(if $(DUFFLEBAG_BIN),,build-ui) ## Drive the real console in a real
 docs-shots: $(if $(DUFFLEBAG_BIN),,build-ui) ## Regenerate console screenshots against seeded data
 	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
 	$(resolve-server-bin); \
+	docker build -f Containerfile.scanner --target stub -t $(OSV_STUB_IMAGE) .; \
 	cd web && { [ -d node_modules ] || npm ci; } && \
-	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" \
+	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" OSV_STUB_IMAGE="$(OSV_STUB_IMAGE)" \
 		node tests/shots/docs-shots.mjs
 
 .PHONY: test-kind

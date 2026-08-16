@@ -4,6 +4,8 @@ Webhooks send project registry changes to your own HTTP endpoint. They are
 operational configuration. A project `maintainer` can create, verify, update,
 or delete them and inspect their delivery history.
 
+![Dufflebag Webhooks screen showing an active webhook](/screenshots/webhooks.png)
+
 ## Create and activate a webhook
 
 Prerequisites: The `maintainer` role on the project and an HTTP or HTTPS

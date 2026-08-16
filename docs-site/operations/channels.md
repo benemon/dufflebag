@@ -18,6 +18,8 @@ A bucket starts with the managed `latest` channel. Dufflebag reassigns it
 when a version completes. Requests to delete or assign `latest` are refused,
 matching HCP Packer.
 
+![Dufflebag channels tab showing the managed latest and a restricted channel](/screenshots/channels.png)
+
 Prerequisites: The `publisher` role and a bucket; use `maintainer` when the
 channel is restricted. Assigning a channel also requires a complete, active
 version.
