@@ -124,13 +124,13 @@ project is it pointed at?"*
 
 | Tool | Purpose | What it returns |
 | --- | --- | --- |
-| `list_buckets` | A project's buckets | Buckets with latest version and platforms |
+| `list_buckets` | A project's buckets | Compact rows: name, platforms, the latest version's identity and revocation flag, and ancestry freshness — build detail stays with `list_versions` |
 | `list_versions` | A bucket's versions, newest first | Versions with builds, artifacts and revocation state |
 | `list_channels` | A bucket's channels | Channels with their assigned versions |
 | `resolve_channel` | Resolve a channel before consuming | The assigned version, its fingerprint, and whether it is safe to consume |
 | `version_diff` | What changed between two versions | Builds added, removed and changed, and each side's revocation state |
 | `check_ancestry` | Parent/child lineage freshness | Each relation's status, including what the parent channel now serves when the child is out of date |
-| `find_artifact` | Provenance in reverse: which version produced an artifact | Matching bucket, version and build for an image digest or machine image id, found by enumerating the project's buckets |
+| `find_artifact` | Provenance in reverse: which version produced an artifact | Matching bucket, version and build for an image digest or machine image id, served by the registry's search endpoint; against registries that predate it the tool enumerates the project's buckets and says so |
 
 Example prompt: *"Which version does the release channel of demo-ubuntu
 serve, is it safe to consume, and what changed since the version before it?"*
@@ -139,7 +139,7 @@ serve, is it safe to consume, and what changed since the version before it?"*
 
 | Tool | Purpose | What it returns |
 | --- | --- | --- |
-| `vulnerability_summary` | Headline scanner counts for a bucket | Totals by criticality, per channel and per package |
+| `vulnerability_summary` | Headline scanner counts for a bucket | Totals by criticality, then one aggregated row per package sorted worst-first, capped with an explicit omission count pointing at `list_vulnerabilities` |
 | `list_vulnerabilities` | Individual findings, filtered | Identifier, criticality, impacted packages and channels, and the fixed version where one exists |
 
 Example prompt: *"List the critical findings on demo-ubuntu that have a fix
