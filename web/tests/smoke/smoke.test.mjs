@@ -1808,9 +1808,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       'exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'dufflebag',
       '-c',
       `INSERT INTO channel_assignments (` +
-        `organization_id, project_id, id, channel_id, version_id, author_id, assigned_at` +
+        `organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at` +
         `) SELECT organization_id, project_id, '00000000000000000000000000', ` +
-        `channel_id, version_id, '', assigned_at - INTERVAL '1 microsecond' ` +
+        `bucket_id, channel_id, version_id, '', assigned_at - INTERVAL '1 microsecond' ` +
         `FROM channel_assignments WHERE channel_id = '${productionChannel.id}' ` +
         'ORDER BY assigned_at DESC, id DESC LIMIT 1',
     ])
