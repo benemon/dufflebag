@@ -70,9 +70,10 @@ export default defineConfig({
   ignoreDeadLinks: false,
   themeConfig: {
     nav: [
-      { text: 'Quick Start', link: '/quick-start/installation' },
+      { text: 'Overview', link: '/' },
       { text: 'API Reference', link: '/platform-api.html', target: '_self' },
       { text: 'Compatibility', link: '/reference/compatibility' },
+      { text: 'GitHub', link: 'https://github.com/benemon/dufflebag' },
     ],
     sidebar: {
       '/quick-start/': sidebar,
