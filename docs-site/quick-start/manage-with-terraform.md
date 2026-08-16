@@ -27,6 +27,26 @@ this call. Dufflebag serves the provider's request without additional
 configuration.
 :::
 
+## Provider support
+
+What dufflebag serves from `terraform-provider-hcp` (0.84.0 or newer; the
+end-to-end suite runs 0.112.0):
+
+| Name | Kind | Supported | Notes |
+|---|---|---|---|
+| `hcp_packer_bucket` | Resource | Yes | Destroy tolerates an already-deleted bucket |
+| `hcp_packer_channel` | Resource | Yes | Can adopt the managed `latest`; omit `restricted` on a block managing it |
+| `hcp_packer_channel_assignment` | Resource | Yes | Destroy clears the assignment |
+| `hcp_packer_version` | Data source | Yes | Refuses a revoked version |
+| `hcp_packer_artifact` | Data source | Yes | Resolves by platform and region |
+| `hcp_packer_bucket_names` | Data source | Yes | Lists the project's buckets |
+| `hcp_packer_run_task` | Resource / data source | No | An inbound-webhook feature of HCP Terraform, outside dufflebag's surface |
+| `hcp_packer_bucket_iam_binding` / `_iam_policy` | Resource | No | Bucket IAM is not served |
+| `hcp_packer_image` / `hcp_packer_iteration` | Data source | No | Deprecated upstream; removed from the provider before the supported version floor |
+
+The [compatibility reference](../reference/compatibility.md) records the
+operations behind this table and the client-version floors.
+
 ## Look up an image
 
 Resolve the managed `latest` channel to the current version, then its
@@ -72,22 +92,12 @@ ready-to-paste for any resolvable version — see
 
 ## Manage the registry declaratively
 
-- **`hcp_packer_bucket`** creates and manages a bucket. Destroying the
-  resource tolerates an already-deleted bucket and fails on any other error.
-- **`hcp_packer_channel`** manages user channels. It can also manage the
-  managed `latest` channel: `CreateBucket` creates `latest`, so the provider
-  receives an already-exists response and adopts the existing channel. Omit
-  the `restricted` argument from a channel block that manages `latest` —
-  setting it makes the provider try to update a managed channel, and
-  dufflebag refuses the update.
-- **`hcp_packer_channel_assignment`** records a promotion by assigning a
-  version fingerprint to a channel. Destroying the resource clears the
-  assignment.
-
-::: warning
-`hcp_packer_run_task`, an inbound-webhook feature of HCP Terraform, is not
-supported. Bucket IAM bindings are also not supported.
-:::
+The three resources manage buckets, channels and promotion. One behaviour is
+worth knowing before writing a channel block: `CreateBucket` creates the
+managed `latest` channel, so an `hcp_packer_channel` block naming `latest`
+receives an already-exists response and adopts the existing channel — omit
+the `restricted` argument from that block, since setting it makes the
+provider try to update a managed channel, and dufflebag refuses the update.
 
 ### A working example
 
