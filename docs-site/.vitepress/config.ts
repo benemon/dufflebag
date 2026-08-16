@@ -70,15 +70,15 @@ export default defineConfig({
   ignoreDeadLinks: false,
   themeConfig: {
     nav: [
-      { text: 'Guides', link: '/getting-started/installation' },
+      { text: 'Quick Start', link: '/quick-start/installation' },
       { text: 'API Reference', link: '/platform-api.html', target: '_self' },
       { text: 'Compatibility', link: '/reference/compatibility' },
     ],
     sidebar: {
-      '/getting-started/': sidebar,
+      '/quick-start/': sidebar,
+      '/components/': sidebar,
       '/administration/': sidebar,
-      '/using/': sidebar,
-      '/deployment/': sidebar,
+      '/operations/': sidebar,
       '/reference/': sidebar,
     },
   },
