@@ -500,8 +500,8 @@ ORDER BY versions.id;
 
 -- name: CreatePrincipal :one
 INSERT INTO principals (
-    id, name, client_id, organization_id, project_id, role, created_at, integrity_mac
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    id, name, client_id, organization_id, project_id, bucket_id, role, created_at, integrity_mac
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT DO NOTHING
 RETURNING id;
 

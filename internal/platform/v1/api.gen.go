@@ -1026,6 +1026,8 @@ type Pin struct {
 
 // Principal defines model for Principal.
 type Principal struct {
+	// BucketId The bound bucket's ULID. Omitted for project-or-wider scope.
+	BucketId  *string   `json:"bucket_id,omitempty"`
 	ClientId  string    `json:"client_id"`
 	CreatedAt time.Time `json:"created_at"`
 	Id        string    `json:"id"`
@@ -1130,6 +1132,7 @@ type SecretMetadata struct {
 
 // Self defines model for Self.
 type Self struct {
+	BucketId       *string             `json:"bucket_id,omitempty"`
 	Name           string              `json:"name"`
 	OrganizationId *openapi_types.UUID `json:"organization_id,omitempty"`
 	PrincipalId    string              `json:"principal_id"`
@@ -1310,7 +1313,10 @@ type ListPrincipalsParams struct {
 
 // CreatePrincipalJSONBody defines parameters for CreatePrincipal.
 type CreatePrincipalJSONBody struct {
-	Name string `json:"name"`
+	// BucketId The ULID of an existing bucket in the named project. Omit
+	// for a project-or-wider principal.
+	BucketId *string `json:"bucket_id,omitempty"`
+	Name     string  `json:"name"`
 
 	// OrganizationId Omit only for a platform-scoped root principal. Every other
 	// role must name an organization.

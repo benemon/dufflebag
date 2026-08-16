@@ -99,6 +99,7 @@ func TestGetSelfReturnsServerResolvedBinding(t *testing.T) {
 		scope: identity.Scope{
 			OrganizationID: uuid.MustParse(testOrgID),
 			ProjectID:      uuid.MustParse(testProjID),
+			BucketID:       testBucketID,
 		},
 	})
 	response := call(t, handler, http.MethodGet, "/api/v1/self", nil, testToken)
@@ -115,6 +116,9 @@ func TestGetSelfReturnsServerResolvedBinding(t *testing.T) {
 	if body.OrganizationId == nil || body.OrganizationId.String() != testOrgID ||
 		body.ProjectId == nil || body.ProjectId.String() != testProjID {
 		t.Fatalf("self binding = %#v", body)
+	}
+	if body.BucketId == nil || *body.BucketId != testBucketID {
+		t.Fatalf("self bucket_id = %v, want %s", body.BucketId, testBucketID)
 	}
 }
 

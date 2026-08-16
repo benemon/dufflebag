@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/identity"
+	"github.com/benemon/dufflebag/internal/domain/registry"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
 	"github.com/google/uuid"
 )
@@ -240,6 +241,87 @@ func TestPrincipalRepositoryRoundTripsProjectScopeAndBothSecrets(t *testing.T) {
 	}
 	if !firstOK || !secondOK {
 		t.Fatal("both rotated secrets must authenticate after persistence")
+	}
+}
+
+func TestPrincipalRepositoryRoundTripsBucketScopeAndRestrictsBucketDeletion(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	tenant := store.ParseTenant(orgA, projectA)
+	bucket, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "principal-bound", Labels: map[string]string{}, CreatedAt: at,
+	})
+	if err != nil {
+		t.Fatalf("CreateBucket: %v", err)
+	}
+	principal, err := identity.NewPrincipal(
+		"principal-bucket", "bucket automation", "client-bucket",
+		identity.Scope{
+			OrganizationID: uuid.MustParse(orgA),
+			ProjectID:      uuid.MustParse(projectA),
+			BucketID:       bucket.ID.String(),
+		},
+		identity.RoleBuilder, at,
+	)
+	if err != nil {
+		t.Fatalf("NewPrincipal: %v", err)
+	}
+	if err := repository.CreatePrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreatePrincipal: %v", err)
+	}
+
+	got, err := repository.GetPrincipalByClientID(ctx, principal.ClientID)
+	if err != nil {
+		t.Fatalf("GetPrincipalByClientID: %v", err)
+	}
+	if got.Scope != principal.Scope {
+		t.Fatalf("principal scope = %#v, want %#v", got.Scope, principal.Scope)
+	}
+
+	var deleteAction string
+	if err := db.QueryRowContext(ctx, `
+		SELECT confdeltype::text
+		FROM pg_constraint
+		WHERE conname = 'principals_bucket_scope_fkey'
+	`).Scan(&deleteAction); err != nil {
+		t.Fatalf("read bucket scope foreign key: %v", err)
+	}
+	if deleteAction != "r" {
+		t.Fatalf("bucket scope foreign key delete action = %q, want RESTRICT", deleteAction)
+	}
+	if err := repository.DeleteBucket(ctx, tenant, bucket.Name); err == nil {
+		t.Fatal("DeleteBucket deleted a bucket with a bound principal")
+	}
+	if err := repository.DeletePrincipal(ctx, principal.ID); err != nil {
+		t.Fatalf("DeletePrincipal: %v", err)
+	}
+	if err := repository.DeleteBucket(ctx, tenant, bucket.Name); err != nil {
+		t.Fatalf("DeleteBucket after deleting principal: %v", err)
+	}
+}
+
+func TestPrincipalRepositoryRefusesMissingBucket(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	principal, err := identity.NewPrincipal(
+		"principal-missing-bucket", "missing bucket", "client-missing-bucket",
+		identity.Scope{
+			OrganizationID: uuid.MustParse(orgA),
+			ProjectID:      uuid.MustParse(projectA),
+			BucketID:       registry.NewID(time.Now().UTC()).String(),
+		},
+		identity.RoleBuilder, time.Now().UTC(),
+	)
+	if err != nil {
+		t.Fatalf("NewPrincipal: %v", err)
+	}
+	if err := store.NewRepository(db).CreatePrincipal(context.Background(), principal); !errors.Is(err, identity.ErrNotFound) {
+		t.Fatalf("CreatePrincipal missing bucket = %v, want ErrNotFound", err)
 	}
 }
 

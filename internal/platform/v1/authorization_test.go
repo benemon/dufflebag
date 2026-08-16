@@ -1051,6 +1051,20 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 			operation: "principal.create", outcome: "failure", reason: "already_exists", actor: testPrincID,
 		},
 		{
+			name:   "a principal naming a missing bucket is recorded",
+			roles:  root,
+			method: http.MethodPost,
+			path:   "/api/v1/principals",
+			body: map[string]any{
+				"name": "ci", "role": "builder",
+				"organization_id": targetOrg,
+				"project_id":      "11111111-1111-1111-1111-111111111112",
+				"bucket_id":       testBucketID,
+			},
+			fault:     func(r *fakeTenancyRepository) { r.createPrincipalErr = identity.ErrNotFound },
+			operation: "principal.create", outcome: "refused", reason: "scope_not_found", actor: testPrincID,
+		},
+		{
 			name:      "storage failing to create is recorded",
 			roles:     root,
 			method:    http.MethodPost,
