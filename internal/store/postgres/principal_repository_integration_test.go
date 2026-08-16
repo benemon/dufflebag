@@ -16,6 +16,174 @@ import (
 	"github.com/google/uuid"
 )
 
+func principalCacheTestPrincipal(
+	t *testing.T, id, name, clientID, secretID string, at time.Time,
+) *identity.Principal {
+	t.Helper()
+	principal, err := identity.NewPrincipal(
+		id, name, clientID,
+		identity.Scope{OrganizationID: uuid.MustParse(orgA), ProjectID: uuid.MustParse(projectA)},
+		identity.RoleBuilder, at,
+	)
+	if err != nil {
+		t.Fatalf("NewPrincipal: %v", err)
+	}
+	if secretID != "" {
+		if _, err := principal.IssueSecret(secretID, nil, at); err != nil {
+			t.Fatalf("IssueSecret: %v", err)
+		}
+	}
+	return principal
+}
+
+func TestPrincipalCacheHonoursTTLAfterDirectSQLRevocation(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	now := at.Add(time.Hour)
+	store.SetPrincipalCacheClockForTest(repository, func() time.Time { return now })
+	principal := principalCacheTestPrincipal(
+		t, "principal-cache-ttl", "cached", "client-cache-ttl", "secret-cache-ttl", at,
+	)
+	if err := repository.CreatePrincipal(ctx, principal); err != nil {
+		t.Fatalf("CreatePrincipal: %v", err)
+	}
+
+	cached, err := repository.GetPrincipalByID(ctx, principal.ID)
+	if err != nil {
+		t.Fatalf("prime cache: %v", err)
+	}
+	if _, err := db.ExecContext(ctx,
+		"DELETE FROM principal_secrets WHERE principal_id = $1 AND id = $2",
+		principal.ID, "secret-cache-ttl",
+	); err != nil {
+		t.Fatalf("direct SQL revoke: %v", err)
+	}
+
+	withinTTL, err := repository.GetPrincipalByID(ctx, principal.ID)
+	if err != nil {
+		t.Fatalf("lookup within TTL: %v", err)
+	}
+	if withinTTL != cached || !withinTTL.HasActiveSecret("secret-cache-ttl", now) {
+		t.Fatal("lookup within TTL did not return the cached active secret")
+	}
+
+	now = now.Add(61 * time.Second)
+	reloaded, err := repository.GetPrincipalByID(ctx, principal.ID)
+	if err != nil {
+		t.Fatalf("lookup past TTL: %v", err)
+	}
+	if reloaded == cached || reloaded.HasActiveSecret("secret-cache-ttl", now) {
+		t.Fatal("lookup past TTL did not reload the direct SQL revocation")
+	}
+}
+
+func TestPrincipalCacheRepositoryMutationsEvict(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	ctx := context.Background()
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 8, 16, 12, 0, 0, 0, time.UTC)
+	now := at.Add(time.Hour)
+	store.SetPrincipalCacheClockForTest(repository, func() time.Time { return now })
+
+	t.Run("IssuePrincipalSecret", func(t *testing.T) {
+		principal := principalCacheTestPrincipal(
+			t, "principal-cache-issue", "issue", "client-cache-issue", "secret-issue-first", at,
+		)
+		if err := repository.CreatePrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreatePrincipal: %v", err)
+		}
+		if _, err := repository.GetPrincipalByID(ctx, principal.ID); err != nil {
+			t.Fatalf("prime cache: %v", err)
+		}
+		if _, _, err := repository.IssuePrincipalSecret(
+			ctx, principal.ID, "secret-issue-second", nil, at.Add(time.Minute),
+		); err != nil {
+			t.Fatalf("IssuePrincipalSecret: %v", err)
+		}
+		got, err := repository.GetPrincipalByID(ctx, principal.ID)
+		if err != nil {
+			t.Fatalf("lookup after issue: %v", err)
+		}
+		if !got.HasActiveSecret("secret-issue-first", now) || !got.HasActiveSecret("secret-issue-second", now) {
+			t.Fatal("lookup after issue did not reload both active secrets")
+		}
+	})
+
+	t.Run("RevokePrincipalSecret", func(t *testing.T) {
+		principal := principalCacheTestPrincipal(
+			t, "principal-cache-revoke", "revoke", "client-cache-revoke", "secret-revoke", at,
+		)
+		if err := repository.CreatePrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreatePrincipal: %v", err)
+		}
+		if _, err := repository.GetPrincipalByID(ctx, principal.ID); err != nil {
+			t.Fatalf("prime cache: %v", err)
+		}
+		if err := repository.RevokePrincipalSecret(ctx, principal.ID, "secret-revoke", now); err != nil {
+			t.Fatalf("RevokePrincipalSecret: %v", err)
+		}
+		got, err := repository.GetPrincipalByID(ctx, principal.ID)
+		if err != nil {
+			t.Fatalf("lookup after revoke: %v", err)
+		}
+		if got.HasActiveSecret("secret-revoke", now) {
+			t.Fatal("lookup after revoke retained the revoked secret")
+		}
+	})
+
+	t.Run("DeletePrincipal", func(t *testing.T) {
+		principal := principalCacheTestPrincipal(
+			t, "principal-cache-delete", "delete", "client-cache-delete", "secret-delete", at,
+		)
+		if err := repository.CreatePrincipal(ctx, principal); err != nil {
+			t.Fatalf("CreatePrincipal: %v", err)
+		}
+		if _, err := repository.GetPrincipalByID(ctx, principal.ID); err != nil {
+			t.Fatalf("prime cache: %v", err)
+		}
+		if err := repository.DeletePrincipal(ctx, principal.ID); err != nil {
+			t.Fatalf("DeletePrincipal: %v", err)
+		}
+		if _, err := repository.GetPrincipalByID(ctx, principal.ID); !errors.Is(err, identity.ErrNotFound) {
+			t.Fatalf("lookup after delete = %v, want ErrNotFound", err)
+		}
+	})
+
+	t.Run("CreatePrincipal", func(t *testing.T) {
+		old := principalCacheTestPrincipal(
+			t, "principal-cache-create", "old", "client-cache-create-old", "secret-create-old", at,
+		)
+		if err := repository.CreatePrincipal(ctx, old); err != nil {
+			t.Fatalf("create old principal: %v", err)
+		}
+		if _, err := repository.GetPrincipalByID(ctx, old.ID); err != nil {
+			t.Fatalf("prime cache: %v", err)
+		}
+		if _, err := db.ExecContext(ctx, "DELETE FROM principals WHERE id = $1", old.ID); err != nil {
+			t.Fatalf("direct SQL delete: %v", err)
+		}
+		replacement := principalCacheTestPrincipal(
+			t, old.ID, "replacement", "client-cache-create-new", "secret-create-new", at.Add(time.Minute),
+		)
+		if err := repository.CreatePrincipal(ctx, replacement); err != nil {
+			t.Fatalf("create replacement principal: %v", err)
+		}
+		got, err := repository.GetPrincipalByID(ctx, replacement.ID)
+		if err != nil {
+			t.Fatalf("lookup after create: %v", err)
+		}
+		if got.Name != replacement.Name || !got.HasActiveSecret("secret-create-new", now) || got.HasActiveSecret("secret-create-old", now) {
+			t.Fatalf("lookup after create returned stale principal %#v", got)
+		}
+	})
+}
+
 func TestPrincipalRepositoryRoundTripsProjectScopeAndBothSecrets(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()

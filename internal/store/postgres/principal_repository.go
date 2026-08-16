@@ -227,6 +227,7 @@ func (r *Repository) createPrincipalTx(ctx context.Context, q *postgresdb.Querie
 			return fmt.Errorf("create principal secret: %w", err)
 		}
 	}
+	r.evictPrincipal(principal.ID)
 	return nil
 }
 
@@ -241,15 +242,17 @@ func (r *Repository) createPrincipalTx(ctx context.Context, q *postgresdb.Querie
 // lowering a role takes effect on the next request instead of at token expiry
 // (ADR-0019).
 func (r *Repository) GetPrincipalByID(ctx context.Context, id string) (*identity.Principal, error) {
-	q := postgresdb.New(r.db)
-	row, err := q.GetPrincipalByID(ctx, id)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, fmt.Errorf("get principal: %w", identity.ErrNotFound)
-	}
-	if err != nil {
-		return nil, fmt.Errorf("get principal: %w", err)
-	}
-	return r.restorePrincipal(ctx, q, row)
+	return r.cachedPrincipalByID(ctx, id, func(ctx context.Context, id string) (*identity.Principal, error) {
+		q := postgresdb.New(r.db)
+		row, err := q.GetPrincipalByID(ctx, id)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("get principal: %w", identity.ErrNotFound)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("get principal: %w", err)
+		}
+		return r.restorePrincipal(ctx, q, row)
+	})
 }
 
 // ListPrincipals loads the principals bound to EXACTLY the selected scope —
@@ -381,6 +384,7 @@ func (r *Repository) IssuePrincipalSecret(
 	if err := tx.Commit(); err != nil {
 		return "", identity.Secret{}, fmt.Errorf("commit issue principal secret: %w", err)
 	}
+	r.evictPrincipal(principalID)
 	return plaintext, issued, nil
 }
 
@@ -435,6 +439,7 @@ func (r *Repository) RevokePrincipalSecret(
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit revoke principal secret: %w", err)
 	}
+	r.evictPrincipal(principalID)
 	return nil
 }
 
@@ -485,5 +490,6 @@ func (r *Repository) DeletePrincipal(ctx context.Context, principalID string) er
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete principal: %w", err)
 	}
+	r.evictPrincipal(principalID)
 	return nil
 }

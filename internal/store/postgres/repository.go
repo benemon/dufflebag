@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
@@ -141,10 +142,18 @@ type Repository struct {
 	// once at startup, after the mode marker admits the configuration; nil
 	// means every payload is stored and read as plaintext.
 	ring *keyring.Keyring
+
+	principalCacheMu sync.Mutex
+	principalCache   map[string]principalCacheEntry
+	now              func() time.Time
 }
 
 func NewRepository(db *sql.DB) *Repository {
-	return &Repository{db: db}
+	return &Repository{
+		db:             db,
+		principalCache: make(map[string]principalCacheEntry),
+		now:            time.Now,
+	}
 }
 
 // SetKeyring arms payload encryption and row integrity. It is called after
@@ -161,7 +170,12 @@ func payloadAAD(tenant Tenant, kind, id string) []byte {
 // NewRepositoryWithObjectStore enables the object-only SBOM store configured
 // by the deployment. A repository without one refuses SBOM transfers.
 func NewRepositoryWithObjectStore(db *sql.DB, objects *objectstore.Store) *Repository {
-	return &Repository{db: db, objects: objects}
+	return &Repository{
+		db:             db,
+		objects:        objects,
+		principalCache: make(map[string]principalCacheEntry),
+		now:            time.Now,
+	}
 }
 
 func (r *Repository) CreateBucket(ctx context.Context, tenant Tenant, bucket Bucket) (*Bucket, error) {
