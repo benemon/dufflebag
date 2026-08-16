@@ -786,6 +786,9 @@ func (s *server) CreatePrincipal(
 	if request.Body.ProjectId != nil {
 		requested.ProjectID = *request.Body.ProjectId
 	}
+	if request.Body.BucketId != nil {
+		requested.BucketID = *request.Body.BucketId
+	}
 	// Authorized against the scope being created IN, so creating a
 	// platform-scoped principal requires root rather than skipping the tenancy
 	// check for want of a tenancy (review findings 9 and 10).
@@ -825,7 +828,12 @@ func (s *server) CreatePrincipal(
 		audit.failed("construct_failed")
 		return nil, err
 	}
-	if err := s.repository.CreatePrincipal(ctx, principal); errors.Is(err, identity.ErrConflict) {
+	if err := s.repository.CreatePrincipal(ctx, principal); errors.Is(err, identity.ErrNotFound) {
+		audit.refused("scope_not_found")
+		return CreatePrincipal404JSONResponse{
+			NotFoundJSONResponse: NotFoundJSONResponse{Message: "not found"},
+		}, nil
+	} else if errors.Is(err, identity.ErrConflict) {
 		audit.failed("already_exists")
 		return CreatePrincipal409JSONResponse{
 			ConflictJSONResponse: ConflictJSONResponse{Message: "principal already exists"},
@@ -1084,6 +1092,10 @@ func renderPrincipal(principal *identity.Principal) Principal {
 	if principal.Scope.ProjectID != uuid.Nil {
 		projectID := principal.Scope.ProjectID
 		response.ProjectId = &projectID
+	}
+	if principal.Scope.BucketID != "" {
+		bucketID := principal.Scope.BucketID
+		response.BucketId = &bucketID
 	}
 	for _, secret := range secrets {
 		response.Secrets = append(response.Secrets, SecretMetadata{
@@ -1382,6 +1394,10 @@ func (s *server) GetSelf(
 	if caller.Scope.ProjectID != uuid.Nil {
 		projectID := caller.Scope.ProjectID
 		response.ProjectId = &projectID
+	}
+	if caller.Scope.BucketID != "" {
+		bucketID := caller.Scope.BucketID
+		response.BucketId = &bucketID
 	}
 	return response, nil
 }

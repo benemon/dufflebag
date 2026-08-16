@@ -80,7 +80,12 @@ func assignmentMACMessage(tenant Tenant, id, channelID, versionID, authorID stri
 	)
 }
 
-func principalMACMessage(id, clientID string, organizationID, projectID uuid.NullUUID, role string) []byte {
+func principalMACMessage(
+	id, clientID string,
+	organizationID, projectID uuid.NullUUID,
+	bucketID sql.NullString,
+	role string,
+) []byte {
 	organization, project := "", ""
 	if organizationID.Valid {
 		organization = organizationID.UUID.String()
@@ -88,7 +93,13 @@ func principalMACMessage(id, clientID string, organizationID, projectID uuid.Nul
 	if projectID.Valid {
 		project = projectID.UUID.String()
 	}
-	return macMessage("principal", id, clientID, organization, project, role)
+	// Keep the established message byte-for-byte for principals without a
+	// bucket. Existing encrypted rows were sealed before bucket binding existed.
+	parts := []string{"principal", id, clientID, organization, project, role}
+	if bucketID.Valid {
+		parts = append(parts, bucketID.String)
+	}
+	return macMessage(parts...)
 }
 
 func principalSecretMACMessage(id, principalID, encodedHash string, expiresAt sql.NullTime) []byte {

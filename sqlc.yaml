@@ -21,6 +21,7 @@ sql:
       - internal/store/postgres/migrations/000024_bagdrop_associations.up.sql
       - internal/store/postgres/migrations/000025_bagdrop_reconcile_status.up.sql
       - internal/store/postgres/migrations/000026_webhooks.up.sql
+      - internal/store/postgres/migrations/000028_principal_bucket_scope.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

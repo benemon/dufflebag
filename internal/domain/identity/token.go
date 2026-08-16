@@ -49,6 +49,7 @@ type Claims struct {
 
 	OrganizationID string `json:"organization_id,omitempty"`
 	ProjectID      string `json:"project_id,omitempty"`
+	BucketID       string `json:"bucket_id,omitempty"`
 	// SecretID is the credential this token was minted from. Not a secret
 	// itself — an opaque identifier — and it is what makes revocation take
 	// effect immediately rather than at expiry.
@@ -153,6 +154,9 @@ func (i *BasicAuthIssuer) sign(
 	if principal.Scope.ProjectID != uuid.Nil {
 		claims.ProjectID = principal.Scope.ProjectID.String()
 	}
+	if principal.Scope.BucketID != "" {
+		claims.BucketID = principal.Scope.BucketID
+	}
 
 	keys := i.keys()
 	if len(keys) == 0 {
@@ -244,6 +248,10 @@ func (i *BasicAuthIssuer) verify(signed string, allowExpired bool) (Verified, er
 	if organizationID == uuid.Nil && projectID != uuid.Nil {
 		return Verified{}, ErrInvalid
 	}
+	// A bucket without a project is malformed rather than narrow.
+	if claims.BucketID != "" && projectID == uuid.Nil {
+		return Verified{}, ErrInvalid
+	}
 	// An absent sid is refused rather than tolerated. A token that cannot say
 	// which credential minted it cannot be revoked by revoking that credential,
 	// so accepting one would leave exactly the hole this closes — and the only
@@ -254,10 +262,14 @@ func (i *BasicAuthIssuer) verify(signed string, allowExpired bool) (Verified, er
 	}
 	return Verified{
 		PrincipalID: claims.Subject,
-		Scope:       Scope{OrganizationID: organizationID, ProjectID: projectID},
-		SecretID:    claims.SecretID,
-		AuthTime:    claims.AuthTime.Time,
-		ExpiresAt:   claims.ExpiresAt.Time,
+		Scope: Scope{
+			OrganizationID: organizationID,
+			ProjectID:      projectID,
+			BucketID:       claims.BucketID,
+		},
+		SecretID:  claims.SecretID,
+		AuthTime:  claims.AuthTime.Time,
+		ExpiresAt: claims.ExpiresAt.Time,
 	}, nil
 }
 

@@ -323,21 +323,22 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 
 const createPrincipal = `-- name: CreatePrincipal :one
 INSERT INTO principals (
-    id, name, client_id, organization_id, project_id, role, created_at, integrity_mac
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    id, name, client_id, organization_id, project_id, bucket_id, role, created_at, integrity_mac
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT DO NOTHING
 RETURNING id
 `
 
 type CreatePrincipalParams struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	ClientID       string        `json:"client_id"`
-	OrganizationID uuid.NullUUID `json:"organization_id"`
-	ProjectID      uuid.NullUUID `json:"project_id"`
-	Role           string        `json:"role"`
-	CreatedAt      time.Time     `json:"created_at"`
-	IntegrityMac   []byte        `json:"integrity_mac"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	ClientID       string         `json:"client_id"`
+	OrganizationID uuid.NullUUID  `json:"organization_id"`
+	ProjectID      uuid.NullUUID  `json:"project_id"`
+	BucketID       sql.NullString `json:"bucket_id"`
+	Role           string         `json:"role"`
+	CreatedAt      time.Time      `json:"created_at"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
 }
 
 func (q *Queries) CreatePrincipal(ctx context.Context, arg CreatePrincipalParams) (string, error) {
@@ -347,6 +348,7 @@ func (q *Queries) CreatePrincipal(ctx context.Context, arg CreatePrincipalParams
 		arg.ClientID,
 		arg.OrganizationID,
 		arg.ProjectID,
+		arg.BucketID,
 		arg.Role,
 		arg.CreatedAt,
 		arg.IntegrityMac,
@@ -1050,7 +1052,7 @@ func (q *Queries) GetPin(ctx context.Context, bucketName string) (GetPinRow, err
 }
 
 const getPrincipalByClientID = `-- name: GetPrincipalByClientID :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE client_id = $1
 `
@@ -1067,12 +1069,13 @@ func (q *Queries) GetPrincipalByClientID(ctx context.Context, clientID string) (
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
 
 const getPrincipalByID = `-- name: GetPrincipalByID :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE id = $1
 `
@@ -1089,12 +1092,13 @@ func (q *Queries) GetPrincipalByID(ctx context.Context, id string) (Principal, e
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
 
 const getPrincipalByIDForUpdate = `-- name: GetPrincipalByIDForUpdate :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE id = $1
 FOR UPDATE
@@ -1112,6 +1116,7 @@ func (q *Queries) GetPrincipalByIDForUpdate(ctx context.Context, id string) (Pri
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -1757,7 +1762,7 @@ func (q *Queries) ListPins(ctx context.Context) ([]ListPinsRow, error) {
 
 const listPlatformPrincipals = `-- name: ListPlatformPrincipals :many
 
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1785,6 +1790,7 @@ func (q *Queries) ListPlatformPrincipals(ctx context.Context) ([]Principal, erro
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1838,7 +1844,7 @@ func (q *Queries) ListPrincipalSecrets(ctx context.Context, principalID string) 
 }
 
 const listPrincipalsByOrganization = `-- name: ListPrincipalsByOrganization :many
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id = $1 AND project_id IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1862,6 +1868,7 @@ func (q *Queries) ListPrincipalsByOrganization(ctx context.Context, organization
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1877,7 +1884,7 @@ func (q *Queries) ListPrincipalsByOrganization(ctx context.Context, organization
 }
 
 const listPrincipalsByProject = `-- name: ListPrincipalsByProject :many
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id = $1 AND project_id = $2
 ORDER BY created_at DESC, id DESC
@@ -1906,6 +1913,7 @@ func (q *Queries) ListPrincipalsByProject(ctx context.Context, arg ListPrincipal
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}

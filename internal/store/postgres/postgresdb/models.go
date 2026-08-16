@@ -144,14 +144,15 @@ type Pin struct {
 }
 
 type Principal struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	ClientID       string        `json:"client_id"`
-	OrganizationID uuid.NullUUID `json:"organization_id"`
-	ProjectID      uuid.NullUUID `json:"project_id"`
-	CreatedAt      time.Time     `json:"created_at"`
-	Role           string        `json:"role"`
-	IntegrityMac   []byte        `json:"integrity_mac"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	ClientID       string         `json:"client_id"`
+	OrganizationID uuid.NullUUID  `json:"organization_id"`
+	ProjectID      uuid.NullUUID  `json:"project_id"`
+	CreatedAt      time.Time      `json:"created_at"`
+	Role           string         `json:"role"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
+	BucketID       sql.NullString `json:"bucket_id"`
 }
 
 type PrincipalSecret struct {

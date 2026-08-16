@@ -22,6 +22,7 @@ import (
 const (
 	testOrganizationID = "00000000-0000-4000-8000-000000000001"
 	testProjectID      = "00000000-0000-4000-8000-000000000101"
+	testBucketID       = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
 )
 
 func TestTenancyHandlers(t *testing.T) {
@@ -355,6 +356,52 @@ func TestPrincipalLifecycleNeverReturnsIssuedSecretAgain(t *testing.T) {
 		http.StatusNoContent,
 		nil,
 	)
+}
+
+func TestCreatePrincipalWithBucket(t *testing.T) {
+	at := time.Date(2026, 7, 31, 8, 0, 0, 0, time.UTC)
+	repository := &fakeTenancyRepository{}
+	handler := newHandler(
+		repository, &fakeInstanceRepository{},
+		testAuth{}, testRoles{}, testLogger(), func() time.Time { return at },
+	)
+
+	var created Principal
+	requestJSON(
+		t, handler, http.MethodPost, "/api/v1/principals",
+		map[string]any{
+			"name": "bucket pipeline", "role": "builder",
+			"organization_id": testOrganizationID,
+			"project_id":      testProjectID,
+			"bucket_id":       testBucketID,
+		},
+		http.StatusCreated, &created,
+	)
+	if created.BucketId == nil || *created.BucketId != testBucketID {
+		t.Fatalf("created principal bucket_id = %v, want %s", created.BucketId, testBucketID)
+	}
+	if len(repository.principals) != 1 || repository.principals[0].Scope.BucketID != testBucketID {
+		t.Fatalf("stored principal scope = %#v", repository.principals)
+	}
+}
+
+func TestCreatePrincipalWithMissingBucketIsNotFound(t *testing.T) {
+	repository := &fakeTenancyRepository{createPrincipalErr: identity.ErrNotFound}
+	handler := newHandler(
+		repository, &fakeInstanceRepository{},
+		testAuth{}, testRoles{}, testLogger(), func() time.Time { return time.Now().UTC() },
+	)
+	response := requestJSON(
+		t, handler, http.MethodPost, "/api/v1/principals",
+		map[string]any{
+			"name": "missing bucket", "role": "builder",
+			"organization_id": testOrganizationID,
+			"project_id":      testProjectID,
+			"bucket_id":       testBucketID,
+		},
+		http.StatusNotFound, nil,
+	)
+	assertPlatformError(t, response, "not found")
 }
 
 func testLogger() *slog.Logger {
