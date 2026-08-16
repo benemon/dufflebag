@@ -945,15 +945,21 @@ test('stock Packer publishes registry metadata with paired file audit records', 
         ('${hiddenOrganizationID}', '${hiddenProjectID}', '${hiddenChildVersionID}',
          '01J00000000000000000000012', 'hidden-child', 'HCL2', true, 1, now(), now(), '');
       INSERT INTO builds (
-        organization_id, project_id, id, version_id, component_type, status,
+        organization_id, project_id, id, version_id, bucket_id, component_type, status,
         platform, metadata_seen, packer_run_uuid, labels, source_external_identifier,
         parent_version_id, parent_channel_id, metadata, created_at, updated_at
       ) VALUES
         ('${hiddenOrganizationID}', '${hiddenProjectID}', '01J00000000000000000000021',
-         '${hiddenChildVersionID}', 'hidden-child', 'done', 'docker', true, '', '{}', '',
+         '${hiddenChildVersionID}',
+         (SELECT bucket_id FROM versions WHERE organization_id = '${hiddenOrganizationID}'
+            AND project_id = '${hiddenProjectID}' AND id = '${hiddenChildVersionID}'),
+         'hidden-child', 'done', 'docker', true, '', '{}', '',
          '${published.version.id}', NULL, '{}', now(), now()),
         ('${organization.id}', '${project.id}', '01J00000000000000000000022',
-         '${projectedChild.version.id}', 'tenant-isolation-probe', 'done', 'docker', true, '', '{}', '',
+         '${projectedChild.version.id}',
+         (SELECT bucket_id FROM versions WHERE organization_id = '${organization.id}'
+            AND project_id = '${project.id}' AND id = '${projectedChild.version.id}'),
+         'tenant-isolation-probe', 'done', 'docker', true, '', '{}', '',
          '${hiddenParentVersionID}', NULL, '{}', now(), now());`,
   ])
   const parentAncestry = await api(
