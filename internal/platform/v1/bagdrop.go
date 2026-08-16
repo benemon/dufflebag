@@ -17,6 +17,9 @@ import (
 func (s *server) admitBagDrop(
 	ctx context.Context, organizationID, projectID string,
 ) (*identity.Principal, refusal, error) {
+	if caller, ok := callerFrom(ctx); !ok || caller.Scope.BucketID != "" {
+		return nil, refusedTenancy, nil
+	}
 	if _, refused := authorizeTenancy(
 		ctx, identity.RoleReader, organizationID, projectID,
 	); refused != permitted {

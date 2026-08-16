@@ -77,22 +77,29 @@ SELECT CASE
 END AS result;
 
 -- name: ListPins :many
-SELECT bucket_name, pinned_at, pinned_by
+SELECT buckets.name AS bucket_name, pins.pinned_at, pins.pinned_by
 FROM pins
-ORDER BY pinned_at, bucket_name;
+JOIN buckets ON buckets.id = pins.bucket_id
+ORDER BY pins.pinned_at, buckets.name;
 
 -- name: InsertPin :exec
-INSERT INTO pins (organization_id, project_id, bucket_name, pinned_at, pinned_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO pins (organization_id, project_id, bucket_id, pinned_at, pinned_by)
+SELECT sqlc.arg(organization_id), sqlc.arg(project_id), buckets.id,
+       sqlc.arg(pinned_at), sqlc.arg(pinned_by)
+FROM buckets
+WHERE buckets.name = sqlc.arg(bucket_name)
 ON CONFLICT DO NOTHING;
 
 -- name: GetPin :one
-SELECT bucket_name, pinned_at, pinned_by
+SELECT buckets.name AS bucket_name, pins.pinned_at, pins.pinned_by
 FROM pins
-WHERE bucket_name = $1;
+JOIN buckets ON buckets.id = pins.bucket_id
+WHERE buckets.name = $1;
 
 -- name: DeletePin :exec
-DELETE FROM pins WHERE bucket_name = $1;
+DELETE FROM pins
+USING buckets
+WHERE pins.bucket_id = buckets.id AND buckets.name = $1;
 
 -- name: GetBagDropConfig :one
 SELECT *
@@ -375,11 +382,11 @@ WHERE buckets.name = $1 AND versions.fingerprint = $2 AND builds.id = $3;
 
 -- name: CreateBuild :one
 INSERT INTO builds (
-    organization_id, project_id, id, version_id, component_type, status,
+    organization_id, project_id, id, bucket_id, version_id, component_type, status,
     platform, metadata_seen, packer_run_uuid, labels,
     source_external_identifier, parent_version_id, parent_channel_id, created_at, updated_at
 )
-SELECT $1, $2, $3, versions.id, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15
+SELECT $1, $2, $3, versions.bucket_id, versions.id, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15
 FROM versions
 JOIN buckets ON buckets.id = versions.bucket_id
 WHERE buckets.name = $4 AND versions.fingerprint = $5
@@ -389,8 +396,13 @@ RETURNING *;
 
 -- name: CreateArtifact :one
 INSERT INTO artifacts (
-    organization_id, project_id, id, build_id, external_identifier, region, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    organization_id, project_id, id, bucket_id, build_id, external_identifier, region, created_at
+)
+SELECT sqlc.arg(organization_id), sqlc.arg(project_id), sqlc.arg(id),
+       builds.bucket_id, builds.id, sqlc.arg(external_identifier),
+       sqlc.arg(region), sqlc.arg(created_at)
+FROM builds
+WHERE builds.id = sqlc.arg(build_id)
 ON CONFLICT (organization_id, project_id, build_id, external_identifier)
 DO UPDATE SET external_identifier = EXCLUDED.external_identifier
 RETURNING *;
@@ -430,9 +442,9 @@ RETURNING *;
 
 -- name: UpsertSbom :one
 INSERT INTO sboms (
-    organization_id, project_id, id, build_id, name, format, object_key, created_at
+    organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at
 )
-SELECT $1, $2, $3, builds.id, $7, $8, $9, $10
+SELECT $1, $2, $3, builds.bucket_id, builds.id, $7, $8, $9, $10
 FROM builds
 JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id

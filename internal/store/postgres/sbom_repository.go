@@ -37,8 +37,11 @@ func replaceSbomProjection(
 		}
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO sbom_packages (
-				organization_id, project_id, sbom_id, name, version, purl, licenses, component_paths
-			) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+				organization_id, project_id, bucket_id, sbom_id, name, version, purl, licenses, component_paths
+			)
+			SELECT $1, $2, sboms.bucket_id, sboms.id, $4, $5, $6, $7, $8
+			FROM sboms
+			WHERE sboms.id = $3
 		`, tenant.OrganizationID, tenant.ProjectID, sbomID,
 			pkg.Name, pkg.Version, pkg.Purl, licenses, paths); err != nil {
 			return fmt.Errorf("store SBOM package: %w", err)

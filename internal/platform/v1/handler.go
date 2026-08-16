@@ -623,8 +623,10 @@ func (s *server) ListPins(
 		return newRefusal(refused), nil
 	}
 	audit.actor(caller)
+	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
 	pins, err := s.repository.ListPins(
-		ctx, store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+		ctx, tenant,
 	)
 	if err != nil {
 		audit.failed("storage_failed")
@@ -654,9 +656,11 @@ func (s *server) DeletePin(
 		return newRefusal(refused), nil
 	}
 	audit.actor(caller)
+	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
 	if err := s.repository.DeletePin(
 		ctx,
-		store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+		tenant,
 		request.BucketName,
 	); err != nil {
 		audit.failed("storage_failed")
@@ -682,9 +686,11 @@ func (s *server) SetPin(
 		return newRefusal(refused), nil
 	}
 	audit.actor(caller)
+	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
 	pin, err := s.repository.SetPin(
 		ctx,
-		store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String()),
+		tenant,
 		request.BucketName,
 		caller.ID,
 		s.now().UTC(),

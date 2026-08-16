@@ -23,6 +23,7 @@ import (
 type Tenant struct {
 	OrganizationID uuid.UUID
 	ProjectID      uuid.UUID
+	BucketID       string
 
 	// denied records a tenant the caller is not entitled to. It is separate from
 	// malformed so the two reasons stay distinguishable in logs, even though both
@@ -437,8 +438,11 @@ func (r *Repository) DeleteVersion(
 			assignmentID := registry.NewID(at).String()
 			if _, err := tx.ExecContext(ctx, `
 				INSERT INTO channel_assignments (
-					organization_id, project_id, id, channel_id, version_id, author_id, assigned_at, integrity_mac
-				) VALUES ($1, $2, $3, $4, NULL, 'Dufflebag', $5, $6)
+					organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at, integrity_mac
+				)
+				SELECT $1, $2, $3, channels.bucket_id, channels.id, NULL, 'Dufflebag', $5, $6
+				FROM channels
+				WHERE channels.id = $4
 			`, tenant.OrganizationID, tenant.ProjectID, assignmentID, channelID.String(), unassignedAt,
 				r.rowMAC(assignmentMACMessage(tenant, assignmentID, channelID.String(), "", "Dufflebag", unassignedAt))); err != nil {
 				return fmt.Errorf("clear managed latest assignment: %w", err)
@@ -1617,7 +1621,7 @@ func (r *Repository) begin(
 	if tenant.malformed || tenant.denied {
 		return nil, nil, fmt.Errorf("%w: tenant", registry.ErrNotFound)
 	}
-	tx, err := BeginTenant(ctx, r.db, tenant.OrganizationID.String(), tenant.ProjectID.String())
+	tx, err := BeginTenant(ctx, r.db, tenant.OrganizationID.String(), tenant.ProjectID.String(), tenant.BucketID)
 	if err != nil {
 		return nil, nil, err
 	}

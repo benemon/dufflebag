@@ -39,7 +39,7 @@ func newCadenceService(
 // would measure the fixtures rather than the rule.
 func queuedReason(t *testing.T, db *sql.DB, org, project, buildID string) string {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, org, project)
+	tx, err := store.BeginTenant(context.Background(), db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,7 +193,7 @@ func TestScannerCadenceFairness(t *testing.T) {
 
 func enqueuedAt(t *testing.T, db *sql.DB, org, project, buildID string) time.Time {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, org, project)
+	tx, err := store.BeginTenant(context.Background(), db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func enqueuedAt(t *testing.T, db *sql.DB, org, project, buildID string) time.Tim
 
 func countEnqueuedBefore(t *testing.T, db *sql.DB, org, project string, before time.Time) int {
 	t.Helper()
-	tx, err := store.BeginTenant(context.Background(), db, org, project)
+	tx, err := store.BeginTenant(context.Background(), db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}

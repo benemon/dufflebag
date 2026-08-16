@@ -293,6 +293,22 @@ test-rls-sabotage: ## Prove tenant isolation tests fail under RLS sabotage
 			exit 1; \
 		fi; \
 		echo "$$hook: tenant isolation failed as required"; \
+	done; \
+	for table in versions channels builds artifacts channel_assignments \
+		sboms sbom_packages scan_runs scan_findings scan_transcripts \
+		build_scan_state pending_scans pins; do \
+		if out=$$(env DUFFLEBAG_TEST_DROP_BUCKET_POLICY=$$table go test -tags=integration ./internal/store/postgres \
+			-run '^TestTenantIsolation$$$$' -count=1 2>&1); then \
+			echo "$$out"; \
+			echo "FAIL: tenant isolation PASSED with $$table's bucket predicate dropped — the assertions prove nothing"; \
+			exit 1; \
+		fi; \
+		if ! echo "$$out" | grep -q -- '--- FAIL: TestTenantIsolation'; then \
+			echo "$$out"; \
+			echo "FAIL: dropping $$table's bucket predicate did not run TestTenantIsolation to a failure (build or setup error), so nothing was proved"; \
+			exit 1; \
+		fi; \
+		echo "$$table: bucket isolation failed as required"; \
 	done
 
 .PHONY: test-contract
