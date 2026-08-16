@@ -257,10 +257,11 @@ recorded parent version with the channel's current assignment for
 HCP response containing null parent fields does not establish that Packer
 omitted them from its request.
 
-Still genuinely deferrable: external artifact search, enforced-block CRUD,
-and all `runtasks` endpoints. The `packages` and
-`vulnerabilities` operations, listed here as deferrable in earlier revisions,
-are now served — see [Scope boundaries](#scope-boundaries).
+Still genuinely deferrable: enforced-block CRUD and all `runtasks`
+endpoints. The `packages` and `vulnerabilities` operations, listed here as
+deferrable in earlier revisions, are now served — see
+[Scope boundaries](#scope-boundaries). External artifact search, deferrable
+in earlier revisions, is served as of 2026-08-16 — see the table below.
 
 ### Served beyond the build path
 
@@ -284,6 +285,18 @@ routed and tested:
 | `ListBucketPackagesVulnerabilitySummary` | `GET` | `/buckets/{bucket_name}/packages/vulnerability-summary` | reader |
 | `ListBucketPackagesWithVulnerabilities` | `GET` | `/buckets/{bucket_name}/packages/with-vulnerabilities` | reader |
 | `ListBucketVulnerabilities` | `GET` | `/buckets/{bucket_name}/vulnerabilities` | reader |
+| `SearchExternalArtifact` | `POST` | `/_search/external_artifact` | reader |
+
+**External artifact search, served 2026-08-16.**
+`PackerService_SearchExternalArtifact` answers provenance in reverse: which
+bucket, version and build produced a given external identifier (an image
+digest, a machine image id). `external_identifier` is required; `platform`
+and `region` are optional exact filters. Matches span buckets within the
+authorized tenant, revoked versions are returned with their revocation state
+— the caller's question is whether the artifact is still vouched for — and
+results order newest version first with the shared offset pagination. No
+stock client calls this operation; it exists for external consumers asking
+the incident-response question.
 
 **Version revocation, served 2026-08-08.** `PackerService_UpdateVersion`
 (`PATCH …/versions/{fingerprint}`) is served for its revocation capability:
