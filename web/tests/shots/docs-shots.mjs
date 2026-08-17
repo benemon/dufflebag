@@ -558,6 +558,26 @@ async function seedFixtures(credentials) {
     revoke_in: '0s',
     revocation_message: 'Superseded after the August hardening release',
   })
+  await completeVersion(builderToken, baseVersions, {
+    fingerprint: 'ubuntu-2404-2026-06',
+    component: 'amazon-ebs.ubuntu',
+    platform: 'aws',
+    artifact: 'ami-0fedcba9876543210',
+    region: 'eu-west-2',
+    owner: 'platform-engineering',
+    template: './images/ubuntu.pkr.hcl',
+    os: 'ubuntu-24.04',
+  })
+  await completeVersion(builderToken, baseVersions, {
+    fingerprint: 'ubuntu-2404-2026-05',
+    component: 'amazon-ebs.ubuntu',
+    platform: 'aws',
+    artifact: 'ami-0aabbccddeeff0011',
+    region: 'eu-west-2',
+    owner: 'platform-engineering',
+    template: './images/ubuntu.pkr.hcl',
+    os: 'ubuntu-24.04',
+  })
   await api(builderToken, 'POST', baseVersions, {
     fingerprint: 'ubuntu-2404-candidate', template_type: 'HCL2',
   })
@@ -614,10 +634,70 @@ async function seedFixtures(credentials) {
     },
   })
 
+  await api(builderToken, 'PUT', bucketBase, {
+    name: 'app-images',
+    description: 'Application runtimes layered on the hardened bases',
+    labels: { owner: 'app-platform', lifecycle: 'managed' },
+  })
+  await completeVersion(builderToken, `${bucketBase}/app-images/versions`, {
+    fingerprint: 'node-22-2026-08',
+    component: 'docker.node',
+    platform: 'docker',
+    artifact: 'sha256:1f9e8d7c6b5a4938',
+    region: 'registry.internal',
+    owner: 'app-platform',
+    template: './images/node.pkr.hcl',
+    os: 'ubuntu-24.04',
+  })
+  await completeVersion(builderToken, `${bucketBase}/app-images/versions`, {
+    fingerprint: 'python-313-2026-08',
+    component: 'docker.python',
+    platform: 'docker',
+    artifact: 'sha256:2a3b4c5d6e7f8091',
+    region: 'registry.internal',
+    owner: 'app-platform',
+    template: './images/python.pkr.hcl',
+    os: 'ubuntu-24.04',
+  })
+  await api(builderToken, 'PUT', bucketBase, {
+    name: 'builder-images',
+    description: 'CI build agents with pinned toolchains',
+    labels: { owner: 'developer-experience', lifecycle: 'managed' },
+  })
+  await completeVersion(builderToken, `${bucketBase}/builder-images/versions`, {
+    fingerprint: 'golang-1263-2026-08',
+    component: 'docker.golang',
+    platform: 'docker',
+    artifact: 'sha256:3c4d5e6f70819203',
+    region: 'registry.internal',
+    owner: 'developer-experience',
+    template: './images/golang.pkr.hcl',
+    os: 'alpine-3.22',
+  })
+  await api(builderToken, 'PUT', bucketBase, {
+    name: 'network-images',
+    description: 'Edge and service-mesh appliance images',
+    labels: { owner: 'network-engineering', lifecycle: 'evaluation' },
+  })
+  await completeVersion(builderToken, `${bucketBase}/network-images/versions`, {
+    fingerprint: 'envoy-1332-2026-08',
+    component: 'docker.envoy',
+    platform: 'docker',
+    artifact: 'sha256:4d5e6f7081920314',
+    region: 'registry.internal',
+    owner: 'network-engineering',
+    template: './images/envoy.pkr.hcl',
+    os: 'alpine-3.22',
+  })
   await api(
     rootToken,
     'PUT',
     `/api/v1/organizations/${organization.id}/projects/${project.id}/pins/base-images`,
+  )
+  await api(
+    rootToken,
+    'PUT',
+    `/api/v1/organizations/${organization.id}/projects/${project.id}/pins/database-images`,
   )
 
   await api(rootToken, 'POST', '/api/v1/audit/targets', {
@@ -652,6 +732,7 @@ async function captureSeededScreens(seeded) {
   await page.click('#tenant-bucket')
   await waitForText('base-images')
   await waitForText('database-images')
+  await waitForText('network-images')
   await capture('bucket-picker.png')
 
   // The bucket screen at its natural scroll: the facet rail (Overview /
@@ -660,6 +741,10 @@ async function captureSeededScreens(seeded) {
   await waitForText('Bucket details')
   await page.waitForSelector('nav[aria-label="Bucket facets"] button[role="tab"]')
   await capture('bucket-facets.png')
+
+  await clickByText('nav[aria-label="Bucket facets"] button', 'Versions')
+  await waitForText('revoked')
+  await capture('versions-table.png')
 
   await clickByText('nav[aria-label="Bucket facets"] button', 'Channels')
   await waitForText('production')
