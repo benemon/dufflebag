@@ -1,12 +1,14 @@
+import { useEffect, useState } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
   Spinner,
 } from '@patternfly/react-core'
 
+import { listBuckets, type Tenant } from './api/client'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
-import { Registry } from './screens/Registry'
+import { Buckets } from './screens/Buckets'
 import { Versions } from './screens/Versions'
 import { Version } from './screens/Version'
 import { Build } from './screens/Build'
@@ -99,8 +101,8 @@ function Authenticated({
   return (
     <Routes>
       <Route element={<ShellRoute theme={theme} onThemeChange={onThemeChange} />}>
-        <Route path="/" element={<Registry />} />
-        <Route path="/buckets" element={<Navigate to="/" replace />} />
+        <Route path="/" element={<Landing />} />
+        <Route path="/buckets" element={<Buckets />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />
@@ -118,6 +120,66 @@ function Authenticated({
       </Route>
     </Routes>
   )
+}
+
+// Above-bucket sessions land on the Buckets screen; a bucket-scoped session
+// has exactly one bucket and lands in it — a one-row list would be noise, and
+// the masthead picker already says where it landed. The claim carries the
+// bucket's id; the scoped listing (which contains exactly that bucket) names
+// it for the route.
+function Landing() {
+  const { state } = useAuth()
+  const claims = state?.claims
+  if (!claims?.bucketID || !claims.organizationID || !claims.projectID) {
+    return <Navigate to="/buckets" replace />
+  }
+  return (
+    <ScopedBucketLanding
+      token={state!.token}
+      tenant={{ organizationID: claims.organizationID, projectID: claims.projectID }}
+      bucketID={claims.bucketID}
+    />
+  )
+}
+
+function ScopedBucketLanding({ token, tenant, bucketID }: {
+  token: string
+  tenant: Tenant
+  bucketID: string
+}) {
+  const [name, setName] = useState<string | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    listBuckets(token, tenant)
+      .then((buckets) => {
+        if (cancelled) return
+        const scoped = buckets.find((bucket) => bucket.id === bucketID)
+        if (scoped) setName(scoped.name)
+        else setFailure('The session names a bucket the listing cannot see.')
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setFailure(err instanceof Error ? err.message : 'Could not resolve the bucket.')
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [token, tenant.organizationID, tenant.projectID, bucketID])
+  if (failure) {
+    return (
+      <PageSection>
+        <Content component="p">{failure}</Content>
+      </PageSection>
+    )
+  }
+  if (name === null) {
+    return (
+      <PageSection>
+        <Spinner aria-label="Resolving your bucket…" />
+      </PageSection>
+    )
+  }
+  return <Navigate to={`/buckets/${encodeURIComponent(name)}`} replace />
 }
 
 function ShellRoute({

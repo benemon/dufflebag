@@ -839,7 +839,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await globalNavItems()).length === 7)
     assert.deepEqual(
       await globalNavItems(),
-      ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -880,7 +880,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the data screens show the real, scoped state', async () => {
-    await waitForText('Choose a bucket')
+    await waitForText('All buckets')
   })
 
   await t.test('the Instance build card matches the authenticated endpoint', async () => {
@@ -1028,7 +1028,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await pickerValue('#tenant-organization')) ===
         'All organisations (platform)')
     // The data screen states the gap rather than showing a silent empty table.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
     await waitForText('can view any organisation')
   })
 
@@ -1368,8 +1368,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the project toggle to follow', async () =>
       (await pickerValue('#tenant-project')) === 'widgets')
     // The screen in view persists across navigation, so name it explicitly.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
+    await clickByText('a', 'Buckets')
+    await waitForText('All buckets')
     // PatternFly transitions nav-link background-color, so a naive read samples
     // the fade and returns a different alpha every run. Settle motion first, or
     // the assertion measures an animation rather than the rule.
@@ -1594,8 +1594,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Open the versions list from the universal bucket picker. Picking the
     // bucket already on screen is a same-route no-op, so step onto the
     // landing first — the old drill-down navigated fresh, and so must this.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
+    await clickByText('a', 'Buckets')
+    await waitForText('All buckets')
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await waitForText('seeded by the smoke test')
     await waitForText('team=platform')
@@ -1811,7 +1811,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Assignment history could not be loaded')
 
     await clickByText('button', 'Registry')
-    await waitForText('Choose a bucket')
+    await waitForText('All buckets')
   })
 
   await t.test('a version is revoked and restored through the console, confirmed at the wire', async () => {
@@ -1931,8 +1931,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // The previous test leaves this bucket's detail on its Channels facet;
     // a same-route pick would keep it. Navigate fresh from the landing.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
+    await clickByText('a', 'Buckets')
+    await waitForText('All buckets')
     await choosePickerOption('#tenant-bucket', 'smoke-revocable')
     await waitForText('Bucket details')
     // The opener and the modal confirm share a label; scope the confirm.
@@ -1941,7 +1941,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await typeToConfirm('smoke-revocable')
     await clickByText('.pf-v6-c-modal-box button', 'Delete bucket')
     await until('the console to land back on Registry', async () =>
-      (await bodyText()).includes('Choose a bucket'))
+      (await bodyText()).includes('All buckets'))
     await until('the bucket to leave the wire', async () => {
       try {
         await api(builderToken, 'GET', bucketPath)
@@ -2251,7 +2251,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Enable')
     await waitForText('Nothing was saved. No configuration was created.')
     // Leaving and returning re-reads the server: still unconfigured.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
     await clickByText('a', 'Bag Drop')
     await waitForText('Bag Drop is not configured')
     // Against a resolvable destination the same single action saves, verifies,
@@ -2609,7 +2609,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       const toggle = await pickerValue('#tenant-project')
       return toggle === 'acme / widgets'
     })
-    assert.deepEqual(await globalNavItems(), ['Registry', 'Bag Drop', 'Instance'])
+    assert.deepEqual(await globalNavItems(), ['Buckets', 'Bag Drop', 'Instance'])
     // It can read its project's bucket…
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await waitForText('Bucket details')

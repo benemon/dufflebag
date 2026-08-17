@@ -726,7 +726,8 @@ async function seedFixtures(credentials) {
 
 async function captureSeededScreens(seeded) {
   await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Choose a bucket')
+  await waitForText('All buckets')
+  await waitForText('network-images')
   await capture('buckets.png')
 
   await page.click('#tenant-bucket')

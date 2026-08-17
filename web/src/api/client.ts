@@ -129,6 +129,8 @@ export async function listProjects(token: string, organizationID: string): Promi
 }
 
 export type ApiBucket = {
+  /** Unique identifier (ULID) — the id the platform's scope claims speak. */
+  id?: string
   name: string
   description?: string
   labels?: Record<string, string>

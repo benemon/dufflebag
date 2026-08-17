@@ -4,22 +4,27 @@ A bucket is the unit of registry organisation: Packer publishes into one, and
 its versions, channels and builds hang off it. This page covers choosing a
 bucket and the single-bucket drill-down.
 
+## The Buckets screen
+
+The **Buckets** screen lists the project's registry: every bucket with its
+latest version, channels and state, with pinned buckets gathered above the
+list. Organisation- and project-scoped sessions land here; a bucket-scoped
+principal has exactly one bucket and lands straight in it instead.
+
+![Dufflebag Buckets screen showing the project registry](/screenshots/buckets.png)
+
+Builders can pin buckets and unpin them from the pinned card or the bucket's
+own header. Publishers can delete a bucket from either place.
+
 ## Choosing a bucket
 
-Bucket selection lives in the masthead beside the organisation and project
-pickers: a searchable drop-down that follows the route, so the bucket in the
-address bar is always the bucket on screen. Pinned buckets group first; typing
-filters the list.
+Bucket selection also lives in the masthead beside the organisation and
+project pickers: a searchable drop-down that follows the route, so the bucket
+in the address bar is always the bucket on screen. Pinned buckets group first;
+typing filters the list. For a bucket-scoped session the picker is the
+orientation point — it always names the bucket the session landed in.
 
 ![Dufflebag bucket picker open in the masthead, pinned buckets grouped first](/screenshots/bucket-picker.png)
-
-With no bucket chosen, the registry landing says so and points at the picker.
-
-![Dufflebag registry landing prompting bucket choice](/screenshots/buckets.png)
-
-Builders can pin a bucket and unpin it from the bucket's own header — pinned
-buckets surface first in the picker. Publishers can delete a bucket from the
-same header.
 
 ::: warning
 When Bag Drop currently mirrors a bucket, the console warns that deleting the
