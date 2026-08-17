@@ -745,6 +745,14 @@ func TestListPrincipalsRefusesAForeignSelection(t *testing.T) {
 		code  int
 	}{
 		{
+			// The spec calls a bucket filter without both tenancy filters
+			// refused; the empty organisation entitles nothing.
+			name:  "a bucket selection without its tenancy pair is refused",
+			roles: testRoles{role: identity.RoleRoot, scope: identity.Scope{}},
+			path:  "/api/v1/principals?bucket_id=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			code:  http.StatusNotFound,
+		},
+		{
 			name:  "an organisation maintainer naming a foreign organisation",
 			roles: organizationMaintainer,
 			path:  "/api/v1/principals?organization_id=" + foreignOrg,

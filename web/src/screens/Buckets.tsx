@@ -55,7 +55,9 @@ export function Buckets() {
     bucket.newestVersion?.state === 'incomplete' ||
     bucket.drift.kind === 'behind' || bucket.drift.kind === 'absent')
   useAutoRefresh({ hot, onRefresh: reload })
-  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const {
+    state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket, signOut,
+  } = useAuth()
   // A bucket-scoped session has exactly one bucket; the list would be one row
   // offering operations the server refuses. The route steps back to the
   // scoped landing, matching the hidden nav entry.
@@ -74,6 +76,9 @@ export function Buckets() {
         if (!state || !tenant) throw new Error('No session.')
         try {
           await deleteBucket(state.token, tenant, bucket)
+          // The carried selection must not outlive its bucket, whichever
+          // surface deleted it.
+          if (selectedBucket?.name === bucket) selectBucket(null)
           setRefresh((current) => current + 1)
         } catch (err: unknown) {
           signOutIfUnauthorized(err, signOut)

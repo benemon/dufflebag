@@ -351,6 +351,12 @@ export function BucketPicker() {
   // reconciling effect would immediately carry it back.
   const lastRouteSync = useRef<string | undefined>(undefined)
   useEffect(() => {
+    // A tenancy change invalidates the sync: the route may name a bucket the
+    // new pair does not own, and "already handled" must not leave the display
+    // asserting a standing the context no longer carries.
+    lastRouteSync.current = undefined
+  }, [selectedOrganization, selectedProject])
+  useEffect(() => {
     if (bucket === undefined) {
       lastRouteSync.current = undefined
       return

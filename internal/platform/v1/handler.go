@@ -751,6 +751,14 @@ func (s *server) ListPrincipals(
 			selection.BucketID = *request.Params.BucketId
 		}
 	}
+	// A bucket filter without both tenancy filters is a malformed scope,
+	// refused closed rather than interpreted — without this, the zero
+	// organisation reads as a PLATFORM selection and the bucket is ignored.
+	if selection.BucketID != "" &&
+		(selection.OrganizationID == uuid.Nil || selection.ProjectID == uuid.Nil) {
+		audit.refused(refusedTenancy.reason())
+		return newRefusal(refusedTenancy), nil
+	}
 
 	// Authorized against the scope being LISTED, not merely the caller's role.
 	// The selection is never trusted past this point: a tenancy caller naming
