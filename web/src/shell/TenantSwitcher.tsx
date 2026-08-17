@@ -165,7 +165,10 @@ function TypeaheadPicker({
               onChange={(_event, value) => {
                 setInputValue(value)
                 setFilterValue(value)
-                if (!open) setPickerOpen(true)
+                if (!open) {
+                  setOpen(true)
+                  onOpen()
+                }
               }}
               autoComplete="off"
               innerRef={inputRef}

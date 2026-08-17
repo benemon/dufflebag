@@ -29,6 +29,10 @@ const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
   'utf8',
 )
+const authContextSource = readFileSync(
+  new URL('../src/auth/AuthContext.tsx', import.meta.url),
+  'utf8',
+)
 
 before(async () => {
   vite = await createServer({
@@ -339,6 +343,29 @@ test('all three pickers refresh their listing on open', () => {
   assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshOrganizations\)/)
   assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshProjects\)/)
   assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, onRefresh\)/)
+})
+
+test('opening and typing into a picker starts from an unfiltered listing', () => {
+  const typeahead = tenantSwitcherSource.match(
+    /function TypeaheadPicker\([\s\S]*?\nfunction OrganizationSelect/,
+  )?.[0] ?? ''
+  assert.match(typeahead, /if \(nextOpen\) \{[\s\S]*?setFilterValue\(''\)/)
+  assert.match(
+    typeahead,
+    /onChange=\{\(_event, value\) => \{[\s\S]*?setFilterValue\(value\)[\s\S]*?setOpen\(true\)/,
+  )
+  assert.doesNotMatch(
+    typeahead,
+    /onChange=\{\(_event, value\) => \{[\s\S]*?if \(!open\) setPickerOpen\(true\)/,
+  )
+})
+
+test('opening the project picker refreshes without replacing its settled input', () => {
+  const refreshProjects = authContextSource.match(
+    /const refreshProjects = useCallback[\s\S]*?\n  \}, \[state, selectedOrganization, signOut\]\)/,
+  )?.[0] ?? ''
+  assert.match(refreshProjects, /setOrganizationProjects\(ordered\)/)
+  assert.doesNotMatch(refreshProjects, /setProjectsLoading\(/)
 })
 
 test('concurrent organisation refresh signals share one request', async () => {

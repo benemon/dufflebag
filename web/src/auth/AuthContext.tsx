@@ -505,7 +505,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const platform = state.claims.organizationID === null
     const organizationID = platform ? selectedOrganization : state.claims.organizationID
     if (!organizationID) return null
-    setProjectsLoading(true)
     setProjectFailure(null)
     try {
       const projects = state.claims.projectID
@@ -521,8 +520,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (signOutIfUnauthorized(err, signOut)) return null
       setProjectFailure(err instanceof Error ? err.message : 'Could not refresh projects.')
       return null
-    } finally {
-      setProjectsLoading(false)
     }
   }, [state, selectedOrganization, signOut])
 
