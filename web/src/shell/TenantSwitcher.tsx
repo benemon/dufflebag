@@ -14,6 +14,7 @@ import type { Role } from '../auth/permissions'
 import { CreateBucketButton } from '../components/BucketCreation'
 import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
+import { useAutoRefresh } from '../data/polling'
 import { organizationRows, useTenant } from '../data/tenant'
 
 type PickerOption = {
@@ -343,6 +344,13 @@ export function BucketPicker() {
   } = useAuth()
   const { buckets, pins, loading, failure, refresh } = useBucketPicker()
   const scoped = Boolean(state && selectedOrganization && selectedProject)
+  // An empty listing renders text with no toggle, so refetch-on-open cannot
+  // fire — and empty is exactly the awaiting-change state: the first publish
+  // must appear without a reload. Poll while empty; stop once anything lands.
+  useAutoRefresh({
+    hot: scoped && !loading && failure === null && buckets.length === 0,
+    onRefresh: refresh,
+  })
   // Bucket routes stay authoritative: visiting one carries its bucket into
   // the tenancy context, so the selection survives onto screens whose routes
   // name no bucket — Principals derives its standing from it (duf-4qr).
