@@ -1,4 +1,4 @@
-import { Navigate, Outlet, Route, Routes } from 'react-router'
+import { Navigate, Route, Routes } from 'react-router'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
   Spinner,
@@ -6,7 +6,7 @@ import {
 
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
-import { Registry } from './screens/Registry'
+import { Buckets } from './screens/Buckets'
 import { Versions } from './screens/Versions'
 import { Version } from './screens/Version'
 import { Build } from './screens/Build'
@@ -97,38 +97,20 @@ function Authenticated({
   }
 
   return (
-    <Routes>
-      <Route element={<ShellRoute theme={theme} onThemeChange={onThemeChange} />}>
-        <Route path="/" element={<Registry />} />
-        <Route path="/buckets" element={<Navigate to="/" replace />} />
+    <AppShell theme={theme} onThemeChange={onThemeChange}>
+      <Routes>
+        <Route path="/" element={<Navigate to="/buckets" replace />} />
+        <Route path="/buckets" element={<Buckets />} />
+        <Route path="/buckets/:bucket" element={<Versions />} />
+        <Route path="/buckets/:bucket/versions/:fingerprint" element={<Version />} />
+        <Route path="/buckets/:bucket/versions/:fingerprint/builds/:build" element={<Build />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />
         <Route path="/bagdrop" element={<BagDrop />} />
         <Route path="/webhooks" element={<Webhooks />} />
         <Route path="/instance" element={<Instance />} />
-      </Route>
-      <Route
-        path="/buckets/:bucket"
-        element={<ShellRoute theme={theme} onThemeChange={onThemeChange} />}
-      >
-        <Route index element={<Versions />} />
-        <Route path="versions/:fingerprint" element={<Version />} />
-        <Route path="versions/:fingerprint/builds/:build" element={<Build />} />
-      </Route>
-    </Routes>
-  )
-}
-
-function ShellRoute({
-  theme, onThemeChange,
-}: {
-  theme: Theme
-  onThemeChange: (theme: Theme) => void
-}) {
-  return (
-    <AppShell theme={theme} onThemeChange={onThemeChange}>
-      <Outlet />
+      </Routes>
     </AppShell>
   )
 }

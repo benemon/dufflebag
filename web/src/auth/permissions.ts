@@ -8,8 +8,6 @@ export const ACTION_REQUIREMENTS = {
   createProjects: 'maintainer',
   // internal/platform/v1/handler.go's SetPin and DeletePin authorize RoleBuilder.
   pinBuckets: 'builder',
-  // Compatibility-plane bucket creation authorizes RoleBuilder.
-  createBuckets: 'builder',
   // Compatibility-plane registry safety operations authorize RolePublisher.
   revokeVersions: 'publisher',
   // Compatibility-plane version deletion authorizes RolePublisher.

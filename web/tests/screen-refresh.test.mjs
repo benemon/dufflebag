@@ -41,7 +41,7 @@ test('ScreenHeader disables refresh while refreshing', () => {
 })
 
 const refreshScreens = [
-  'Versions', 'Version', 'Build', 'Audit', 'Webhooks', 'Principals', 'Encryption', 'Instance',
+  'Buckets', 'Versions', 'Version', 'Build', 'Audit', 'Webhooks', 'Principals', 'Encryption', 'Instance',
   'BagDrop',
 ]
 
@@ -62,7 +62,7 @@ test('every volatile screen passes onRefresh to ScreenHeader', () => {
 })
 
 test('registry refresh indicators never replace settled data with skeletons', () => {
-  for (const name of ['Versions', 'Version', 'Build']) {
+  for (const name of ['Buckets', 'Versions', 'Version', 'Build']) {
     const source = readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8')
     assert.match(source, /refreshing=\{refreshing\}/, `${name}: header uses refreshing`)
     assert.match(source, /\{loading \? \([\s\S]*?<SkeletonRows\b/, `${name}: skeleton uses loading`)
@@ -78,12 +78,19 @@ test('MUTATION_BUILD_REFRESH_BINDING keeps Build wired to its live quiet reload'
 })
 
 test('MUTATION_MANUAL_QUIET keeps manual registry refreshes on revision reloads', () => {
-  const picker = readFileSync(new URL('../src/data/bucketPicker.ts', import.meta.url), 'utf8')
+  const buckets = readFileSync(new URL('../src/screens/Buckets.tsx', import.meta.url), 'utf8')
+  const bucketData = readFileSync(new URL('../src/data/buckets.ts', import.meta.url), 'utf8')
   const versions = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
-  assert.match(picker, /export function useBucketPicker\(/)
-  assert.match(picker, /listBuckets\(token, tenant\)/)
-  assert.match(picker, /listPins\(token, tenant\)/)
-  assert.doesNotMatch(picker, /listVersions|listChannels/)
+  assert.match(buckets, /useBuckets\(location\.key, refresh\)/)
+  assert.match(buckets, /onRefresh=\{reload\}/)
+  assert.match(bucketData, new RegExp(
+    'if \\(identityChanged\\) \\{\\s*setBuckets\\(\\[\\]\\)\\s*setLoading\\(true\\)'
+    + '[\\s\\S]*?\\} else \\{\\s*setBucketsRefreshing\\(true\\)\\s*\\}',
+  ), 'buckets: blanking and skeleton only on identity change; quiet branch only flips refreshing')
+  assert.match(bucketData, new RegExp(
+    'if \\(identityChanged\\) \\{\\s*setPins\\(\\[\\]\\)\\s*setPinsLoading\\(true\\)'
+    + '[\\s\\S]*?\\} else \\{\\s*setPinsRefreshing\\(true\\)\\s*\\}',
+  ), 'pins: blanking and skeleton only on identity change; quiet branch only flips refreshing')
   for (const hook of ['useVersions', 'useVersion', 'useBuild']) {
     assert.match(
       versions,

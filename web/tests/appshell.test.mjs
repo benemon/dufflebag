@@ -4,14 +4,13 @@ import { after, before, test } from 'node:test'
 
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter, Route, Routes, useParams } from 'react-router'
+import { MemoryRouter } from 'react-router'
 import { createServer } from 'vite'
 
 let vite
 let AppShellView
 let ThemeToggleButton
 let visibleNavItems
-let BucketPickerView
 
 before(async () => {
   vite = await createServer({
@@ -22,7 +21,6 @@ before(async () => {
     ssr: { noExternal: [/@patternfly\//] },
   })
   ;({ AppShellView, ThemeToggleButton } = await vite.ssrLoadModule('/src/shell/AppShell.tsx'))
-  ;({ BucketPickerView } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ visibleNavItems } = await vite.ssrLoadModule('/src/auth/permissions.ts'))
 })
 
@@ -30,22 +28,21 @@ after(async () => {
   await vite.close()
 })
 
-const labels = ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
+const labels = ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
 const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
-const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const screenHeaderSource = readFileSync(
   new URL('../src/components/ScreenHeader.tsx', import.meta.url),
   'utf8',
 )
 const headerScreenSources = [
-  'Principals', 'Audit', 'Webhooks', 'Versions', 'Version', 'Instance', 'Encryption',
+  'Principals', 'Audit', 'Webhooks', 'Versions', 'Version', 'Buckets', 'Instance', 'Encryption',
   'BagDrop',
 ].map((name) => [
   name,
   readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
 ])
 
-const view = (role, pathname = '/') => renderToStaticMarkup(React.createElement(
+const view = (role, pathname = '/buckets') => renderToStaticMarkup(React.createElement(
   MemoryRouter,
   { initialEntries: [pathname] },
   React.createElement(AppShellView, {
@@ -56,11 +53,11 @@ const view = (role, pathname = '/') => renderToStaticMarkup(React.createElement(
 
 test('the shell renders only navigation the caller can use', () => {
   for (const [role, expected] of [
-    [null, ['Registry', 'Bag Drop', 'Instance']],
-    ['reader', ['Registry', 'Bag Drop', 'Instance']],
-    ['builder', ['Registry', 'Bag Drop', 'Instance']],
-    ['publisher', ['Registry', 'Bag Drop', 'Instance']],
-    ['maintainer', ['Registry', 'Principals', 'Bag Drop', 'Webhooks', 'Instance']],
+    [null, ['Buckets', 'Bag Drop', 'Instance']],
+    ['reader', ['Buckets', 'Bag Drop', 'Instance']],
+    ['builder', ['Buckets', 'Bag Drop', 'Instance']],
+    ['publisher', ['Buckets', 'Bag Drop', 'Instance']],
+    ['maintainer', ['Buckets', 'Principals', 'Bag Drop', 'Webhooks', 'Instance']],
     ['root', labels],
   ]) {
     const markup = view(role)
@@ -82,17 +79,9 @@ test('router links carry PatternFly native current navigation state', () => {
     /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
   )
   assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
-  for (const destination of ['/', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+  for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
-})
-
-test('Registry owns the root route while bucket detail routes keep their paths', () => {
-  assert.match(appSource, /<Route path="\/" element=\{<Registry \/>\}/)
-  assert.match(appSource, /<Route path="\/buckets" element=\{<Navigate to="\/" replace \/>\}/)
-  assert.match(appSource, /path="\/buckets\/:bucket"/)
-  assert.match(appSource, /<Route path="versions\/:fingerprint" element=\{<Version \/>\}/)
-  assert.match(appSource, /<Route path="versions\/:fingerprint\/builds\/:build" element=\{<Build \/>\}/)
 })
 
 test('the masthead uses the PatternFly brand slot for the lowercase wordmark', () => {
@@ -105,32 +94,6 @@ test('the masthead keeps the labelled tenancy pickers in one toolbar item', () =
     shellSource,
     /<ToolbarItem className="tenant-switcher-item">[\s\S]*?<TenantSwitcher \/>/,
   )
-})
-
-test('the bucket picker renders its selection from the matched route parameter', () => {
-  function PickerAtRoute() {
-    const { bucket } = useParams()
-    return React.createElement(BucketPickerView, {
-      selectedBucket: bucket,
-      buckets: [{ name: 'base images' }],
-      pins: [], scoped: true, loading: false, failure: null, callerRole: 'builder',
-      onRefresh: async () => [], onSelect: () => {}, onCreate: async () => {},
-    })
-  }
-  const markup = renderToStaticMarkup(React.createElement(
-    MemoryRouter,
-    { initialEntries: ['/buckets/base%20images/versions/fp'] },
-    React.createElement(
-      Routes,
-      null,
-      React.createElement(Route, {
-        path: '/buckets/:bucket/*',
-        element: React.createElement(PickerAtRoute),
-      }),
-    ),
-  ))
-  assert.match(markup, /id="tenant-bucket"/)
-  assert.match(markup, /value="base images"/)
 })
 
 test('the theme toggle flips its action label and persists the chosen override', () => {
@@ -170,6 +133,7 @@ test('settled screen headers cannot drift back to inline header shapes', () => {
 
 test('tenancy context stays in the masthead, not top-level screen breadcrumbs', () => {
   const sources = Object.fromEntries(headerScreenSources)
+  assert.doesNotMatch(sources.Buckets, /Project registry|<Breadcrumb/)
   for (const name of ['Principals', 'Audit', 'Webhooks', 'Instance', 'Encryption', 'BagDrop']) {
     assert.doesNotMatch(sources[name], /<Breadcrumb/, `${name}: top-level destination`)
   }

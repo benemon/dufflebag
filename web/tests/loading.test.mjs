@@ -27,6 +27,7 @@ after(async () => {
 const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 
 const skeletonSites = new Map([
+  ['screens/Buckets.tsx', ['Loading pinned buckets…', 'Loading buckets…']],
   ['screens/Versions.tsx', ['Loading versions…', 'Loading assignment history…']],
   ['screens/Version.tsx', ['Loading version…']],
   ['screens/Build.tsx', ['Loading build…']],

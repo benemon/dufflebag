@@ -182,16 +182,6 @@ const clickOptionExact = (text) =>
     ),
   )
 
-/** Typeahead selection is type-then-click; the stable id remains on its toggle. */
-const choosePickerOption = async (id, text) => {
-  await page.click(id)
-  await page.click(`${id}-input`, { clickCount: 3 })
-  await page.type(`${id}-input`, text)
-  await clickOptionExact(text)
-}
-
-const pickerValue = (id) => page.$eval(`${id}-input`, (input) => input.value)
-
 /**
  * The text of the table row naming `name`. Row-scoped rather than page-scoped
  * because several principals list at once and each carries its own controls, so
@@ -826,7 +816,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await globalNavItems()).length === 7)
     assert.deepEqual(
       await globalNavItems(),
-      ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -861,13 +851,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The wizard created these names through the authenticated platform API,
     // and the platform session's picker auto-selects the sole tenancy.
     await until('the organisation toggle to name the real tenancy', async () =>
-      (await pickerValue('#tenant-organization')) === wizardOrganizationName)
-    assert.equal(await pickerValue('#tenant-project'), wizardProjectName)
+      (await page.$eval('#tenant-organization', (el) => el.innerText.trim())) === wizardOrganizationName)
+    assert.equal(await page.$eval('#tenant-project', (el) => el.innerText.trim()), wizardProjectName)
     assert.doesNotMatch(await bodyText(), /orbital-home|lab-registry/)
   })
 
   await t.test('the data screens show the real, scoped state', async () => {
-    await waitForText('Choose a bucket')
+    await waitForText('No buckets yet')
   })
 
   await t.test('the Instance build card matches the authenticated endpoint', async () => {
@@ -927,9 +917,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the blank project row is the deliberate step up to organisation level', async () => {
-    await choosePickerOption('#tenant-project', '—')
+    await page.click('#tenant-project')
+    await clickOptionExact('—')
     await until('the project toggle to show the dash', async () =>
-      (await pickerValue('#tenant-project')) === '—')
+      (await page.$eval('#tenant-project', (el) => el.innerText.trim())) === '—')
     // An empty organisation-level table explains which scope answered empty.
     await waitForText('No organisation-scoped principals')
     await waitForText('select one in the header')
@@ -1007,17 +998,15 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // A successful refresh preserves the still-valid wizard selection. The
     // operator, not the arrival of a second row, chooses when to step up.
     assert.equal(
-      await pickerValue('#tenant-organization'),
+      await page.$eval('#tenant-organization', (el) => el.innerText.trim()),
       wizardOrganizationName,
     )
-    await page.click('#tenant-organization-input', { clickCount: 3 })
-    await page.type('#tenant-organization-input', 'All organisations')
     await clickOptionExact('All organisations (platform)')
     await until('the organisation toggle to show platform standing', async () =>
-      (await pickerValue('#tenant-organization')) ===
+      (await page.$eval('#tenant-organization', (el) => el.innerText.trim())) ===
         'All organisations (platform)')
     // The data screen states the gap rather than showing a silent empty table.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
     await waitForText('can view any organisation')
   })
 
@@ -1349,14 +1338,26 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the picker drives the data screens to the seeded tenancy', async () => {
-    await choosePickerOption('#tenant-organization', 'acme')
+    await page.click('#tenant-organization')
+    await clickByText('li button, button', 'acme')
     await until('the organisation toggle to follow the selection', async () =>
-      (await pickerValue('#tenant-organization')) === 'acme')
+      (await page.$eval('#tenant-organization', (el) => el.innerText.trim())) === 'acme')
     // widgets is the organisation's only project, so it is selected the way an
     // unpinned CLI would select it: oldest first.
     await until('the project toggle to follow', async () =>
-      (await pickerValue('#tenant-project')) === 'widgets')
-    await waitForText('Choose a bucket')
+      (await page.$eval('#tenant-project', (el) => el.innerText.trim())) === 'widgets')
+    // The screen in view persists across navigation, so name it explicitly.
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    await waitForText('zzz-newer')
+    assert.deepEqual(
+      await page.$$eval(
+        'table[aria-label="Buckets"] td[data-label="Bucket"] > div:first-child button',
+        (buttons) => buttons.map((button) => button.innerText.trim()),
+      ),
+      ['zzz-newer', 'smoke-images'],
+      'same-day buckets do not default to full-timestamp newest-first order',
+    )
     // PatternFly transitions nav-link background-color, so a naive read samples
     // the fade and returns a different alpha every run. Settle motion first, or
     // the assertion measures an animation rather than the rule.
@@ -1416,21 +1417,66 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         fontWeight: '500', fontSize: '14px', lineHeight: '19.6px',
       },
     })
-    // Bucket choice is route state: type into the masthead picker, choose the
-    // exact option, and the detail route becomes the selection.
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
-    await until('the bucket picker to navigate', () =>
-      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
-    assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
-    await waitForText('Bucket details')
+    // Its fields render truthfully: no versions have been pushed, so the
+    // newest-version and ancestry cells are absent rather than numeric zeros.
+    await until('the fresh bucket row to show no newest version', async () =>
+      (await page.$eval('td[data-label="Newest version"]', (cell) => cell.innerText.trim())) === '—')
+    // A fresh bucket is never channel-less: the server created the managed
+    // "latest" inside the CreateBucket transaction (duf-08q), and the bucket
+    // row lists it — unassigned, because nothing has completed yet.
     await waitForText('latest')
+    // The toolbar is behaviour, not decoration: its name filter changes the
+    // real API-backed row set and exposes a distinct no-match state.
+    await page.type('input[aria-label="Filter buckets by name"]', 'does-not-exist')
+    await waitForText('No buckets match these filters')
+    // Typing leaves the caret at the end, so erase exactly what was typed.
+    // Select-all shortcuts are platform-specific (Control+A only selects on
+    // Linux) and clicking first moves the caret, either of which leaves the
+    // filter applied and every later assertion on this screen looking at an
+    // empty table.
+    for (let i = 0; i < 'does-not-exist'.length; i += 1) {
+      await page.keyboard.press('Backspace')
+    }
+    await waitForText('smoke-images')
+    await waitForText('smoke-images')
   })
 
-  await t.test('a privileged session pins and unpins from the bucket detail header', async () => {
-    await clickByText('button', 'Pin bucket')
-    await waitForText('Unpin bucket')
-    await clickByText('button', 'Unpin bucket')
-    await waitForText('Pin bucket')
+  await t.test('a privileged session pins, navigates from, and unpins a bucket', async () => {
+    const openPinMenu = () => until('the smoke-images pin menu', () =>
+      page.$$eval('table[aria-label="Buckets"] tr', (rows) => {
+        const row = rows.find((candidate) => candidate.innerText.includes('smoke-images'))
+        const toggle = row?.querySelector('button[aria-label="Actions for smoke-images"]')
+        if (!toggle) return false
+        toggle.click()
+        return true
+      }))
+
+    await openPinMenu()
+    await clickOptionExact('Pin bucket')
+    await until('the pinned gallery card to appear', () =>
+      page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) =>
+        buttons.some((button) => button.innerText.trim() === 'smoke-images')))
+
+    await page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) => {
+      const cardLink = buttons.find((button) => button.innerText.trim() === 'smoke-images')
+      cardLink?.click()
+    })
+    await until('the gallery card to navigate into the bucket', () =>
+      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
+
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    // Un-pin through the card's own affordance (duf-fcg6.4), not the row menu.
+    await until('the card Unpin control to accept the click', () =>
+      page.$$eval('section[aria-label="Pinned buckets"] button', (buttons) => {
+        const unpin = buttons.find(
+          (button) => button.getAttribute('aria-label') === 'Unpin smoke-images')
+        if (!unpin) return false
+        unpin.click()
+        return true
+      }))
+    await until('the pinned gallery to empty', () =>
+      page.$('section[aria-label="Pinned buckets"]').then((section) => section === null))
   })
 
   await t.test('a completed version and an incomplete v0 drill down from the bucket row', async () => {
@@ -1554,8 +1600,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     page.on('request', recordHistoryRequest)
     t.after(() => page.off('request', recordHistoryRequest))
 
-    // Open the versions list from the universal bucket picker.
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    // From the bucket row into the versions list.
+    await clickByText('a', 'Buckets')
+    await until('the bucket ancestry cells to render status rather than counts', async () =>
+      (await rowCellText('smoke-images', 'Parents')).includes('up to date') &&
+      (await rowCellText('smoke-images', 'Children')) === '—')
+    await clickByText('button', 'smoke-images')
     await waitForText('seeded by the smoke test')
     await waitForText('team=platform')
     await waitForText('purpose=browser-proof')
@@ -1770,7 +1820,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Assignment history could not be loaded')
 
     await clickByText('button', 'Registry')
-    await waitForText('Choose a bucket')
+    await waitForText('All buckets')
   })
 
   await t.test('a version is revoked and restored through the console, confirmed at the wire', async () => {
@@ -1797,7 +1847,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       metadata: {},
     })
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
     await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     await clickByText('button', 'v1')
@@ -1833,7 +1884,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/packer/2023-01-01/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/buckets/smoke-revocable/channels`
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await waitForText('latest')
 
@@ -1864,7 +1916,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // Delete it through the kebab's danger confirmation; history goes with it.
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
@@ -1882,21 +1935,22 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
   await t.test('the facet bucket is deleted through the console, gone at the wire', async () => {
     // Ends the smoke-revocable arc: the bucket detail's danger action removes
-    // the bucket the revoke and channel facets used, landing back on Registry.
+    // the bucket the revoke and channel facets used, landing back on the list.
     const builderToken = await tokenFor(seeded.principal.client_id, seeded.principal.secret)
     const bucketPath =
       `/packer/2023-01-01/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/buckets/smoke-revocable`
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-revocable')
     await waitForText('Bucket details')
     // The opener and the modal confirm share a label; scope the confirm.
     await clickByText('button', 'Delete bucket')
     await waitForText('Delete smoke-revocable')
     await typeToConfirm('smoke-revocable')
     await clickByText('.pf-v6-c-modal-box button', 'Delete bucket')
-    await until('the console to land back on Registry', async () =>
-      (await bodyText()).includes('Choose a bucket'))
+    await until('the console to land back on the bucket list', async () =>
+      (await bodyText()).includes('All buckets'))
     await until('the bucket to leave the wire', async () => {
       try {
         await api(builderToken, 'GET', bucketPath)
@@ -2028,7 +2082,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         return false
       })
       if (settled === 'gap') {
-        await choosePickerOption('#tenant-organization', seeded.organization.name)
+        await page.click('#tenant-organization')
+        await clickByText('li button, button', seeded.organization.name)
       }
       await waitForText('Security')
     }
@@ -2206,7 +2261,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Enable')
     await waitForText('Nothing was saved. No configuration was created.')
     // Leaving and returning re-reads the server: still unconfigured.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
     await clickByText('a', 'Bag Drop')
     await waitForText('Bag Drop is not configured')
     // Against a resolvable destination the same single action saves, verifies,
@@ -2318,15 +2374,19 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await api(rootToken, 'POST', `${bagdropBase}/disable`)
     await api(rootToken, 'PUT', `${bagdropBase}/buckets/smoke-images`)
 
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
-    await clickByText('button', 'Delete bucket')
+    await clickByText('a', 'Buckets')
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
+    await page.click('button[aria-label="Actions for smoke-images"]')
+    await clickByText('button', 'Delete bucket…')
     await waitForText('Delete smoke-images')
     await waitForText('This bucket is mirrored by Bag Drop')
     await clickByText('.pf-v6-c-modal-box button', 'Cancel')
 
     // Un-associated, the same confirmation carries no mirror warning.
     await api(rootToken, 'DELETE', `${bagdropBase}/buckets/smoke-images`)
-    await clickByText('button', 'Delete bucket')
+    await page.waitForSelector('button[aria-label="Actions for smoke-images"]')
+    await page.click('button[aria-label="Actions for smoke-images"]')
+    await clickByText('button', 'Delete bucket…')
     await waitForText('Delete smoke-images')
     await until('the warning to stay absent for the un-mirrored bucket', async () =>
       !(await bodyText()).includes('mirrored by Bag Drop'))
@@ -2364,7 +2424,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // The assigned version's delete is refused with the server's own words.
-    await choosePickerOption('#tenant-bucket', 'smoke-deletable')
+    await clickByText('a', 'Buckets')
+    await clickByText('button', 'smoke-deletable')
     await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')
     await clickByText('button', 'v1')
@@ -2518,9 +2579,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('organisation level lists org-scoped principals only', async () => {
-    await choosePickerOption('#tenant-project', '—')
+    await page.click('#tenant-project')
+    await clickOptionExact('—')
     await until('the project toggle to show the dash', async () =>
-      (await pickerValue('#tenant-project')) === '—')
+      (await page.$eval('#tenant-project', (el) => el.innerText.trim())) === '—')
     // smoke-builder was seeded org-scoped; console-builder lives at widgets.
     await waitForText('smoke-builder')
     // The LISTING drops the project-scoped principal. The issued-credential
@@ -2542,11 +2604,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The fixed organisation binding resolves through its item read, while its
     // projects resolve through the same resource-manager listing the CLI uses.
     await until('the combined toggle to name the real tenant', async () => {
-      const toggle = await pickerValue('#tenant-project')
+      const toggle = await page.$eval('#tenant-project', (el) => el.innerText.trim())
       return toggle === 'acme / widgets'
     })
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
-    await waitForText('Bucket details')
+    // The screen in view persists across sign-out, so name it explicitly.
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
   })
 
   await t.test('the console-minted builder signs in, scoped to exactly its project', async () => {
@@ -2561,13 +2624,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // by design (ADR-0016), so it resolves only the two item reads permitted by
     // its fixed binding and must name the seeded acme/widgets pair.
     await until('the combined toggle to name exactly the created scope', async () => {
-      const toggle = await pickerValue('#tenant-project')
+      const toggle = await page.$eval('#tenant-project', (el) => el.innerText.trim())
       return toggle === 'acme / widgets'
     })
-    assert.deepEqual(await globalNavItems(), ['Registry', 'Bag Drop', 'Instance'])
+    assert.deepEqual(await globalNavItems(), ['Buckets', 'Bag Drop', 'Instance'])
     // It can read its project's bucket…
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
-    await waitForText('Bucket details')
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
     // …and its role stops at builder: managing principals is refused, and the
     // screen says so rather than rendering a healthy empty table.
     await page.goto(`${base}/principals`, { waitUntil: 'domcontentloaded' })

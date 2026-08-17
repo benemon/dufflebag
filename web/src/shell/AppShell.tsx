@@ -23,7 +23,7 @@ type NavGroupModel = {
 /** Nav grouped as the design labels it: Registry, then Administration. */
 const NAV: readonly NavGroupModel[] = [
   { group: 'Registry', items: [
-    { key: 'buckets', to: '/', label: 'Registry' },
+    { key: 'buckets', to: '/buckets', label: 'Buckets' },
   ]},
   // Instance stays under Administration where the design put it: it is
   // reader-tier, so the group renders for every role — role filtering changes
@@ -181,7 +181,7 @@ export function AppShellView({
                   key={key}
                   component={RouterNavLink}
                   to={to}
-                  isActive={to === '/' ? pathname === '/' : pathname.startsWith(to)}
+                  isActive={pathname.startsWith(to)}
                 >
                   {label}
                 </NavItem>

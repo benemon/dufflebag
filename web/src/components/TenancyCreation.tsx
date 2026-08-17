@@ -16,15 +16,14 @@ const labels = {
   project: 'Create project',
 } as const
 
-export async function refreshThenSelect<T>(
+export async function refreshThenSelect<T extends { id: string }>(
   created: T,
   refresh: () => Promise<T[] | null>,
   select: (created: T) => void,
-  identity: (item: T) => string = (item) => (item as { id: string }).id,
 ) {
   const listed = await refresh()
-  if (!listed?.some((candidate) => identity(candidate) === identity(created))) {
-    throw new Error('The new resource was created but its listing could not be refreshed.')
+  if (!listed?.some((candidate) => candidate.id === created.id)) {
+    throw new Error('The new tenancy was created but its listing could not be refreshed.')
   }
   select(created)
 }

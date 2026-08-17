@@ -27,9 +27,8 @@ import { updateBulkSelection } from '../components/BulkSelection'
 import { When } from '../components/When'
 
 import {
-  assignChannelVersion, createChannel, deleteBucket, deleteChannel, deletePin, deleteVersion,
-  getBagDropStatus, listPins, revokeVersion, setPin, signOutIfUnauthorized,
-  type RevokeVersionOptions,
+  assignChannelVersion, createChannel, deleteBucket, deleteChannel, deleteVersion,
+  getBagDropStatus, revokeVersion, signOutIfUnauthorized, type RevokeVersionOptions,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
@@ -66,30 +65,6 @@ export function Versions() {
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null
   const enforcedProvisioners = useEnforcedProvisioners(bucket)
-  const [pinned, setPinned] = useState(false)
-  const [pinLoading, setPinLoading] = useState(true)
-  const [pinFailure, setPinFailure] = useState<string | null>(null)
-  useEffect(() => {
-    if (!state || !tenant) {
-      setPinned(false)
-      setPinLoading(false)
-      setPinFailure(null)
-      return
-    }
-    let cancelled = false
-    setPinLoading(true)
-    setPinFailure(null)
-    void listPins(state.token, tenant)
-      .then((pins) => {
-        if (!cancelled) setPinned(pins.some((pin) => pin.bucket_name === bucket))
-      })
-      .catch((err: unknown) => {
-        if (cancelled || signOutIfUnauthorized(err, signOut)) return
-        setPinFailure(err instanceof Error ? err.message : 'Could not load the bucket pin.')
-      })
-      .finally(() => { if (!cancelled) setPinLoading(false) })
-    return () => { cancelled = true }
-  }, [state, selectedOrganization, selectedProject, bucket, signOut])
   const hot = data?.versions.some((version) =>
     version.state === 'incomplete' || version.builds.some(buildIsInProgress)) ?? false
   useAutoRefresh({ hot, onRefresh: reload })
@@ -105,26 +80,7 @@ export function Versions() {
       enforcedProvisionersLoading={enforcedProvisioners.loading}
       enforcedProvisionersFailure={enforcedProvisioners.failure}
       callerRole={self?.role ?? null}
-      pinned={pinned}
-      pinLoading={pinLoading}
-      pinFailure={pinFailure}
-      onTogglePin={async () => {
-        if (!state || !tenant) throw new Error('No session.')
-        setPinLoading(true)
-        setPinFailure(null)
-        try {
-          if (pinned) await deletePin(state.token, tenant, bucket)
-          else await setPin(state.token, tenant, bucket)
-          setPinned(!pinned)
-        } catch (err: unknown) {
-          if (!signOutIfUnauthorized(err, signOut)) {
-            setPinFailure(err instanceof Error ? err.message : 'Could not update the bucket pin.')
-          }
-        } finally {
-          setPinLoading(false)
-        }
-      }}
-      onBack={() => navigate('/')}
+      onBack={() => navigate('/buckets')}
       onOpenVersion={(fingerprint) =>
         navigate(`/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}`)}
       onCreateChannel={async (options) => {
@@ -161,7 +117,7 @@ export function Versions() {
         if (!state || !tenant) throw new Error('No session.')
         try {
           await deleteBucket(state.token, tenant, bucket)
-          navigate('/')
+          navigate('/buckets')
         } catch (err: unknown) {
           signOutIfUnauthorized(err, signOut)
           throw err
@@ -213,10 +169,6 @@ export function VersionsView({
   enforcedProvisionersLoading = false,
   enforcedProvisionersFailure = null,
   callerRole = null,
-  pinned = false,
-  pinLoading = false,
-  pinFailure = null,
-  onTogglePin = () => Promise.reject(new Error('No session.')),
   onBack,
   onOpenVersion,
   onCreateChannel = () => Promise.reject(new Error('No session.')),
@@ -241,10 +193,6 @@ export function VersionsView({
   enforcedProvisionersLoading?: boolean
   enforcedProvisionersFailure?: string | null
   callerRole?: Role | null
-  pinned?: boolean
-  pinLoading?: boolean
-  pinFailure?: string | null
-  onTogglePin?: () => Promise<void>
   onBack: () => void
   onOpenVersion: (fingerprint: string) => void
   onCreateChannel?: (options: {
@@ -293,25 +241,14 @@ export function VersionsView({
           ? bucketData.description || 'No description has been recorded.'
           : null}
         actions={!loading && !failure && !gap ? (
-          <>
-            <RoleRestrictedButton
-              action="pinBuckets"
-              callerRole={callerRole}
-              variant="secondary"
-              isDisabled={pinLoading}
-              onClick={() => { void onTogglePin() }}
-            >
-              {pinned ? 'Unpin bucket' : 'Pin bucket'}
-            </RoleRestrictedButton>
-            <RoleRestrictedButton
-              action="deleteBuckets"
-              callerRole={callerRole}
-              variant="danger"
-              onClick={() => setDeletingBucket(true)}
-            >
-              Delete bucket
-            </RoleRestrictedButton>
-          </>
+          <RoleRestrictedButton
+            action="deleteBuckets"
+            callerRole={callerRole}
+            variant="danger"
+            onClick={() => setDeletingBucket(true)}
+          >
+            Delete bucket
+          </RoleRestrictedButton>
         ) : null}
       >
         {bucketData && Object.keys(bucketData.labels).length > 0 ? (
@@ -322,14 +259,6 @@ export function VersionsView({
           </span>
         ) : null}
       </ScreenHeader>
-
-      {pinFailure ? (
-        <PageSection variant="secondary">
-          <Alert variant="warning" isInline title="Bucket pin could not be updated">
-            <Content component="p">{pinFailure}</Content>
-          </Alert>
-        </PageSection>
-      ) : null}
 
       {/* The rail sits flush against the header and left edge; only the facet
           content carries the grey well's padding. Alert states have no rail,

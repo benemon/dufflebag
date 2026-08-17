@@ -645,14 +645,11 @@ async function seedFixtures(credentials) {
 }
 
 async function captureSeededScreens(seeded) {
-  await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Choose a bucket')
-  await capture('buckets.png')
-
-  await page.click('#tenant-bucket')
+  await page.goto(`${base}/buckets`, { waitUntil: 'domcontentloaded' })
   await waitForText('base-images')
   await waitForText('database-images')
-  await capture('bucket-picker.png')
+  await page.waitForSelector('section[aria-label="Pinned buckets"]')
+  await capture('buckets.png')
 
   // The bucket screen at its natural scroll: the facet rail (Overview /
   // Versions / Channels with counts) beside the overview cards.
