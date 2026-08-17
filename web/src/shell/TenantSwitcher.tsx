@@ -159,7 +159,7 @@ function TypeaheadPicker({
         >
           <TextInputGroup isPlain>
             <TextInputGroupMain
-              id={`${id}-input`}
+              inputId={`${id}-input`}
               value={inputValue}
               onClick={() => { if (!open) setPickerOpen(true) }}
               onChange={(_event, value) => {
