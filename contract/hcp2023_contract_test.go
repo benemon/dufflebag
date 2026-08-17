@@ -327,8 +327,11 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 			WithBody(&sdkmodels.HashicorpCloudPacker20230101CreateBuildBody{
 				ComponentType: "docker",
 				PackerRunUUID: "run-1",
+				Platform:      "docker",
 				Status:        &buildStatus,
-				Artifacts:     []*sdkmodels.HashicorpCloudPacker20230101ArtifactCreateBody{},
+				Artifacts: []*sdkmodels.HashicorpCloudPacker20230101ArtifactCreateBody{{
+					ExternalIdentifier: "sha256:contract", Region: "registry.example",
+				}},
 			})
 	}
 	createdBuild, err := client.PackerServiceCreateBuild(createBuildParams(), contractAuth)
@@ -345,6 +348,26 @@ func TestGeneratedClientDrivesRunningServer(t *testing.T) {
 			repeatedBuild.Payload.Build.ID,
 			createdBuild.Payload.Build.ID,
 		)
+	}
+	searched, err := client.PackerServiceSearchExternalArtifact(
+		packer_service.NewPackerServiceSearchExternalArtifactParams().
+			WithLocationOrganizationID(contractOrg).
+			WithLocationProjectID(contractProject).
+			WithBody(&sdkmodels.HashicorpCloudPacker20230101SearchExternalArtifactRequestBody{
+				ExternalIdentifier: "sha256:contract", Platform: "docker", Region: "registry.example",
+			}),
+		contractAuth,
+	)
+	if err != nil {
+		t.Fatalf("generated SearchExternalArtifact: %v", err)
+	}
+	if len(searched.Payload.Artifacts) != 1 || searched.Payload.Artifacts[0].Bucket == nil ||
+		searched.Payload.Artifacts[0].Bucket.Name != "images" ||
+		searched.Payload.Artifacts[0].Build == nil ||
+		searched.Payload.Artifacts[0].Build.ID != createdBuild.Payload.Build.ID ||
+		searched.Payload.Artifacts[0].Version == nil ||
+		searched.Payload.Artifacts[0].Version.Fingerprint != "fingerprint" {
+		t.Fatalf("generated SearchExternalArtifact payload = %#v", searched.Payload)
 	}
 
 	listed, err := client.PackerServiceListBuilds(
@@ -2086,6 +2109,57 @@ func (r *contractRepository) ListBucketAncestry(
 		return false
 	})
 	return relations, nil
+}
+
+func (r *contractRepository) SearchExternalArtifacts(
+	_ context.Context,
+	_ store.Tenant,
+	externalIdentifier, platform, region string,
+) ([]store.ExternalArtifactMatch, error) {
+	matches := make([]store.ExternalArtifactMatch, 0)
+	for key, builds := range r.builds {
+		version := r.versions[key]
+		if version == nil {
+			continue
+		}
+		bucket := r.buckets[version.BucketName]
+		if bucket == nil {
+			continue
+		}
+		for i := range builds {
+			build := &builds[i]
+			if platform != "" && build.Platform != platform {
+				continue
+			}
+			for _, artifact := range build.Artifacts {
+				if artifact.ExternalIdentifier == externalIdentifier &&
+					(region == "" || artifact.Region == region) {
+					matches = append(matches, store.ExternalArtifactMatch{
+						Bucket: *bucket, Build: *build, Version: version,
+					})
+				}
+			}
+		}
+	}
+	sort.Slice(matches, func(i, j int) bool {
+		a, b := matches[i], matches[j]
+		aSequence, aComplete := a.Version.Sequence()
+		bSequence, bComplete := b.Version.Sequence()
+		if aComplete != bComplete {
+			return aComplete
+		}
+		if aSequence != bSequence {
+			return aSequence > bSequence
+		}
+		if !a.Version.CreatedAt.Equal(b.Version.CreatedAt) {
+			return a.Version.CreatedAt.After(b.Version.CreatedAt)
+		}
+		if a.Version.ID != b.Version.ID {
+			return a.Version.ID.String() > b.Version.ID.String()
+		}
+		return a.Build.ID.String() > b.Build.ID.String()
+	})
+	return matches, nil
 }
 
 func (r *contractRepository) versionByID(id string) *registry.Version {

@@ -21,6 +21,7 @@ type Artifact struct {
 	Region             string    `json:"region"`
 	CreatedAt          time.Time `json:"created_at"`
 	IntegrityMac       []byte    `json:"integrity_mac"`
+	BucketID           string    `json:"bucket_id"`
 }
 
 type AuditTarget struct {
@@ -85,6 +86,17 @@ type Build struct {
 	ParentChannelID          sql.NullString  `json:"parent_channel_id"`
 	Metadata                 []byte          `json:"metadata"`
 	IntegrityMac             []byte          `json:"integrity_mac"`
+	BucketID                 string          `json:"bucket_id"`
+}
+
+type BuildScanState struct {
+	OrganizationID       uuid.UUID      `json:"organization_id"`
+	ProjectID            uuid.UUID      `json:"project_id"`
+	BuildID              string         `json:"build_id"`
+	CurrentFindingsRunID sql.NullString `json:"current_findings_run_id"`
+	LatestAttemptRunID   string         `json:"latest_attempt_run_id"`
+	IntegrityMac         []byte         `json:"integrity_mac"`
+	BucketID             string         `json:"bucket_id"`
 }
 
 type Channel struct {
@@ -96,16 +108,19 @@ type Channel struct {
 	Restricted     bool      `json:"restricted"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	Managed        bool      `json:"managed"`
 }
 
 type ChannelAssignment struct {
-	OrganizationID uuid.UUID `json:"organization_id"`
-	ProjectID      uuid.UUID `json:"project_id"`
-	ID             string    `json:"id"`
-	ChannelID      string    `json:"channel_id"`
-	VersionID      string    `json:"version_id"`
-	AssignedAt     time.Time `json:"assigned_at"`
-	IntegrityMac   []byte    `json:"integrity_mac"`
+	OrganizationID uuid.UUID      `json:"organization_id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ID             string         `json:"id"`
+	ChannelID      string         `json:"channel_id"`
+	VersionID      sql.NullString `json:"version_id"`
+	AssignedAt     time.Time      `json:"assigned_at"`
+	AuthorID       string         `json:"author_id"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
+	BucketID       string         `json:"bucket_id"`
 }
 
 type EncryptionMode struct {
@@ -135,23 +150,33 @@ type Organization struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type PendingScan struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	BuildID        string    `json:"build_id"`
+	EnqueuedAt     time.Time `json:"enqueued_at"`
+	Reason         string    `json:"reason"`
+	BucketID       string    `json:"bucket_id"`
+}
+
 type Pin struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	ProjectID      uuid.UUID `json:"project_id"`
-	BucketName     string    `json:"bucket_name"`
 	PinnedAt       time.Time `json:"pinned_at"`
 	PinnedBy       string    `json:"pinned_by"`
+	BucketID       string    `json:"bucket_id"`
 }
 
 type Principal struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	ClientID       string        `json:"client_id"`
-	OrganizationID uuid.NullUUID `json:"organization_id"`
-	ProjectID      uuid.NullUUID `json:"project_id"`
-	CreatedAt      time.Time     `json:"created_at"`
-	Role           string        `json:"role"`
-	IntegrityMac   []byte        `json:"integrity_mac"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	ClientID       string         `json:"client_id"`
+	OrganizationID uuid.NullUUID  `json:"organization_id"`
+	ProjectID      uuid.NullUUID  `json:"project_id"`
+	CreatedAt      time.Time      `json:"created_at"`
+	Role           string         `json:"role"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
+	BucketID       sql.NullString `json:"bucket_id"`
 }
 
 type PrincipalSecret struct {
@@ -182,6 +207,7 @@ type Sbom struct {
 	ParseStatus    string    `json:"parse_status"`
 	ParseError     string    `json:"parse_error"`
 	ObjectKey      string    `json:"object_key"`
+	BucketID       string    `json:"bucket_id"`
 }
 
 type SbomPackage struct {
@@ -193,6 +219,65 @@ type SbomPackage struct {
 	Purl           string          `json:"purl"`
 	Licenses       json.RawMessage `json:"licenses"`
 	ComponentPaths json.RawMessage `json:"component_paths"`
+	BucketID       string          `json:"bucket_id"`
+}
+
+type ScanFinding struct {
+	OrganizationID  uuid.UUID       `json:"organization_id"`
+	ProjectID       uuid.UUID       `json:"project_id"`
+	RunID           string          `json:"run_id"`
+	SbomID          string          `json:"sbom_id"`
+	PackageName     string          `json:"package_name"`
+	PackageVersion  string          `json:"package_version"`
+	Purl            string          `json:"purl"`
+	AdvisoryID      string          `json:"advisory_id"`
+	Summary         string          `json:"summary"`
+	Aliases         json.RawMessage `json:"aliases"`
+	Related         json.RawMessage `json:"related"`
+	Published       sql.NullTime    `json:"published"`
+	Modified        sql.NullTime    `json:"modified"`
+	Withdrawn       sql.NullTime    `json:"withdrawn"`
+	FixedVersions   json.RawMessage `json:"fixed_versions"`
+	Severities      json.RawMessage `json:"severities"`
+	DerivedSeverity string          `json:"derived_severity"`
+	FirstSeenAt     time.Time       `json:"first_seen_at"`
+	IntegrityMac    []byte          `json:"integrity_mac"`
+	BucketID        string          `json:"bucket_id"`
+}
+
+type ScanRun struct {
+	OrganizationID   uuid.UUID       `json:"organization_id"`
+	ProjectID        uuid.UUID       `json:"project_id"`
+	ID               string          `json:"id"`
+	BuildID          string          `json:"build_id"`
+	RunSequence      int64           `json:"run_sequence"`
+	Status           string          `json:"status"`
+	Error            string          `json:"error"`
+	Adapter          string          `json:"adapter"`
+	Engine           string          `json:"engine"`
+	DatabaseRevision string          `json:"database_revision"`
+	ObservedAt       time.Time       `json:"observed_at"`
+	TranscriptDigest string          `json:"transcript_digest"`
+	Coverage         json.RawMessage `json:"coverage"`
+	CreatedAt        time.Time       `json:"created_at"`
+	IntegrityMac     []byte          `json:"integrity_mac"`
+	BucketID         string          `json:"bucket_id"`
+}
+
+type ScanRunCounter struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	NextSequence   int64     `json:"next_sequence"`
+}
+
+type ScanTranscript struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ProjectID      uuid.UUID `json:"project_id"`
+	RunID          string    `json:"run_id"`
+	ObjectKey      string    `json:"object_key"`
+	ExpiresAt      time.Time `json:"expires_at"`
+	IntegrityMac   []byte    `json:"integrity_mac"`
+	BucketID       string    `json:"bucket_id"`
 }
 
 type Version struct {

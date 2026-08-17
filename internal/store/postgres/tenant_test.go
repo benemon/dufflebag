@@ -17,7 +17,7 @@ func TestBeginTenantRequiresBothIDs(t *testing.T) {
 		{"missing both", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tx, err := BeginTenant(context.Background(), nil, tc.organizationID, tc.projectID)
+			tx, err := BeginTenant(context.Background(), nil, tc.organizationID, tc.projectID, "")
 			if err == nil {
 				_ = tx.Rollback()
 				t.Fatal("BeginTenant accepted an incomplete tenant")

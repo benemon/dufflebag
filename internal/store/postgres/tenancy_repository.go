@@ -299,7 +299,7 @@ func (r *Repository) GetProject(
 }
 
 func (r *Repository) DeleteProject(ctx context.Context, organizationID, projectID string) error {
-	tx, err := BeginTenant(ctx, r.db, organizationID, projectID)
+	tx, err := BeginTenant(ctx, r.db, organizationID, projectID, "")
 	if err != nil {
 		return err
 	}

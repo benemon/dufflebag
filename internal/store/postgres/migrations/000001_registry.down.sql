@@ -1,9 +1,0 @@
-DROP TABLE channel_assignments;
-DROP FUNCTION reject_channel_assignment_change();
-DROP TABLE channels;
-DROP TABLE artifacts;
-DROP TABLE builds;
-DROP TABLE versions;
-DROP TABLE buckets;
-DROP TABLE projects;
-DROP TABLE organizations;

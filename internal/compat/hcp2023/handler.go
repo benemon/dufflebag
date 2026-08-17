@@ -45,6 +45,7 @@ type Repository interface {
 	DeleteChannel(context.Context, store.Tenant, string, string) error
 	ListChannelAssignmentHistory(context.Context, store.Tenant, string, string) ([]store.ChannelAssignment, error)
 	ListBucketAncestry(context.Context, store.Tenant, string, string, string, string) ([]store.BucketAncestry, error)
+	SearchExternalArtifacts(context.Context, store.Tenant, string, string, string) ([]store.ExternalArtifactMatch, error)
 	CreateVersion(context.Context, store.Tenant, *registry.Version) (*registry.Version, error)
 	GetVersion(context.Context, store.Tenant, string, string) (*registry.Version, error)
 	ListVersions(context.Context, store.Tenant, string) ([]*registry.Version, map[string][]store.StoredBuild, error)
@@ -97,6 +98,7 @@ func routes() []route {
 		{method: http.MethodGet, path: "/registry", notFoundCode: 5, required: identity.RoleReader, operation: "registry.read", targetType: "registry", handle: (*handler).getRegistry},
 		{method: http.MethodGet, path: "/enforced_blocks/bucket/{bucket}", notFoundCode: 5, required: identity.RoleReader, operation: "enforced_block.list", targetType: "bucket", targetIDParam: "bucket", handle: (*handler).getEnforcedBlocksByBucket},
 		{method: http.MethodGet, path: "/buckets", notFoundCode: 5, required: identity.RoleReader, operation: "bucket.list", targetType: "bucket_collection", handle: (*handler).listBuckets},
+		{method: http.MethodPost, path: "/_search/external_artifact", notFoundCode: 5, required: identity.RoleReader, operation: "artifact.search", targetType: "artifact_collection", handle: (*handler).searchExternalArtifact},
 		{method: http.MethodGet, path: "/buckets/{bucket}", notFoundCode: 5, required: identity.RoleReader, operation: "bucket.read", targetType: "bucket", targetIDParam: "bucket", handle: (*handler).getBucket},
 		{method: http.MethodPut, path: "/buckets", notFoundCode: 5, required: identity.RoleBuilder, operation: "bucket.create", targetType: "bucket", handle: (*handler).createBucket},
 		{method: http.MethodPatch, path: "/buckets/{bucket}", notFoundCode: 5, required: identity.RoleBuilder, operation: "bucket.update", targetType: "bucket", targetIDParam: "bucket", handle: (*handler).updateBucket},
@@ -647,6 +649,43 @@ func (h *handler) listBucketAncestry(w http.ResponseWriter, r *http.Request) {
 		Relations:  wireRelations,
 		TotalCount: int32(len(relations)),
 		Pagination: pagination,
+	})
+}
+
+func (h *handler) searchExternalArtifact(w http.ResponseWriter, r *http.Request) {
+	var body models.HashicorpCloudPacker20230101SearchExternalArtifactRequestBody
+	if !h.decodeBody(w, r, &body) {
+		return
+	}
+	if body.ExternalIdentifier == "" {
+		writeRPCError(w, http.StatusBadRequest, 3, "external_identifier is required")
+		return
+	}
+	matches, err := h.repository.SearchExternalArtifacts(
+		r.Context(), tenant(r), body.ExternalIdentifier, body.Platform, body.Region,
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		matches = []store.ExternalArtifactMatch{}
+	} else if err != nil {
+		h.writeInternal(w, r, "search external artifacts", err)
+		return
+	}
+	start, end, pagination, err := paginationPage(r, len(matches))
+	if err != nil {
+		writeRPCError(w, http.StatusBadRequest, 3, err.Error())
+		return
+	}
+	artifacts := make([]*models.HashicorpCloudPacker20230101ExternalArtifact, 0, end-start)
+	for i := start; i < end; i++ {
+		artifact, err := renderExternalArtifact(&matches[i], h.now().UTC())
+		if err != nil {
+			h.writeInternal(w, r, "render external artifact", err)
+			return
+		}
+		artifacts = append(artifacts, artifact)
+	}
+	writeJSON(w, http.StatusOK, &models.HashicorpCloudPacker20230101SearchExternalArtifactResponse{
+		Artifacts: artifacts, Pagination: pagination,
 	})
 }
 
@@ -1724,6 +1763,40 @@ func renderBuild(build *store.StoredBuild) (*models.HashicorpCloudPacker20230101
 		wire.Metadata = &metadata
 	}
 	return wire, nil
+}
+
+func renderExternalArtifact(
+	match *store.ExternalArtifactMatch,
+	now time.Time,
+) (*models.HashicorpCloudPacker20230101ExternalArtifact, error) {
+	build, err := renderBuild(&match.Build)
+	if err != nil {
+		return nil, err
+	}
+	version, err := renderVersion(store.Tenant{}, match.Version, nil, now)
+	if err != nil {
+		return nil, err
+	}
+	externalVersion := &models.HashicorpCloudPacker20230101ExternalArtifactVersion{
+		AuthorID:          version.AuthorID,
+		Fingerprint:       version.Fingerprint,
+		ID:                version.ID,
+		Name:              version.Name,
+		RevocationAuthor:  version.RevocationAuthor,
+		RevocationMessage: version.RevocationMessage,
+		RevocationType:    version.RevocationType,
+		Status:            version.Status,
+	}
+	if version.RevokeAt != nil {
+		externalVersion.RevokeAt = *version.RevokeAt
+	}
+	return &models.HashicorpCloudPacker20230101ExternalArtifact{
+		Bucket: &models.HashicorpCloudPacker20230101ExternalArtifactBucket{
+			ID: match.Bucket.ID.String(), Labels: match.Bucket.Labels, Name: match.Bucket.Name,
+		},
+		Build:   build,
+		Version: externalVersion,
+	}, nil
 }
 
 func wireAncestryStatus(status registry.AncestryStatus) models.HashicorpCloudPacker20230101AncestryStatus {

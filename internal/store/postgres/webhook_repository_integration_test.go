@@ -143,7 +143,7 @@ func TestWebhookPendingReceivesNothing(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA)
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -332,7 +332,7 @@ func TestWebhookOutboxLostEventTransactionality(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "forced outbox rollback") {
 		t.Fatalf("CreateBucket error = %v, want forced rollback", err)
 	}
-	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA)
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}

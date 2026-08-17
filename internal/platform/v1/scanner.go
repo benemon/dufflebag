@@ -84,6 +84,7 @@ func (s *server) RescanBuild(
 	}
 
 	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
 	err := s.scanner.ManualRescan(ctx, tenant, request.BuildId)
 	switch {
 	case errors.Is(err, store.ErrScanIneligible):

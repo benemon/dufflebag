@@ -79,21 +79,26 @@ func (q *Queries) CountRootPrincipals(ctx context.Context) (int64, error) {
 
 const createArtifact = `-- name: CreateArtifact :one
 INSERT INTO artifacts (
-    organization_id, project_id, id, build_id, external_identifier, region, created_at
-) VALUES ($1, $2, $3, $4, $5, $6, $7)
+    organization_id, project_id, id, bucket_id, build_id, external_identifier, region, created_at
+)
+SELECT $1, $2, $3,
+       builds.bucket_id, builds.id, $4,
+       $5, $6
+FROM builds
+WHERE builds.id = $7
 ON CONFLICT (organization_id, project_id, build_id, external_identifier)
 DO UPDATE SET external_identifier = EXCLUDED.external_identifier
-RETURNING organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac
+RETURNING organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac, bucket_id
 `
 
 type CreateArtifactParams struct {
 	OrganizationID     uuid.UUID `json:"organization_id"`
 	ProjectID          uuid.UUID `json:"project_id"`
 	ID                 string    `json:"id"`
-	BuildID            string    `json:"build_id"`
 	ExternalIdentifier string    `json:"external_identifier"`
 	Region             string    `json:"region"`
 	CreatedAt          time.Time `json:"created_at"`
+	BuildID            string    `json:"build_id"`
 }
 
 func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) (Artifact, error) {
@@ -101,10 +106,10 @@ func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) 
 		arg.OrganizationID,
 		arg.ProjectID,
 		arg.ID,
-		arg.BuildID,
 		arg.ExternalIdentifier,
 		arg.Region,
 		arg.CreatedAt,
+		arg.BuildID,
 	)
 	var i Artifact
 	err := row.Scan(
@@ -116,6 +121,7 @@ func (q *Queries) CreateArtifact(ctx context.Context, arg CreateArtifactParams) 
 		&i.Region,
 		&i.CreatedAt,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -201,17 +207,17 @@ func (q *Queries) CreateBucket(ctx context.Context, arg CreateBucketParams) (Buc
 
 const createBuild = `-- name: CreateBuild :one
 INSERT INTO builds (
-    organization_id, project_id, id, version_id, component_type, status,
+    organization_id, project_id, id, bucket_id, version_id, component_type, status,
     platform, metadata_seen, packer_run_uuid, labels,
     source_external_identifier, parent_version_id, parent_channel_id, created_at, updated_at
 )
-SELECT $1, $2, $3, versions.id, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15
+SELECT $1, $2, $3, versions.bucket_id, versions.id, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $15
 FROM versions
 JOIN buckets ON buckets.id = versions.bucket_id
 WHERE buckets.name = $4 AND versions.fingerprint = $5
 ON CONFLICT (organization_id, project_id, version_id, component_type)
 DO UPDATE SET component_type = builds.component_type
-RETURNING organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, packer_run_uuid, labels, source_external_identifier, created_at, updated_at, parent_version_id, parent_channel_id, metadata, integrity_mac
+RETURNING organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, packer_run_uuid, labels, source_external_identifier, created_at, updated_at, parent_version_id, parent_channel_id, metadata, integrity_mac, bucket_id
 `
 
 type CreateBuildParams struct {
@@ -269,6 +275,7 @@ func (q *Queries) CreateBuild(ctx context.Context, arg CreateBuildParams) (Build
 		&i.ParentChannelID,
 		&i.Metadata,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -323,21 +330,22 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 
 const createPrincipal = `-- name: CreatePrincipal :one
 INSERT INTO principals (
-    id, name, client_id, organization_id, project_id, role, created_at, integrity_mac
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+    id, name, client_id, organization_id, project_id, bucket_id, role, created_at, integrity_mac
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 ON CONFLICT DO NOTHING
 RETURNING id
 `
 
 type CreatePrincipalParams struct {
-	ID             string        `json:"id"`
-	Name           string        `json:"name"`
-	ClientID       string        `json:"client_id"`
-	OrganizationID uuid.NullUUID `json:"organization_id"`
-	ProjectID      uuid.NullUUID `json:"project_id"`
-	Role           string        `json:"role"`
-	CreatedAt      time.Time     `json:"created_at"`
-	IntegrityMac   []byte        `json:"integrity_mac"`
+	ID             string         `json:"id"`
+	Name           string         `json:"name"`
+	ClientID       string         `json:"client_id"`
+	OrganizationID uuid.NullUUID  `json:"organization_id"`
+	ProjectID      uuid.NullUUID  `json:"project_id"`
+	BucketID       sql.NullString `json:"bucket_id"`
+	Role           string         `json:"role"`
+	CreatedAt      time.Time      `json:"created_at"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
 }
 
 func (q *Queries) CreatePrincipal(ctx context.Context, arg CreatePrincipalParams) (string, error) {
@@ -347,6 +355,7 @@ func (q *Queries) CreatePrincipal(ctx context.Context, arg CreatePrincipalParams
 		arg.ClientID,
 		arg.OrganizationID,
 		arg.ProjectID,
+		arg.BucketID,
 		arg.Role,
 		arg.CreatedAt,
 		arg.IntegrityMac,
@@ -672,11 +681,13 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id uuid.UUID) (string,
 }
 
 const deletePin = `-- name: DeletePin :exec
-DELETE FROM pins WHERE bucket_name = $1
+DELETE FROM pins
+USING buckets
+WHERE pins.bucket_id = buckets.id AND buckets.name = $1
 `
 
-func (q *Queries) DeletePin(ctx context.Context, bucketName string) error {
-	_, err := q.db.ExecContext(ctx, deletePin, bucketName)
+func (q *Queries) DeletePin(ctx context.Context, name string) error {
+	_, err := q.db.ExecContext(ctx, deletePin, name)
 	return err
 }
 
@@ -929,7 +940,7 @@ func (q *Queries) GetBucketByName(ctx context.Context, name string) (Bucket, err
 }
 
 const getBuild = `-- name: GetBuild :one
-SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac
+SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac, builds.bucket_id
 FROM builds
 JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id
@@ -963,6 +974,7 @@ func (q *Queries) GetBuild(ctx context.Context, arg GetBuildParams) (Build, erro
 		&i.ParentChannelID,
 		&i.Metadata,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -1031,9 +1043,10 @@ func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (Organizati
 }
 
 const getPin = `-- name: GetPin :one
-SELECT bucket_name, pinned_at, pinned_by
+SELECT buckets.name AS bucket_name, pins.pinned_at, pins.pinned_by
 FROM pins
-WHERE bucket_name = $1
+JOIN buckets ON buckets.id = pins.bucket_id
+WHERE buckets.name = $1
 `
 
 type GetPinRow struct {
@@ -1042,15 +1055,15 @@ type GetPinRow struct {
 	PinnedBy   string    `json:"pinned_by"`
 }
 
-func (q *Queries) GetPin(ctx context.Context, bucketName string) (GetPinRow, error) {
-	row := q.db.QueryRowContext(ctx, getPin, bucketName)
+func (q *Queries) GetPin(ctx context.Context, name string) (GetPinRow, error) {
+	row := q.db.QueryRowContext(ctx, getPin, name)
 	var i GetPinRow
 	err := row.Scan(&i.BucketName, &i.PinnedAt, &i.PinnedBy)
 	return i, err
 }
 
 const getPrincipalByClientID = `-- name: GetPrincipalByClientID :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE client_id = $1
 `
@@ -1067,12 +1080,13 @@ func (q *Queries) GetPrincipalByClientID(ctx context.Context, clientID string) (
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
 
 const getPrincipalByID = `-- name: GetPrincipalByID :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE id = $1
 `
@@ -1089,12 +1103,13 @@ func (q *Queries) GetPrincipalByID(ctx context.Context, id string) (Principal, e
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
 
 const getPrincipalByIDForUpdate = `-- name: GetPrincipalByIDForUpdate :one
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE id = $1
 FOR UPDATE
@@ -1112,6 +1127,7 @@ func (q *Queries) GetPrincipalByIDForUpdate(ctx context.Context, id string) (Pri
 		&i.CreatedAt,
 		&i.Role,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -1375,32 +1391,35 @@ func (q *Queries) HasBlockingBagDropAssociations(ctx context.Context) (bool, err
 }
 
 const insertPin = `-- name: InsertPin :exec
-INSERT INTO pins (organization_id, project_id, bucket_name, pinned_at, pinned_by)
-VALUES ($1, $2, $3, $4, $5)
+INSERT INTO pins (organization_id, project_id, bucket_id, pinned_at, pinned_by)
+SELECT $1, $2, buckets.id,
+       $3, $4
+FROM buckets
+WHERE buckets.name = $5
 ON CONFLICT DO NOTHING
 `
 
 type InsertPinParams struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	ProjectID      uuid.UUID `json:"project_id"`
-	BucketName     string    `json:"bucket_name"`
 	PinnedAt       time.Time `json:"pinned_at"`
 	PinnedBy       string    `json:"pinned_by"`
+	BucketName     string    `json:"bucket_name"`
 }
 
 func (q *Queries) InsertPin(ctx context.Context, arg InsertPinParams) error {
 	_, err := q.db.ExecContext(ctx, insertPin,
 		arg.OrganizationID,
 		arg.ProjectID,
-		arg.BucketName,
 		arg.PinnedAt,
 		arg.PinnedBy,
+		arg.BucketName,
 	)
 	return err
 }
 
 const listArtifactsByBucketBuilds = `-- name: ListArtifactsByBucketBuilds :many
-SELECT artifacts.organization_id, artifacts.project_id, artifacts.id, artifacts.build_id, artifacts.external_identifier, artifacts.region, artifacts.created_at, artifacts.integrity_mac
+SELECT artifacts.organization_id, artifacts.project_id, artifacts.id, artifacts.build_id, artifacts.external_identifier, artifacts.region, artifacts.created_at, artifacts.integrity_mac, artifacts.bucket_id
 FROM artifacts
 JOIN builds ON builds.id = artifacts.build_id
 JOIN versions ON versions.id = builds.version_id
@@ -1427,6 +1446,7 @@ func (q *Queries) ListArtifactsByBucketBuilds(ctx context.Context, name string) 
 			&i.Region,
 			&i.CreatedAt,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1442,7 +1462,7 @@ func (q *Queries) ListArtifactsByBucketBuilds(ctx context.Context, name string) 
 }
 
 const listArtifactsByBuild = `-- name: ListArtifactsByBuild :many
-SELECT organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac FROM artifacts WHERE build_id = $1 ORDER BY id DESC
+SELECT organization_id, project_id, id, build_id, external_identifier, region, created_at, integrity_mac, bucket_id FROM artifacts WHERE build_id = $1 ORDER BY id DESC
 `
 
 func (q *Queries) ListArtifactsByBuild(ctx context.Context, buildID string) ([]Artifact, error) {
@@ -1463,6 +1483,7 @@ func (q *Queries) ListArtifactsByBuild(ctx context.Context, buildID string) ([]A
 			&i.Region,
 			&i.CreatedAt,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1552,7 +1573,7 @@ func (q *Queries) ListBagDropAssociations(ctx context.Context) ([]BagdropAssocia
 }
 
 const listBuildsByBucket = `-- name: ListBuildsByBucket :many
-SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac
+SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac, builds.bucket_id
 FROM builds
 JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id
@@ -1587,6 +1608,7 @@ func (q *Queries) ListBuildsByBucket(ctx context.Context, name string) ([]Build,
 			&i.ParentChannelID,
 			&i.Metadata,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1602,7 +1624,7 @@ func (q *Queries) ListBuildsByBucket(ctx context.Context, name string) ([]Build,
 }
 
 const listBuildsByVersion = `-- name: ListBuildsByVersion :many
-SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac
+SELECT builds.organization_id, builds.project_id, builds.id, builds.version_id, builds.component_type, builds.status, builds.platform, builds.metadata_seen, builds.packer_run_uuid, builds.labels, builds.source_external_identifier, builds.created_at, builds.updated_at, builds.parent_version_id, builds.parent_channel_id, builds.metadata, builds.integrity_mac, builds.bucket_id
 FROM builds
 JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id
@@ -1642,6 +1664,7 @@ func (q *Queries) ListBuildsByVersion(ctx context.Context, arg ListBuildsByVersi
 			&i.ParentChannelID,
 			&i.Metadata,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1721,9 +1744,10 @@ func (q *Queries) ListOrganizations(ctx context.Context) ([]Organization, error)
 }
 
 const listPins = `-- name: ListPins :many
-SELECT bucket_name, pinned_at, pinned_by
+SELECT buckets.name AS bucket_name, pins.pinned_at, pins.pinned_by
 FROM pins
-ORDER BY pinned_at, bucket_name
+JOIN buckets ON buckets.id = pins.bucket_id
+ORDER BY pins.pinned_at, buckets.name
 `
 
 type ListPinsRow struct {
@@ -1757,7 +1781,7 @@ func (q *Queries) ListPins(ctx context.Context) ([]ListPinsRow, error) {
 
 const listPlatformPrincipals = `-- name: ListPlatformPrincipals :many
 
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1785,6 +1809,7 @@ func (q *Queries) ListPlatformPrincipals(ctx context.Context) ([]Principal, erro
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1838,7 +1863,7 @@ func (q *Queries) ListPrincipalSecrets(ctx context.Context, principalID string) 
 }
 
 const listPrincipalsByOrganization = `-- name: ListPrincipalsByOrganization :many
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id = $1 AND project_id IS NULL
 ORDER BY created_at DESC, id DESC
@@ -1862,6 +1887,7 @@ func (q *Queries) ListPrincipalsByOrganization(ctx context.Context, organization
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -1877,7 +1903,7 @@ func (q *Queries) ListPrincipalsByOrganization(ctx context.Context, organization
 }
 
 const listPrincipalsByProject = `-- name: ListPrincipalsByProject :many
-SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
 WHERE organization_id = $1 AND project_id = $2
 ORDER BY created_at DESC, id DESC
@@ -1906,6 +1932,7 @@ func (q *Queries) ListPrincipalsByProject(ctx context.Context, arg ListPrincipal
 			&i.CreatedAt,
 			&i.Role,
 			&i.IntegrityMac,
+			&i.BucketID,
 		); err != nil {
 			return nil, err
 		}
@@ -2990,7 +3017,7 @@ SET status = $4,
         ELSE updated_at
     END
 WHERE id = $3 AND organization_id = $1 AND project_id = $2
-RETURNING organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, packer_run_uuid, labels, source_external_identifier, created_at, updated_at, parent_version_id, parent_channel_id, metadata, integrity_mac
+RETURNING organization_id, project_id, id, version_id, component_type, status, platform, metadata_seen, packer_run_uuid, labels, source_external_identifier, created_at, updated_at, parent_version_id, parent_channel_id, metadata, integrity_mac, bucket_id
 `
 
 type UpdateBuildParams struct {
@@ -3044,6 +3071,7 @@ func (q *Queries) UpdateBuild(ctx context.Context, arg UpdateBuildParams) (Build
 		&i.ParentChannelID,
 		&i.Metadata,
 		&i.IntegrityMac,
+		&i.BucketID,
 	)
 	return i, err
 }
@@ -3230,9 +3258,9 @@ func (q *Queries) UpsertBagDropConfig(ctx context.Context, arg UpsertBagDropConf
 
 const upsertSbom = `-- name: UpsertSbom :one
 INSERT INTO sboms (
-    organization_id, project_id, id, build_id, name, format, object_key, created_at
+    organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at
 )
-SELECT $1, $2, $3, builds.id, $7, $8, $9, $10
+SELECT $1, $2, $3, builds.bucket_id, builds.id, $7, $8, $9, $10
 FROM builds
 JOIN versions ON versions.id = builds.version_id
 JOIN buckets ON buckets.id = versions.bucket_id

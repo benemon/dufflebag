@@ -1,12 +1,13 @@
 # HCP Packer API compatibility reference
 
-The contract dufflebag serves, established by reading upstream client source —
-not inferred from documentation — with a source link per section so findings
-can be re-checked when upstream moves. Findings marked **probe 2026-07-31**
-were verified against the live HCP Packer service; the numbered probe
+The contract dufflebag serves, established by reading upstream client
+source — not inferred from documentation — with a source link per section so
+findings can be re-checked when upstream moves. Findings marked with a probe
+date were verified against the live HCP Packer service; the numbered probe
 transcripts those citations refer to are retained by the maintainers outside
-this repository. This document is the authoritative statement of the contract:
-where it and published documentation disagree, observed client behaviour wins.
+this repository. This document is the authoritative statement of the
+contract: where it and published documentation disagree, observed client
+behaviour wins.
 
 Upstream revisions read: `hashicorp/packer@main`, `hashicorp/hcp-sdk-go@main`.
 
@@ -17,7 +18,7 @@ required reading for using the document.
 
 ---
 
-## 1. Endpoint redirection — no host spoofing needed
+## Client redirection
 
 No `/etc/hosts` or DNS interception is needed — the stock binary honours the
 SDK's environment surface. Call chain:
@@ -72,7 +73,7 @@ environment surface in `hcp-sdk-go/config/env.go` is live in the stock binary.
 > `validate()` (`config/hcp.go`) checks non-empty only, and no scheme check
 > exists anywhere in `config/`.
 
-Given the lab CA, issue real certificates for both hosts and skip the insecure
+With a private CA available, issue real certificates and skip the insecure
 flags entirely.
 
 Source: [config/env.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/config/env.go),
@@ -82,7 +83,7 @@ Source: [config/env.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/config
 
 ---
 
-## 2. Pinning org and project deletes Packer's discovery surface, not the provider's
+## Tenancy pinning and discovery
 
 `NewClient()` returns early when the profile has both IDs:
 
@@ -101,7 +102,7 @@ Setting both `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` therefore skips:
 - `ValidateRegistryForProject` → `PackerService_GetRegistry`
 
 This is the single largest scope reduction available, and it remains true — but
-per ADR-0003 we implement the resource-manager
+per ADR-0003 dufflebag implements the resource-manager
 endpoints anyway, so that all four resolution paths work as they do against real
 HCP. Pinning is an optimisation, not a requirement.
 
@@ -127,7 +128,7 @@ Source: [internal/hcp/api/client.go](https://github.com/hashicorp/packer/blob/ma
 
 ---
 
-## 3. Authentication surface
+## Authentication
 
 `clientcredentials.Config` posts to `{authURL}/oauth2/token` with:
 
@@ -156,9 +157,9 @@ string would satisfy Packer.
 > claims**: the token is the contract, not the credential, so every consumer
 > authorizes off verified claims and a second issuer (workload-identity
 > federation) can be added without touching them. What Packer will *accept* and
-> what we choose to *issue* are different questions.
+> what dufflebag chooses to *issue* are different questions.
 
-### What dufflebag answers
+### Token endpoint responses
 
 Beyond the 200 token document, the endpoint has five other wire-visible
 outcomes, all carried in a standard OAuth `{"error", "error_description"}`
@@ -176,7 +177,7 @@ body — **not** `google.rpc.Status`:
 A client's retry logic must tolerate the last two: they are admission
 control, not authentication verdicts.
 
-### Token cache gotcha
+### The token cache
 
 `tokencache.NewServicePrincipalTokenSource` persists tokens to
 `~/.config/hcp/creds-cache.json` (note the spelling — `creds-cache`, not
@@ -185,7 +186,7 @@ control, not authentication verdicts.
 client ID that has also been used against real HCP will collide and produce
 confusing 401s. Always use a distinct `HCP_CLIENT_ID` for this registry.
 
-### Credential-file alternative
+### Credential files
 
 `env.HasHCPAuth()` also accepts a credential file at `~/.config/hcp/cred_file.json`
 or `$HCP_CRED_FILE`, supporting both a service-principal scheme and a workload
@@ -195,21 +196,21 @@ The workload-identity scheme is not merely "later": it reaches
 `POST {API}/2019-12-10/{wip-resource-name}/exchange-token`, which is in the
 compatibility surface per ADR-0001 and *is* the
 OIDC federation feature per ADR-0004. Its wire contract
-is fixed by HCP, not ours to design.
+is fixed by HCP, not dufflebag's to design.
 
 Source: [config/tokensource.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/config/tokensource.go),
 [internal/hcp/env/env.go](https://github.com/hashicorp/packer/blob/main/internal/hcp/env/env.go)
 
 ---
 
-## 4. API surface
+## API surface
 
 Base path: `/packer/2023-01-01/organizations/{location.organization_id}/projects/{location.project_id}`
 
 The generated client exposes **52 operations**. Thirteen are on the path Packer
 actually exercises during a build.
 
-### Required for a working `packer build`
+### The build path
 
 | Operation | Method | Path suffix |
 |---|---|---|
@@ -230,7 +231,7 @@ actually exercises during a build.
 > Earlier revisions listed `CreateBucket (upsert)` as one operation and counted
 > twelve. The spike disproved it: `UpsertBucket` is `GetBucket` → on code 5
 > `CreateBucket`, otherwise compare metadata and `UpdateBucket` on mismatch —
-> three endpoints. §6 has the observed order.
+> three endpoints. [Build lifecycle](#build-lifecycle) has the observed order.
 
 `GetRegistry` is reached in exactly one of the four org/project resolution paths
 (project pinned, org not) and must return a non-nil registry there — see
@@ -238,7 +239,7 @@ ADR-0003. It is **not** among the twelve operations
 `terraform-provider-hcp` reaches; ADR-0013
 enumerates those.
 
-### Deferrable — substantially revised by ADR-0006
+### The read surface
 
 > The original text here listed the entire read surface as deferrable, to be
 > `501`'d until something demanded it.
@@ -252,14 +253,15 @@ terminal `UpdateBuild` `parent_version_id` and `parent_channel_id`, joins those
 identifiers across buckets inside the authorized tenant, and compares the
 recorded parent version with the channel's current assignment for
 `UP_TO_DATE` / `OUT_OF_DATE`; a missing or unassigned channel is
-`UNDETERMINED`. Section 5.7 records the exact client condition and why a live
+`UNDETERMINED`. [Build ancestry](#build-ancestry) records the exact client condition and why a live
 HCP response containing null parent fields does not establish that Packer
 omitted them from its request.
 
-Still genuinely deferrable: external artifact search, enforced-block CRUD,
-and all `runtasks` endpoints. The `packages` and
-`vulnerabilities` operations, listed here as deferrable in earlier revisions,
-are now served — see the two scope reversals in §8.
+Still genuinely deferrable: enforced-block CRUD and all `runtasks`
+endpoints. The `packages` and `vulnerabilities` operations, listed here as
+deferrable in earlier revisions, are now served — see
+[Scope boundaries](#scope-boundaries). External artifact search, deferrable
+in earlier revisions, is served as of 2026-08-16 — see the table below.
 
 ### Served beyond the build path
 
@@ -283,6 +285,18 @@ routed and tested:
 | `ListBucketPackagesVulnerabilitySummary` | `GET` | `/buckets/{bucket_name}/packages/vulnerability-summary` | reader |
 | `ListBucketPackagesWithVulnerabilities` | `GET` | `/buckets/{bucket_name}/packages/with-vulnerabilities` | reader |
 | `ListBucketVulnerabilities` | `GET` | `/buckets/{bucket_name}/vulnerabilities` | reader |
+| `SearchExternalArtifact` | `POST` | `/_search/external_artifact` | reader |
+
+**External artifact search, served 2026-08-16.**
+`PackerService_SearchExternalArtifact` answers provenance in reverse: which
+bucket, version and build produced a given external identifier (an image
+digest, a machine image id). `external_identifier` is required; `platform`
+and `region` are optional exact filters. Matches span buckets within the
+authorized tenant, revoked versions are returned with their revocation state
+— the caller's question is whether the artifact is still vouched for — and
+results order newest version first with the shared offset pagination. No
+stock client calls this operation; it exists for external consumers asking
+the incident-response question.
 
 **Version revocation, served 2026-08-08.** `PackerService_UpdateVersion`
 (`PATCH …/versions/{fingerprint}`) is served for its revocation capability:
@@ -368,7 +382,7 @@ while `GET` keeps its HTTP 409-ish / code 10 version-identity miss. A missing
 build is HTTP 404 / code 5, `The build with identifier <build_id> does not
 exist.`
 
-### Second API version — unsupported by the client-version floor
+### The 2021-04-30 API
 
 > **Correction, 2026-08-01:** the earlier “required, but only two endpoints” /
 > “required, and cheap” classification is withdrawn. The coverage rule is
@@ -387,17 +401,17 @@ parseable HTTP 501 / gRPC code 12 refusal.
 
 Source: [packer_service_client.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/clients/cloud-packer-service/stable/2023-01-01/client/packer_service/packer_service_client.go)
 
-### Resource-manager API — three read endpoints
+### The resource-manager API
 
 The reachable resource-manager surface is three of its 35 operations:
 `OrganizationService_List`, `ProjectService_List`, and `ProjectService_Get`.
 The first two are Packer/provider discovery calls. The third is provider-only
-when a project id is pinned, as corrected in §2. The scope rule excludes the
+when a project id is pinned, as corrected under [Tenancy pinning and discovery](#tenancy-pinning-and-discovery). The scope rule excludes the
 other 32 operations.
 
 ---
 
-## 4a. The spec's schema carries almost no machine-checkable validation
+## Validation posture
 
 Measured across `cloud-packer-service` 2023-01-01: **zero** occurrences of
 `pattern`, `maxLength` or `minLength`, and `required` appears on none of its 132
@@ -405,7 +419,7 @@ definitions. No schema keyword constrains bucket names, channel names or
 fingerprints; a handful of field *descriptions* state constraints in prose,
 which a generator cannot enforce.
 
-So validation rules cannot be derived from the spec, and we have no observed
+So validation rules cannot be derived from the spec, and there are no observed
 upstream rejections to copy either. That gives one asymmetry worth stating as a
 rule:
 
@@ -449,11 +463,11 @@ configurable rather than inferred from the constraint-free spec. The refusal
 itself is reproduced as observed: an over-limit body answers `504` with a
 `text/plain` body of exactly `Gateway Timeout` — deliberately **not** a
 `google.rpc.Status`, and therefore the one served refusal exempt from the
-parseable-body rule that §5.1 and the 501 catch-all otherwise insist on.
+parseable-body rule that [version identity errors](#version-identity-errors) and the 501 catch-all otherwise insist on.
 
 ---
 
-## 5. Bug-for-bug quirks
+## Client quirks
 
 These are behaviours the client depends on that the published API docs do not
 describe. Getting any of them wrong breaks the build in a way that is hard to
@@ -465,7 +479,7 @@ diagnose from Packer's error output.
 > code differs per resource; incomplete versions must be named `v0`;
 > credentials arrive via HTTP Basic; the token cache masks auth bugs).
 
-### 5.1 "Version not found" must return gRPC code 10 (`Aborted`), not 404
+### Version identity errors
 
 This is the most important quirk in the entire project.
 
@@ -483,10 +497,10 @@ fact** (Appendix A has the verbatim pairs):
 | `GetChannel` / `UpdateChannel`, missing channel | **404** | `{"code":5, "message":"Error: The channel with identifier … does not exist.", "details":[]}` |
 | `CreateBucket`, name exists | **409** | `{"code":6, "message":"Error: The bucket with identifier … already exists.", "details":[]}` |
 | `CreateChannel`, name exists | **409** | `{"code":6, "message":"Error: The channel with identifier … already exists.", "details":[]}` |
-| Managed-channel mutation refusals | **400** | `{"code":3}` / `{"code":9}` — see §7 |
+| Managed-channel mutation refusals | **400** | `{"code":3}` / `{"code":9}` — see [the managed `latest` channel](#the-managed-latest-channel) |
 
 The mapping follows the grpc-gateway convention (3→400, 5→404, 6→409, 9→400,
-10→409). Our implementation matches the observed pairing for codes 3, 5, 6 and
+10→409). Dufflebag matches the observed pairing for codes 3, 5, 6 and
 10 **on the resource-not-found path**. Two deliberate paths sit outside the
 blanket claim: the ADR-0016 concealment refusals (denied or absent tenant,
 unresolvable principal) use HTTP **404** as the carrier with the route's
@@ -497,7 +511,7 @@ a missing **build** under a valid version answers 404/code-5 `build not
 found` on the SBOM and package sub-resources. The one divergence this table
 recorded — code **9** emitted with HTTP 409 where live HCP pairs it with
 **400** — was **resolved 2026-08-01**: the managed-channel refusals now
-answer 400/code-9 as captured (§7's implemented note). Packer only regexes
+answer 400/code-9 as captured (see the managed-channel implementation note under [Data model](#data-model)). Packer only regexes
 the code, so the status was inert for it throughout. (Code 12's status was
 not observed live; nothing new there.)
 
@@ -528,7 +542,7 @@ Consequences for the server:
   (HTTP status codes, application error codes) or the match will pick up the
   wrong number.
 
-### 5.2 Completed versions are a hard failure
+### Version completion
 
 `IsVersionComplete(version)` returning true makes Packer exit with
 "The version associated to the fingerprint %v is complete... a new version must
@@ -541,7 +555,7 @@ completion is inferred from a string field rather than from `status`. The
 `incremental_version` integer, and 2023-01-01 collapsed both into `name`. See
 [spec/vendor/PROVENANCE.md](https://github.com/benemon/dufflebag/blob/main/spec/vendor/PROVENANCE.md).
 
-### 5.3 `TemplateType` must be persisted and must never be `UNSET` on create
+### Template type
 
 `createVersion` refuses to proceed if the template type is
 `TEMPLATE_TYPE_UNSET`. `initializeVersion` then hard-fails if an existing
@@ -552,13 +566,13 @@ version's stored template type differs from the current run's:
 
 So the server must store `HCL2` vs `JSON` per version and return it faithfully.
 
-### 5.4 Build heartbeats
+### Build heartbeats
 
 `HeartbeatBuild` periodically issues `UpdateBuild` `PATCH`es against a running
 build. The server must tolerate these and not treat every PATCH as a meaningful
 status transition.
 
-### 5.5 Org/project identifiers travel in the path
+### Tenancy in the path
 
 > **Correction, 2026-08-08.** An earlier revision said `withOrgAndProjectIDs`
 > "injects organization and project ID headers on every request", suggesting a
@@ -571,7 +585,7 @@ exclusively from those path segments and authorizes them against the token's
 principal scope; any org/project headers a client happens to send are ignored
 entirely, and no cross-check exists or is needed.
 
-### 5.6 SBOM payloads arrive in-band and compressed
+### SBOM upload and download
 
 `UploadSbom` sends `{CompressedSbom, Format, Name}` in the request body —
 zstd-compressed bytes inline (base64 on the wire), not a presigned-URL
@@ -607,7 +621,7 @@ Source: [internal/hcp/api/errors.go](https://github.com/hashicorp/packer/blob/ma
 [internal/hcp/registry/types.bucket.go](https://github.com/hashicorp/packer/blob/main/internal/hcp/registry/types.bucket.go),
 [internal/hcp/api/service_build.go](https://github.com/hashicorp/packer/blob/main/internal/hcp/api/service_build.go)
 
-### 5.7 Ancestry IDs depend on HCL data-source correlation
+### Build ancestry
 
 Packer does have a parent-pointer path, but it is narrower than the wire model
 suggests. For an HCL2 build it captures the evaluated data-source outputs while
@@ -677,7 +691,7 @@ input to an ancestry claim.
 
 ---
 
-## 6. Build lifecycle
+## Build lifecycle
 
 Order **observed on the wire** during a real v1.16.0 build (2026-07-29 spike;
 re-proven on every `make test-packer` run):
@@ -727,17 +741,17 @@ reached `BUILD_DONE` (step 8), in the same instant (identical sub-second
 
 So completion is a server-side side effect of the final `UpdateBuild`, and
 step 9 (`UpdateChannel`) is only for *user-configured* channels — `latest`
-must never be written by a client (§7).
+must never be written by a client — see [the managed `latest` channel](#the-managed-latest-channel).
 
 One inference the per-resource codes above do **not** license: the code-10
 shape is specific to *version identity* (`GetVersion`/`UpdateVersion` on an
 unknown fingerprint). A missing **build** under a valid version — the SBOM and
 package sub-resources — answers 404/code-5 `build not found`, even though
-those routes conceal denied tenants with code 10 (§5.1).
+those routes conceal denied tenants with code 10 (see [version identity errors](#version-identity-errors)).
 
 ---
 
-## 7. Data model
+## Data model
 
 Small. The domain is not where the difficulty lives; the wire-protocol quirks
 are.
@@ -767,7 +781,7 @@ Three things the sketch above does not show, all decided since it was written:
   registry tables is enforced by row-level security rather than by
   application predicates alone. See ADR-0003.
 
-### The managed `latest` channel — verified, no longer inferred
+### The managed `latest` channel
 
 **Probe 2026-07-31** (Appendix A, probes 04–06 and 13–19). The 2026-07-31
 review listed this as could-not-assess; it is now observed fact:
@@ -777,7 +791,7 @@ review listed this as could-not-assess; it is now observed fact:
   `version: null`. It appears in `ListChannels` and answers `GetChannel`
   directly — a fresh bucket is never channel-less.
 - **On version completion the service assigns the completed version to
-  `latest` automatically** (§6). `version` on the channel is the full nested
+  `latest` automatically** (see [Build lifecycle](#build-lifecycle)). `version` on the channel is the full nested
   version object, builds and artifacts included.
 - **Clients cannot mutate it.** `UpdateChannel latest` (with a valid
   `update_mask` and fingerprint) → `400 {"code":9, "message":"Can't update
@@ -802,24 +816,24 @@ review listed this as could-not-assess; it is now observed fact:
   step only updates pre-existing channels; creation is `CreateChannel`.
 
 **Consequence for dufflebag (superseded — see the implementation note
-below):** at probe time we created no `latest` channel, so
+below):** at probe time dufflebag created no `latest` channel, so
 `data "hcp_packer_version" { channel_name = "latest" }` — the commonest
-consumption pattern — 404'd against us where it succeeded against HCP. The
+consumption pattern — 404'd against it where it succeeded against HCP. The
 required behaviour was: auto-create a managed `latest` per bucket, auto-assign
 at completion, and refuse mutation with the shapes above.
 
-> **2026-07-31 — implemented (duf-08q):** dufflebag now auto-creates the managed `latest` at CreateBucket (migration 000008 backfills pre-existing buckets), auto-assigns at completion in the same transaction, and refuses mutation with the captured 400/code-9 and 400/code-3 shapes — with one deliberate deviation: the `author_id` and the refusal prose say "Dufflebag" where live says "HCP Packer", because a HashiCorp trademark must not appear in content this server originates.
+> **2026-07-31 — implemented (duf-08q):** dufflebag now auto-creates the managed `latest` at CreateBucket, auto-assigns at completion in the same transaction, and refuses mutation with the captured 400/code-9 and 400/code-3 shapes — with one deliberate deviation: the `author_id` and the refusal prose say "Dufflebag" where live says "HCP Packer", because a HashiCorp trademark must not appear in content this server originates. The 0.1.0 baseline starts with this shape; pre-0.1.0 databases are rebuildable rather than upgraded.
 > The deviation is verified inert: Packer matches errors solely by numeric code (`errCodeRegex`/`CheckErrorCode`, `packer@v1.16.0 internal/hcp/api/errors.go`), and the provider keys its managed-channel handling off the `managed` boolean and typed numeric `payload.Code`, never the message or author text (`terraform-provider-hcp internal/providersdkv2/resource_packer_channel.go` create/delete paths; `resource_packer_channel_assignment.go` `channel.Managed` checks).
 >
 > **2026-08-01 — completeness extension (duf-why, duf-wct, duf-6i3):**
 > duplicate channel creation now follows probe 38's 409/code-6 adoption shape;
 > both handler and repository refuse assign-copy into managed channels with
-> probe 40's 400/code-9 shape; migration 000009 persists assignment author per
+> probe 40's 400/code-9 shape; the baseline persists assignment author per
 > history row. New manual rows carry the caller principal, automatic rows carry
 > `Dufflebag` under the same branding rule, and pre-migration rows carry the
-> honest explicit unknown `""` because their actor was never stored.
+> honest explicit unknown `""` when imported history has no actor.
 
-### Secure channel access (implemented 2026-08-14)
+### Restricted channels
 
 Dufflebag enforces HCP's documented secure-channel-access semantics, calibrated
 to its own role ladder. Every restricted channel, including the managed
@@ -847,13 +861,13 @@ established insufficient-role 403/code-7 response.
 
 ---
 
-## 8. Explicitly out of scope
+## Scope boundaries
 
 | Feature | Why |
 |---|---|
 | TFC run tasks | Requires HCP Terraform to call **inbound** to an HMAC-verified webhook — a different integration direction, backing a paid feature. ADR-0013 |
 
-### Scope reversal: package projection from client-reported SBOMs (2026-08-03)
+### Package projection from client-reported SBOMs
 
 The earlier decision that SBOM analysis and package inventory were out of
 scope is deliberately superseded. Package projection is now in scope so the
@@ -883,14 +897,10 @@ recorded here. CycloneDX
 component's bom-ref/name ancestry path is stored with the row so flattening
 does not discard the source format's containment information.
 
-Rows written before this migration, or by a previous release during an
-expand/contract overlap, have `parse_status = pending` by an expand-only
-default. *(Correction 2026-08-05: an earlier revision described a lazy
-backfill that re-parsed those rows' Postgres blobs on first read. Migration
-000014 dropped `compressed_data`, deliberately abandoning those bytes; the
-first packages read now marks such rows `unparseable` with an explicit
-abandonment error — `internal/store/postgres/sbom_repository.go`.)* A corrupt
-or structurally unrecognised document likewise remains stored with
+The 0.1.0 baseline stores only the object key and has no legacy Postgres blob
+column; pre-0.1.0 databases are rebuildable rather than upgraded. A row with
+`parse_status = pending` is projected lazily on its first packages read. A
+corrupt or structurally unrecognised document likewise remains stored with
 `parse_status = unparseable`; the packages read returns an explicit
 failed-precondition response naming the SBOM instead of the indistinguishable
 and false `packages: []`.
@@ -899,10 +909,10 @@ The trust boundary does not change. Package names, versions, purls and licences
 are **client-reported**, not verified against the image. This matches the audit
 trail's `forwarded_for` wording (“unverified forwarded-for value”, ADR-0020)
 and ancestry's refusal to promote a client-supplied source digest into a
-provenance claim (§5): Dufflebag records and attributes the assertion without
+provenance claim (see [Build ancestry](#build-ancestry)): Dufflebag records and attributes the assertion without
 certifying it.
 
-### Scope reversal: vulnerability reads from stored scan findings (2026-08-07)
+### Vulnerability reads from stored scan findings
 
 The earlier decision that CVE and vulnerability endpoints were out of scope is
 deliberately superseded. The external scanner pipeline now stores attributed
@@ -950,7 +960,7 @@ severity remain the scanner's stored assertion.
 
 ---
 
-## 9. Consumption side
+## The Terraform provider
 
 **Verified.** `terraform-provider-hcp/internal/clients/client.go:141` builds its
 configuration from `hcpConfig.FromEnv()` and passes it to `sdk.New`, so every
@@ -994,7 +1004,7 @@ enumerating that package undercounts the surface. Its destroy path tolerates
 exactly one error — an HTTP 404 removes the resource from state; anything else
 fails the destroy. (**Probe 2026-07-31:** live `DeleteBucket` on a missing
 bucket is literally HTTP 404 with `{"code":5, …}` — the provider's tolerance
-and HCP's answer line up, and our 404/code-5 matches both.) Its Read also stores `Bucket.ResourceName` in Terraform
+and HCP's answer line up, and dufflebag's 404/code-5 matches both.) Its Read also stores `Bucket.ResourceName` in Terraform
 state, so the field must carry the spec's documented shape
 `packer/project/<project-id>/bucket/<bucket-name>` — an empty value is
 perpetual state drift, not a hard failure.
@@ -1002,10 +1012,10 @@ perpetual state drift, not a hard failure.
 
 ---
 
-## 9a. Pinned client stack
+## Pinned client stack
 
 Per ADR-0010, `hcp-sdk-go` is the
-instrument that proves our contract is correct. Its authority rests entirely on
+instrument that proves the served contract is correct. Its authority rests entirely on
 being **the same artifact Packer links against**, so it must be pinned — and not
 alone.
 
@@ -1016,9 +1026,9 @@ wire-visible. Pin the whole triple.
 > precision — milliseconds (`.442Z`), microseconds (`.575261Z`) and full
 > nanoseconds (`.443428576Z`) appear in the same response document, apparently
 > reflecting however each timestamp was stored. Every pinned client stack
-> accepts all of them, so the precision our strfmt happens to emit is inside
+> accepts all of them, so the precision dufflebag's strfmt happens to emit is inside
 > the envelope real clients already tolerate; the pin still matters for what
-> *we parse*, not for an exact emitted form.
+> *dufflebag parses*, not for an exact emitted form.
 
 | Packer | `hcp-sdk-go` | `go-openapi/runtime` | `go-openapi/strfmt` |
 |---|---|---|---|
@@ -1047,7 +1057,7 @@ different client stacks.
   updates**: an auto-bump would not break the contract test, it would silently
   change what the test proves, which is worse.
 
-## 10. Clean-room position
+## Clean-room position
 
 The sources consulted, what was not consulted, and the working rules are
 recorded once, in [CONTRIBUTING.md](https://github.com/benemon/dufflebag/blob/main/CONTRIBUTING.md). The rule this
@@ -1055,7 +1065,7 @@ document exists to satisfy: never paste source from `packer/internal/hcp` —
 state the contract it implies and cite the file, which is what every section
 above does.
 
-## Appendix A — live-service probe captures
+## Appendix: live-service probe captures
 
 The numbered captures (`probe NN`) cited throughout were taken against the
 live service on 2026-07-31 and 2026-08-01 with a disposable service principal

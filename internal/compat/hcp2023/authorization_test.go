@@ -52,6 +52,53 @@ func TestTenantOutsidePrincipalScopeIsNotFound(t *testing.T) {
 	}
 }
 
+func TestBucketOutsidePrincipalScopeIsNotFound(t *testing.T) {
+	repository := newFakeRepository()
+	ownedID := registry.NewID(testTime)
+	repository.buckets["owned"] = &store.Bucket{ID: ownedID, Name: "owned"}
+	repository.buckets["sibling"] = &store.Bucket{
+		ID: registry.NewID(testTime.Add(time.Second)), Name: "sibling",
+	}
+	principals := fakePrincipals{
+		role: identity.RolePublisher,
+		scope: identity.Scope{
+			OrganizationID: uuid.MustParse(testOrg),
+			ProjectID:      uuid.MustParse(testProject),
+			BucketID:       ownedID.String(),
+		},
+	}
+	server := newHandler(repository, principals, testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+
+	if response := request(t, server, http.MethodGet, testBase+"/buckets/owned", nil); response.Code != http.StatusOK {
+		t.Fatalf("owned bucket status = %d, want 200; body %s", response.Code, response.Body)
+	}
+	if response := request(t, server, http.MethodPatch, testBase+"/buckets/owned", map[string]any{
+		"description": "owned update",
+	}); response.Code != http.StatusOK {
+		t.Fatalf("owned bucket update = %d, want 200; body %s", response.Code, response.Body)
+	}
+	for _, tc := range []struct {
+		name, method, path string
+		body               any
+	}{
+		{"sibling read", http.MethodGet, testBase + "/buckets/sibling", nil},
+		{"bucket create", http.MethodPut, testBase + "/buckets", map[string]any{"name": "new"}},
+		{"bucket delete", http.MethodDelete, testBase + "/buckets/owned", nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response := request(t, server, tc.method, tc.path, tc.body)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body %s", response.Code, response.Body)
+			}
+			var body map[string]any
+			decodeResponse(t, response, &body)
+			if body["code"] != float64(5) {
+				t.Fatalf("code = %v, want 5", body["code"])
+			}
+		})
+	}
+}
+
 func TestVulnerabilityReadsRequireReaderInScope(t *testing.T) {
 	repository := newFakeRepository()
 	seed := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
@@ -566,6 +613,7 @@ func TestEveryPackerRouteHasItsExactAuditDescriptor(t *testing.T) {
 		operation, targetType, targetIDParam string
 	}
 	expected := map[string]semantic{
+		"POST /_search/external_artifact":                                                   {"artifact.search", "artifact_collection", ""},
 		"GET /registry":                                                                     {"registry.read", "registry", ""},
 		"GET /enforced_blocks/bucket/{bucket}":                                              {"enforced_block.list", "bucket", "bucket"},
 		"GET /buckets":                                                                      {"bucket.list", "bucket_collection", ""},
@@ -776,6 +824,7 @@ func TestCreateBucketDistinguishesConflictFromFailure(t *testing.T) {
 // failure rather than a gap.
 func TestEveryRouteRequiresTheRoleItShould(t *testing.T) {
 	expected := map[string]identity.Role{
+		"POST /_search/external_artifact":                                                   identity.RoleReader,
 		"GET /registry":                                                                     identity.RoleReader,
 		"GET /enforced_blocks/bucket/{bucket}":                                              identity.RoleReader,
 		"GET /buckets":                                                                      identity.RoleReader,

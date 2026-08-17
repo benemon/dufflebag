@@ -10,6 +10,7 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 var dummyPrincipal = func() *identity.Principal {
@@ -99,7 +100,7 @@ func (r *Repository) restorePrincipal(
 ) (*identity.Principal, error) {
 	if r.ring != nil {
 		if err := r.ring.VerifyMAC(row.IntegrityMac, principalMACMessage(
-			row.ID, row.ClientID, row.OrganizationID, row.ProjectID, row.Role,
+			row.ID, row.ClientID, row.OrganizationID, row.ProjectID, row.BucketID, row.Role,
 		)); err != nil {
 			return nil, fmt.Errorf("restore principal %s: %w", row.ID, identity.ErrIntegrity)
 		}
@@ -160,6 +161,9 @@ func (r *Repository) restorePrincipal(
 	if row.ProjectID.Valid {
 		scope.ProjectID = row.ProjectID.UUID
 	}
+	if row.BucketID.Valid {
+		scope.BucketID = row.BucketID.String
+	}
 	principal, err := identity.RestorePrincipal(
 		row.ID, row.Name, row.ClientID, scope, role, utc(row.CreatedAt), secrets,
 	)
@@ -188,20 +192,29 @@ func (r *Repository) createPrincipalTx(ctx context.Context, q *postgresdb.Querie
 	if principal.Scope.OrganizationID != uuid.Nil {
 		organizationID = uuid.NullUUID{UUID: principal.Scope.OrganizationID, Valid: true}
 	}
+	bucketID := sql.NullString{}
+	if principal.Scope.BucketID != "" {
+		bucketID = sql.NullString{String: principal.Scope.BucketID, Valid: true}
+	}
 	if _, err := q.CreatePrincipal(ctx, postgresdb.CreatePrincipalParams{
 		ID:             principal.ID,
 		Name:           principal.Name,
 		ClientID:       principal.ClientID,
 		OrganizationID: organizationID,
 		ProjectID:      projectID,
+		BucketID:       bucketID,
 		Role:           string(principal.Role),
 		CreatedAt:      principal.CreatedAt,
 		IntegrityMac: r.rowMAC(principalMACMessage(
-			principal.ID, principal.ClientID, organizationID, projectID, string(principal.Role),
+			principal.ID, principal.ClientID, organizationID, projectID, bucketID, string(principal.Role),
 		)),
 	}); errors.Is(err, sql.ErrNoRows) {
 		return fmt.Errorf("create principal: %w", identity.ErrConflict)
 	} else if err != nil {
+		var postgresError *pgconn.PgError
+		if errors.As(err, &postgresError) && postgresError.Code == "23503" {
+			return fmt.Errorf("create principal: %w", identity.ErrNotFound)
+		}
 		return fmt.Errorf("create principal: %w", err)
 	}
 

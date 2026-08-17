@@ -16,7 +16,8 @@ import (
 // ListAuditTargets returns the configured targets in slot order.
 //
 // Slot orders the result and is then discarded: it exists so a fourth target
-// cannot be written (migration 000011), not so a caller can reason about it.
+// cannot be written (the baseline's three-slot constraint), not so a caller
+// can reason about it.
 func (r *Repository) ListAuditTargets(ctx context.Context) ([]identity.AuditTarget, error) {
 	rows, err := postgresdb.New(r.db).ListAuditTargets(ctx)
 	if err != nil {

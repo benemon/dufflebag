@@ -147,12 +147,14 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO scan_runs (
-			organization_id, project_id, id, build_id, run_sequence, status,
+			organization_id, project_id, id, bucket_id, build_id, run_sequence, status,
 			error, adapter, engine, database_revision, observed_at,
 			transcript_digest, coverage, created_at, integrity_mac
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
-		)`,
+		)
+		SELECT $1, $2, $3, builds.bucket_id, builds.id, $5, $6, $7, $8,
+			$9, $10, $11, $12, $13, $14, $15
+		FROM builds
+		WHERE builds.id = $4`,
 		tenant.OrganizationID, tenant.ProjectID, run.ID, run.BuildID,
 		run.RunSequence, run.Status, run.Error, run.Adapter, run.Engine,
 		run.DatabaseRevision, run.ObservedAt, run.TranscriptDigest, coverage,
@@ -163,8 +165,10 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 
 	expiresAt := scanWriteTime(run.CreatedAt.Add(scanTranscriptRetention))
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO scan_transcripts (organization_id, project_id, run_id, object_key, expires_at, integrity_mac)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
+		INSERT INTO scan_transcripts (organization_id, project_id, bucket_id, run_id, object_key, expires_at, integrity_mac)
+		SELECT $1, $2, scan_runs.bucket_id, scan_runs.id, $4, $5, $6
+		FROM scan_runs
+		WHERE scan_runs.id = $3`,
 		tenant.OrganizationID, tenant.ProjectID, run.ID, objectKey, expiresAt,
 		r.rowMAC(scanTranscriptMACMessage(tenant, run.ID, objectKey, expiresAt)),
 	); err != nil {
@@ -231,17 +235,18 @@ func insertScanFinding(ctx context.Context, tx *sql.Tx, r *Repository, tenant Te
 	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO scan_findings (
-			organization_id, project_id, run_id, sbom_id, package_name,
+			organization_id, project_id, bucket_id, run_id, sbom_id, package_name,
 			package_version, purl, advisory_id, summary, aliases, related,
 			published, modified, withdrawn, fixed_versions, severities,
 			derived_severity, first_seen_at, integrity_mac
-		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11,
+		)
+		SELECT $1, $2, scan_runs.bucket_id, scan_runs.id, $4, $5, $6, $7, $8, $9, $10, $11,
 			NULLIF($12, '0001-01-01T00:00:00Z'::timestamptz),
 			NULLIF($13, '0001-01-01T00:00:00Z'::timestamptz),
 			NULLIF($14, '0001-01-01T00:00:00Z'::timestamptz),
 			$15, $16, $17, $18, $19
-		)`,
+		FROM scan_runs
+		WHERE scan_runs.id = $3`,
 		tenant.OrganizationID, tenant.ProjectID, runID,
 		f.Package.SBOMID, f.Package.Name, f.Package.Version, f.Package.Purl,
 		f.ID, f.Summary, aliases, related,
@@ -363,8 +368,10 @@ func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenan
 
 	mac := r.rowMAC(buildScanStateMACMessage(tenant, run.BuildID, current, latest))
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO build_scan_state (organization_id, project_id, build_id, current_findings_run_id, latest_attempt_run_id, integrity_mac)
-		VALUES ($1, $2, $3, NULLIF($4, ''), $5, $6)
+		INSERT INTO build_scan_state (organization_id, project_id, bucket_id, build_id, current_findings_run_id, latest_attempt_run_id, integrity_mac)
+		SELECT $1, $2, builds.bucket_id, builds.id, NULLIF($4, ''), $5, $6
+		FROM builds
+		WHERE builds.id = $3
 		ON CONFLICT (organization_id, project_id, build_id) DO UPDATE SET
 			current_findings_run_id = NULLIF($4, ''),
 			latest_attempt_run_id = $5,
