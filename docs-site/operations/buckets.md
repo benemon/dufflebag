@@ -1,17 +1,25 @@
 # Buckets
 
 A bucket is the unit of registry organisation: Packer publishes into one, and
-its versions, channels and builds hang off it. This page covers the Buckets
-list screen and the single-bucket drill-down.
+its versions, channels and builds hang off it. This page covers choosing a
+bucket and the single-bucket drill-down.
 
-## The Buckets screen
+## Choosing a bucket
 
-The **Buckets** screen lists the project's registry.
+Bucket selection lives in the masthead beside the organisation and project
+pickers: a searchable drop-down that follows the route, so the bucket in the
+address bar is always the bucket on screen. Pinned buckets group first; typing
+filters the list.
 
-![Dufflebag Buckets screen showing the project registry](/screenshots/buckets.png)
+![Dufflebag bucket picker open in the masthead, pinned buckets grouped first](/screenshots/bucket-picker.png)
 
-Builders can pin buckets and unpin them from the pinned card. Publishers can
-delete a bucket.
+With no bucket chosen, the registry landing says so and points at the picker.
+
+![Dufflebag registry landing prompting bucket choice](/screenshots/buckets.png)
+
+Builders can pin a bucket and unpin it from the bucket's own header — pinned
+buckets surface first in the picker. Publishers can delete a bucket from the
+same header.
 
 ::: warning
 When Bag Drop currently mirrors a bucket, the console warns that deleting the
@@ -30,6 +38,7 @@ The versions table is covered in [Versions](./versions.md); the channels tab
 in [Channels](./channels.md).
 
 Buckets are created by a `packer build` (see
-[Build an image with Packer](../quick-start/build-with-packer.md)) or by the
-`hcp_packer_bucket` Terraform resource — the console deliberately offers no
-bucket creation, matching HCP's own console.
+[Build an image with Packer](../quick-start/build-with-packer.md)), by the
+`hcp_packer_bucket` Terraform resource, or from the picker's **Create bucket**
+action — which issues the same compatibility-plane request a client would, so
+a console-created bucket is indistinguishable from a published one.
