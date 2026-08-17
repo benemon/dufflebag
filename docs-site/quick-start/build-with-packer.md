@@ -72,7 +72,15 @@ build {
 
 The build creates the bucket, an incomplete version, and its builds; on
 completion the version becomes active and the managed `latest` channel moves
-to it. To also upload an SBOM during the build, see
+to it.
+
+::: tip
+Bucket creation is the organisation- and project-scoped behaviour. A
+[bucket-scoped principal](../administration/principals.md#scopes) publishes
+into a bucket that already exists — name any other bucket and the build fails
+with not-found, and Packer's create-if-missing step is refused rather than
+minting one.
+::: To also upload an SBOM during the build, see
 [Builds — SBOMs and findings](../operations/builds.md).
 
 ## Next

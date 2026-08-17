@@ -23,7 +23,7 @@ type NavGroupModel = {
 /** Nav grouped as the design labels it: Registry, then Administration. */
 const NAV: readonly NavGroupModel[] = [
   { group: 'Registry', items: [
-    { key: 'buckets', to: '/', label: 'Registry' },
+    { key: 'buckets', to: '/buckets', label: 'Buckets' },
   ]},
   // Instance stays under Administration where the design put it: it is
   // reader-tier, so the group renders for every role — role filtering changes
@@ -139,12 +139,16 @@ export function AppShell({
   onThemeChange: (theme: Theme) => void
 }) {
   const { pathname } = useLocation()
-  const { self } = useAuth()
+  const { self, state } = useAuth()
+  // A bucket-scoped session has exactly one bucket and lands in it; a Buckets
+  // entry would offer a list of one.
+  const bucketScoped = state?.claims.bucketID != null
 
   return (
     <AppShellView
       pathname={pathname}
-      visibleItems={visibleNavItems(self?.role ?? null)}
+      visibleItems={visibleNavItems(self?.role ?? null)
+        .filter((item) => !(bucketScoped && item === 'buckets'))}
       masthead={<AppMasthead theme={theme} onThemeChange={onThemeChange} />}
     >
       {children}
@@ -181,7 +185,7 @@ export function AppShellView({
                   key={key}
                   component={RouterNavLink}
                   to={to}
-                  isActive={to === '/' ? pathname === '/' : pathname.startsWith(to)}
+                  isActive={pathname.startsWith(to)}
                 >
                   {label}
                 </NavItem>

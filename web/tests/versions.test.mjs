@@ -1850,7 +1850,8 @@ test('versions paginate the 30-row recent window and expose the five older rows 
 test('empty and gap states are distinct, and list rows remain read-only', async () => {
   const emptyMarkup = versionsFacetMarkup([])
   assert.match(emptyMarkup, /<h2[^>]*>No versions in this bucket<\/h2>/)
-  assert.match(emptyMarkup, /pf-v6-c-empty-state__body">Publish with packer build to create one\./)
+  assert.match(emptyMarkup, /Versions appear when Packer publishes to this bucket\./)
+  assert.match(emptyMarkup, />Connect a client</)
 
   const gap = platformTenancyGap({
     platform: true, organizationCount: 1,
@@ -1961,4 +1962,14 @@ test('the bucket ancestry card aggregates every version and names the local vers
   assert.match(markup, /aria-label="Parents ancestry scope"/)
   assert.match(markup, /aria-label="Children ancestry scope"/)
   assert.doesNotMatch(markup, /parent of v1 \(latest\)/)
+})
+
+test('an empty bucket offers the same connect affordance as an empty list', () => {
+  const markup = renderToStaticMarkup(React.createElement(VersionsFacet, {
+    versions: [],
+    onOpenVersion: () => {},
+  }))
+  assert.match(markup, /No versions in this bucket/)
+  assert.match(markup, />Connect a client</)
+  assert.match(markup, />Packer docs</)
 })

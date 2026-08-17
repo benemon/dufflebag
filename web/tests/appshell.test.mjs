@@ -45,12 +45,13 @@ const headerScreenSources = [
   readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
 ])
 
-const view = (role, pathname = '/') => renderToStaticMarkup(React.createElement(
+const view = (role, pathname = '/', over = {}) => renderToStaticMarkup(React.createElement(
   MemoryRouter,
   { initialEntries: [pathname] },
   React.createElement(AppShellView, {
     pathname,
     visibleItems: visibleNavItems(role),
+    ...over,
   }, React.createElement('main', null, 'Screen')),
 ))
 
@@ -82,14 +83,25 @@ test('router links carry PatternFly native current navigation state', () => {
     /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
   )
   assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
-  for (const destination of ['/', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+  for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
 })
 
-test('Registry owns the root route while bucket detail routes keep their paths', () => {
-  assert.match(appSource, /<Route path="\/" element=\{<Registry \/>\}/)
-  assert.match(appSource, /<Route path="\/buckets" element=\{<Navigate to="\/" replace \/>\}/)
+test('the nav names the Buckets item and hides it from bucket-scoped sessions', () => {
+  assert.match(shellSource, /key: 'buckets', to: '\/buckets', label: 'Buckets'/)
+  assert.match(shellSource, /bucketScoped && item === 'buckets'/)
+  const markup = view('root', '/audit', { visibleItems: ['principals', 'audit'] })
+  assert.doesNotMatch(markup, /href="\/buckets"/)
+})
+
+test('the landing routes by scope while bucket detail routes keep their paths', () => {
+  // Above-bucket sessions land on the Buckets screen; a bucket-scoped session
+  // lands in its one bucket (the Landing component encodes the split).
+  assert.match(appSource, /<Route path="\/" element=\{<Landing \/>\}/)
+  assert.match(appSource, /<Route path="\/buckets" element=\{<Buckets \/>\}/)
+  assert.match(appSource, /Navigate to="\/buckets" replace/)
+  assert.match(appSource, /claims.bucketID/)
   assert.match(appSource, /path="\/buckets\/:bucket"/)
   assert.match(appSource, /<Route path="versions\/:fingerprint" element=\{<Version \/>\}/)
   assert.match(appSource, /<Route path="versions\/:fingerprint\/builds\/:build" element=\{<Build \/>\}/)
