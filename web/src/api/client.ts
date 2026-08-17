@@ -152,6 +152,20 @@ export async function listBuckets(token: string, tenant: Tenant): Promise<ApiBuc
   return body.buckets ?? []
 }
 
+export async function createBucket(
+  token: string,
+  tenant: Tenant,
+  name: string,
+): Promise<ApiBucket> {
+  const body = await request<{ bucket?: ApiBucket }>(
+    token,
+    'PUT',
+    `${packerPath(tenant)}/buckets`,
+    { name },
+  )
+  return body?.bucket ?? { name }
+}
+
 export async function getBucket(token: string, tenant: Tenant, bucket: string): Promise<ApiBucket> {
   const body = await get<{ bucket?: ApiBucket }>(
     token,

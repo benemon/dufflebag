@@ -72,7 +72,7 @@ export function Version() {
       failure={failure}
       gap={gap}
       onRefresh={reload}
-      onBackToRegistry={() => navigate('/buckets')}
+      onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onOpenBuild={(build) => navigate(
         `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
