@@ -1,28 +1,27 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
-  Button, Content, MenuFooter, MenuToggle, Popover, Select, SelectGroup, SelectList, SelectOption,
-  Skeleton, TextInputGroup, TextInputGroupMain, TextInputGroupUtilities,
+  Button, Content, MenuFooter, MenuToggle, Popover, Select, SelectList, SelectOption, Skeleton,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
-import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
 import ExclamationCircleIcon from '@patternfly/react-icons/dist/esm/icons/exclamation-circle-icon'
-import { useNavigate, useParams } from 'react-router'
 
-import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import type { Role } from '../auth/permissions'
-import { CreateBucketButton } from '../components/BucketCreation'
-import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
-import { useBucketPicker } from '../data/bucketPicker'
+import { CreateTenancyButton } from '../components/TenancyCreation'
 import { organizationRows, useTenant } from '../data/tenant'
 
-type PickerOption = {
-  value: string
-  label: string
-  group?: string
-}
-
-/** Organization, project and route-derived bucket selectors. */
+/**
+ * Organization / project selector.
+ *
+ * A tenant is the (organization, project) pair, and every compatibility-plane
+ * path carries both — so nothing can be fetched until one is chosen.
+ *
+ * A tenancy-scoped session shows one combined selector, because its
+ * organisation is the token's and is never a choice. A platform-scoped session
+ * (the bootstrap root, duf-tkw) chooses the organisation first, so it gets two:
+ * organisation, then project within it — and the organisation select carries
+ * an explicit platform row, because ADR-0014's "nothing
+ * selected" must stay reachable after the sole-organisation auto-select.
+ */
 export function TenantSwitcher() {
   const {
     state, self, organizations, organizationsLoading, organizationFailure,
@@ -31,49 +30,43 @@ export function TenantSwitcher() {
 
   const platform = state !== null && state.claims.organizationID === null
   if (!platform) {
-    return (
-      <span className="tenant-switchers">
-        <ProjectSelect combined />
-        <BucketPicker />
-      </span>
-    )
+    return <ProjectSelect combined />
   }
-
-  let organizationPicker: ReactNode
+  // Settled truths render as text, not as an empty menu pretending to offer
+  // something: an empty listing and a failed one are different facts.
   if (organizationsLoading) {
-    organizationPicker = (
+    return (
       <PickerField label="Organisation">
         <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading organisations…" />
       </PickerField>
     )
-  } else if (organizationFailure) {
-    organizationPicker = (
+  }
+  if (organizationFailure) {
+    return (
       <PickerField label="Organisation">
         <Content component="p" style={{ margin: 0 }}>Organisations could not be loaded</Content>
       </PickerField>
     )
-  } else if (organizations.length === 0) {
-    organizationPicker = (
+  }
+  if (organizations.length === 0) {
+    return (
       <PickerField label="Organisation">
         <Content component="p" style={{ margin: 0 }}>No organisations exist</Content>
         <CreateTenancyButton kind="organization" callerRole={self?.role ?? null} variant="link" />
       </PickerField>
     )
-  } else {
-    organizationPicker = <OrganizationSelect refreshFailure={organizationRefreshFailure} />
   }
-
   return (
     <span className="tenant-switchers">
-      {organizationPicker}
+      <OrganizationSelect refreshFailure={organizationRefreshFailure} />
       {selectedOrganization ? <ProjectSelect /> : null}
-      <BucketPicker />
     </span>
   )
 }
 
-// A picker refreshes when opened so resources created elsewhere do not require
-// a tenancy round-trip before they appear.
+// Both pickers refetch their listing when opened: a select that opens onto a
+// cached list goes stale the moment tenancy is created elsewhere (duf-4hje —
+// new projects only appeared after an organisation round-trip).
 export function refreshOnPickerOpen(
   open: boolean,
   refresh: () => Promise<unknown>,
@@ -90,153 +83,59 @@ function PickerField({ label, children }: { label: string; children: ReactNode }
   )
 }
 
-function TypeaheadPicker({
-  id, label, options, selectedValue, selectedLabel, footer, onSelect, onOpen,
-}: {
-  id: string
-  label: string
-  options: PickerOption[]
-  selectedValue?: string
-  selectedLabel: string
-  footer: ReactNode
-  onSelect: (value: string) => void
-  onOpen: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const [inputValue, setInputValue] = useState(selectedLabel)
-  const [filterValue, setFilterValue] = useState('')
-  const inputRef = useRef<HTMLInputElement>(null)
-  const query = filterValue.trim().toLowerCase()
-  const filtered = options.filter((option) => option.label.toLowerCase().includes(query))
-  const groups = [...new Set(filtered.flatMap((option) => option.group ? [option.group] : []))]
-
-  useEffect(() => {
-    if (!open) setInputValue(selectedLabel)
-  }, [open, selectedLabel])
-
-  const setPickerOpen = (nextOpen: boolean) => {
-    setOpen(nextOpen)
-    if (nextOpen) {
-      setInputValue(selectedLabel)
-      setFilterValue('')
-      onOpen()
-    } else {
-      setInputValue(selectedLabel)
-      setFilterValue('')
-    }
-  }
-  const select = (value: string) => {
-    const option = options.find((candidate) => candidate.value === value)
-    if (!option) return
-    setInputValue(option.label)
-    setFilterValue('')
-    onSelect(value)
-    setOpen(false)
-  }
-  const optionNode = (option: PickerOption) => (
-    <SelectOption key={option.value} value={option.value}>{option.label}</SelectOption>
-  )
-
-  return (
-    <Select
-      isOpen={open}
-      selected={filterValue ? undefined : selectedValue}
-      onSelect={(_event, value) => {
-        if (typeof value === 'string') select(value)
-      }}
-      onOpenChange={setPickerOpen}
-      variant="typeahead"
-      toggle={(ref: React.Ref<MenuToggleElement>) => (
-        <MenuToggle
-          id={id}
-          ref={ref}
-          isExpanded={open}
-          onClick={() => {
-            setPickerOpen(!open)
-            inputRef.current?.focus()
-          }}
-          variant="typeahead"
-        >
-          <TextInputGroup isPlain>
-            <TextInputGroupMain
-              inputId={`${id}-input`}
-              value={inputValue}
-              onClick={() => { if (!open) setPickerOpen(true) }}
-              onChange={(_event, value) => {
-                setInputValue(value)
-                setFilterValue(value)
-                if (!open) setPickerOpen(true)
-              }}
-              autoComplete="off"
-              innerRef={inputRef}
-              aria-label={`Search ${label.toLowerCase()}`}
-              placeholder={selectedLabel}
-              role="combobox"
-              isExpanded={open}
-              aria-controls={`${id}-listbox`}
-            />
-            <TextInputGroupUtilities style={inputValue ? undefined : { display: 'none' }}>
-              <Button
-                variant="plain"
-                aria-label={`Clear ${label.toLowerCase()} search`}
-                icon={<TimesIcon />}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  setInputValue('')
-                  setFilterValue('')
-                  inputRef.current?.focus()
-                }}
-              />
-            </TextInputGroupUtilities>
-          </TextInputGroup>
-        </MenuToggle>
-      )}
-    >
-      <SelectList id={`${id}-listbox`}>
-        {filtered.length === 0 ? (
-          <SelectOption isAriaDisabled value="__no-results">
-            No results found for “{filterValue}”
-          </SelectOption>
-        ) : groups.length > 0 ? groups.map((group) => (
-          <SelectGroup key={group} label={group}>
-            {filtered.filter((option) => option.group === group).map(optionNode)}
-          </SelectGroup>
-        )) : filtered.map(optionNode)}
-      </SelectList>
-      {footer}
-    </Select>
-  )
-}
-
 function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null }) {
   const {
     self, organizations, selectedOrganization, selectOrganization, refreshOrganizations,
   } = useAuth()
+  const [open, setOpen] = useState(false)
+  // The platform row ahead of the real organisations is the deliberate step
+  // back up to platform standing (ADR-0014's "nothing selected"). Selecting it
+  // stores '' — which the sole-organisation auto-select cannot undo — and
+  // clears the project selection with it; the data screens state the gap.
   const rows = organizationRows(organizations)
   const selected = rows.find((candidate) => candidate.id === selectedOrganization)
+  const setPickerOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    refreshOnPickerOpen(nextOpen, refreshOrganizations)
+  }
+
   return (
     <PickerField label="Organisation">
-      <TypeaheadPicker
-        id="tenant-organization"
-        label="Organisation"
-        options={rows.map((organization) => ({
-          value: organization.id,
-          label: organization.name,
-        }))}
-        selectedValue={selectedOrganization ?? undefined}
-        selectedLabel={selected?.name ?? 'Choose an organisation'}
-        onSelect={selectOrganization}
-        onOpen={() => refreshOnPickerOpen(true, refreshOrganizations)}
-        footer={(
-          <MenuFooter>
-            <CreateTenancyButton
-              kind="organization"
-              callerRole={self?.role ?? null}
-              variant="link"
-            />
-          </MenuFooter>
+      <Select
+        isOpen={open}
+        selected={selectedOrganization ?? undefined}
+        onSelect={(_e, value) => {
+          if (typeof value === 'string') selectOrganization(value)
+          setOpen(false)
+        }}
+        onOpenChange={setPickerOpen}
+        toggle={(ref: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            id="tenant-organization"
+            ref={ref}
+            isExpanded={open}
+            onClick={() => setPickerOpen(!open)}
+            variant="plainText"
+          >
+            {selected?.name ?? 'Choose an organisation'}
+          </MenuToggle>
         )}
-      />
+      >
+        <SelectList>
+          {rows.map((organization) => (
+            <SelectOption key={organization.id} value={organization.id}>
+              {organization.name}
+            </SelectOption>
+          ))}
+        </SelectList>
+        <MenuFooter>
+          <CreateTenancyButton
+            kind="organization"
+            callerRole={self?.role ?? null}
+            variant="link"
+          />
+        </MenuFooter>
+      </Select>
       {refreshFailure ? (
         <Popover
           aria-label="Organisation refresh failure"
@@ -258,188 +157,61 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
   )
 }
 
+/**
+ * The project half. `combined` labels options as "organisation / project" for
+ * the tenancy-scoped session, whose single selector carries the whole pair; the
+ * platform session's sits beside an organisation selector already naming the
+ * organisation, so repeating it would say nothing.
+ */
 function ProjectSelect({ combined = false }: { combined?: boolean }) {
-  const {
-    self, selectedOrganization, permittedProjects, projectsLoading, projectFailure,
-    refreshProjects,
-  } = useAuth()
+  const { self, selectedOrganization, refreshProjects } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
-  const label = (candidate: typeof tenant) => (
-    combined ? `${candidate.organization} / ${candidate.project}` : candidate.project
-  )
-
-  if (projectsLoading) {
-    return (
-      <PickerField label="Project">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading projects…" />
-      </PickerField>
-    )
-  }
-  if (projectFailure) {
-    return (
-      <PickerField label="Project">
-        <Content component="p" style={{ margin: 0 }}>Projects could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (permittedProjects.length === 0) {
-    return (
-      <PickerField label="Project">
-        <Content component="p" style={{ margin: 0 }}>No projects exist</Content>
-        <CreateTenancyButton
-          kind="project"
-          callerRole={self?.role ?? null}
-          organizationID={selectedOrganization ?? undefined}
-          variant="link"
-        />
-      </PickerField>
-    )
+  const [open, setOpen] = useState(false)
+  const label = (t: typeof tenant) => (combined ? `${t.organization} / ${t.project}` : t.project)
+  const setPickerOpen = (nextOpen: boolean) => {
+    setOpen(nextOpen)
+    refreshOnPickerOpen(nextOpen, refreshProjects)
   }
 
   return (
     <PickerField label="Project">
-      <TypeaheadPicker
-        id="tenant-project"
-        label="Project"
-        options={tenants.map((candidate) => ({
-          value: candidate.id,
-          label: label(candidate),
-        }))}
-        selectedValue={tenant.id}
-        selectedLabel={label(tenant)}
-        onSelect={(value) => {
-          const next = tenants.find((candidate) => candidate.id === value)
+      <Select
+        isOpen={open}
+        selected={tenant.id}
+        onSelect={(_e, value) => {
+          const next = tenants.find((t) => t.id === value)
           if (next) setTenant(next)
+          setOpen(false)
         }}
-        onOpen={() => refreshOnPickerOpen(true, refreshProjects)}
-        footer={(
-          <MenuFooter>
-            <CreateTenancyButton
-              kind="project"
-              callerRole={self?.role ?? null}
-              organizationID={selectedOrganization ?? undefined}
-              variant="link"
-            />
-          </MenuFooter>
+        onOpenChange={setPickerOpen}
+        toggle={(ref: React.Ref<MenuToggleElement>) => (
+          <MenuToggle
+            id="tenant-project"
+            ref={ref}
+            isExpanded={open}
+            onClick={() => setPickerOpen(!open)}
+            variant="plainText"
+          >
+            {label(tenant)}
+          </MenuToggle>
         )}
-      />
+      >
+        <SelectList>
+          {tenants.map((t) => (
+            <SelectOption key={t.id} value={t.id}>
+              {label(t)}
+            </SelectOption>
+          ))}
+        </SelectList>
+        <MenuFooter>
+          <CreateTenancyButton
+            kind="project"
+            callerRole={self?.role ?? null}
+            organizationID={selectedOrganization ?? undefined}
+            variant="link"
+          />
+        </MenuFooter>
+      </Select>
     </PickerField>
   )
-}
-
-export function BucketPicker() {
-  const { bucket } = useParams()
-  const navigate = useNavigate()
-  const { state, self, selectedOrganization, selectedProject } = useAuth()
-  const { buckets, pins, loading, failure, refresh } = useBucketPicker()
-  const scoped = Boolean(state && selectedOrganization && selectedProject)
-  const create = async (name: string) => {
-    if (!state || !selectedOrganization || !selectedProject) throw new Error('No session.')
-    const created = await createBucket(state.token, {
-      organizationID: selectedOrganization,
-      projectID: selectedProject,
-    }, name)
-    await refreshThenSelect(
-      created,
-      refresh,
-      (listed) => navigate(`/buckets/${encodeURIComponent(listed.name)}`),
-      (listed) => listed.name,
-    )
-  }
-  return (
-    <BucketPickerView
-      selectedBucket={bucket}
-      buckets={buckets}
-      pins={pins}
-      scoped={scoped}
-      loading={loading}
-      failure={failure}
-      callerRole={self?.role ?? null}
-      onRefresh={refresh}
-      onSelect={(name) => navigate(`/buckets/${encodeURIComponent(name)}`)}
-      onCreate={create}
-    />
-  )
-}
-
-export function BucketPickerView({
-  selectedBucket, buckets, pins, scoped, loading, failure, callerRole,
-  onRefresh, onSelect, onCreate,
-}: {
-  selectedBucket?: string
-  buckets: { name: string }[]
-  pins: { bucket_name: string }[]
-  scoped: boolean
-  loading: boolean
-  failure: string | null
-  callerRole: Role | null
-  onRefresh: () => Promise<unknown>
-  onSelect: (name: string) => void
-  onCreate: (name: string) => Promise<void>
-}) {
-  const createButton = (
-    <CreateBucketButton callerRole={callerRole} onCreate={onCreate} variant="link" />
-  )
-  if (!scoped) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
-      </PickerField>
-    )
-  }
-  if (loading) {
-    return (
-      <PickerField label="Bucket">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
-      </PickerField>
-    )
-  }
-  if (failure) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (buckets.length === 0) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>No buckets exist</Content>
-        {createButton}
-      </PickerField>
-    )
-  }
-
-  const options = bucketPickerOptions(buckets, pins)
-  return (
-    <PickerField label="Bucket">
-      <TypeaheadPicker
-        id="tenant-bucket"
-        label="Bucket"
-        options={options}
-        selectedValue={selectedBucket}
-        selectedLabel={selectedBucket ?? '—'}
-        onSelect={onSelect}
-        onOpen={() => refreshOnPickerOpen(true, onRefresh)}
-        footer={<MenuFooter>{createButton}</MenuFooter>}
-      />
-    </PickerField>
-  )
-}
-
-export function bucketPickerOptions(
-  buckets: { name: string }[],
-  pins: { bucket_name: string }[],
-): PickerOption[] {
-  const pinnedNames = new Set(pins.map((pin) => pin.bucket_name))
-  const byName = new Map(buckets.map((listed) => [listed.name, listed]))
-  const pinned = pins.flatMap((pin) => {
-    const listed = byName.get(pin.bucket_name)
-    return listed ? [listed] : []
-  })
-  const rest = buckets.filter((listed) => !pinnedNames.has(listed.name))
-  return [
-    ...pinned.map((listed) => ({ value: listed.name, label: listed.name, group: 'Pinned' })),
-    ...rest.map((listed) => ({ value: listed.name, label: listed.name, group: 'Buckets' })),
-  ]
 }

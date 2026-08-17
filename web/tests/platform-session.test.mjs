@@ -5,7 +5,6 @@ import { after, before, test } from 'node:test'
 
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
-import { MemoryRouter } from 'react-router'
 import { createServer } from 'vite'
 
 let vite
@@ -24,7 +23,7 @@ let refreshOnPickerOpen
 let selectionAfterProjectsRefresh
 let grantableRoles
 let PrincipalsView
-let RegistryView
+let BucketsView
 const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
   'utf8',
@@ -51,7 +50,7 @@ before(async () => {
   } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
-  ;({ RegistryView } = await vite.ssrLoadModule('/src/screens/Registry.tsx'))
+  ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
 })
 
 after(async () => {
@@ -259,11 +258,8 @@ function session(over = {}) {
 
 const switcherMarkup = (value) =>
   renderToStaticMarkup(React.createElement(
-    MemoryRouter, { initialEntries: ['/'] },
-    React.createElement(
-      AuthContext.Provider, { value },
-      React.createElement(TenantSwitcher),
-    ),
+    AuthContext.Provider, { value },
+    React.createElement(TenantSwitcher),
   ))
 
 // The organisation select in a PLATFORM session leads with an explicit
@@ -292,11 +288,6 @@ test('masthead pickers carry visible captions and loading uses a compact skeleto
   }))
   assert.match(markup, /Organisation:[\s\S]*tenant-organization/)
   assert.match(markup, /Project:[\s\S]*tenant-project/)
-  // The smoke test drives the pickers through their inner inputs by id and
-  // reads the selection from input.value — PatternFly only places the id on
-  // the real <input> via inputId, so the markup must bind them together.
-  assert.match(markup, /<input(?=[^>]*id="tenant-organization-input")(?=[^>]*value="[^"]+")[^>]*>/)
-  assert.match(markup, /<input(?=[^>]*id="tenant-project-input")(?=[^>]*value="widgets")[^>]*>/)
 
   const loading = switcherMarkup(session({ organizationsLoading: true }))
   assert.match(loading, /Organisation:/)
@@ -335,10 +326,9 @@ test('opening a picker refreshes once, while closing it does not', async () => {
 // duf-4hje: newly created projects only appeared after an organisation
 // round-trip, because the project picker opened onto a cached list. Both
 // pickers must wire the open-refresh, not just the organisation one.
-test('all three pickers refresh their listing on open', () => {
-  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshOrganizations\)/)
-  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshProjects\)/)
-  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, onRefresh\)/)
+test('both pickers refresh their listing on open', () => {
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshOrganizations\)/)
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshProjects\)/)
 })
 
 test('concurrent organisation refresh signals share one request', async () => {
@@ -438,15 +428,10 @@ test('a tenancy session gets no dash row', () => {
   assert.doesNotMatch(markup, /—/)
 })
 
-test('all three masthead pickers use typeahead toggles and role-gated creation footers', () => {
-  assert.match(tenantSwitcherSource, /<Select[\s\S]*?variant="typeahead"/)
-  assert.match(tenantSwitcherSource, /<MenuToggle[\s\S]*?variant="typeahead"/)
-  assert.match(tenantSwitcherSource, /<TextInputGroupMain/)
-  assert.match(tenantSwitcherSource, /label\.toLowerCase\(\)\.includes\(query\)/)
-  assert.equal((tenantSwitcherSource.match(/<MenuFooter>/g) ?? []).length, 3)
+test('both tenancy pickers render role-gated creation footers', () => {
+  assert.equal((tenantSwitcherSource.match(/<MenuFooter>/g) ?? []).length, 2)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="organization"/)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="project"/)
-  assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?<CreateBucketButton/)
 })
 
 test('zero-organisation masthead keeps its compact recovery action', () => {
@@ -461,11 +446,12 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
     platform: true, organizationCount: 0,
     selectedOrganization: null, projectCount: 0, selectedProject: null,
   })
-  assert.match(gap.title, /No organisations exist/)
-  const landing = renderToStaticMarkup(React.createElement(RegistryView, {
-    onConnectClient: () => {},
+  const buckets = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [], total: 0, loading: false, failure: null, gap,
   }))
-  assert.match(landing, /Choose a bucket/)
-  assert.match(landing, /masthead picker/)
-  assert.doesNotMatch(landing, /No buckets yet/)
+  assert.match(buckets, /No organisations exist/)
+  assert.match(buckets, /Principals and Instance work/)
+  assert.match(buckets, /pf-v6-c-empty-state/)
+  assert.match(buckets, /Create organisation/)
+  assert.doesNotMatch(buckets, /No buckets yet/)
 })

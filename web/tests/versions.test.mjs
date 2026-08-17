@@ -389,19 +389,6 @@ test('bucket-detail deletion is live for publisher and disabled with a reason be
   assert.doesNotMatch(publisher, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Delete bucket/)
 })
 
-test('bucket-detail pinning is live for builder and names the current pin state', () => {
-  const reader = listMarkup([], { callerRole: 'reader' })
-  assert.match(reader, /Requires builder/)
-  assert.match(reader, /<button[^>]*disabled[^>]*>[\s\S]{0,240}Pin bucket/)
-
-  const builder = listMarkup([], { callerRole: 'builder' })
-  assert.match(builder, />Pin bucket</)
-  assert.doesNotMatch(builder, /Requires builder/)
-
-  const pinned = listMarkup([], { callerRole: 'builder', pinned: true })
-  assert.match(pinned, />Unpin bucket</)
-})
-
 test('the version state selects Revoke or Restore without a second action', () => {
   const active = detailMarkup(actionVersion('complete'), { callerRole: 'publisher' })
   assert.match(active, />Revoke</)

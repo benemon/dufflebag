@@ -22,22 +22,22 @@ after(async () => { await vite.close() })
 
 test('each role gets the nested console action snapshot declared by the server', () => {
   assert.deepEqual(allowedActions('reader'), [])
-  assert.deepEqual(allowedActions('builder'), ['pinBuckets', 'createBuckets'])
+  assert.deepEqual(allowedActions('builder'), ['pinBuckets'])
   assert.deepEqual(
     allowedActions('publisher'),
-    ['pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets'],
+    ['pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets'],
   )
   assert.deepEqual(
     allowedActions('maintainer'),
     [
       'createProjects',
-      'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels',
+      'pinBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels',
       'manageRestrictedChannels', 'deleteBuckets',
       'managePrincipals', 'configureBagDrop', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
-    'createOrganizations', 'createProjects', 'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions',
+    'createOrganizations', 'createProjects', 'pinBuckets', 'revokeVersions', 'deleteVersions',
     'manageChannels', 'manageRestrictedChannels', 'deleteBuckets', 'configureAudit',
     'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configureWebhooks',
   ])
@@ -57,11 +57,6 @@ test('createProjects permission mapping requires maintainer', () => {
 test('pinBuckets permission mapping requires builder', () => {
   assert.equal(allowedActions('reader').includes('pinBuckets'), false)
   assert.equal(allowedActions('builder').includes('pinBuckets'), true)
-})
-
-test('createBuckets permission mapping requires builder', () => {
-  assert.equal(allowedActions('reader').includes('createBuckets'), false)
-  assert.equal(allowedActions('builder').includes('createBuckets'), true)
 })
 
 test('revokeVersions permission mapping requires publisher', () => {
