@@ -47,7 +47,9 @@ A principal is bound to exactly one scope:
   It can read and (with `builder`) publish into its bucket, and nothing else
   in the project exists for it: sibling buckets answer not-found, and bucket
   creation and deletion are refused. In the console it lands directly in its
-  bucket rather than on the Buckets screen. The bucket must exist before the
+  bucket rather than on the Buckets screen, and the navigation offers a
+  **Bucket** entry in place of **Buckets** — one click back to the bucket from
+  any administration screen. The bucket must exist before the
   principal is created, and cannot be deleted while the principal lives.
 
 Bucket-scoped principals are created the way every principal is: the picker

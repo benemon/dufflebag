@@ -12,6 +12,13 @@ Export the generated block and use it as
 [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md)
 describe. The variables themselves are documented in the
 [client redirection reference](../quick-start/installation.md#client-redirection).
+For a bucket-scoped session the block also exports
+`HCP_PACKER_BUCKET_NAME` set to the session's bucket — the fallback bucket
+name Packer reads when the template names none, and the only bucket the
+credential can publish into. Wider sessions never emit it, even while viewing
+a bucket: the credential is not bound to one. If the bucket cannot be
+resolved, the console says so above the block rather than emitting an
+incomplete one silently.
 
 ::: warning
 The console warns if it is not served over HTTPS. Authentication requires an

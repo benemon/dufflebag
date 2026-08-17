@@ -139,16 +139,27 @@ export function AppShell({
   onThemeChange: (theme: Theme) => void
 }) {
   const { pathname } = useLocation()
-  const { self, state } = useAuth()
+  const { self, state, selectedBucket } = useAuth()
   // A bucket-scoped session has exactly one bucket and lands in it; a Buckets
-  // entry would offer a list of one.
+  // entry would offer a list of one. It still needs a way BACK — admin screens
+  // otherwise strand it (duf-xmg5) — so the entry becomes 'Bucket', pointing
+  // at the bucket itself. The claim carries only the bucket's id; the carried
+  // selection names it when it matches, and the landing route re-resolves the
+  // claim when it does not.
   const bucketScoped = state?.claims.bucketID != null
+  const bucketNav = bucketScoped
+    ? {
+      to: selectedBucket && selectedBucket.id === state?.claims.bucketID
+        ? `/buckets/${encodeURIComponent(selectedBucket.name)}`
+        : '/',
+    }
+    : null
 
   return (
     <AppShellView
       pathname={pathname}
-      visibleItems={visibleNavItems(self?.role ?? null)
-        .filter((item) => !(bucketScoped && item === 'buckets'))}
+      visibleItems={visibleNavItems(self?.role ?? null)}
+      bucketNav={bucketNav}
       masthead={<AppMasthead theme={theme} onThemeChange={onThemeChange} />}
     >
       {children}
@@ -160,19 +171,38 @@ export function AppShellView({
   children,
   pathname,
   visibleItems,
+  bucketNav = null,
   masthead,
 }: {
   children: ReactNode
   pathname: string
   visibleItems: NavKey[]
+  /** Bucket-scoped sessions: swap Buckets for a 'Bucket' entry at this target. */
+  bucketNav?: { to: string } | null
   masthead?: ReactNode
 }) {
   const visibleGroups = NAV
     .map(({ group, items }) => ({
       group,
-      items: items.filter(({ key }) => visibleItems.includes(key)),
+      items: items
+        .filter(({ key }) => visibleItems.includes(key))
+        .map((item) => (item.key === 'buckets' && bucketNav
+          ? { ...item, to: bucketNav.to, label: 'Bucket' }
+          : item)),
     }))
     .filter(({ items }) => items.length > 0)
+
+  // The swapped entry means "your bucket": current on the landing (mid-
+  // resolution) and on the bucket's own routes, bounded at path segments so a
+  // sibling bucket route — reachable by URL, refused by the server — does not
+  // light it up, and neither does a name that happens to share a prefix.
+  const isActive = (key: NavKey, to: string) => {
+    if (key === 'buckets' && bucketNav) {
+      if (pathname === '/') return true
+      return to !== '/' && (pathname === to || pathname.startsWith(`${to}/`))
+    }
+    return pathname.startsWith(to)
+  }
 
   const sidebar = (
     <PageSidebar className="app-sidebar">
@@ -185,7 +215,7 @@ export function AppShellView({
                   key={key}
                   component={RouterNavLink}
                   to={to}
-                  isActive={pathname.startsWith(to)}
+                  isActive={isActive(key, to)}
                 >
                   {label}
                 </NavItem>

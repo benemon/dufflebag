@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, ClipboardCopyButton, CodeBlock, CodeBlockAction,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, PageSection,
 } from '@patternfly/react-core'
 
-import type { ApiInstance } from '../api/client'
+import { listBuckets, signOutIfUnauthorized, type ApiInstance } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useInstance } from '../data/instance'
 import { ScreenHeader } from '../components/ScreenHeader'
@@ -19,9 +19,64 @@ import { SkeletonRows } from '../components/Loading'
  * backing-service state come from the authenticated instance endpoint.
  */
 export function Instance() {
-  const { state, selectedOrganization, selectedProject } = useAuth()
+  const { state, selectedOrganization, selectedProject, signOut } = useAuth()
   const [refresh, setRefresh] = useState(0)
   const { instance, loading, failure } = useInstance(refresh)
+  // A bucket-scoped session's environment block names its bucket: the server
+  // only accepts builds into that one, and Packer reads the name from
+  // HCP_PACKER_BUCKET_NAME. The claim carries only the id; resolve it against
+  // the scoped listing exactly as the landing does (App.tsx). Deliberately
+  // bucket-scoped sessions ONLY — for a wider tenancy that happens to be
+  // viewing a bucket, emitting one would pin clients to a bucket the
+  // credential is not bound to.
+  const claims = state?.claims
+  const bucketID = claims?.bucketID ?? null
+  const [bucketNaming, setBucketNaming] = useState<{
+    name: string | null
+    failure: string | null
+  }>({ name: null, failure: null })
+  useEffect(() => {
+    // A renewal re-runs this effect (state carries the token); resetting first
+    // would blank the row every ~14 minutes for nothing. The claim never
+    // changes within a session, so only its absence clears the name. The
+    // screen's Refresh counter is a dependency so a failed resolution has a
+    // retry path (review finding: a transient failure otherwise left the
+    // block silently incomplete until remount).
+    if (!bucketID || !state || !claims?.organizationID || !claims.projectID) {
+      setBucketNaming({ name: null, failure: null })
+      return
+    }
+    let cancelled = false
+    listBuckets(state.token, {
+      organizationID: claims.organizationID,
+      projectID: claims.projectID,
+    })
+      .then((buckets) => {
+        if (cancelled) return
+        const scoped = buckets.find((bucket) => bucket.id === bucketID)
+        setBucketNaming({
+          name: scoped?.name ?? null,
+          failure: scoped ? null : 'The session names a bucket the listing cannot see.',
+        })
+      })
+      .catch((err: unknown) => {
+        // The row is additive — the screen keeps working — but its absence is
+        // stated, not silent: an operator would otherwise copy a
+        // plausible-looking block missing the bucket variable. A name already
+        // resolved survives a later refresh failure WITHOUT a warning: bucket
+        // names are immutable, so the held name is still right, and warning
+        // that the block omits a variable it emits would be a lie.
+        if (cancelled) return
+        if (signOutIfUnauthorized(err, signOut)) return
+        setBucketNaming((current) => (current.name !== null ? current : {
+          name: null,
+          failure: err instanceof Error ? err.message : 'The bucket could not be resolved.',
+        }))
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bucketID, state, claims?.organizationID, claims?.projectID, signOut, refresh])
   return (
     <InstanceView
       host={typeof window === 'undefined' ? '' : window.location.host}
@@ -32,6 +87,8 @@ export function Instance() {
       // identifier is omitted, exactly as the project already is.
       organizationID={selectedOrganization}
       projectID={selectedProject ?? state?.claims.projectID ?? null}
+      bucketName={bucketNaming.name}
+      bucketNameFailure={bucketNaming.failure}
       instance={instance}
       loading={loading}
       failure={failure}
@@ -41,12 +98,17 @@ export function Instance() {
 }
 
 export function InstanceView({
-  host, secure, organizationID, projectID, instance, loading, failure, onRefresh = () => {},
+  host, secure, organizationID, projectID, bucketName = null, bucketNameFailure = null,
+  instance, loading, failure, onRefresh = () => {},
 }: {
   host: string
   secure: boolean
   organizationID: string | null
   projectID: string | null
+  /** The session's bucket, bucket-scoped sessions only — null everywhere else. */
+  bucketName?: string | null
+  /** Why the session's bucket could not be named, when it could not be. */
+  bucketNameFailure?: string | null
   instance: ApiInstance | null
   loading: boolean
   failure: string | null
@@ -88,7 +150,21 @@ export function InstanceView({
                 </Content>
               </Alert>
             )}
-            <EnvironmentBlock value={clientEnvironment({ host, organizationID, projectID })} />
+            {bucketNameFailure ? (
+              <Alert
+                variant="warning"
+                isInline
+                title="The session's bucket could not be resolved"
+              >
+                <Content component="p">
+                  {bucketNameFailure} The block below omits HCP_PACKER_BUCKET_NAME;
+                  refresh to retry.
+                </Content>
+              </Alert>
+            ) : null}
+            <EnvironmentBlock
+              value={clientEnvironment({ host, organizationID, projectID, bucketName })}
+            />
           </CardBody>
         </Card>
       </PageSection>
@@ -220,11 +296,12 @@ function EnvironmentBlock({ value }: { value: string }) {
  * one would send the client somewhere it may not be entitled to.
  */
 export function clientEnvironment({
-  host, organizationID, projectID,
+  host, organizationID, projectID, bucketName = null,
 }: {
   host: string
   organizationID: string | null
   projectID: string | null
+  bucketName?: string | null
 }): string {
   const lines = [
     `export HCP_API_ADDRESS=${host}`,
@@ -234,5 +311,22 @@ export function clientEnvironment({
   ]
   if (organizationID) lines.push(`export HCP_ORGANIZATION_ID=${organizationID}`)
   if (projectID) lines.push(`export HCP_PROJECT_ID=${projectID}`)
+  // Packer's fallback bucket name when the template names none — the exact
+  // variable the client reads (packer v1.16.0 internal/hcp/env/variables.go,
+  // HCPPackerBucket). Emitted only for bucket-scoped sessions, which can
+  // publish nowhere else.
+  if (bucketName) lines.push(`export HCP_PACKER_BUCKET_NAME=${shellValue(bucketName)}`)
   return lines.join('\n')
+}
+
+/**
+ * Bucket names are arbitrary strings (the compat plane deliberately imposes no
+ * character class), and this block is made to be pasted into a shell — an
+ * unquoted name containing spaces or metacharacters exports the wrong value or
+ * runs it. Common names stay bare so the block reads clean; anything else is
+ * single-quoted with embedded quotes escaped.
+ */
+export function shellValue(value: string): string {
+  if (/^[A-Za-z0-9._-]+$/.test(value)) return value
+  return `'${value.replace(/'/g, `'\\''`)}'`
 }

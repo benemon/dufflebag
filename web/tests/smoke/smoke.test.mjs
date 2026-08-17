@@ -2692,8 +2692,28 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bucket details')
     await waitForText('smoke-images')
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
+    // The listing entry swaps for a way back: 'Bucket', never 'Buckets'
+    // (duf-xmg5). Admin screens must not strand the session.
     const nav = await globalNavItems()
     assert.ok(!nav.includes('Buckets'), `Buckets nav offered to a bucket-scoped session: ${nav}`)
+    assert.ok(nav.includes('Bucket'), `no Bucket nav for a bucket-scoped session: ${nav}`)
+    // Instance names the session's bucket in the client environment — the
+    // variable Packer reads when the template names none (duf-ccwl).
+    await clickByText('nav.app-global-nav a', 'Instance')
+    await waitForText('Client environment')
+    await waitForText('HCP_PACKER_BUCKET_NAME=smoke-images')
+    // From an admin screen, Bucket is the one-click path home (duf-xmg5).
+    await clickByText('nav.app-global-nav a', 'Bucket')
+    await waitForText('Bucket details')
+    await waitForText('smoke-images')
+    // The picker's Create bucket is refused by scope with the reason stated,
+    // not silently no-opped by the server (duf-3p03).
+    await page.click('#tenant-bucket')
+    await until('the create trigger to state its scope refusal', () =>
+      page.$$eval('span[aria-label="A bucket-scoped session cannot create buckets"]',
+        (spans) => spans.length > 0))
+    assert.equal(await buttonDisabled('Create bucket'), true)
+    await page.keyboard.press('Escape')
     await page.goto(`${base}/buckets`, { waitUntil: 'domcontentloaded' })
     await waitForText('Bucket details')
     assert.doesNotMatch(await bodyText(), /All buckets/)
@@ -2703,6 +2723,26 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await page.type('#client-secret', credentials.secret)
     await clickByText('button', 'Log in')
     await waitForText('Sign out')
+  })
+
+  await t.test('the picker-footer create survives the picker closing under it', async () => {
+    // The create modal opens from the Select's footer, and the first click
+    // into the modal closes the Select — which unmounts the footer. When the
+    // footer owned the modal, that click made the whole flow vanish
+    // mid-submit and swallowed every failure (duf-3p03). This walks the exact
+    // sequence: open picker, open modal, click into the field, submit.
+    await choosePickerOption('#tenant-organization', seeded.organization.name)
+    await until('the project to follow', async () =>
+      (await pickerValue('#tenant-project')) !== '')
+    await page.click('#tenant-bucket')
+    await clickByText('button', 'Create bucket')
+    await page.waitForSelector('#create-bucket-name')
+    await page.click('#create-bucket-name')
+    await page.type('#create-bucket-name', 'smoke-footer-created')
+    await clickInModal('Create bucket')
+    await waitForText('Bucket details')
+    await until('the created bucket to become the selection', async () =>
+      (await pickerValue('#tenant-bucket')) === 'smoke-footer-created')
   })
 
   await t.test('the console-minted builder signs in, scoped to exactly its project', async () => {

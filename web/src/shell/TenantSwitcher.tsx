@@ -11,7 +11,7 @@ import { useNavigate, useParams } from 'react-router'
 import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
-import { CreateBucketButton } from '../components/BucketCreation'
+import { BucketModal, CreateBucketButton } from '../components/BucketCreation'
 import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
 import { useAutoRefresh } from '../data/polling'
@@ -410,6 +410,7 @@ export function BucketPicker() {
       buckets={buckets}
       pins={pins}
       scoped={scoped}
+      bucketScoped={state?.claims.bucketID != null}
       loading={loading}
       failure={failure}
       callerRole={self?.role ?? null}
@@ -421,13 +422,14 @@ export function BucketPicker() {
 }
 
 export function BucketPickerView({
-  selectedBucket, buckets, pins, scoped, loading, failure, callerRole,
+  selectedBucket, buckets, pins, scoped, bucketScoped = false, loading, failure, callerRole,
   onRefresh, onSelect, onCreate,
 }: {
   selectedBucket?: string
   buckets: { name: string }[]
   pins: { bucket_name: string }[]
   scoped: boolean
+  bucketScoped?: boolean
   loading: boolean
   failure: string | null
   callerRole: Role | null
@@ -435,52 +437,64 @@ export function BucketPickerView({
   onSelect: (name: string) => void
   onCreate: (name: string) => Promise<void>
 }) {
+  // The modal's state lives here and the modal renders OUTSIDE the Select.
+  // The picker closes on any click into the portaled modal (the Select's
+  // window listener sees a click outside menu and toggle), and closing
+  // unmounts the footer — a modal owned by the footer vanished on the first
+  // click into its own name field, before any request was even sent
+  // (duf-3p03, reproduced against the live console).
+  const [creating, setCreating] = useState(false)
+  // The server refuses bucket creation by scope, whatever the role: creating
+  // a bucket changes the set of buckets rather than acting inside this one.
+  const refusal = bucketScoped ? 'A bucket-scoped session cannot create buckets' : null
   const createButton = (
-    <CreateBucketButton callerRole={callerRole} onCreate={onCreate} variant="link" />
+    <CreateBucketButton
+      callerRole={callerRole}
+      refusal={refusal}
+      onOpen={() => setCreating(true)}
+      variant="link"
+    />
   )
+  const modal = creating ? (
+    <BucketModal onCreate={onCreate} onClose={() => setCreating(false)} />
+  ) : null
+  // One return, whatever the listing state: the branches swap the picker body
+  // while an open modal stays mounted. A refresh failing (or a renewal
+  // restarting the load) mid-create otherwise swapped into a branch with no
+  // modal and tore down the operator's half-typed form (review finding on
+  // duf-3p03).
+  let body: ReactNode
   if (!scoped) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
-      </PickerField>
-    )
-  }
-  if (loading) {
-    return (
-      <PickerField label="Bucket">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
-      </PickerField>
-    )
-  }
-  if (failure) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (buckets.length === 0) {
-    return (
-      <PickerField label="Bucket">
+    body = <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
+  } else if (loading) {
+    body = <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
+  } else if (failure) {
+    body = <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
+  } else if (buckets.length === 0) {
+    body = (
+      <>
         <Content component="p" style={{ margin: 0 }}>No buckets exist</Content>
         {createButton}
-      </PickerField>
+      </>
     )
-  }
-
-  const options = bucketPickerOptions(buckets, pins, selectedBucket != null)
-  return (
-    <PickerField label="Bucket">
+  } else {
+    body = (
       <TypeaheadPicker
         id="tenant-bucket"
         label="Bucket"
-        options={options}
+        options={bucketPickerOptions(buckets, pins, selectedBucket != null)}
         selectedValue={selectedBucket}
         selectedLabel={selectedBucket ?? '—'}
         onSelect={onSelect}
         onOpen={() => refreshOnPickerOpen(true, onRefresh)}
         footer={<MenuFooter>{createButton}</MenuFooter>}
       />
+    )
+  }
+  return (
+    <PickerField label="Bucket">
+      {body}
+      {modal}
     </PickerField>
   )
 }
