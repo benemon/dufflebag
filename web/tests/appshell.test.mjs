@@ -45,12 +45,13 @@ const headerScreenSources = [
   readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
 ])
 
-const view = (role, pathname = '/') => renderToStaticMarkup(React.createElement(
+const view = (role, pathname = '/', over = {}) => renderToStaticMarkup(React.createElement(
   MemoryRouter,
   { initialEntries: [pathname] },
   React.createElement(AppShellView, {
     pathname,
     visibleItems: visibleNavItems(role),
+    ...over,
   }, React.createElement('main', null, 'Screen')),
 ))
 
@@ -82,14 +83,61 @@ test('router links carry PatternFly native current navigation state', () => {
     /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
   )
   assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
-  for (const destination of ['/', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+  for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
 })
 
-test('Registry owns the root route while bucket detail routes keep their paths', () => {
-  assert.match(appSource, /<Route path="\/" element=\{<Registry \/>\}/)
-  assert.match(appSource, /<Route path="\/buckets" element=\{<Navigate to="\/" replace \/>\}/)
+test('bucket-scoped sessions swap Buckets for a Bucket entry pointing home', () => {
+  assert.match(shellSource, /key: 'buckets', to: '\/buckets', label: 'Buckets'/)
+  // Above-bucket sessions keep the listing entry untouched.
+  assert.match(view('root', '/audit'), />Buckets</)
+
+  // A bucket-scoped session is never stranded on an admin screen: the entry
+  // renames to Bucket and points at the resolved bucket detail (duf-xmg5).
+  const onInstance = view('builder', '/instance', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.match(onInstance, /<a(?=[^>]*href="\/buckets\/base%20images")[^>]*>(?:<span[^>]*>)?Bucket</)
+  assert.doesNotMatch(onInstance, />Buckets</)
+  // Not current while an admin screen is showing.
+  assert.doesNotMatch(onInstance, /<a(?=[^>]*href="\/buckets\/base%20images")(?=[^>]*pf-m-current)[^>]*>/)
+
+  // Current whenever the session is looking at its bucket: the detail route…
+  const onDetail = view('builder', '/buckets/base%20images', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.match(onDetail, /<a(?=[^>]*href="\/buckets\/base%20images")(?=[^>]*class="[^"]*pf-m-current)[^>]*>/)
+  // …and the landing redirect while the claim is still resolving, where the
+  // entry falls back to the landing route rather than rendering a dead link.
+  const resolving = view('builder', '/', { bucketNav: { to: '/' } })
+  assert.match(resolving, /<a(?=[^>]*href="\/")(?=[^>]*class="[^"]*pf-m-current)[^>]*>(?:<span[^>]*>)?Bucket</)
+
+  // NOT current on a sibling bucket route (reachable by URL, refused by the
+  // server) nor on a name sharing a prefix — the current link must point at
+  // the page being displayed.
+  const onSibling = view('builder', '/buckets/sibling', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.doesNotMatch(onSibling, /pf-m-current/)
+  const onPrefix = view('builder', '/buckets/base-images-nightly', {
+    bucketNav: { to: '/buckets/base-images' },
+  })
+  assert.doesNotMatch(onPrefix, /pf-m-current/)
+
+  // The derivation feeding bucketNav is pinned at source: the carried
+  // selection must match the claim's bucket id, and the name is URL-encoded.
+  assert.match(shellSource, /selectedBucket\.id === state\?\.claims\.bucketID/)
+  assert.match(shellSource, /encodeURIComponent\(selectedBucket\.name\)/)
+})
+
+test('the landing routes by scope while bucket detail routes keep their paths', () => {
+  // Above-bucket sessions land on the Buckets screen; a bucket-scoped session
+  // lands in its one bucket (the Landing component encodes the split).
+  assert.match(appSource, /<Route path="\/" element=\{<Landing \/>\}/)
+  assert.match(appSource, /<Route path="\/buckets" element=\{<Buckets \/>\}/)
+  assert.match(appSource, /Navigate to="\/buckets" replace/)
+  assert.match(appSource, /claims.bucketID/)
   assert.match(appSource, /path="\/buckets\/:bucket"/)
   assert.match(appSource, /<Route path="versions\/:fingerprint" element=\{<Version \/>\}/)
   assert.match(appSource, /<Route path="versions\/:fingerprint\/builds\/:build" element=\{<Build \/>\}/)

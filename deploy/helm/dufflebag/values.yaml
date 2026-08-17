@@ -26,6 +26,10 @@ ceph:
   image:
     repository: quay.io/benjamin_holmes/ceph-aio
     tag: v20
+    # The version tags move when the image is rebuilt (the date-stamped tags
+    # are pruned monthly), so a node's cached copy can silently trail the
+    # rebuild — Always keeps the tag honest.
+    pullPolicy: Always
   persistence:
     size: 10Gi
   resources: {}

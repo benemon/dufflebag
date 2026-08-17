@@ -10,6 +10,14 @@ A bucket's versions table shows each version's completion and revocation
 state. An incomplete version is named `v0` until it completes; a complete
 version takes its sequence name and the managed `latest` channel moves to it.
 
+![Dufflebag versions table showing completed, incomplete and revoked versions](/screenshots/versions-table.png)
+
+Before the first publish — a bucket created from the console or Terraform
+ahead of its pipeline — the table states its emptiness and points at client
+connection, the same affordance an empty project shows:
+
+![Dufflebag empty bucket pointing at client connection before the first publish](/screenshots/bucket-empty.png)
+
 ## A version
 
 A version shows its builds, artifacts, findings and ancestry. Its operations

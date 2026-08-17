@@ -632,8 +632,8 @@ paths:
       summary: List service principals at a scope
       description: |
         Lists the principals bound to EXACTLY one scope — platform, one
-        organization, or one project — never a subtree. Omitting both filters
-        lists the scope the caller itself stands at. Secret *metadata* only.
+        organization, one project, or one bucket — never a subtree. Omitting
+        every filter lists the scope the caller itself stands at. Secret *metadata* only.
         Secret values are never returned here.
 
         The filters authorize like any other tenancy argument: a caller naming
@@ -661,6 +661,16 @@ paths:
             project. Meaningless without organization_id, and refused as a
             scope the caller cannot see.
           schema: { type: string, format: uuid }
+        - name: bucket_id
+          in: query
+          required: false
+          description: |
+            With both tenancy filters, list the principals bound to exactly
+            this bucket. Meaningless without organization_id and project_id,
+            and refused as a scope the caller cannot see. Without it, a
+            project selection answers the PROJECT-scoped principals only —
+            bucket-scoped principals are listed at their bucket.
+          schema: { type: string }
       responses:
         "200":
           description: OK

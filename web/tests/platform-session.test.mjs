@@ -24,7 +24,7 @@ let refreshOnPickerOpen
 let selectionAfterProjectsRefresh
 let grantableRoles
 let PrincipalsView
-let RegistryView
+let BucketsView
 const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
   'utf8',
@@ -55,7 +55,7 @@ before(async () => {
   } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
-  ;({ RegistryView } = await vite.ssrLoadModule('/src/screens/Registry.tsx'))
+  ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
 })
 
 after(async () => {
@@ -188,6 +188,24 @@ test('a present but non-string tenancy claim stays malformed', () => {
   assert.equal(decodeClaims(sign({ ...base, organization_id: 7 })), null)
   assert.equal(decodeClaims(sign({ ...base, organization_id: null })), null)
   assert.equal(decodeClaims(sign({ ...base, organization_id: 'org-1', project_id: 7 })), null)
+})
+
+test('a bucket claim surfaces as the scope id, and without a project is malformed', () => {
+  const exp = inFifteenMinutes()
+  const base = {
+    iss: 'https://dufflebag.local', sub: 'p-1', aud: ['https://api.hashicorp.cloud'],
+    exp, iat: exp - 900, sid: 's-1', scope: [], grants: [],
+    organization_id: '3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d',
+    project_id: '9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d',
+  }
+  const claims = decodeClaims(sign({ ...base, bucket_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' }))
+  assert.ok(claims)
+  assert.equal(claims.bucketID, '01ARZ3NDEKTSV4RRFFQ69G5FAV')
+  assert.equal(decodeClaims(sign({ ...base, bucket_id: 7 })), null)
+  const { project_id: _dropped, ...withoutProject } = base
+  assert.equal(
+    decodeClaims(sign({ ...withoutProject, bucket_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV' })), null)
+  assert.equal(decodeClaims(sign(base))?.bucketID ?? null, null)
 })
 
 // Verify refuses a project without an organization as malformed rather than
@@ -489,12 +507,17 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
     selectedOrganization: null, projectCount: 0, selectedProject: null,
   })
   assert.match(gap.title, /No organisations exist/)
-  const landing = renderToStaticMarkup(React.createElement(RegistryView, {
-    gap: null,
+  const landing = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [], total: 0, loading: false, failure: null,
+    gap: {
+      title: 'Choose an organisation',
+      resource: 'organization',
+      detail: 'This platform-scoped session can view any organisation. ' +
+        'Pick one from the header to see its buckets and channels.',
+    },
     callerRole: 'root',
-    onConnectClient: () => {},
+    openBucket: () => {}, openInstance: () => {},
   }))
-  assert.match(landing, /Choose a bucket/)
-  assert.match(landing, /masthead picker/)
+  assert.match(landing, /can view any organisation/)
   assert.doesNotMatch(landing, /No buckets yet/)
 })

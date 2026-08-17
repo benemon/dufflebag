@@ -11,9 +11,10 @@ import { useNavigate, useParams } from 'react-router'
 import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
-import { CreateBucketButton } from '../components/BucketCreation'
+import { BucketModal, CreateBucketButton } from '../components/BucketCreation'
 import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
+import { useAutoRefresh } from '../data/polling'
 import { organizationRows, useTenant } from '../data/tenant'
 
 type PickerOption = {
@@ -200,11 +201,16 @@ function TypeaheadPicker({
           <SelectOption isAriaDisabled value="__no-results">
             No results found for “{filterValue}”
           </SelectOption>
-        ) : groups.length > 0 ? groups.map((group) => (
-          <SelectGroup key={group} label={group}>
-            {filtered.filter((option) => option.group === group).map(optionNode)}
-          </SelectGroup>
-        )) : filtered.map(optionNode)}
+        ) : groups.length > 0 ? (
+          <>
+            {filtered.filter((option) => !option.group).map(optionNode)}
+            {groups.map((group) => (
+              <SelectGroup key={group} label={group}>
+                {filtered.filter((option) => option.group === group).map(optionNode)}
+              </SelectGroup>
+            ))}
+          </>
+        ) : filtered.map(optionNode)}
       </SelectList>
       {footer}
     </Select>
@@ -333,9 +339,55 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
 export function BucketPicker() {
   const { bucket } = useParams()
   const navigate = useNavigate()
-  const { state, self, selectedOrganization, selectedProject } = useAuth()
+  const {
+    state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket,
+  } = useAuth()
   const { buckets, pins, loading, failure, refresh } = useBucketPicker()
   const scoped = Boolean(state && selectedOrganization && selectedProject)
+  // An empty listing renders text with no toggle, so refetch-on-open cannot
+  // fire — and empty is exactly the awaiting-change state: the first publish
+  // must appear without a reload. Poll while empty; stop once anything lands.
+  useAutoRefresh({
+    hot: scoped && !loading && failure === null && buckets.length === 0,
+    onRefresh: refresh,
+  })
+  // Bucket routes stay authoritative: visiting one carries its bucket into
+  // the tenancy context, so the selection survives onto screens whose routes
+  // name no bucket — Principals derives its standing from it (duf-4qr).
+  // Synced once per route value, never reconciled continuously: a deliberate
+  // step-up clears the selection while the route is still current, and a
+  // reconciling effect would immediately carry it back.
+  const lastRouteSync = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    // A tenancy change invalidates the sync: the route may name a bucket the
+    // new pair does not own, and "already handled" must not leave the display
+    // asserting a standing the context no longer carries.
+    lastRouteSync.current = undefined
+  }, [selectedOrganization, selectedProject])
+  useEffect(() => {
+    if (bucket === undefined) {
+      lastRouteSync.current = undefined
+      return
+    }
+    if (lastRouteSync.current === bucket) return
+    const listed = buckets.find((candidate) => candidate.name === bucket)
+    if (listed?.id) {
+      lastRouteSync.current = bucket
+      selectBucket({ id: listed.id, name: listed.name })
+    }
+  }, [bucket, buckets, selectBucket])
+  const select = (name: string) => {
+    if (name === '') {
+      // The blank row is the deliberate step back up to project standing
+      // (duf-4qr, extended to buckets).
+      selectBucket(null)
+      if (bucket !== undefined) navigate('/buckets')
+      return
+    }
+    const listed = buckets.find((candidate) => candidate.name === name)
+    if (listed?.id) selectBucket({ id: listed.id, name: listed.name })
+    navigate(`/buckets/${encodeURIComponent(name)}`)
+  }
   const create = async (name: string) => {
     if (!state || !selectedOrganization || !selectedProject) throw new Error('No session.')
     const created = await createBucket(state.token, {
@@ -345,34 +397,39 @@ export function BucketPicker() {
     await refreshThenSelect(
       created,
       refresh,
-      (listed) => navigate(`/buckets/${encodeURIComponent(listed.name)}`),
+      (listed) => {
+        if (listed.id) selectBucket({ id: listed.id, name: listed.name })
+        navigate(`/buckets/${encodeURIComponent(listed.name)}`)
+      },
       (listed) => listed.name,
     )
   }
   return (
     <BucketPickerView
-      selectedBucket={bucket}
+      selectedBucket={bucket ?? selectedBucket?.name}
       buckets={buckets}
       pins={pins}
       scoped={scoped}
+      bucketScoped={state?.claims.bucketID != null}
       loading={loading}
       failure={failure}
       callerRole={self?.role ?? null}
       onRefresh={refresh}
-      onSelect={(name) => navigate(`/buckets/${encodeURIComponent(name)}`)}
+      onSelect={select}
       onCreate={create}
     />
   )
 }
 
 export function BucketPickerView({
-  selectedBucket, buckets, pins, scoped, loading, failure, callerRole,
+  selectedBucket, buckets, pins, scoped, bucketScoped = false, loading, failure, callerRole,
   onRefresh, onSelect, onCreate,
 }: {
   selectedBucket?: string
   buckets: { name: string }[]
   pins: { bucket_name: string }[]
   scoped: boolean
+  bucketScoped?: boolean
   loading: boolean
   failure: string | null
   callerRole: Role | null
@@ -380,52 +437,64 @@ export function BucketPickerView({
   onSelect: (name: string) => void
   onCreate: (name: string) => Promise<void>
 }) {
+  // The modal's state lives here and the modal renders OUTSIDE the Select.
+  // The picker closes on any click into the portaled modal (the Select's
+  // window listener sees a click outside menu and toggle), and closing
+  // unmounts the footer — a modal owned by the footer vanished on the first
+  // click into its own name field, before any request was even sent
+  // (duf-3p03, reproduced against the live console).
+  const [creating, setCreating] = useState(false)
+  // The server refuses bucket creation by scope, whatever the role: creating
+  // a bucket changes the set of buckets rather than acting inside this one.
+  const refusal = bucketScoped ? 'A bucket-scoped session cannot create buckets' : null
   const createButton = (
-    <CreateBucketButton callerRole={callerRole} onCreate={onCreate} variant="link" />
+    <CreateBucketButton
+      callerRole={callerRole}
+      refusal={refusal}
+      onOpen={() => setCreating(true)}
+      variant="link"
+    />
   )
+  const modal = creating ? (
+    <BucketModal onCreate={onCreate} onClose={() => setCreating(false)} />
+  ) : null
+  // One return, whatever the listing state: the branches swap the picker body
+  // while an open modal stays mounted. A refresh failing (or a renewal
+  // restarting the load) mid-create otherwise swapped into a branch with no
+  // modal and tore down the operator's half-typed form (review finding on
+  // duf-3p03).
+  let body: ReactNode
   if (!scoped) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
-      </PickerField>
-    )
-  }
-  if (loading) {
-    return (
-      <PickerField label="Bucket">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
-      </PickerField>
-    )
-  }
-  if (failure) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (buckets.length === 0) {
-    return (
-      <PickerField label="Bucket">
+    body = <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
+  } else if (loading) {
+    body = <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
+  } else if (failure) {
+    body = <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
+  } else if (buckets.length === 0) {
+    body = (
+      <>
         <Content component="p" style={{ margin: 0 }}>No buckets exist</Content>
         {createButton}
-      </PickerField>
+      </>
     )
-  }
-
-  const options = bucketPickerOptions(buckets, pins)
-  return (
-    <PickerField label="Bucket">
+  } else {
+    body = (
       <TypeaheadPicker
         id="tenant-bucket"
         label="Bucket"
-        options={options}
+        options={bucketPickerOptions(buckets, pins, selectedBucket != null)}
         selectedValue={selectedBucket}
         selectedLabel={selectedBucket ?? '—'}
         onSelect={onSelect}
         onOpen={() => refreshOnPickerOpen(true, onRefresh)}
         footer={<MenuFooter>{createButton}</MenuFooter>}
       />
+    )
+  }
+  return (
+    <PickerField label="Bucket">
+      {body}
+      {modal}
     </PickerField>
   )
 }
@@ -433,6 +502,7 @@ export function BucketPickerView({
 export function bucketPickerOptions(
   buckets: { name: string }[],
   pins: { bucket_name: string }[],
+  hasSelection = false,
 ): PickerOption[] {
   const pinnedNames = new Set(pins.map((pin) => pin.bucket_name))
   const byName = new Map(buckets.map((listed) => [listed.name, listed]))
@@ -442,6 +512,10 @@ export function bucketPickerOptions(
   })
   const rest = buckets.filter((listed) => !pinnedNames.has(listed.name))
   return [
+    // The blank row is the deliberate step back up to project standing
+    // (duf-4qr, extended to buckets): offered exactly while a bucket is in
+    // effect, so there is always a way to stand above it.
+    ...(hasSelection ? [{ value: '', label: '\u2014' }] : []),
     ...pinned.map((listed) => ({ value: listed.name, label: listed.name, group: 'Pinned' })),
     ...rest.map((listed) => ({ value: listed.name, label: listed.name, group: 'Buckets' })),
   ]

@@ -61,7 +61,9 @@ export function Versions() {
   const { bucket = '' } = useParams()
   const navigate = useNavigate()
   const { data, loading, refreshing, failure, gap, reload } = useVersions(bucket)
-  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const {
+    state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket, signOut,
+  } = useAuth()
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null
@@ -125,6 +127,7 @@ export function Versions() {
         }
       }}
       onBack={() => navigate('/')}
+      onConnectClient={() => navigate('/instance')}
       onOpenVersion={(fingerprint) =>
         navigate(`/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}`)}
       onCreateChannel={async (options) => {
@@ -161,6 +164,8 @@ export function Versions() {
         if (!state || !tenant) throw new Error('No session.')
         try {
           await deleteBucket(state.token, tenant, bucket)
+          // The carried selection must not outlive its bucket.
+          if (selectedBucket?.name === bucket) selectBucket(null)
           navigate('/')
         } catch (err: unknown) {
           signOutIfUnauthorized(err, signOut)
@@ -218,6 +223,7 @@ export function VersionsView({
   pinFailure = null,
   onTogglePin = () => Promise.reject(new Error('No session.')),
   onBack,
+  onConnectClient = () => {},
   onOpenVersion,
   onCreateChannel = () => Promise.reject(new Error('No session.')),
   onAssignChannel = () => Promise.reject(new Error('No session.')),
@@ -246,6 +252,7 @@ export function VersionsView({
   pinFailure?: string | null
   onTogglePin?: () => Promise<void>
   onBack: () => void
+  onConnectClient?: () => void
   onOpenVersion: (fingerprint: string) => void
   onCreateChannel?: (options: {
     name: string; restricted?: boolean; fingerprint?: string
@@ -380,6 +387,7 @@ export function VersionsView({
                     onRevokeVersion={onRevokeVersion}
                     onDeleteVersion={onDeleteVersion}
                     onRefresh={onRefresh}
+                    onConnectClient={onConnectClient}
                   />
                 ),
               },
@@ -596,6 +604,7 @@ export function VersionsFacet({
   onRevokeVersion = () => Promise.reject(new Error('No session.')),
   onDeleteVersion = () => Promise.reject(new Error('No session.')),
   onRefresh = () => {},
+  onConnectClient = () => {},
 }: {
   versions: Version[]
   callerRole?: Role | null
@@ -603,6 +612,7 @@ export function VersionsFacet({
   onRevokeVersion?: (fingerprint: string, options: RevokeVersionOptions) => Promise<void>
   onDeleteVersion?: (fingerprint: string) => Promise<void>
   onRefresh?: () => void | Promise<void>
+  onConnectClient?: () => void
 }) {
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(RECENT)
@@ -646,7 +656,25 @@ export function VersionsFacet({
         <CardBody>
           {versions.length === 0 ? (
             <EmptyState titleText="No versions in this bucket" headingLevel="h2">
-              <EmptyStateBody>Publish with packer build to create one.</EmptyStateBody>
+              <EmptyStateBody>
+                Versions appear when Packer publishes to this bucket.
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  <Button variant="primary" onClick={onConnectClient}>Connect a client</Button>
+                </EmptyStateActions>
+                <EmptyStateActions>
+                  <Button
+                    component="a"
+                    href="https://developer.hashicorp.com/packer/docs"
+                    target="_blank"
+                    rel="noreferrer"
+                    variant="link"
+                  >
+                    Packer docs
+                  </Button>
+                </EmptyStateActions>
+              </EmptyStateFooter>
             </EmptyState>
           ) : (
             <>

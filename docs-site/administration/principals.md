@@ -42,6 +42,24 @@ A principal is bound to exactly one scope:
 - **Platform:** only `root` lives here.
 - **Organisation:** sees every project in its organisation.
 - **Project:** sees exactly one project.
+- **Bucket:** sees exactly one bucket inside its project. The narrowest
+  binding — the right shape for a CI pipeline that publishes one image line.
+  It can read and (with `builder`) publish into its bucket, and nothing else
+  in the project exists for it: sibling buckets answer not-found, and bucket
+  creation and deletion are refused. In the console it lands directly in its
+  bucket rather than on the Buckets screen, and the navigation offers a
+  **Bucket** entry in place of **Buckets** — one click back to the bucket from
+  any administration screen. The bucket must exist before the
+  principal is created, and cannot be deleted while the principal lives.
+
+Bucket-scoped principals are created the way every principal is: the picker
+selection IS the scope. Pick the bucket in the header — the selection carries
+onto this screen — and create; the principal binds to that bucket, and the
+issued-credential card offers the ready-to-paste `DFBG_MCP_*` environment
+with the bucket binding included. The listing is scope-exact here too: a
+bucket selection answers exactly that bucket's principals, and a project
+selection never lists bucket-scoped principals as a subtree. Over the API,
+pass `bucket_id` (the bucket's ULID) alongside the organisation and project.
 
 The two tenancy-scoped kinds behave differently in the Packer CLI. A
 project-scoped principal gets a 403 from project discovery, which Packer

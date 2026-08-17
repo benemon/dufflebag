@@ -839,7 +839,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await globalNavItems()).length === 7)
     assert.deepEqual(
       await globalNavItems(),
-      ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -880,7 +880,26 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the data screens show the real, scoped state', async () => {
-    await waitForText('Choose a bucket')
+    await waitForText('No buckets yet')
+  })
+
+  await t.test('a bucket published from outside appears without a reload', async () => {
+    // The empty console is the awaiting-change state: demo-publish landing a
+    // bucket must surface in the masthead picker and the screen by polling,
+    // never by hard refresh (duf-ear2).
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
+    const wizardOrg = organizations.find((o) => o.name === wizardOrganizationName)
+    const { projects } = await api(
+      rootToken, 'GET', `/api/v1/organizations/${wizardOrg.id}/projects`)
+    await api(
+      rootToken, 'PUT',
+      `/packer/2023-01-01/organizations/${wizardOrg.id}/projects/${projects[0].id}/buckets`,
+      { name: 'first-published', description: 'landed from outside the console' },
+    )
+    await waitForText('first-published')
+    await until('the masthead picker to grow its toggle', () =>
+      page.$('#tenant-bucket').then((el) => el !== null))
   })
 
   await t.test('the Instance build card matches the authenticated endpoint', async () => {
@@ -1028,7 +1047,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await pickerValue('#tenant-organization')) ===
         'All organisations (platform)')
     // The data screen states the gap rather than showing a silent empty table.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
     await waitForText('can view any organisation')
   })
 
@@ -1368,8 +1387,17 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the project toggle to follow', async () =>
       (await pickerValue('#tenant-project')) === 'widgets')
     // The screen in view persists across navigation, so name it explicitly.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    await waitForText('zzz-newer')
+    assert.deepEqual(
+      await page.$$eval(
+        'table[aria-label="Buckets"] td[data-label="Bucket"] > div:first-child button',
+        (buttons) => buttons.map((button) => button.innerText.trim()),
+      ),
+      ['zzz-newer', 'smoke-images'],
+      'same-day buckets do not default to full-timestamp newest-first order',
+    )
     // PatternFly transitions nav-link background-color, so a naive read samples
     // the fade and returns a different alpha every run. Settle motion first, or
     // the assertion measures an animation rather than the rule.
@@ -1594,9 +1622,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Open the versions list from the universal bucket picker. Picking the
     // bucket already on screen is a same-route no-op, so step onto the
     // landing first — the old drill-down navigated fresh, and so must this.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
-    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    await clickByText('table[aria-label="Buckets"] button', 'smoke-images')
     await waitForText('seeded by the smoke test')
     await waitForText('team=platform')
     await waitForText('purpose=browser-proof')
@@ -1811,7 +1839,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Assignment history could not be loaded')
 
     await clickByText('button', 'Registry')
-    await waitForText('Choose a bucket')
+    await waitForText('smoke-images')
   })
 
   await t.test('a version is revoked and restored through the console, confirmed at the wire', async () => {
@@ -1931,8 +1959,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // The previous test leaves this bucket's detail on its Channels facet;
     // a same-route pick would keep it. Navigate fresh from the landing.
-    await clickByText('a', 'Registry')
-    await waitForText('Choose a bucket')
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-revocable')
     await choosePickerOption('#tenant-bucket', 'smoke-revocable')
     await waitForText('Bucket details')
     // The opener and the modal confirm share a label; scope the confirm.
@@ -1940,8 +1968,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Delete smoke-revocable')
     await typeToConfirm('smoke-revocable')
     await clickByText('.pf-v6-c-modal-box button', 'Delete bucket')
-    await until('the console to land back on Registry', async () =>
-      (await bodyText()).includes('Choose a bucket'))
+    await until('the console to land back on the loaded list', async () => {
+      const text = await bodyText()
+      return text.includes('smoke-images') && !text.includes('smoke-revocable')
+    })
     await until('the bucket to leave the wire', async () => {
       try {
         await api(builderToken, 'GET', bucketPath)
@@ -2251,7 +2281,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Enable')
     await waitForText('Nothing was saved. No configuration was created.')
     // Leaving and returning re-reads the server: still unconfigured.
-    await clickByText('a', 'Registry')
+    await clickByText('a', 'Buckets')
     await clickByText('a', 'Bag Drop')
     await waitForText('Bag Drop is not configured')
     // Against a resolvable destination the same single action saves, verifies,
@@ -2447,10 +2477,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   let consoleBuilder
+  // Bucket visits carry their selection into the tenancy (duf-4qr extended);
+  // a test that intends PROJECT standing steps back up through the picker's
+  // blank row first, exactly as an operator would.
+  const stepUpToProject = async () => {
+    if ((await pickerValue('#tenant-bucket')) === '—') return
+    await page.click('#tenant-bucket')
+    await clickOptionExact('—')
+  }
+
   await t.test('a builder principal is minted through the form, where the session stands', async () => {
     // Standing in acme/widgets, the form creates a PROJECT-scoped builder —
     // least-privilege packer credentials from the console, no tenancy field
     // anywhere (duf-4qr).
+    await stepUpToProject()
     await clickByText('a', 'Principals')
     await waitForText('Service principals')
     await clickByText('button', 'Create principal')
@@ -2594,6 +2634,117 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bucket details')
   })
 
+  await t.test('the picker carries the bucket to Principals, and the minted principal lands in it', async () => {
+    // Ben's workflow, end to end: pick the bucket, move to Principals, and the
+    // screen honours the selection — creation is bucket-scoped from context,
+    // the form itself never asks (duf-4qr extended to buckets).
+    // The preceding subtest leaves a builder session; this workflow is an
+    // operator's, so it signs in as root first.
+    await clickByText('button', 'Sign out')
+    await waitForText('Log in')
+    await page.type('#client-id', credentials.clientID)
+    await page.type('#client-secret', credentials.secret)
+    await clickByText('button', 'Log in')
+    await waitForText('Sign out')
+    await choosePickerOption('#tenant-organization', seeded.organization.name)
+    await until('the project to follow', async () =>
+      (await pickerValue('#tenant-project')) !== '')
+    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await waitForText('Bucket details')
+    await waitForText('Principals')
+    await clickByText('a', 'Principals')
+    await waitForText('Service principals')
+    // The carried bucket is the standing: the listing answers exactly the
+    // bucket's principals, which is none yet.
+    await waitForText('No bucket-scoped principals')
+    assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
+    await clickByText('button', 'Create principal')
+    await page.type('#principal-name', 'smoke-bucket-scoped')
+    await clickByText('button', 'Create principal')
+    await waitForText('smoke-bucket-scoped')
+    // Issue its credential; the card offers the MCP environment with the
+    // bucket binding stated.
+    await clickInRow('smoke-bucket-scoped', 'Issue secret')
+    await clickInModal('Confirm')
+    await waitForText('smoke-bucket-scoped — credential issued')
+    // The environment block is a collapsed expansion: its text is an input
+    // value, invisible to text waits — and the one place the whole contract
+    // can be read back, credential included.
+    const environment = await until('the MCP environment block', () =>
+      page.$$eval('[role="dialog"] input', (inputs) =>
+        inputs.map((input) => input.value)
+          .find((value) => value.startsWith('DFBG_MCP_ENDPOINT=')) ?? false))
+    const scopedID = /DFBG_MCP_CLIENT_ID=([^\s]+)/.exec(environment)?.[1]
+    const scopedSecret = /DFBG_MCP_CLIENT_SECRET=([^\s]+)/.exec(environment)?.[1]
+    assert.ok(scopedID && scopedSecret, `credential missing from the environment: ${environment}`)
+    assert.match(environment, /DFBG_MCP_BUCKET_ID=[0-9A-HJKMNP-TV-Z]{26}/)
+    await clickInModal('Close')
+    // The minted credential signs in and lands in its bucket: never a list.
+    await clickByText('button', 'Sign out')
+    await waitForText('Log in')
+    await page.type('#client-id', scopedID)
+    await page.type('#client-secret', scopedSecret)
+    await clickByText('button', 'Log in')
+    await waitForText('Sign out')
+    // Signing in resumes the route where login happened; the landing's
+    // scope routing is the root route's job.
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
+    await waitForText('Bucket details')
+    await waitForText('smoke-images')
+    assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
+    // The listing entry swaps for a way back: 'Bucket', never 'Buckets'
+    // (duf-xmg5). Admin screens must not strand the session.
+    const nav = await globalNavItems()
+    assert.ok(!nav.includes('Buckets'), `Buckets nav offered to a bucket-scoped session: ${nav}`)
+    assert.ok(nav.includes('Bucket'), `no Bucket nav for a bucket-scoped session: ${nav}`)
+    // Instance names the session's bucket in the client environment — the
+    // variable Packer reads when the template names none (duf-ccwl).
+    await clickByText('nav.app-global-nav a', 'Instance')
+    await waitForText('Client environment')
+    await waitForText('HCP_PACKER_BUCKET_NAME=smoke-images')
+    // From an admin screen, Bucket is the one-click path home (duf-xmg5).
+    await clickByText('nav.app-global-nav a', 'Bucket')
+    await waitForText('Bucket details')
+    await waitForText('smoke-images')
+    // The picker's Create bucket is refused by scope with the reason stated,
+    // not silently no-opped by the server (duf-3p03).
+    await page.click('#tenant-bucket')
+    await until('the create trigger to state its scope refusal', () =>
+      page.$$eval('span[aria-label="A bucket-scoped session cannot create buckets"]',
+        (spans) => spans.length > 0))
+    assert.equal(await buttonDisabled('Create bucket'), true)
+    await page.keyboard.press('Escape')
+    await page.goto(`${base}/buckets`, { waitUntil: 'domcontentloaded' })
+    await waitForText('Bucket details')
+    assert.doesNotMatch(await bodyText(), /All buckets/)
+    await clickByText('button', 'Sign out')
+    await waitForText('Log in')
+    await page.type('#client-id', credentials.clientID)
+    await page.type('#client-secret', credentials.secret)
+    await clickByText('button', 'Log in')
+    await waitForText('Sign out')
+  })
+
+  await t.test('the picker-footer create survives the picker closing under it', async () => {
+    // The create modal opens from the Select's footer, and the first click
+    // into the modal closes the Select — which unmounts the footer. When the
+    // footer owned the modal, that click made the whole flow vanish
+    // mid-submit and swallowed every failure (duf-3p03). This walks the exact
+    // sequence: open picker, open modal, click into the field, submit.
+    await choosePickerOption('#tenant-organization', seeded.organization.name)
+    await until('the project to follow', async () =>
+      (await pickerValue('#tenant-project')) !== '')
+    await page.click('#tenant-bucket')
+    await clickByText('button', 'Create bucket')
+    await page.waitForSelector('#create-bucket-name')
+    await page.click('#create-bucket-name')
+    await page.type('#create-bucket-name', 'smoke-footer-created')
+    await clickInModal('Create bucket')
+    await waitForText('Bucket details')
+    await until('the created bucket to become the selection', async () =>
+      (await pickerValue('#tenant-bucket')) === 'smoke-footer-created')
+  })
+
   await t.test('the console-minted builder signs in, scoped to exactly its project', async () => {
     assert.ok(consoleBuilder, 'the create-through-the-form step must have captured a credential')
     await clickByText('button', 'Sign out')
@@ -2609,7 +2760,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       const toggle = await pickerValue('#tenant-project')
       return toggle === 'acme / widgets'
     })
-    assert.deepEqual(await globalNavItems(), ['Registry', 'Bag Drop', 'Instance'])
+    assert.deepEqual(await globalNavItems(), ['Buckets', 'Bag Drop', 'Instance'])
     // It can read its project's bucket…
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await waitForText('Bucket details')

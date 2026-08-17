@@ -59,15 +59,15 @@ helm install dufflebag dufflebag/dufflebag \
 ```
 
 The profile keeps every pod under the restricted-v2 constraints — dufflebag,
-PostgreSQL and Vault all run at an arbitrary non-root UID — with one
-exception: the Ceph all-in-one image must run as root, so the chart pins its
-ServiceAccount to the `anyuid` SCC via a RoleBinding. Installing therefore
-needs a user who can grant SCC use and create the chart's one
-ClusterRoleBinding (Vault's token reviewer) — in practice, a cluster
-administrator. `route.host` fixes the Route's hostname; without it, OpenShift
-assigns one. On plain Kubernetes leave the profile off: the PostgreSQL and
-Ceph images start as root and drop privileges themselves, which the default
-profile permits with a documented capability set.
+PostgreSQL, Vault and Ceph all run at an arbitrary non-root UID — no SCC
+grants, no exceptions. Installing needs a user who can create the chart's one
+cluster-scoped object, the ClusterRoleBinding for Vault's token reviewer;
+nothing else reaches past the namespace. `route.host` fixes the Route's
+hostname; without it, OpenShift assigns one. On plain Kubernetes leave the
+profile off: the PostgreSQL and Ceph images start as root and drop privileges
+themselves, which the default profile permits with a documented capability
+set. The Ceph image is pulled with `Always`: its version tags move when the
+image is rebuilt, and a node's cached copy must not trail them.
 
 ### Docker or Podman
 

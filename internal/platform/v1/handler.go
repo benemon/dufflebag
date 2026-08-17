@@ -738,7 +738,8 @@ func (s *server) ListPrincipals(
 		return newRefusal(refusedTenancy), nil
 	}
 	selection := standing.Scope
-	if request.Params.OrganizationId != nil || request.Params.ProjectId != nil {
+	if request.Params.OrganizationId != nil || request.Params.ProjectId != nil ||
+		request.Params.BucketId != nil {
 		selection = identity.Scope{}
 		if request.Params.OrganizationId != nil {
 			selection.OrganizationID = *request.Params.OrganizationId
@@ -746,6 +747,17 @@ func (s *server) ListPrincipals(
 		if request.Params.ProjectId != nil {
 			selection.ProjectID = *request.Params.ProjectId
 		}
+		if request.Params.BucketId != nil {
+			selection.BucketID = *request.Params.BucketId
+		}
+	}
+	// A bucket filter without both tenancy filters is a malformed scope,
+	// refused closed rather than interpreted — without this, the zero
+	// organisation reads as a PLATFORM selection and the bucket is ignored.
+	if selection.BucketID != "" &&
+		(selection.OrganizationID == uuid.Nil || selection.ProjectID == uuid.Nil) {
+		audit.refused(refusedTenancy.reason())
+		return newRefusal(refusedTenancy), nil
 	}
 
 	// Authorized against the scope being LISTED, not merely the caller's role.
