@@ -108,17 +108,19 @@ type Channel struct {
 	Restricted     bool      `json:"restricted"`
 	CreatedAt      time.Time `json:"created_at"`
 	UpdatedAt      time.Time `json:"updated_at"`
+	Managed        bool      `json:"managed"`
 }
 
 type ChannelAssignment struct {
-	OrganizationID uuid.UUID `json:"organization_id"`
-	ProjectID      uuid.UUID `json:"project_id"`
-	ID             string    `json:"id"`
-	ChannelID      string    `json:"channel_id"`
-	VersionID      string    `json:"version_id"`
-	AssignedAt     time.Time `json:"assigned_at"`
-	IntegrityMac   []byte    `json:"integrity_mac"`
-	BucketID       string    `json:"bucket_id"`
+	OrganizationID uuid.UUID      `json:"organization_id"`
+	ProjectID      uuid.UUID      `json:"project_id"`
+	ID             string         `json:"id"`
+	ChannelID      string         `json:"channel_id"`
+	VersionID      sql.NullString `json:"version_id"`
+	AssignedAt     time.Time      `json:"assigned_at"`
+	AuthorID       string         `json:"author_id"`
+	IntegrityMac   []byte         `json:"integrity_mac"`
+	BucketID       string         `json:"bucket_id"`
 }
 
 type EncryptionMode struct {

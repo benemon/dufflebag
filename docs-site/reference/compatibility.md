@@ -822,16 +822,16 @@ consumption pattern — 404'd against it where it succeeded against HCP. The
 required behaviour was: auto-create a managed `latest` per bucket, auto-assign
 at completion, and refuse mutation with the shapes above.
 
-> **2026-07-31 — implemented (duf-08q):** dufflebag now auto-creates the managed `latest` at CreateBucket (migration 000008 backfills pre-existing buckets), auto-assigns at completion in the same transaction, and refuses mutation with the captured 400/code-9 and 400/code-3 shapes — with one deliberate deviation: the `author_id` and the refusal prose say "Dufflebag" where live says "HCP Packer", because a HashiCorp trademark must not appear in content this server originates.
+> **2026-07-31 — implemented (duf-08q):** dufflebag now auto-creates the managed `latest` at CreateBucket, auto-assigns at completion in the same transaction, and refuses mutation with the captured 400/code-9 and 400/code-3 shapes — with one deliberate deviation: the `author_id` and the refusal prose say "Dufflebag" where live says "HCP Packer", because a HashiCorp trademark must not appear in content this server originates. The 0.1.0 baseline starts with this shape; pre-0.1.0 databases are rebuildable rather than upgraded.
 > The deviation is verified inert: Packer matches errors solely by numeric code (`errCodeRegex`/`CheckErrorCode`, `packer@v1.16.0 internal/hcp/api/errors.go`), and the provider keys its managed-channel handling off the `managed` boolean and typed numeric `payload.Code`, never the message or author text (`terraform-provider-hcp internal/providersdkv2/resource_packer_channel.go` create/delete paths; `resource_packer_channel_assignment.go` `channel.Managed` checks).
 >
 > **2026-08-01 — completeness extension (duf-why, duf-wct, duf-6i3):**
 > duplicate channel creation now follows probe 38's 409/code-6 adoption shape;
 > both handler and repository refuse assign-copy into managed channels with
-> probe 40's 400/code-9 shape; migration 000009 persists assignment author per
+> probe 40's 400/code-9 shape; the baseline persists assignment author per
 > history row. New manual rows carry the caller principal, automatic rows carry
 > `Dufflebag` under the same branding rule, and pre-migration rows carry the
-> honest explicit unknown `""` because their actor was never stored.
+> honest explicit unknown `""` when imported history has no actor.
 
 ### Restricted channels
 
@@ -897,14 +897,10 @@ recorded here. CycloneDX
 component's bom-ref/name ancestry path is stored with the row so flattening
 does not discard the source format's containment information.
 
-Rows written before this migration, or by a previous release during an
-expand/contract overlap, have `parse_status = pending` by an expand-only
-default. *(Correction 2026-08-05: an earlier revision described a lazy
-backfill that re-parsed those rows' Postgres blobs on first read. Migration
-000014 dropped `compressed_data`, deliberately abandoning those bytes; the
-first packages read now marks such rows `unparseable` with an explicit
-abandonment error — `internal/store/postgres/sbom_repository.go`.)* A corrupt
-or structurally unrecognised document likewise remains stored with
+The 0.1.0 baseline stores only the object key and has no legacy Postgres blob
+column; pre-0.1.0 databases are rebuildable rather than upgraded. A row with
+`parse_status = pending` is projected lazily on its first packages read. A
+corrupt or structurally unrecognised document likewise remains stored with
 `parse_status = unparseable`; the packages read returns an explicit
 failed-precondition response naming the SBOM instead of the indistinguishable
 and false `packages: []`.

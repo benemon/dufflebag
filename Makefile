@@ -269,6 +269,10 @@ test-scanner: ## Run scanner tests against recorded fixtures with no external ro
 test-integration: ## Run Postgres and Vault integration tests in testcontainers
 	$(SCANNER_DISABLED_ENV) go test -timeout 30m -tags=integration ./internal/store/postgres ./internal/keyring ./cmd/dufflebag
 
+.PHONY: test-migration-equivalence
+test-migration-equivalence: ## Prove the 0.1.0 baseline matches the pre-release chain
+	./internal/store/postgres/check-baseline-equivalence.sh
+
 .PHONY: test-rls-sabotage
 # Prove the tenant isolation assertions have teeth, by requiring them to FAIL
 # when row-level security is sabotaged. A test that passes with RLS disabled is

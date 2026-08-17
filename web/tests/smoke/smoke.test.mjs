@@ -1494,7 +1494,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/projects/${seeded.project.id}/buckets`
 
     // A real parent bucket/version/channel is recorded on the child build, so
-    // the lineage card below is proving migration 000010's stored relation.
+    // the lineage card below is proving the baseline's stored relation.
     await api(builderToken, 'PUT', bucketBase, {
       name: 'smoke-base', description: 'parent seeded by the smoke test',
     })
@@ -1801,8 +1801,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // administration). The row stays — assignment history is append-only by
     // trigger, tampered or not — and nothing later reads this channel again.
     // The unknown-author rendering this fixture used to exercise lives in the
-    // SSR unit lane: a legacy pre-migration-000009 row cannot exist on an
-    // encrypted instance, whose first boot post-dates that migration.
+    // SSR unit lane: a baseline encrypted instance cannot naturally create an
+    // unknown-author row.
     assert.match(productionChannel.id, /^[0-9A-HJKMNP-TV-Z]{26}$/)
     await execFile('docker', [
       'exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'dufflebag',

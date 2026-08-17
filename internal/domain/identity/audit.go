@@ -73,7 +73,8 @@ const (
 // AuditTarget is one file the broker writes every audit event to.
 //
 // Slot is deliberately absent. The database assigns 1..3 to make a fourth
-// target unwriteable (migration 000011), but that is storage enforcing a limit,
+// target unwriteable (the baseline's three-slot constraint), but that is
+// storage enforcing a limit,
 // not a property of the target — exposing it would invite a client to choose
 // one, and the ordering it implies means nothing to a caller.
 type AuditTarget struct {

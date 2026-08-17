@@ -468,7 +468,7 @@ func TestPrincipalRepositoryRejectsStoredZeroProjectID(t *testing.T) {
 	); err != nil {
 		t.Fatalf("drop constraint: %v", err)
 	}
-	// Migration 000021's scope FK also refuses the zero project on the way in;
+	// The baseline scope FK also refuses the zero project on the way in;
 	// drop it for the same reason as the CHECK above — the restore guard under
 	// test must hold for rows that predate or bypass both constraints.
 	if _, err := owner.ExecContext(ctx,
