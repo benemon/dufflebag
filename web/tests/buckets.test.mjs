@@ -477,6 +477,21 @@ test('pinned buckets form the first select group and the rest follow', () => {
   ])
 })
 
+test('a carried selection offers the blank step-up row ahead of the groups', () => {
+  const withSelection = bucketPickerOptions(
+    [{ name: 'base-images' }, { name: 'database-images' }],
+    [{ bucket_name: 'database-images' }],
+    true,
+  )
+  assert.deepEqual(withSelection[0], { value: '', label: '\u2014' })
+  assert.equal(withSelection.filter((option) => option.value === '').length, 1)
+
+  const withoutSelection = bucketPickerOptions(
+    [{ name: 'base-images' }], [], false,
+  )
+  assert.ok(!withoutSelection.some((option) => option.value === ''))
+})
+
 test('picker loading, failure and empty listings are text states, never empty menus', () => {
   const loading = pickerMarkup({ loading: true })
   assert.match(loading, /Loading buckets…/)

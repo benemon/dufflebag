@@ -326,6 +326,12 @@ func (r *Repository) ListPrincipals(
 		rows, err = q.ListPrincipalsByOrganization(ctx, uuid.NullUUID{
 			UUID: selection.OrganizationID, Valid: true,
 		})
+	case selection.BucketID != "":
+		rows, err = q.ListPrincipalsByBucket(ctx, postgresdb.ListPrincipalsByBucketParams{
+			OrganizationID: uuid.NullUUID{UUID: selection.OrganizationID, Valid: true},
+			ProjectID:      uuid.NullUUID{UUID: selection.ProjectID, Valid: true},
+			BucketID:       sql.NullString{String: selection.BucketID, Valid: true},
+		})
 	default:
 		rows, err = q.ListPrincipalsByProject(ctx, postgresdb.ListPrincipalsByProjectParams{
 			OrganizationID: uuid.NullUUID{UUID: selection.OrganizationID, Valid: true},

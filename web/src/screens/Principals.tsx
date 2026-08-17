@@ -48,6 +48,7 @@ type ViewProps = ReturnType<typeof usePrincipals>
 
 export function PrincipalsView({
   principals, loading, failure, reload, selfID, callerRole, token, organizationID, projectID,
+  bucketID = null, bucketName = null,
 }: ViewProps) {
   const [creating, setCreating] = useState(false)
   const [issuing, setIssuing] = useState<Principal | null>(null)
@@ -65,7 +66,9 @@ export function PrincipalsView({
   // blank project row is that organisation, a whole pair is that project. The
   // form never asks for tenancy, so it cannot express a pairing validBinding
   // would refuse — only root above every tenancy, never root inside one.
-  const standing: Standing = organizationID ? (projectID ? 'project' : 'organization') : 'platform'
+  const standing: Standing = organizationID
+    ? (projectID ? (bucketID ? 'bucket' : 'project') : 'organization')
+    : 'platform'
   const offerable = grantableRoles(standing === 'platform' ? 'platform' : 'tenancy', callerRole)
 
   async function run(work: () => Promise<void>) {
@@ -156,7 +159,7 @@ export function PrincipalsView({
                 // Creation alone. The new principal appears in the listing
                 // holding no secrets, and the operator issues one from its row
                 // — the same action that adds a second secret (duf-4ac).
-                await createPrincipal(token, { name, role, organizationID, projectID })
+                await createPrincipal(token, { name, role, organizationID, projectID, bucketID })
                 setCreating(false)
               })
             }}
@@ -169,7 +172,27 @@ export function PrincipalsView({
           // The listing is EXACTLY the selection's scope, so an empty table
           // needs to say which scope answered empty — an organisation with no
           // org-scoped principals is not an organisation with no principals.
-          standing === 'organization' ? (
+          standing === 'bucket' ? (
+            <EmptyState titleText="No bucket-scoped principals" headingLevel="h2">
+              <EmptyStateBody>
+                Principals created here are bound to {bucketName ?? 'the selected bucket'}: they
+                publish into exactly this bucket and see nothing else in the project. Clear the
+                bucket in the header to stand at the project.
+              </EmptyStateBody>
+              <EmptyStateFooter>
+                <EmptyStateActions>
+                  {!creating ? (
+                    <RoleRestrictedButton
+                      action="managePrincipals" callerRole={callerRole}
+                      variant="primary" onClick={() => setCreating(true)}
+                    >
+                      Create principal
+                    </RoleRestrictedButton>
+                  ) : null}
+                </EmptyStateActions>
+              </EmptyStateFooter>
+            </EmptyState>
+          ) : standing === 'organization' ? (
             <EmptyState titleText="No organisation-scoped principals" headingLevel="h2">
               <EmptyStateBody>
                 Principals bound to a project are listed at that project — select one in the header
@@ -503,11 +526,24 @@ export function rootsLastSecret(principal: Principal): boolean {
  * reveal phase until the operator explicitly acknowledges it by closing.
  */
 export function IssuedCredentialCard({
-  name, credential,
+  name, credential, principal,
 }: {
   name: string
   credential: IssuedCredential
+  /** When given, the card also offers the ready-to-paste MCP environment. */
+  principal?: Principal
 }) {
+  const endpoint = typeof window === 'undefined' ? '' : window.location.origin
+  const mcpEnvironment = principal && principal.organization_id && principal.project_id
+    ? [
+        `DFBG_MCP_ENDPOINT=${endpoint}`,
+        `DFBG_MCP_CLIENT_ID=${credential.clientID}`,
+        `DFBG_MCP_CLIENT_SECRET=${credential.secret}`,
+        `DFBG_MCP_ORGANIZATION_ID=${principal.organization_id}`,
+        `DFBG_MCP_PROJECT_ID=${principal.project_id}`,
+        ...(principal.bucket_id != null ? [`DFBG_MCP_BUCKET_ID=${principal.bucket_id}`] : []),
+      ].join('\n')
+    : null
   return (
     <Card>
       <CardTitle>{name} — credential issued</CardTitle>
@@ -527,6 +563,25 @@ export function IssuedCredentialCard({
         <ClipboardCopy isReadOnly hoverTip="Copy" clickTip="Copied">
           {credential.secret}
         </ClipboardCopy>
+
+        {mcpEnvironment ? (
+          <>
+            <Content component="p">
+              MCP server environment — the same credential, ready for
+              dufflebag-mcp
+            </Content>
+            <ClipboardCopy
+              isReadOnly
+              isCode
+              isBlock
+              variant="expansion"
+              hoverTip="Copy"
+              clickTip="Copied"
+            >
+              {mcpEnvironment}
+            </ClipboardCopy>
+          </>
+        ) : null}
       </CardBody>
     </Card>
   )
@@ -948,7 +1003,7 @@ export function IssueSecretModalView({
           </Alert>
         ) : null}
         {credential ? (
-          <IssuedCredentialCard name={principal.name} credential={credential} />
+          <IssuedCredentialCard name={principal.name} credential={credential} principal={principal} />
         ) : (
           <Form>
             <FormGroup label="Expiry" fieldId={`${idPrefix}-expiry`} role="radiogroup">
@@ -1097,6 +1152,7 @@ function SecretSlots({
 function scopeLabel(principal: Principal): string {
   if (principal.organization_id === null) return 'platform'
   if (principal.project_id === null) return 'organisation'
+  if (principal.bucket_id != null) return 'bucket'
   return 'project'
 }
 

@@ -627,7 +627,19 @@ func TestListPrincipalsListsExactlyTheSelectedScope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	seeded := []*identity.Principal{platformRoot, atOrganization, atProject}
+	atBucket, err := identity.NewPrincipal(
+		"at-bucket", "pipeline automation", "client-bucket",
+		identity.Scope{
+			OrganizationID: uuid.MustParse(testOrgID),
+			ProjectID:      uuid.MustParse(testProjID),
+			BucketID:       "01ARZ3NDEKTSV4RRFFQ69G5FAV",
+		},
+		identity.RoleBuilder, initTestTime,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seeded := []*identity.Principal{platformRoot, atOrganization, atProject, atBucket}
 
 	root := testRoles{role: identity.RoleRoot, scope: identity.Scope{}}
 	organizationMaintainer := testRoles{
@@ -658,6 +670,15 @@ func TestListPrincipalsListsExactlyTheSelectedScope(t *testing.T) {
 			roles: root,
 			path:  "/api/v1/principals?organization_id=" + testOrgID + "&project_id=" + testProjID,
 			want:  "at-project",
+		},
+		{
+			// Bucket-scoped principals are a narrower scope, listed at their
+			// bucket — never as a project subtree.
+			name:  "a bucket selection lists that bucket's principals only",
+			roles: root,
+			path: "/api/v1/principals?organization_id=" + testOrgID +
+				"&project_id=" + testProjID + "&bucket_id=01ARZ3NDEKTSV4RRFFQ69G5FAV",
+			want: "at-bucket",
 		},
 		{
 			// The default is the CALLER's standing, so a tenancy maintainer

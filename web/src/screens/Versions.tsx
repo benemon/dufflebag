@@ -61,7 +61,9 @@ export function Versions() {
   const { bucket = '' } = useParams()
   const navigate = useNavigate()
   const { data, loading, refreshing, failure, gap, reload } = useVersions(bucket)
-  const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  const {
+    state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket, signOut,
+  } = useAuth()
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null
@@ -162,6 +164,8 @@ export function Versions() {
         if (!state || !tenant) throw new Error('No session.')
         try {
           await deleteBucket(state.token, tenant, bucket)
+          // The carried selection must not outlive its bucket.
+          if (selectedBucket?.name === bucket) selectBucket(null)
           navigate('/')
         } catch (err: unknown) {
           signOutIfUnauthorized(err, signOut)

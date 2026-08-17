@@ -2458,10 +2458,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   let consoleBuilder
+  // Bucket visits carry their selection into the tenancy (duf-4qr extended);
+  // a test that intends PROJECT standing steps back up through the picker's
+  // blank row first, exactly as an operator would.
+  const stepUpToProject = async () => {
+    if ((await pickerValue('#tenant-bucket')) === '—') return
+    await page.click('#tenant-bucket')
+    await clickOptionExact('—')
+  }
+
   await t.test('a builder principal is minted through the form, where the session stands', async () => {
     // Standing in acme/widgets, the form creates a PROJECT-scoped builder —
     // least-privilege packer credentials from the console, no tenancy field
     // anywhere (duf-4qr).
+    await stepUpToProject()
     await clickByText('a', 'Principals')
     await waitForText('Service principals')
     await clickByText('button', 'Create principal')
@@ -2605,33 +2615,66 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bucket details')
   })
 
-  await t.test('a bucket-scoped principal lands in its bucket, with no list to browse', async () => {
-    // Minted the way every seeded principal is: create, then issue a secret.
-    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
-    const scopedBucket = await api(
-      rootToken, 'GET',
-      `/packer/2023-01-01/organizations/${seeded.organization.id}` +
-        `/projects/${seeded.project.id}/buckets/smoke-images`,
-    )
-    const created = await api(rootToken, 'POST', '/api/v1/principals', {
-      name: 'smoke-bucket-scoped', role: 'builder',
-      organization_id: seeded.organization.id, project_id: seeded.project.id,
-      bucket_id: scopedBucket.bucket.id,
-    })
-    const issued = await api(rootToken, 'POST', `/api/v1/principals/${created.id}/secrets`, {})
+  await t.test('the picker carries the bucket to Principals, and the minted principal lands in it', async () => {
+    // Ben's workflow, end to end: pick the bucket, move to Principals, and the
+    // screen honours the selection — creation is bucket-scoped from context,
+    // the form itself never asks (duf-4qr extended to buckets).
+    // The preceding subtest leaves a builder session; this workflow is an
+    // operator's, so it signs in as root first.
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
-    await page.type('#client-id', created.client_id)
-    await page.type('#client-secret', issued.secret)
+    await page.type('#client-id', credentials.clientID)
+    await page.type('#client-secret', credentials.secret)
     await clickByText('button', 'Log in')
-    // The landing resolves the claim's bucket id through the scoped listing
-    // and steps straight into the bucket — never a list of one.
+    await waitForText('Sign out')
+    await choosePickerOption('#tenant-organization', seeded.organization.name)
+    await until('the project to follow', async () =>
+      (await pickerValue('#tenant-project')) !== '')
+    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await waitForText('Bucket details')
+    await waitForText('Principals')
+    await clickByText('a', 'Principals')
+    await waitForText('Service principals')
+    // The carried bucket is the standing: the listing answers exactly the
+    // bucket's principals, which is none yet.
+    await waitForText('No bucket-scoped principals')
+    assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
+    await clickByText('button', 'Create principal')
+    await page.type('#principal-name', 'smoke-bucket-scoped')
+    await clickByText('button', 'Create principal')
+    await waitForText('smoke-bucket-scoped')
+    // Issue its credential; the card offers the MCP environment with the
+    // bucket binding stated.
+    await clickInRow('smoke-bucket-scoped', 'Issue secret')
+    await clickInModal('Confirm')
+    await waitForText('smoke-bucket-scoped — credential issued')
+    // The environment block is a collapsed expansion: its text is an input
+    // value, invisible to text waits — and the one place the whole contract
+    // can be read back, credential included.
+    const environment = await until('the MCP environment block', () =>
+      page.$$eval('[role="dialog"] input', (inputs) =>
+        inputs.map((input) => input.value)
+          .find((value) => value.startsWith('DFBG_MCP_ENDPOINT=')) ?? false))
+    const scopedID = /DFBG_MCP_CLIENT_ID=([^\s]+)/.exec(environment)?.[1]
+    const scopedSecret = /DFBG_MCP_CLIENT_SECRET=([^\s]+)/.exec(environment)?.[1]
+    assert.ok(scopedID && scopedSecret, `credential missing from the environment: ${environment}`)
+    assert.match(environment, /DFBG_MCP_BUCKET_ID=[0-9A-HJKMNP-TV-Z]{26}/)
+    await clickInModal('Close')
+    // The minted credential signs in and lands in its bucket: never a list.
+    await clickByText('button', 'Sign out')
+    await waitForText('Log in')
+    await page.type('#client-id', scopedID)
+    await page.type('#client-secret', scopedSecret)
+    await clickByText('button', 'Log in')
+    await waitForText('Sign out')
+    // Signing in resumes the route where login happened; the landing's
+    // scope routing is the root route's job.
+    await page.goto(`${base}/`, { waitUntil: 'domcontentloaded' })
     await waitForText('Bucket details')
     await waitForText('smoke-images')
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
     const nav = await globalNavItems()
     assert.ok(!nav.includes('Buckets'), `Buckets nav offered to a bucket-scoped session: ${nav}`)
-    // Browsing by URL is answered the same way as the hidden entry.
     await page.goto(`${base}/buckets`, { waitUntil: 'domcontentloaded' })
     await waitForText('Bucket details')
     assert.doesNotMatch(await bodyText(), /All buckets/)

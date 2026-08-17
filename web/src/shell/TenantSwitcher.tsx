@@ -200,11 +200,16 @@ function TypeaheadPicker({
           <SelectOption isAriaDisabled value="__no-results">
             No results found for “{filterValue}”
           </SelectOption>
-        ) : groups.length > 0 ? groups.map((group) => (
-          <SelectGroup key={group} label={group}>
-            {filtered.filter((option) => option.group === group).map(optionNode)}
-          </SelectGroup>
-        )) : filtered.map(optionNode)}
+        ) : groups.length > 0 ? (
+          <>
+            {filtered.filter((option) => !option.group).map(optionNode)}
+            {groups.map((group) => (
+              <SelectGroup key={group} label={group}>
+                {filtered.filter((option) => option.group === group).map(optionNode)}
+              </SelectGroup>
+            ))}
+          </>
+        ) : filtered.map(optionNode)}
       </SelectList>
       {footer}
     </Select>
@@ -333,9 +338,42 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
 export function BucketPicker() {
   const { bucket } = useParams()
   const navigate = useNavigate()
-  const { state, self, selectedOrganization, selectedProject } = useAuth()
+  const {
+    state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket,
+  } = useAuth()
   const { buckets, pins, loading, failure, refresh } = useBucketPicker()
   const scoped = Boolean(state && selectedOrganization && selectedProject)
+  // Bucket routes stay authoritative: visiting one carries its bucket into
+  // the tenancy context, so the selection survives onto screens whose routes
+  // name no bucket — Principals derives its standing from it (duf-4qr).
+  // Synced once per route value, never reconciled continuously: a deliberate
+  // step-up clears the selection while the route is still current, and a
+  // reconciling effect would immediately carry it back.
+  const lastRouteSync = useRef<string | undefined>(undefined)
+  useEffect(() => {
+    if (bucket === undefined) {
+      lastRouteSync.current = undefined
+      return
+    }
+    if (lastRouteSync.current === bucket) return
+    const listed = buckets.find((candidate) => candidate.name === bucket)
+    if (listed?.id) {
+      lastRouteSync.current = bucket
+      selectBucket({ id: listed.id, name: listed.name })
+    }
+  }, [bucket, buckets, selectBucket])
+  const select = (name: string) => {
+    if (name === '') {
+      // The blank row is the deliberate step back up to project standing
+      // (duf-4qr, extended to buckets).
+      selectBucket(null)
+      if (bucket !== undefined) navigate('/buckets')
+      return
+    }
+    const listed = buckets.find((candidate) => candidate.name === name)
+    if (listed?.id) selectBucket({ id: listed.id, name: listed.name })
+    navigate(`/buckets/${encodeURIComponent(name)}`)
+  }
   const create = async (name: string) => {
     if (!state || !selectedOrganization || !selectedProject) throw new Error('No session.')
     const created = await createBucket(state.token, {
@@ -345,13 +383,16 @@ export function BucketPicker() {
     await refreshThenSelect(
       created,
       refresh,
-      (listed) => navigate(`/buckets/${encodeURIComponent(listed.name)}`),
+      (listed) => {
+        if (listed.id) selectBucket({ id: listed.id, name: listed.name })
+        navigate(`/buckets/${encodeURIComponent(listed.name)}`)
+      },
       (listed) => listed.name,
     )
   }
   return (
     <BucketPickerView
-      selectedBucket={bucket}
+      selectedBucket={bucket ?? selectedBucket?.name}
       buckets={buckets}
       pins={pins}
       scoped={scoped}
@@ -359,7 +400,7 @@ export function BucketPicker() {
       failure={failure}
       callerRole={self?.role ?? null}
       onRefresh={refresh}
-      onSelect={(name) => navigate(`/buckets/${encodeURIComponent(name)}`)}
+      onSelect={select}
       onCreate={create}
     />
   )
@@ -413,7 +454,7 @@ export function BucketPickerView({
     )
   }
 
-  const options = bucketPickerOptions(buckets, pins)
+  const options = bucketPickerOptions(buckets, pins, selectedBucket != null)
   return (
     <PickerField label="Bucket">
       <TypeaheadPicker
@@ -433,6 +474,7 @@ export function BucketPickerView({
 export function bucketPickerOptions(
   buckets: { name: string }[],
   pins: { bucket_name: string }[],
+  hasSelection = false,
 ): PickerOption[] {
   const pinnedNames = new Set(pins.map((pin) => pin.bucket_name))
   const byName = new Map(buckets.map((listed) => [listed.name, listed]))
@@ -442,6 +484,10 @@ export function bucketPickerOptions(
   })
   const rest = buckets.filter((listed) => !pinnedNames.has(listed.name))
   return [
+    // The blank row is the deliberate step back up to project standing
+    // (duf-4qr, extended to buckets): offered exactly while a bucket is in
+    // effect, so there is always a way to stand above it.
+    ...(hasSelection ? [{ value: '', label: '\u2014' }] : []),
     ...pinned.map((listed) => ({ value: listed.name, label: listed.name, group: 'Pinned' })),
     ...rest.map((listed) => ({ value: listed.name, label: listed.name, group: 'Buckets' })),
   ]

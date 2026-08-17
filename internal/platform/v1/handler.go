@@ -738,13 +738,17 @@ func (s *server) ListPrincipals(
 		return newRefusal(refusedTenancy), nil
 	}
 	selection := standing.Scope
-	if request.Params.OrganizationId != nil || request.Params.ProjectId != nil {
+	if request.Params.OrganizationId != nil || request.Params.ProjectId != nil ||
+		request.Params.BucketId != nil {
 		selection = identity.Scope{}
 		if request.Params.OrganizationId != nil {
 			selection.OrganizationID = *request.Params.OrganizationId
 		}
 		if request.Params.ProjectId != nil {
 			selection.ProjectID = *request.Params.ProjectId
+		}
+		if request.Params.BucketId != nil {
+			selection.BucketID = *request.Params.BucketId
 		}
 	}
 
