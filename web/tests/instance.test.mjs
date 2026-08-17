@@ -102,11 +102,15 @@ test('an unresolved bucket name is stated above the block, never silent', () => 
   assert.match(failed, /listing unavailable/)
   assert.match(failed, /omits HCP_PACKER_BUCKET_NAME/)
   assert.doesNotMatch(view(), /could not be resolved/)
-  // The resolution effect retries on the screen's Refresh counter.
+  // The resolution effect retries on the screen's Refresh counter, and a name
+  // already resolved survives a later refresh failure without a warning —
+  // bucket names are immutable, so the held name is still right, and warning
+  // that the block omits a variable it emits would be a lie.
   const instanceSource = readFileSync(
     new URL('../src/screens/Instance.tsx', import.meta.url), 'utf8',
   )
   assert.match(instanceSource, /signOut, refresh\]\)/)
+  assert.match(instanceSource, /current\.name !== null \? current/)
 })
 
 // The SDK rejects a non-https auth URL on any network, so a console served over

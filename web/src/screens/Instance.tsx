@@ -31,8 +31,10 @@ export function Instance() {
   // credential is not bound to.
   const claims = state?.claims
   const bucketID = claims?.bucketID ?? null
-  const [bucketName, setBucketName] = useState<string | null>(null)
-  const [bucketNameFailure, setBucketNameFailure] = useState<string | null>(null)
+  const [bucketNaming, setBucketNaming] = useState<{
+    name: string | null
+    failure: string | null
+  }>({ name: null, failure: null })
   useEffect(() => {
     // A renewal re-runs this effect (state carries the token); resetting first
     // would blank the row every ~14 minutes for nothing. The claim never
@@ -41,8 +43,7 @@ export function Instance() {
     // retry path (review finding: a transient failure otherwise left the
     // block silently incomplete until remount).
     if (!bucketID || !state || !claims?.organizationID || !claims.projectID) {
-      setBucketName(null)
-      setBucketNameFailure(null)
+      setBucketNaming({ name: null, failure: null })
       return
     }
     let cancelled = false
@@ -53,18 +54,24 @@ export function Instance() {
       .then((buckets) => {
         if (cancelled) return
         const scoped = buckets.find((bucket) => bucket.id === bucketID)
-        setBucketName(scoped?.name ?? null)
-        setBucketNameFailure(scoped
-          ? null
-          : 'The session names a bucket the listing cannot see.')
+        setBucketNaming({
+          name: scoped?.name ?? null,
+          failure: scoped ? null : 'The session names a bucket the listing cannot see.',
+        })
       })
       .catch((err: unknown) => {
         // The row is additive — the screen keeps working — but its absence is
         // stated, not silent: an operator would otherwise copy a
-        // plausible-looking block missing the bucket variable.
+        // plausible-looking block missing the bucket variable. A name already
+        // resolved survives a later refresh failure WITHOUT a warning: bucket
+        // names are immutable, so the held name is still right, and warning
+        // that the block omits a variable it emits would be a lie.
         if (cancelled) return
         if (signOutIfUnauthorized(err, signOut)) return
-        setBucketNameFailure(err instanceof Error ? err.message : 'The bucket could not be resolved.')
+        setBucketNaming((current) => (current.name !== null ? current : {
+          name: null,
+          failure: err instanceof Error ? err.message : 'The bucket could not be resolved.',
+        }))
       })
     return () => {
       cancelled = true
@@ -80,8 +87,8 @@ export function Instance() {
       // identifier is omitted, exactly as the project already is.
       organizationID={selectedOrganization}
       projectID={selectedProject ?? state?.claims.projectID ?? null}
-      bucketName={bucketName}
-      bucketNameFailure={bucketNameFailure}
+      bucketName={bucketNaming.name}
+      bucketNameFailure={bucketNaming.failure}
       instance={instance}
       loading={loading}
       failure={failure}
