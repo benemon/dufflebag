@@ -38,6 +38,8 @@ const json = (body) => new Response(JSON.stringify(body), {
 
 test('the registry landing points bucket choice and creation at the masthead', () => {
   const markup = renderToStaticMarkup(React.createElement(RegistryView, {
+    gap: null,
+    callerRole: 'root',
     onConnectClient: () => {},
   }))
   assert.match(markup, /<h2[^>]*>Choose a bucket<\/h2>/)
@@ -45,6 +47,22 @@ test('the registry landing points bucket choice and creation at the masthead', (
   assert.match(markup, />Connect a client</)
   assert.match(markup, />Packer docs</)
   assert.doesNotMatch(markup, /All buckets|Pinned buckets|Loading buckets/)
+})
+
+test('the registry landing states the platform gap rather than a silent bucket prompt', () => {
+  const markup = renderToStaticMarkup(React.createElement(RegistryView, {
+    gap: {
+      title: 'Choose an organisation',
+      resource: 'organization',
+      detail: 'This platform-scoped session can view any organisation. ' +
+        'Pick one from the header to see its buckets and channels.',
+    },
+    callerRole: 'root',
+    onConnectClient: () => {},
+  }))
+  assert.match(markup, /Choose an organisation/)
+  assert.match(markup, /can view any organisation/)
+  assert.doesNotMatch(markup, /Choose a bucket/)
 })
 
 const pickerMarkup = (over = {}) => renderToStaticMarkup(React.createElement(BucketPickerView, {

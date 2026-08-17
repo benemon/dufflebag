@@ -490,6 +490,8 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
   })
   assert.match(gap.title, /No organisations exist/)
   const landing = renderToStaticMarkup(React.createElement(RegistryView, {
+    gap: null,
+    callerRole: 'root',
     onConnectClient: () => {},
   }))
   assert.match(landing, /Choose a bucket/)

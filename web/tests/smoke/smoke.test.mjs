@@ -1367,6 +1367,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // unpinned CLI would select it: oldest first.
     await until('the project toggle to follow', async () =>
       (await pickerValue('#tenant-project')) === 'widgets')
+    // The screen in view persists across navigation, so name it explicitly.
+    await clickByText('a', 'Registry')
     await waitForText('Choose a bucket')
     // PatternFly transitions nav-link background-color, so a naive read samples
     // the fade and returns a different alpha every run. Settle motion first, or
@@ -1434,7 +1436,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
     await waitForText('Bucket details')
+    // Channel names live on the Channels facet; Overview shows counts only.
+    await clickByText('button', 'Channels')
     await waitForText('latest')
+    // The facet is screen state that outlives navigation; leave the default
+    // in place for the tests that follow.
+    await clickByText('button', 'Overview')
+    await waitForText('Bucket details')
   })
 
   await t.test('a privileged session pins and unpins from the bucket detail header', async () => {
@@ -1565,7 +1573,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     page.on('request', recordHistoryRequest)
     t.after(() => page.off('request', recordHistoryRequest))
 
-    // Open the versions list from the universal bucket picker.
+    // Open the versions list from the universal bucket picker. Picking the
+    // bucket already on screen is a same-route no-op, so step onto the
+    // landing first — the old drill-down navigated fresh, and so must this.
+    await clickByText('a', 'Registry')
+    await waitForText('Choose a bucket')
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await waitForText('seeded by the smoke test')
     await waitForText('team=platform')
@@ -1899,6 +1911,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/packer/2023-01-01/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/buckets/smoke-revocable`
 
+    // The previous test leaves this bucket's detail on its Channels facet;
+    // a same-route pick would keep it. Navigate fresh from the landing.
+    await clickByText('a', 'Registry')
+    await waitForText('Choose a bucket')
     await choosePickerOption('#tenant-bucket', 'smoke-revocable')
     await waitForText('Bucket details')
     // The opener and the modal confirm share a label; scope the confirm.
