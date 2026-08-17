@@ -10,6 +10,8 @@ A bucket's versions table shows each version's completion and revocation
 state. An incomplete version is named `v0` until it completes; a complete
 version takes its sequence name and the managed `latest` channel moves to it.
 
+![Dufflebag versions table showing completed, incomplete and revoked versions](/screenshots/versions-table.png)
+
 ## A version
 
 A version shows its builds, artifacts, findings and ancestry. Its operations
