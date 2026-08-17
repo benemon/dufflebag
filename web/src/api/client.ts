@@ -219,13 +219,13 @@ export type ApiBuild = {
       version?: string
       options?: {
         path?: string
-        vars?: string[]
-        'var-files'?: string[]
-        only?: string | string[]
-        except?: string | string[]
+        vars?: string[] | null
+        'var-files'?: string[] | null
+        only?: string | string[] | null
+        except?: string | string[] | null
         debug?: boolean
         force?: boolean
-      }
+      } | null
       os?: {
         type?: string
         details?: { arch?: string; version?: string }

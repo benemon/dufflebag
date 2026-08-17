@@ -27,10 +27,16 @@ after(async () => {
 const render = (element) => renderToStaticMarkup(element)
 
 test('a mapped platform renders a glyph whose accessible text names it', () => {
-  const markup = render(React.createElement(PlatformLabel, { platform: 'docker' }))
-  assert.match(markup, /<svg/, 'no glyph rendered for a mapped platform')
-  assert.match(markup, /<title[^>]*>docker<\/title>/, 'the glyph carries no accessible name')
-  assert.doesNotMatch(markup, /aria-hidden="true"/, 'a titled glyph must not be hidden from readers')
+  for (const platform of ['docker', 'aws']) {
+    const markup = render(React.createElement(PlatformLabel, { platform }))
+    assert.match(markup, /<svg/, `no glyph rendered for ${platform}`)
+    assert.match(
+      markup,
+      new RegExp(`<title[^>]*>${platform}<\\/title>`),
+      `${platform} does not match Docker's accessible title semantics`,
+    )
+    assert.doesNotMatch(markup, /aria-hidden="true"/, 'a titled glyph must not be hidden from readers')
+  }
 })
 
 // Packer's platform values are an open set; the literal-name path is the one

@@ -192,6 +192,15 @@ function BuildOverview({
   fetchSbom: (sbom: SbomRef) => Promise<ArrayBuffer>
 }) {
   const command = packerBuildCommand(build)
+  // The Run UUID is a top-level build field, not metadata, and this card is
+  // its only home — a metadata-less build with a run UUID keeps the card. The
+  // card absents itself only when there is genuinely nothing to show.
+  const hasPackerEnvironment = Boolean(
+    build.packerVersion || build.plugins.length || build.runnerOS || build.arch ||
+    build.options.path || build.options.variables.length || build.options.variableFiles.length ||
+    build.options.only.length || build.options.except.length ||
+    build.options.debug || build.options.force || build.packerRunUUID,
+  )
   return (
     <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
       <div style={{ flex: '1 1 440px', minWidth: 0, display: 'flex', flexDirection: 'column', gap: 24 }}>
@@ -216,25 +225,42 @@ function BuildOverview({
           </CardBody>
         </Card>
 
-        <Card>
-          <CardTitle>Packer runner environment</CardTitle>
-          <CardBody>
-            <DescriptionList isHorizontal isCompact>
-              <EnvironmentField label="Packer" value={build.packerVersion} />
-              <EnvironmentField label="Plugin" value={pluginSummary(build)} />
-              <EnvironmentField label="Packer runner OS" value={build.runnerOS} />
-              <EnvironmentField label="Arch" value={build.arch} />
-              <DescriptionListGroup>
-                <DescriptionListTerm>Run UUID</DescriptionListTerm>
-                <DescriptionListDescription>
-                  {build.packerRunUUID ? (
-                    <CopyableIdentifier value={build.packerRunUUID} label="Build Run UUID" />
-                  ) : '—'}
-                </DescriptionListDescription>
-              </DescriptionListGroup>
-            </DescriptionList>
-          </CardBody>
-        </Card>
+        {hasPackerEnvironment && (
+          <Card>
+            <CardTitle>Packer runner environment</CardTitle>
+            <CardBody>
+              <DescriptionList isHorizontal isCompact>
+                <EnvironmentField label="Packer" value={build.packerVersion} />
+                <EnvironmentField label="Plugin" value={pluginSummary(build)} />
+                <EnvironmentField label="Packer runner OS" value={build.runnerOS} />
+                <EnvironmentField label="Arch" value={build.arch} />
+                {build.options.path && <EnvironmentField label="Template" value={build.options.path} />}
+                {build.options.debug && <EnvironmentField label="Debug" value="true" />}
+                {build.options.force && <EnvironmentField label="Force" value="true" />}
+                {build.options.only.length > 0 && (
+                  <EnvironmentField label="Only" value={build.options.only.join(', ')} />
+                )}
+                {build.options.except.length > 0 && (
+                  <EnvironmentField label="Except" value={build.options.except.join(', ')} />
+                )}
+                {build.options.variableFiles.length > 0 && (
+                  <EnvironmentField label="Var files" value={build.options.variableFiles.join(', ')} />
+                )}
+                {build.options.variables.length > 0 && (
+                  <EnvironmentField label="Vars" value={build.options.variables.join(', ')} />
+                )}
+                <DescriptionListGroup>
+                  <DescriptionListTerm>Run UUID</DescriptionListTerm>
+                  <DescriptionListDescription>
+                    {build.packerRunUUID ? (
+                      <CopyableIdentifier value={build.packerRunUUID} label="Build Run UUID" />
+                    ) : '—'}
+                  </DescriptionListDescription>
+                </DescriptionListGroup>
+              </DescriptionList>
+            </CardBody>
+          </Card>
+        )}
       </div>
 
       <Card style={{ flex: '0 1 380px', minWidth: 300 }}>

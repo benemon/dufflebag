@@ -3,7 +3,7 @@ import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle,
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
-  DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Label, Modal,
+  DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Grid, GridItem, Label, Modal,
   ModalBody, ModalFooter, ModalHeader, PageSection, Title, ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -600,7 +600,7 @@ export function RestoreModalView({
   )
 }
 
-function VersionOverview({
+export function VersionOverview({
   bucket,
   version,
   detail,
@@ -609,6 +609,7 @@ function VersionOverview({
   onOpenBuild,
   onOpenVersion,
   onPromote,
+  initialConsumer,
 }: {
   bucket: string
   version: VersionData
@@ -618,34 +619,39 @@ function VersionOverview({
   onOpenBuild: (build: string) => void
   onOpenVersion: (bucket: string, fingerprint: string) => void
   onPromote: (channel: string) => Promise<void>
+  initialConsumer?: Consumer
 }) {
   return (
-    <div style={{ display: 'flex', gap: 24, alignItems: 'flex-start', flexWrap: 'wrap' }}>
-      <div style={{ flex: '1 1 520px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-        {detail && findings.length > 0 && (
-          <VersionSecurityCard
-            builds={findings}
-            onOpenBuild={onOpenBuild}
-            // The channels this version actually carries, so a version a
-            // channel selects is never reported as unmaintained.
-            outOfScanSet={version.channels.length === 0}
-          />
-        )}
-        {detail && <LineageCard version={version} onOpenVersion={onOpenVersion} />}
-      </div>
-      {detail && (
-        <div style={{ flex: '0 1 440px', display: 'flex', flexDirection: 'column', gap: 24 }}>
-          <ConsumeCard bucket={bucket} version={version} />
-          <OperationsCard
-            bucket={bucket}
-            version={version}
-            channels={detail.channels}
-            callerRole={callerRole}
-            onPromote={onPromote}
-          />
+    <Grid hasGutter>
+      <GridItem span={12} lg={7} style={{ minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+          {detail && findings.length > 0 && (
+            <VersionSecurityCard
+              builds={findings}
+              onOpenBuild={onOpenBuild}
+              // The channels this version actually carries, so a version a
+              // channel selects is never reported as unmaintained.
+              outOfScanSet={version.channels.length === 0}
+            />
+          )}
+          {detail && <LineageCard version={version} onOpenVersion={onOpenVersion} />}
         </div>
+      </GridItem>
+      {detail && (
+        <GridItem span={12} lg={5} style={{ minWidth: 0 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+            <ConsumeCard bucket={bucket} version={version} initialConsumer={initialConsumer} />
+            <OperationsCard
+              bucket={bucket}
+              version={version}
+              channels={detail.channels}
+              callerRole={callerRole}
+              onPromote={onPromote}
+            />
+          </div>
+        </GridItem>
       )}
-    </div>
+    </Grid>
   )
 }
 
@@ -698,7 +704,12 @@ function LineageSide({
   )
 }
 
-type Consumer = 'terraform' | 'docker' | 'aws'
+export type Consumer = 'terraform' | 'docker' | 'podman' | 'aws'
+
+// Explicit labels: deriving them by capitalising the key rendered 'Aws'.
+const CONSUMER_LABELS: Record<Consumer, string> = {
+  terraform: 'Terraform', docker: 'Docker', podman: 'Podman', aws: 'AWS',
+}
 
 export function ConsumeCard({
   bucket,
@@ -728,7 +739,7 @@ export function ConsumeCard({
           {consumers.map((item) => (
             <ToggleGroupItem
               key={item}
-              text={item === 'terraform' ? 'Terraform' : item === 'docker' ? 'Docker' : 'AWS'}
+              text={CONSUMER_LABELS[item]}
               buttonId={`consume-${item}`}
               isSelected={consumer === item}
               onChange={() => setConsumer(item)}
@@ -760,7 +771,16 @@ export function availableConsumers(version: VersionData): Consumer[] {
   const builtPlatforms = new Set(
     version.builds.filter((build) => build.artifacts.length > 0).map((build) => build.platform),
   )
-  return ['terraform', ...(['docker', 'aws'] as const).filter((platform) => builtPlatforms.has(platform))]
+  const taggedDocker = version.builds.some((build) =>
+    build.platform === 'docker' && build.artifacts.length > 0 &&
+    (build.labels.tags ?? '').split(',').some((tag) => tag.trim() !== ''),
+  )
+  return [
+    'terraform',
+    ...(builtPlatforms.has('docker') ? ['docker' as const] : []),
+    ...(taggedDocker ? ['podman' as const] : []),
+    ...(builtPlatforms.has('aws') ? ['aws' as const] : []),
+  ]
 }
 
 export function platformConsumeSnippet(
@@ -768,29 +788,31 @@ export function platformConsumeSnippet(
   bucket: string,
   version: VersionData,
 ): string | null {
-  const artifacts = version.builds
-    .filter((build) => build.platform === platform)
-    .flatMap((build) => build.artifacts)
-  if (artifacts.length === 0) return null
-
   const heading = `# ${bucket} ${version.name}`
-  if (platform === 'docker') {
-    return [heading, ...artifacts.map((artifact) =>
-      '# image digest recorded for this build\n' +
-      `# pull with a known repository: docker pull <repo>@${artifact.externalIdentifier}\n` +
-      `docker image inspect ${artifact.externalIdentifier}\n\n` +
-      `- name: Pull ${bucket} ${version.name} image by digest\n` +
-      '  community.docker.docker_image_pull:\n' +
-      `    name: ${JSON.stringify(`<repo>@${artifact.externalIdentifier}`)}`,
-    )].join('\n\n')
+  if (platform === 'docker' || platform === 'podman') {
+    const builds = version.builds.filter((build) =>
+      build.platform === 'docker' && build.artifacts.length > 0,
+    )
+    if (builds.length === 0) return null
+    return [heading, ...builds.map((build) => {
+      const tags = (build.labels.tags ?? '').split(',').map((tag) => tag.trim()).filter(Boolean)
+      return [
+        ...(tags.length > 0
+          ? tags.map((tag) => `${platform} pull ${tag}`)
+          : ['# The builder recorded no repository, so no pull command exists.']),
+        ...build.artifacts.map((artifact) =>
+          `${platform} image inspect ${artifact.externalIdentifier}`),
+      ].join('\n')
+    })].join('\n\n')
   }
   if (platform === 'aws') {
+    const artifacts = version.builds
+      .filter((build) => build.platform === platform)
+      .flatMap((build) => build.artifacts)
+    if (artifacts.length === 0) return null
     return [heading, ...artifacts.map((artifact) =>
-      `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n\n` +
-      `- name: Launch ${bucket} ${version.name} in ${artifact.region}\n` +
-      '  amazon.aws.ec2_instance:\n' +
-      `    image_id: ${JSON.stringify(artifact.externalIdentifier)}\n` +
-      `    region: ${JSON.stringify(artifact.region)}`,
+      `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n` +
+      `aws ec2 run-instances --image-id ${artifact.externalIdentifier} --region ${artifact.region}`,
     )].join('\n\n')
   }
   return null
