@@ -44,11 +44,20 @@ capabilities:
 {{- end -}}
 
 {{/*
-ceph-aio's bootstrap chowns unconditionally, so it must run as root on every
-platform; the openshift profile pairs this with an anyuid SCC RoleBinding for
-its ServiceAccount rather than pretending drop-ALL could hold.
+The OpenShift-native ceph-aio images run at an arbitrary non-root UID under
+restricted-v2, so the openshift profile holds the strict posture with no SCC
+special-casing. On plain Kubernetes the image still boots its storage daemons
+as root with the container's default capability set — a narrower list crashed
+the bootstrap (duf-6cix's finding stands), so only escalation is denied.
 */}}
 {{- define "dufflebag.cephSecurityContext" -}}
+{{- if .Values.security.openshift -}}
 allowPrivilegeEscalation: false
+capabilities:
+  drop:
+    - ALL
+{{- else -}}
+allowPrivilegeEscalation: false
+{{- end -}}
 {{- end -}}
 
