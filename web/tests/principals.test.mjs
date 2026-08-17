@@ -184,6 +184,46 @@ test('the one-time credential shows the secret and its warning', () => {
   }))
   assert.match(markup, /PLAINTEXT-SECRET/)
   assert.match(markup, /only time it can be read/)
+  // Without a principal there is no scope to speak, so no environment block.
+  assert.doesNotMatch(markup, /DFBG_MCP_/)
+})
+
+test('the issued card offers the MCP environment, bucket-scoped when the principal is', () => {
+  const scoped = renderToStaticMarkup(React.createElement(IssuedCredentialCard, {
+    name: 'sp-pipeline',
+    credential: { secretID: 's-1', secret: 'PLAINTEXT-SECRET', clientID: 'client-1' },
+    principal: {
+      id: 'p-1', name: 'sp-pipeline', client_id: 'client-1', role: 'builder',
+      organization_id: 'org-1', project_id: 'proj-1',
+      bucket_id: '01ARZ3NDEKTSV4RRFFQ69G5FAV', created_at: '2026-08-17T00:00:00Z', secrets: [],
+    },
+  }))
+  assert.match(scoped, /DFBG_MCP_CLIENT_ID=client-1/)
+  assert.match(scoped, /DFBG_MCP_ORGANIZATION_ID=org-1/)
+  assert.match(scoped, /DFBG_MCP_PROJECT_ID=proj-1/)
+  assert.match(scoped, /DFBG_MCP_BUCKET_ID=01ARZ3NDEKTSV4RRFFQ69G5FAV/)
+
+  const projectWide = renderToStaticMarkup(React.createElement(IssuedCredentialCard, {
+    name: 'sp-project',
+    credential: { secretID: 's-2', secret: 'OTHER-SECRET', clientID: 'client-2' },
+    principal: {
+      id: 'p-2', name: 'sp-project', client_id: 'client-2', role: 'builder',
+      organization_id: 'org-1', project_id: 'proj-1', created_at: '2026-08-17T00:00:00Z',
+      secrets: [],
+    },
+  }))
+  assert.match(projectWide, /DFBG_MCP_PROJECT_ID=proj-1/)
+  assert.doesNotMatch(projectWide, /DFBG_MCP_BUCKET_ID/)
+
+  const platform = renderToStaticMarkup(React.createElement(IssuedCredentialCard, {
+    name: 'root',
+    credential: { secretID: 's-3', secret: 'ROOT-SECRET', clientID: 'client-3' },
+    principal: {
+      id: 'p-3', name: 'root', client_id: 'client-3', role: 'root',
+      organization_id: null, project_id: null, created_at: '2026-08-17T00:00:00Z', secrets: [],
+    },
+  }))
+  assert.doesNotMatch(platform, /DFBG_MCP_/)
 })
 
 test('Issue secret opens the selected principal workflow in the modal view', () => {

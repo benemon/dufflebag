@@ -1309,6 +1309,13 @@ type ListPrincipalsParams struct {
 	// project. Meaningless without organization_id, and refused as a
 	// scope the caller cannot see.
 	ProjectId *openapi_types.UUID `form:"project_id,omitempty" json:"project_id,omitempty"`
+
+	// BucketId With both tenancy filters, list the principals bound to exactly
+	// this bucket. Meaningless without organization_id and project_id,
+	// and refused as a scope the caller cannot see. Without it, a
+	// project selection answers the PROJECT-scoped principals only —
+	// bucket-scoped principals are listed at their bucket.
+	BucketId *string `form:"bucket_id,omitempty" json:"bucket_id,omitempty"`
 }
 
 // CreatePrincipalJSONBody defines parameters for CreatePrincipal.
@@ -1967,8 +1974,8 @@ type ClientInterface interface {
 	// ListPrincipals List service principals at a scope
 	//
 	// Lists the principals bound to EXACTLY one scope — platform, one
-	// organization, or one project — never a subtree. Omitting both filters
-	// lists the scope the caller itself stands at. Secret *metadata* only.
+	// organization, one project, or one bucket — never a subtree. Omitting
+	// every filter lists the scope the caller itself stands at. Secret *metadata* only.
 	// Secret values are never returned here.
 	//
 	// The filters authorize like any other tenancy argument: a caller naming
@@ -3130,8 +3137,8 @@ func (c *Client) VerifyWebhook(ctx context.Context, organizationId OrganizationI
 // ListPrincipals List service principals at a scope
 //
 // Lists the principals bound to EXACTLY one scope — platform, one
-// organization, or one project — never a subtree. Omitting both filters
-// lists the scope the caller itself stands at. Secret *metadata* only.
+// organization, one project, or one bucket — never a subtree. Omitting
+// every filter lists the scope the caller itself stands at. Secret *metadata* only.
 // Secret values are never returned here.
 //
 // The filters authorize like any other tenancy argument: a caller naming
@@ -5168,6 +5175,18 @@ func NewListPrincipalsRequest(server string, params *ListPrincipalsParams) (*htt
 
 		}
 
+		if params.BucketId != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "bucket_id", *params.BucketId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
 		if encoded := queryValues.Encode(); encoded != "" {
 			rawQueryFragments = append(rawQueryFragments, encoded)
 		}
@@ -6137,8 +6156,8 @@ type ClientWithResponsesInterface interface {
 	// ListPrincipalsWithResponse List service principals at a scope
 	//
 	// Lists the principals bound to EXACTLY one scope — platform, one
-	// organization, or one project — never a subtree. Omitting both filters
-	// lists the scope the caller itself stands at. Secret *metadata* only.
+	// organization, one project, or one bucket — never a subtree. Omitting
+	// every filter lists the scope the caller itself stands at. Secret *metadata* only.
 	// Secret values are never returned here.
 	//
 	// The filters authorize like any other tenancy argument: a caller naming
@@ -10285,8 +10304,8 @@ func (c *ClientWithResponses) VerifyWebhookWithResponse(ctx context.Context, org
 // ListPrincipalsWithResponse List service principals at a scope
 //
 // Lists the principals bound to EXACTLY one scope — platform, one
-// organization, or one project — never a subtree. Omitting both filters
-// lists the scope the caller itself stands at. Secret *metadata* only.
+// organization, one project, or one bucket — never a subtree. Omitting
+// every filter lists the scope the caller itself stands at. Secret *metadata* only.
 // Secret values are never returned here.
 //
 // The filters authorize like any other tenancy argument: a caller naming
@@ -14411,6 +14430,19 @@ func (siw *ServerInterfaceWrapper) ListPrincipals(w http.ResponseWriter, r *http
 			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "project_id"})
 		} else {
 			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "project_id", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "bucket_id" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "bucket_id", r.URL.Query(), &params.BucketId, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "bucket_id"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "bucket_id", Err: err})
 		}
 		return
 	}

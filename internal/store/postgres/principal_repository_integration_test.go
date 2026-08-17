@@ -296,6 +296,38 @@ func TestPrincipalRepositoryRoundTripsBucketScopeAndRestrictsBucketDeletion(t *t
 	if err := repository.DeleteBucket(ctx, tenant, bucket.Name); err == nil {
 		t.Fatal("DeleteBucket deleted a bucket with a bound principal")
 	}
+
+	// Listings are scope-exact: the bucket selection answers exactly the
+	// bucket-bound principal, and the project selection excludes it — a
+	// bucket-scoped principal is never a project subtree row (duf-4qr).
+	root := &identity.Principal{
+		ID: "root-lister", Name: "root", ClientID: "client-root",
+		Role: identity.RoleRoot, Scope: identity.Scope{}, CreatedAt: at,
+	}
+	atBucket, err := repository.ListPrincipals(ctx, root, identity.Scope{
+		OrganizationID: uuid.MustParse(orgA),
+		ProjectID:      uuid.MustParse(projectA),
+		BucketID:       bucket.ID.String(),
+	})
+	if err != nil {
+		t.Fatalf("ListPrincipals at the bucket: %v", err)
+	}
+	if len(atBucket) != 1 || atBucket[0].ID != principal.ID {
+		t.Fatalf("bucket selection listed %d principals, want exactly %s", len(atBucket), principal.ID)
+	}
+	atProject, err := repository.ListPrincipals(ctx, root, identity.Scope{
+		OrganizationID: uuid.MustParse(orgA),
+		ProjectID:      uuid.MustParse(projectA),
+	})
+	if err != nil {
+		t.Fatalf("ListPrincipals at the project: %v", err)
+	}
+	for _, listed := range atProject {
+		if listed.ID == principal.ID {
+			t.Fatal("project selection listed a bucket-scoped principal as a subtree row")
+		}
+	}
+
 	if err := repository.DeletePrincipal(ctx, principal.ID); err != nil {
 		t.Fatalf("DeletePrincipal: %v", err)
 	}

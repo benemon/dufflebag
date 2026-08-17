@@ -1862,6 +1862,52 @@ func (q *Queries) ListPrincipalSecrets(ctx context.Context, principalID string) 
 	return items, nil
 }
 
+const listPrincipalsByBucket = `-- name: ListPrincipalsByBucket :many
+SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
+FROM principals
+WHERE organization_id = $1 AND project_id = $2 AND bucket_id = $3
+ORDER BY created_at DESC, id DESC
+`
+
+type ListPrincipalsByBucketParams struct {
+	OrganizationID uuid.NullUUID  `json:"organization_id"`
+	ProjectID      uuid.NullUUID  `json:"project_id"`
+	BucketID       sql.NullString `json:"bucket_id"`
+}
+
+func (q *Queries) ListPrincipalsByBucket(ctx context.Context, arg ListPrincipalsByBucketParams) ([]Principal, error) {
+	rows, err := q.db.QueryContext(ctx, listPrincipalsByBucket, arg.OrganizationID, arg.ProjectID, arg.BucketID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Principal
+	for rows.Next() {
+		var i Principal
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.ClientID,
+			&i.OrganizationID,
+			&i.ProjectID,
+			&i.CreatedAt,
+			&i.Role,
+			&i.IntegrityMac,
+			&i.BucketID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPrincipalsByOrganization = `-- name: ListPrincipalsByOrganization :many
 SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
@@ -1905,7 +1951,7 @@ func (q *Queries) ListPrincipalsByOrganization(ctx context.Context, organization
 const listPrincipalsByProject = `-- name: ListPrincipalsByProject :many
 SELECT id, name, client_id, organization_id, project_id, created_at, role, integrity_mac, bucket_id
 FROM principals
-WHERE organization_id = $1 AND project_id = $2
+WHERE organization_id = $1 AND project_id = $2 AND bucket_id IS NULL
 ORDER BY created_at DESC, id DESC
 `
 
@@ -1914,6 +1960,8 @@ type ListPrincipalsByProjectParams struct {
 	ProjectID      uuid.NullUUID `json:"project_id"`
 }
 
+// Exactly the project's own principals: a bucket-scoped principal is a
+// narrower scope and is listed at its bucket, never as a project subtree.
 func (q *Queries) ListPrincipalsByProject(ctx context.Context, arg ListPrincipalsByProjectParams) ([]Principal, error) {
 	rows, err := q.db.QueryContext(ctx, listPrincipalsByProject, arg.OrganizationID, arg.ProjectID)
 	if err != nil {

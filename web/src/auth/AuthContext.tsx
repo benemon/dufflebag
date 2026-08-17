@@ -138,6 +138,16 @@ type AuthContextValue = {
   projectNames: Record<string, string>
   selectedProject: string | null
   selectProject: (project: string) => void
+  /**
+   * The bucket in effect, carried across screens like the rest of the
+   * tenancy: set when a bucket route is visited or the picker selects one,
+   * cleared when the organisation or project changes. Bucket routes remain
+   * authoritative — visiting one re-syncs this. Holds both names: the id is
+   * what scope claims and principal creation speak, the name is what routes
+   * and the compat plane speak.
+   */
+  selectedBucket: { id: string; name: string } | null
+  selectBucket: (bucket: { id: string; name: string } | null) => void
   projectsLoading: boolean
   projectFailure: string | null
   refreshProjects: () => Promise<ApiProject[] | null>
@@ -269,6 +279,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setOrganizationFailure(null)
     setSelectedOrganization(null)
     setSelectedProject(null)
+    setSelectedBucket(null)
     setOrganizationProjects([])
     setProjectsLoading(false)
     setProjectFailure(null)
@@ -310,6 +321,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // would scope queries to a project the new organisation does not contain.
   // '' — the platform row — is the deliberate step back up to platform standing
   // (ADR-0014), so it clears the pair the same way and lists nothing.
+  const [selectedBucket, setSelectedBucket] = useState<{ id: string; name: string } | null>(null)
   const projectEpoch = useRef(0)
   const selectOrganization = useCallback((organizationID: string) => {
     // A refresh in flight for the previous organisation must not land its
@@ -317,6 +329,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     projectEpoch.current += 1
     setSelectedOrganization(organizationID)
     setSelectedProject(null)
+    // A bucket belongs to the pair that named it.
+    setSelectedBucket(null)
     setOrganizationProjects([])
     // For a real organisation, marked loading NOW rather than when the effect
     // runs, so no render in between can mistake "not listed yet" for "listed
@@ -551,7 +565,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       permittedProjects,
       projectNames,
       selectedProject,
-      selectProject: setSelectedProject,
+      selectProject: (project: string) => {
+        setSelectedProject(project)
+        setSelectedBucket(null)
+      },
+      selectedBucket,
+      selectBucket: setSelectedBucket,
       projectsLoading,
       projectFailure,
       refreshProjects,
@@ -561,7 +580,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       organizations, boundOrganizationName, organizationsLoading, organizationFailure,
       organizationRefresh.failure, refreshOrganizations,
       selectedOrganization, selectOrganization,
-      permittedProjects, projectNames, selectedProject,
+      permittedProjects, projectNames, selectedProject, selectedBucket,
       projectsLoading, projectFailure, refreshProjects,
     ],
   )

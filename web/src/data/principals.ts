@@ -88,6 +88,7 @@ export type Principal = {
   role: Role
   organization_id: string | null
   project_id: string | null
+  bucket_id?: string | null
   created_at: string
   secrets: SecretMetadata[]
 }
@@ -105,11 +106,12 @@ export type IssuedCredential = {
 }
 
 /** Where the session stands, per the picker. The selection IS the scope (duf-4qr). */
-export type Standing = 'platform' | 'organization' | 'project'
+export type Standing = 'platform' | 'organization' | 'project' | 'bucket'
 
 export type ScopeSelection = {
   organizationID: string | null
   projectID: string | null
+  bucketID?: string | null
 }
 
 export async function loadPrincipals(
@@ -125,6 +127,7 @@ export async function loadPrincipals(
   const params = new URLSearchParams()
   if (selection.organizationID) params.set('organization_id', selection.organizationID)
   if (selection.projectID) params.set('project_id', selection.projectID)
+  if (selection.bucketID) params.set('bucket_id', selection.bucketID)
   const query = params.toString()
   const body = await platformGet<{ principals?: Principal[] }>(
     token,
@@ -138,6 +141,7 @@ export type CreateRequest = {
   role: Role
   organizationID: string | null
   projectID: string | null
+  bucketID?: string | null
 }
 
 /**
@@ -160,6 +164,7 @@ export async function createPrincipal(
     // there (ADR-0019).
     ...(request.organizationID ? { organization_id: request.organizationID } : {}),
     ...(request.projectID ? { project_id: request.projectID } : {}),
+    ...(request.bucketID ? { bucket_id: request.bucketID } : {}),
   })
 }
 
@@ -253,7 +258,9 @@ export function everUsed(secret: SecretMetadata): boolean {
  * which scope happens to be listed here.
  */
 export function usePrincipals() {
-  const { state, self, signOut, selectedOrganization, selectedProject } = useAuth()
+  const {
+    state, self, signOut, selectedOrganization, selectedProject, selectedBucket,
+  } = useAuth()
   const [principals, setPrincipals] = useState<Principal[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
@@ -262,6 +269,9 @@ export function usePrincipals() {
   // omits, the same as null.
   const organizationID = selectedOrganization
   const projectID = selectedProject || null
+  // The carried bucket only means bucket standing under a full pair.
+  const bucketID = organizationID && projectID ? (selectedBucket?.id ?? null) : null
+  const bucketName = organizationID && projectID ? (selectedBucket?.name ?? null) : null
 
   const reload = useCallback(async () => {
     if (!state) {
@@ -271,7 +281,7 @@ export function usePrincipals() {
     }
     setLoading(true)
     try {
-      setPrincipals(await loadPrincipals(state.token, { organizationID, projectID }))
+      setPrincipals(await loadPrincipals(state.token, { organizationID, projectID, bucketID }))
       setFailure(null)
     } catch (err: unknown) {
       if (signOutIfUnauthorized(err, signOut)) return
@@ -282,7 +292,7 @@ export function usePrincipals() {
     } finally {
       setLoading(false)
     }
-  }, [state, organizationID, projectID, signOut])
+  }, [state, organizationID, projectID, bucketID, signOut])
 
   useEffect(() => {
     void reload()
@@ -298,5 +308,7 @@ export function usePrincipals() {
     token: state?.token ?? null,
     organizationID,
     projectID,
+    bucketID,
+    bucketName,
   }
 }

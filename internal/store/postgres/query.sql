@@ -637,9 +637,17 @@ WHERE organization_id = $1 AND project_id IS NULL
 ORDER BY created_at DESC, id DESC;
 
 -- name: ListPrincipalsByProject :many
+-- Exactly the project's own principals: a bucket-scoped principal is a
+-- narrower scope and is listed at its bucket, never as a project subtree.
 SELECT *
 FROM principals
-WHERE organization_id = $1 AND project_id = $2
+WHERE organization_id = $1 AND project_id = $2 AND bucket_id IS NULL
+ORDER BY created_at DESC, id DESC;
+
+-- name: ListPrincipalsByBucket :many
+SELECT *
+FROM principals
+WHERE organization_id = $1 AND project_id = $2 AND bucket_id = $3
 ORDER BY created_at DESC, id DESC;
 
 -- name: DeletePrincipal :execrows

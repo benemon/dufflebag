@@ -28,15 +28,19 @@ export function useBucketPicker() {
   const [pins, setPins] = useState<ApiPin[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
+  // Keyed on the TENANCY, deliberately not the token: a session renewal mints
+  // a new token every ~14 minutes, and keying on it blanked every picker
+  // instance mid-interaction while the same tenancy reloaded for no reason.
+  // The refresh callback always reads the current token for its requests.
   const identity = state && selectedOrganization && selectedProject
-    ? `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}`
+    ? `${selectedOrganization}\u0000${selectedProject}`
     : ''
   const identityRef = useRef(identity)
   identityRef.current = identity
 
   const refresh = useCallback(async (): Promise<ApiBucket[] | null> => {
     if (!state || !selectedOrganization || !selectedProject) return null
-    const requestIdentity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}`
+    const requestIdentity = `${selectedOrganization}\u0000${selectedProject}`
     try {
       const listed = await loadBucketPicker(state.token, {
         organizationID: selectedOrganization,
