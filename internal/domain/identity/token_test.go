@@ -31,6 +31,7 @@ func TestIssueAndVerifyReturnsPrincipalScope(t *testing.T) {
 	}{
 		{"organization scoped", Scope{OrganizationID: orgA}},
 		{"project scoped", Scope{OrganizationID: orgA, ProjectID: projA}},
+		{"bucket scoped", Scope{OrganizationID: orgA, ProjectID: projA, BucketID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			principal, secret := newTestPrincipal(t, c.scope)
@@ -80,6 +81,9 @@ func TestOrganizationScopedTokenOmitsProjectAndCarriesAuthorizationClaims(t *tes
 	}
 	if project, ok := claims["project_id"]; ok {
 		t.Fatalf("organization-scoped project_id = %v, want absent", project)
+	}
+	if bucket, ok := claims["bucket_id"]; ok {
+		t.Fatalf("organization-scoped bucket_id = %v, want absent", bucket)
 	}
 	if scope, ok := claims["scope"].([]any); !ok || len(scope) != 0 {
 		t.Fatalf("scope claim = %#v, want an empty array", claims["scope"])
@@ -190,6 +194,13 @@ func TestVerifyFailsClosed(t *testing.T) {
 
 	t.Run("malformed token", func(t *testing.T) {
 		assertInvalid(t, "not-a-jwt")
+	})
+
+	t.Run("bucket without project", func(t *testing.T) {
+		claims := validClaims()
+		claims.ProjectID = ""
+		claims.BucketID = "01ARZ3NDEKTSV4RRFFQ69G5FAV"
+		assertInvalid(t, sign(t, jwt.SigningMethodHS256, claims, testSigningKey))
 	})
 }
 

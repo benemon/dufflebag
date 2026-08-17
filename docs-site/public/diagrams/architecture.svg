@@ -1,0 +1,146 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1180 780" font-family="-apple-system, 'Segoe UI', Helvetica, Arial, sans-serif">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#52514e"/>
+    </marker>
+  </defs>
+
+  <rect width="1180" height="780" fill="#fcfcfb"/>
+
+  <!-- ======================= Clients ======================= -->
+  <text x="60" y="76" font-size="13" font-weight="600" fill="#52514e" letter-spacing="1">CLIENTS</text>
+  <g font-size="13" fill="#0b0b0b">
+    <rect x="60" y="92"  width="180" height="52" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="150" y="114" text-anchor="middle" font-weight="600">Packer CLI</text>
+    <text x="150" y="132" text-anchor="middle" font-size="11" fill="#52514e">publishes build metadata</text>
+
+    <rect x="60" y="156" width="180" height="52" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="150" y="178" text-anchor="middle" font-weight="600">Terraform</text>
+    <text x="150" y="196" text-anchor="middle" font-size="11" fill="#52514e">terraform-provider-hcp</text>
+
+    <rect x="60" y="220" width="180" height="52" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="150" y="242" text-anchor="middle" font-weight="600">Browser</text>
+    <text x="150" y="260" text-anchor="middle" font-size="11" fill="#52514e">embedded console</text>
+
+    <rect x="60" y="284" width="180" height="52" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="150" y="306" text-anchor="middle" font-weight="600">API clients</text>
+    <text x="150" y="324" text-anchor="middle" font-size="11" fill="#52514e">curl, automation</text>
+  </g>
+
+  <!-- clients -> listener -->
+  <path d="M 240 214 H 296" stroke="#52514e" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="268" y="200" text-anchor="middle" font-size="11" fill="#52514e">HTTPS</text>
+  <text x="60" y="366" font-size="10.5" fill="#52514e">All client traffic: HTTPS to one hostname,</text>
+  <text x="60" y="381" font-size="10.5" fill="#52514e">at the root — no path prefix.</text>
+
+  <!-- ======================= dufflebag ======================= -->
+  <rect x="300" y="56" width="420" height="600" rx="8" fill="#ffffff" stroke="#2a78d6" stroke-width="2"/>
+  <text x="322" y="86" font-size="14" font-weight="700" fill="#0b0b0b">dufflebag</text>
+  <text x="322" y="104" font-size="11" fill="#52514e">one stateless container</text>
+
+  <!-- listener strip -->
+  <rect x="322" y="120" width="376" height="40" rx="6" fill="#f1f5fb" stroke="#2a78d6" stroke-width="1"/>
+  <text x="510" y="145" text-anchor="middle" font-size="12" font-weight="600" fill="#0b0b0b">HTTPS listener</text>
+
+  <!-- serving surfaces -->
+  <text x="322" y="192" font-size="11" font-weight="600" fill="#52514e" letter-spacing="1">SERVING</text>
+  <g font-size="12" fill="#0b0b0b">
+    <rect x="322" y="204" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="413" y="224" text-anchor="middle" font-weight="600">Token endpoint</text>
+    <text x="413" y="241" text-anchor="middle" font-size="10.5" fill="#52514e">/oauth2/token</text>
+
+    <rect x="516" y="204" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="607" y="224" text-anchor="middle" font-weight="600">Compatibility plane</text>
+    <text x="607" y="241" text-anchor="middle" font-size="10.5" fill="#52514e">Packer registry API · frozen</text>
+
+    <rect x="322" y="264" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="413" y="284" text-anchor="middle" font-weight="600">Platform plane</text>
+    <text x="413" y="301" text-anchor="middle" font-size="10.5" fill="#52514e">/api/v1 · /sys</text>
+
+    <rect x="516" y="264" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="607" y="284" text-anchor="middle" font-weight="600">Console</text>
+    <text x="607" y="301" text-anchor="middle" font-size="10.5" fill="#52514e">embedded, ordinary client</text>
+  </g>
+
+  <!-- background workers -->
+  <line x1="322" y1="336" x2="698" y2="336" stroke="#e3e2df" stroke-width="1.5"/>
+  <text x="322" y="362" font-size="11" font-weight="600" fill="#52514e" letter-spacing="1">BACKGROUND · OFF THE SERVING PATH</text>
+  <g font-size="12" fill="#0b0b0b">
+    <rect x="322" y="376" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="413" y="396" text-anchor="middle" font-weight="600">Bag Drop reconciler</text>
+    <text x="413" y="413" text-anchor="middle" font-size="10.5" fill="#52514e">level-based mirror</text>
+
+    <rect x="516" y="376" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="607" y="396" text-anchor="middle" font-weight="600">Scan workers</text>
+    <text x="607" y="413" text-anchor="middle" font-size="10.5" fill="#52514e">queued per tenant</text>
+
+    <rect x="322" y="436" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="413" y="456" text-anchor="middle" font-weight="600">Webhook delivery</text>
+    <text x="413" y="473" text-anchor="middle" font-size="10.5" fill="#52514e">transactional outbox</text>
+
+    <rect x="516" y="436" width="182" height="48" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5"/>
+    <text x="607" y="456" text-anchor="middle" font-weight="600">Audit pipeline</text>
+    <text x="607" y="473" text-anchor="middle" font-size="10.5" fill="#52514e">fail-closed · file targets</text>
+  </g>
+
+  <!-- migrations note -->
+  <rect x="322" y="560" width="376" height="72" rx="6" fill="#fcfcfb" stroke="#e3e2df" stroke-width="1.5"/>
+  <text x="510" y="586" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0b0b0b">Migrations embedded in the binary</text>
+  <text x="510" y="604" text-anchor="middle" font-size="10.5" fill="#52514e">apply at startup, expand-only ·</text>
+  <text x="510" y="619" text-anchor="middle" font-size="10.5" fill="#52514e">migrate subcommand on two-role deployments</text>
+
+  <!-- ======================= State ======================= -->
+  <text x="770" y="76" font-size="13" font-weight="600" fill="#52514e" letter-spacing="1">STATE</text>
+  <g font-size="13" fill="#0b0b0b">
+    <rect x="770" y="92" width="190" height="88" rx="6" fill="#f2f7f2" stroke="#006300" stroke-width="1.5"/>
+    <text x="865" y="118" text-anchor="middle" font-weight="700">PostgreSQL</text>
+    <text x="865" y="138" text-anchor="middle" font-size="10.5" fill="#52514e">all state · row-level security</text>
+    <text x="865" y="154" text-anchor="middle" font-size="10.5" fill="#52514e">is the tenancy boundary</text>
+    <text x="865" y="170" text-anchor="middle" font-size="10.5" fill="#52514e">wrapped keyring</text>
+
+    <rect x="770" y="196" width="190" height="72" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="865" y="222" text-anchor="middle" font-weight="600">Object storage</text>
+    <text x="865" y="240" text-anchor="middle" font-size="10.5" fill="#52514e">S3-compatible · optional</text>
+    <text x="865" y="256" text-anchor="middle" font-size="10.5" fill="#52514e">SBOMs, scan transcripts</text>
+  </g>
+
+  <!-- dufflebag -> state arrows -->
+  <path d="M 720 136 H 764" stroke="#52514e" stroke-width="1.5" fill="none" marker-end="url(#arrow)"/>
+  <text x="742" y="126" text-anchor="middle" font-size="10.5" fill="#52514e">SQL</text>
+  <path d="M 720 232 H 764" stroke="#52514e" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <text x="742" y="222" text-anchor="middle" font-size="10.5" fill="#52514e">S3</text>
+
+  <!-- ======================= External services ======================= -->
+  <text x="770" y="330" font-size="13" font-weight="600" fill="#52514e" letter-spacing="1">EXTERNAL · ALL OPTIONAL</text>
+  <g font-size="12.5" fill="#0b0b0b">
+    <rect x="770" y="346" width="190" height="64" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="865" y="370" text-anchor="middle" font-weight="600">Vault transit</text>
+    <text x="865" y="388" text-anchor="middle" font-size="10.5" fill="#52514e">wraps the keyring (KEK)</text>
+
+    <rect x="770" y="422" width="190" height="64" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="865" y="446" text-anchor="middle" font-weight="600">OSV endpoint</text>
+    <text x="865" y="464" text-anchor="middle" font-size="10.5" fill="#52514e">vulnerability queries</text>
+
+    <rect x="770" y="498" width="190" height="64" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="865" y="522" text-anchor="middle" font-weight="600">Destination registry</text>
+    <text x="865" y="540" text-anchor="middle" font-size="10.5" fill="#52514e">HCP Packer or dufflebag</text>
+
+    <rect x="770" y="574" width="190" height="64" rx="6" fill="#ffffff" stroke="#b8b7b3" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="865" y="598" text-anchor="middle" font-weight="600">Webhook receivers</text>
+    <text x="865" y="616" text-anchor="middle" font-size="10.5" fill="#52514e">signed project events</text>
+  </g>
+
+  <!-- background workers -> external arrows -->
+  <path d="M 720 378 L 764 378" stroke="#52514e" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <path d="M 720 392 H 752 V 454 H 764" stroke="#52514e" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <path d="M 720 406 H 738 V 530 H 764" stroke="#52514e" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  <path d="M 720 460 H 726 V 606 H 764" stroke="#52514e" stroke-width="1.5" fill="none" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+
+  <!-- legend -->
+  <g font-size="10.5" fill="#52514e">
+    <line x1="60" y1="700" x2="100" y2="700" stroke="#52514e" stroke-width="1.5"/>
+    <text x="108" y="704">required</text>
+    <line x1="180" y1="700" x2="220" y2="700" stroke="#52514e" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="228" y="704">optional, chosen by the deployment</text>
+  </g>
+</svg>

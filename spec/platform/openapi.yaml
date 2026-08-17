@@ -726,6 +726,11 @@ paths:
                     projects instead makes it warn and select the oldest. Support
                     only one kind and one of those documented paths becomes
                     unreachable.
+                bucket_id:
+                  type: string
+                  description: |
+                    The ULID of an existing bucket in the named project. Omit
+                    for a project-or-wider principal.
               required: [name, role]
       responses:
         "201":
@@ -1738,6 +1743,7 @@ components:
         role: { $ref: "#/components/schemas/Role" }
         organization_id: { type: string, format: uuid, nullable: true }
         project_id: { type: string, format: uuid, nullable: true }
+        bucket_id: { type: string }
       required: [principal_id, name, role]
 
     AuditTargetCreate:
@@ -1915,6 +1921,9 @@ components:
           format: uuid
           nullable: true
           description: Null for an organization-scoped principal.
+        bucket_id:
+          type: string
+          description: The bound bucket's ULID. Omitted for project-or-wider scope.
         created_at: { type: string, format: date-time }
         secrets:
           type: array

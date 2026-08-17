@@ -4,7 +4,9 @@ The **audit trail** records what the instance did. **Encryption at rest**
 protects what it stores. These operator concerns are independent. Roots manage
 both from the console's **Audit** and **Encryption** pages or the equivalent
 [platform API](pathname:///platform-api.html) endpoints. The
-[deployment guide](../deployment/index.md) defines the operational contract.
+[installation page](../quick-start/installation.md#configuration-reference) defines the operational contract.
+
+![Dufflebag Audit screen showing a healthy file target](/screenshots/audit.png)
 
 ## The audit trail
 

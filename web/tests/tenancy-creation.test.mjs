@@ -11,7 +11,7 @@ const creationSource = readFileSync(
   new URL('../src/components/TenancyCreation.tsx', import.meta.url),
   'utf8',
 )
-const gapScreenSources = ['Buckets.tsx', 'Versions.tsx', 'Version.tsx', 'Build.tsx'].map((screen) =>
+const gapScreenSources = ['Versions.tsx', 'Version.tsx', 'Build.tsx'].map((screen) =>
   readFileSync(new URL(`../src/screens/${screen}`, import.meta.url), 'utf8'))
 
 let vite

@@ -4,6 +4,8 @@ Webhooks send project registry changes to your own HTTP endpoint. They are
 operational configuration. A project `maintainer` can create, verify, update,
 or delete them and inspect their delivery history.
 
+![Dufflebag Webhooks screen showing an active webhook](/screenshots/webhooks.png)
+
 ## Create and activate a webhook
 
 Prerequisites: The `maintainer` role on the project and an HTTP or HTTPS
@@ -74,13 +76,43 @@ Failures retry up to five times over roughly fifteen minutes and then become
 without retry.
 
 The operator controls egress and credential sealing. See the
-[deployment guide](../deployment/operations.md#webhooks) for the default SSRF
+[operational contract](#operational-contract) below for the default SSRF
 protections, the lab-only private-network escape hatch, timeouts, response
 bounds, and `DFBG_CREDENTIAL_KEY` migration rules.
 
+## Operational contract
+
+Webhooks make outbound HTTP requests to project-configured URLs. By default
+dufflebag resolves the target and refuses loopback, link-local (including
+the cloud metadata address `169.254.169.254`), RFC1918, unspecified, and
+multicast addresses. The checked address is the address dialled, which
+prevents a second DNS lookup from rebinding the connection after admission.
+Redirects are never followed, requests time out after ten seconds, and
+response reads are capped at 64 KiB; only a bounded snippet is retained in
+the last-100 delivery history.
+
+`DFBG_WEBHOOK_ALLOW_PRIVATE=true` disables the private/local address refusal
+for isolated labs whose receiver deliberately lives on a private network. It
+defaults to `false`; do not enable it on a deployment where project
+maintainers must not reach internal services. A refused address is recorded
+once as a refused delivery and is not retried.
+
+Signing secrets are write-only and use the same credential protection as
+[Bag Drop](./bag-drop.md#the-credential-key): the wrapped keyring on
+encrypted deployments, or the 32-byte `DFBG_CREDENTIAL_KEY` on unencrypted
+deployments. The legacy `DFBG_BAGDROP_CREDENTIAL_KEY` alias can supply this
+general key during migration, including for webhook secrets. Encrypted
+deployments refuse either environment variable.
+
+Delivery runs outside the serving path. A failed request is retried at most
+five times with exponential backoff over roughly fifteen minutes, then
+marked failed and dropped. The transactional outbox means a domain write and
+its event commit or roll back together; endpoint latency and failure never
+delay that write.
+
 ## Where to go next
 
-- [Deployment guide: Webhooks](../deployment/operations.md#webhooks): egress
+- [The console](../components/console.md): role gates and confirmations
   protection and credential keys.
 - [Platform API reference](/platform-api.html): create, update, verify, and
   delivery-history wire shapes.

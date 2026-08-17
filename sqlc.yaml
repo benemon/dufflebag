@@ -2,25 +2,7 @@ version: "2"
 sql:
   - engine: postgresql
     schema:
-      - internal/store/postgres/migrations/000001_registry.up.sql
-      - internal/store/postgres/migrations/000002_identity.up.sql
-      - internal/store/postgres/migrations/000003_instance.up.sql
-      - internal/store/postgres/migrations/000004_roles.up.sql
-      - internal/store/postgres/migrations/000007_sboms.up.sql
-      - internal/store/postgres/migrations/000010_build_ancestry.up.sql
-      - internal/store/postgres/migrations/000011_audit_targets.up.sql
-      - internal/store/postgres/migrations/000012_version_compat_projection.up.sql
-      - internal/store/postgres/migrations/000013_sbom_packages.up.sql
-      - internal/store/postgres/migrations/000014_sbom_object_storage.up.sql
-      - internal/store/postgres/migrations/000015_recovery.up.sql
-      - internal/store/postgres/migrations/000016_encryption.up.sql
-      - internal/store/postgres/migrations/000017_version_revocation.up.sql
-      - internal/store/postgres/migrations/000018_secret_expiry.up.sql
-      - internal/store/postgres/migrations/000022_pins.up.sql
-      - internal/store/postgres/migrations/000023_bagdrop_configs.up.sql
-      - internal/store/postgres/migrations/000024_bagdrop_associations.up.sql
-      - internal/store/postgres/migrations/000025_bagdrop_reconcile_status.up.sql
-      - internal/store/postgres/migrations/000026_webhooks.up.sql
+      - internal/store/postgres/migrations/000001_baseline.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

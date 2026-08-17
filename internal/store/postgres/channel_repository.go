@@ -562,8 +562,11 @@ func (r *Repository) UpdateChannel(
 		clearedID := registry.NewID(at).String()
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO channel_assignments (
-				organization_id, project_id, id, channel_id, version_id, author_id, assigned_at, integrity_mac
-			) VALUES ($1, $2, $3, $4, NULL, $5, $6, $7)
+				organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at, integrity_mac
+			)
+			SELECT $1, $2, $3, channels.bucket_id, channels.id, NULL, $5, $6, $7
+			FROM channels
+			WHERE channels.id = $4
 		`, tenant.OrganizationID, tenant.ProjectID, clearedID,
 			channel.ID.String(), authorID, clearedAt,
 			r.rowMAC(assignmentMACMessage(tenant, clearedID, channel.ID.String(), "", authorID, clearedAt))); err != nil {
@@ -832,8 +835,11 @@ func (r *Repository) recordAssignment(
 	assignmentID := registry.NewID(at).String()
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channel_assignments (
-			organization_id, project_id, id, channel_id, version_id, author_id, assigned_at, integrity_mac
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			organization_id, project_id, id, bucket_id, channel_id, version_id, author_id, assigned_at, integrity_mac
+		)
+		SELECT $1, $2, $3, versions.bucket_id, $4, versions.id, $6, $7, $8
+		FROM versions
+		WHERE versions.id = $5
 	`, tenant.OrganizationID, tenant.ProjectID, assignmentID,
 		channelID.String(), versionID.String(), authorID, assignedAt,
 		r.rowMAC(assignmentMACMessage(tenant, assignmentID, channelID.String(), versionID.String(), authorID, assignedAt))); err != nil {
@@ -844,9 +850,9 @@ func (r *Repository) recordAssignment(
 	// moving the build behind newer work.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO pending_scans (
-			organization_id, project_id, build_id, enqueued_at, reason
+			organization_id, project_id, bucket_id, build_id, enqueued_at, reason
 		)
-		SELECT organization_id, project_id, id, $4, 'channel_assignment'
+		SELECT organization_id, project_id, bucket_id, id, $4, 'channel_assignment'
 		FROM builds
 		WHERE organization_id = $1 AND project_id = $2
 		  AND version_id = $3 AND status = 'done'

@@ -61,6 +61,7 @@ func TestNewPrincipalRejectsBadInput(t *testing.T) {
 		{"empty name", "p-1", "", "client-1", full},
 		{"empty client id", "p-1", "ci", "", full},
 		{"no organization", "p-1", "ci", "client-1", Scope{ProjectID: projA}},
+		{"bucket without project", "p-1", "ci", "client-1", Scope{OrganizationID: orgA, BucketID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			if _, err := NewPrincipal(c.id, c.pname, c.clientID, c.scope, RoleBuilder, epoch); !errors.Is(err, ErrInvalid) {
@@ -339,14 +340,16 @@ func TestScopePermitsIsDenyByDefault(t *testing.T) {
 		org, project uuid.UUID
 		want         bool
 	}{
-		{"project-scoped, own tenancy", Scope{orgA, projA}, orgA, projA, true},
-		{"project-scoped, sibling project", Scope{orgA, projA}, orgA, projB, false},
-		{"project-scoped, other organization", Scope{orgA, projA}, orgB, projA, false},
+		{"project-scoped, own tenancy", Scope{OrganizationID: orgA, ProjectID: projA}, orgA, projA, true},
+		{"project-scoped, sibling project", Scope{OrganizationID: orgA, ProjectID: projA}, orgA, projB, false},
+		{"project-scoped, other organization", Scope{OrganizationID: orgA, ProjectID: projA}, orgB, projA, false},
+		{"bucket-scoped, own project", Scope{OrganizationID: orgA, ProjectID: projA, BucketID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, orgA, projA, true},
+		{"bucket-scoped, sibling project", Scope{OrganizationID: orgA, ProjectID: projA, BucketID: "01ARZ3NDEKTSV4RRFFQ69G5FAV"}, orgA, projB, false},
 		{"org-scoped, any project in its org", Scope{OrganizationID: orgA}, orgA, projB, true},
 		{"org-scoped, other organization", Scope{OrganizationID: orgA}, orgB, projA, false},
 		{"zero scope permits nothing", Scope{}, orgA, projA, false},
-		{"zero organization requested", Scope{orgA, projA}, uuid.Nil, projA, false},
-		{"zero project requested", Scope{orgA, projA}, orgA, uuid.Nil, false},
+		{"zero organization requested", Scope{OrganizationID: orgA, ProjectID: projA}, uuid.Nil, projA, false},
+		{"zero project requested", Scope{OrganizationID: orgA, ProjectID: projA}, orgA, uuid.Nil, false},
 		{"org-scoped with zero project requested", Scope{OrganizationID: orgA}, orgA, uuid.Nil, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {

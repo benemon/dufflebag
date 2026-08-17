@@ -269,6 +269,10 @@ test-scanner: ## Run scanner tests against recorded fixtures with no external ro
 test-integration: ## Run Postgres and Vault integration tests in testcontainers
 	$(SCANNER_DISABLED_ENV) go test -timeout 30m -tags=integration ./internal/store/postgres ./internal/keyring ./cmd/dufflebag
 
+.PHONY: test-migration-equivalence
+test-migration-equivalence: ## Prove the 0.1.0 baseline matches the pre-release chain
+	./internal/store/postgres/check-baseline-equivalence.sh
+
 .PHONY: test-rls-sabotage
 # Prove the tenant isolation assertions have teeth, by requiring them to FAIL
 # when row-level security is sabotaged. A test that passes with RLS disabled is
@@ -293,6 +297,22 @@ test-rls-sabotage: ## Prove tenant isolation tests fail under RLS sabotage
 			exit 1; \
 		fi; \
 		echo "$$hook: tenant isolation failed as required"; \
+	done; \
+	for table in versions channels builds artifacts channel_assignments \
+		sboms sbom_packages scan_runs scan_findings scan_transcripts \
+		build_scan_state pending_scans pins; do \
+		if out=$$(env DUFFLEBAG_TEST_DROP_BUCKET_POLICY=$$table go test -tags=integration ./internal/store/postgres \
+			-run '^TestTenantIsolation$$$$' -count=1 2>&1); then \
+			echo "$$out"; \
+			echo "FAIL: tenant isolation PASSED with $$table's bucket predicate dropped — the assertions prove nothing"; \
+			exit 1; \
+		fi; \
+		if ! echo "$$out" | grep -q -- '--- FAIL: TestTenantIsolation'; then \
+			echo "$$out"; \
+			echo "FAIL: dropping $$table's bucket predicate did not run TestTenantIsolation to a failure (build or setup error), so nothing was proved"; \
+			exit 1; \
+		fi; \
+		echo "$$table: bucket isolation failed as required"; \
 	done
 
 .PHONY: test-contract
@@ -363,8 +383,9 @@ test-smoke: $(if $(DUFFLEBAG_BIN),,build-ui) ## Drive the real console in a real
 docs-shots: $(if $(DUFFLEBAG_BIN),,build-ui) ## Regenerate console screenshots against seeded data
 	@set -e; work=$$(mktemp -d); trap 'rm -rf "$$work"' EXIT; \
 	$(resolve-server-bin); \
+	docker build -f Containerfile.scanner --target stub -t $(OSV_STUB_IMAGE) .; \
 	cd web && { [ -d node_modules ] || npm ci; } && \
-	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" \
+	SMOKE_BIN="$$bin" SMOKE_CHROME="$(SMOKE_CHROME)" OSV_STUB_IMAGE="$(OSV_STUB_IMAGE)" \
 		node tests/shots/docs-shots.mjs
 
 .PHONY: test-kind

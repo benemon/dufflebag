@@ -142,6 +142,33 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 			}
 		}
 	}
+	if table := os.Getenv("DUFFLEBAG_TEST_DROP_BUCKET_POLICY"); table != "" {
+		bucketTables := map[string]bool{
+			"versions": true, "channels": true, "builds": true, "artifacts": true,
+			"channel_assignments": true, "sboms": true, "sbom_packages": true,
+			"scan_runs": true, "scan_findings": true, "scan_transcripts": true,
+			"build_scan_state": true, "pending_scans": true, "pins": true,
+		}
+		if !bucketTables[table] {
+			_ = admin.Close()
+			stop()
+			t.Fatalf("unknown bucket policy sabotage table %q", table)
+		}
+		if _, err := admin.Exec(fmt.Sprintf(`
+			DROP POLICY tenant_isolation ON %s;
+			CREATE POLICY tenant_isolation ON %s USING (
+				organization_id = NULLIF(current_setting('app.tenant_org', true), '')::uuid
+				AND project_id = NULLIF(current_setting('app.tenant_project', true), '')::uuid
+			) WITH CHECK (
+				organization_id = NULLIF(current_setting('app.tenant_org', true), '')::uuid
+				AND project_id = NULLIF(current_setting('app.tenant_project', true), '')::uuid
+			)
+		`, table, table)); err != nil {
+			_ = admin.Close()
+			stop()
+			t.Fatalf("sabotage %s bucket policy: %v", table, err)
+		}
+	}
 	if os.Getenv("DUFFLEBAG_TEST_BREAK_SCHEMA") == "1" {
 		if _, err := admin.Exec("ALTER TABLE builds DROP COLUMN platform"); err != nil {
 			_ = admin.Close()
@@ -192,6 +219,76 @@ func TestTenantIsolation(t *testing.T) {
 
 	insertAggregate(t, ctx, db, orgA, projectA, "a")
 	insertAggregate(t, ctx, db, orgB, projectB, "b")
+	insertBucketAggregate(t, ctx, db, orgA, projectA, "c", 2)
+
+	bucketTables := []string{
+		"versions", "channels", "builds", "artifacts", "channel_assignments",
+		"sboms", "sbom_packages", "scan_runs", "scan_findings",
+		"scan_transcripts", "build_scan_state", "pending_scans", "pins",
+	}
+	t.Run("buckets", func(t *testing.T) {
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "bucket-a")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM buckets").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Errorf("buckets exposed %d rows to bucket-a; want exactly its own row", count)
+		}
+		result, err := tx.ExecContext(ctx, "UPDATE buckets SET name = name WHERE id = 'bucket-c'")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if affected, err := result.RowsAffected(); err != nil || affected != 0 {
+			t.Errorf("buckets wrote %d sibling rows; want zero (error %v)", affected, err)
+		}
+	})
+	for _, table := range bucketTables {
+		t.Run(table, func(t *testing.T) {
+			tx, err := store.BeginTenant(ctx, db, orgA, projectA, "bucket-a")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var count int
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Errorf("%s exposed %d rows to bucket-a; want exactly its own row", table, count)
+			}
+			result, err := tx.ExecContext(ctx, "UPDATE "+table+" SET bucket_id = bucket_id WHERE bucket_id = $1", "bucket-c")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if affected, err := result.RowsAffected(); err != nil || affected != 0 {
+				t.Errorf("%s wrote %d sibling rows; want zero (error %v)", table, affected, err)
+			}
+		})
+	}
+
+	unscoped, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, table := range bucketTables {
+		var count int
+		if err := unscoped.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {
+			_ = unscoped.Rollback()
+			t.Fatalf("%s unscoped count: %v", table, err)
+		}
+		if count != 2 {
+			_ = unscoped.Rollback()
+			t.Fatalf("%s exposed %d rows without bucket scope; want both buckets", table, count)
+		}
+	}
+	if err := unscoped.Commit(); err != nil {
+		t.Fatal(err)
+	}
 
 	for _, tenant := range []struct {
 		org, project, suffix string
@@ -199,7 +296,7 @@ func TestTenantIsolation(t *testing.T) {
 		{orgA, projectA, "a"},
 		{orgB, projectB, "b"},
 	} {
-		tx, err := store.BeginTenant(ctx, db, tenant.org, tenant.project)
+		tx, err := store.BeginTenant(ctx, db, tenant.org, tenant.project, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -214,9 +311,13 @@ func TestTenantIsolation(t *testing.T) {
 				_ = tx.Rollback()
 				t.Fatalf("%s count for %s: %v", table, tenant.org, err)
 			}
-			if count != 1 {
+			want := 1
+			if tenant.suffix == "a" && (table == "buckets" || contains(bucketTables, table)) {
+				want = 2
+			}
+			if count != want {
 				_ = tx.Rollback()
-				t.Fatalf("%s exposed %d rows to %s; want exactly its own row", table, count, tenant.org)
+				t.Fatalf("%s exposed %d rows to %s; want %d", table, count, tenant.org, want)
 			}
 		}
 		var visible bool
@@ -238,6 +339,15 @@ func TestTenantIsolation(t *testing.T) {
 	}
 }
 
+func contains(values []string, target string) bool {
+	for _, value := range values {
+		if value == target {
+			return true
+		}
+	}
+	return false
+}
+
 func TestTenantRequiredForWrites(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -257,7 +367,7 @@ func TestVersionCompletionInvariantIsPersistable(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
 	ctx := context.Background()
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -297,7 +407,7 @@ func TestVersionCompletionStateRoundTrips(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
 	ctx := context.Background()
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,7 +486,7 @@ func TestTenantSettingDoesNotLeakThroughPool(t *testing.T) {
 	db.SetMaxOpenConns(1)
 	ctx := context.Background()
 
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -397,19 +507,20 @@ func TestTenantSettingDoesNotLeakThroughPool(t *testing.T) {
 		_ = conn.Close()
 	}()
 	var pooledPID int
-	var organizationID, projectID string
+	var organizationID, projectID, bucketID string
 	if err := conn.QueryRowContext(ctx, `
 		SELECT pg_backend_pid(),
 		       coalesce(current_setting('app.tenant_org', true), ''),
-		       coalesce(current_setting('app.tenant_project', true), '')
-	`).Scan(&pooledPID, &organizationID, &projectID); err != nil {
+		       coalesce(current_setting('app.tenant_project', true), ''),
+		       coalesce(current_setting('app.tenant_bucket', true), '')
+	`).Scan(&pooledPID, &organizationID, &projectID, &bucketID); err != nil {
 		t.Fatal(err)
 	}
 	if pooledPID != transactionPID {
 		t.Fatalf("test did not reuse pooled connection: got backend %d, want %d", pooledPID, transactionPID)
 	}
-	if organizationID != "" || projectID != "" {
-		t.Fatalf("tenant leaked through pool: organization=%q project=%q", organizationID, projectID)
+	if organizationID != "" || projectID != "" || bucketID != "" {
+		t.Fatalf("tenant leaked through pool: organization=%q project=%q bucket=%q", organizationID, projectID, bucketID)
 	}
 }
 
@@ -423,7 +534,7 @@ func TestChannelAssignmentHistoryIsAppendOnly(t *testing.T) {
 		"UPDATE channel_assignments SET assigned_at = now() WHERE id = 'assignment-a'",
 		"DELETE FROM channel_assignments WHERE id = 'assignment-a'",
 	} {
-		tx, err := store.BeginTenant(ctx, db, orgA, projectA)
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -454,80 +565,19 @@ func TestPreviousReleaseAgainstNewSchema(t *testing.T) {
 }
 
 func insertAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, project, suffix string) {
-	t.Helper()
-	tx, err := store.BeginTenant(ctx, db, org, project)
+	insertBucketAggregate(t, ctx, db, org, project, suffix, 1)
+	tx, err := store.BeginTenant(ctx, db, org, project, "")
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer func() {
-		_ = tx.Rollback()
-	}()
+	defer func() { _ = tx.Rollback() }()
 	now := time.Now()
 	statements := []struct {
 		query string
 		args  []any
 	}{
-		{`INSERT INTO buckets
-			(organization_id, project_id, id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,'images',$4,$4)`, []any{org, project, "bucket-" + suffix, now}},
-		{`INSERT INTO versions
-			(organization_id, project_id, id, bucket_id, fingerprint, template_type,
-			 complete, sequence, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'fingerprint','HCL2',true,1,$5,$5)`,
-			[]any{org, project, "version-" + suffix, "bucket-" + suffix, now}},
-		{`INSERT INTO builds
-			(organization_id, project_id, id, version_id, component_type, status,
-			 platform, metadata_seen, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'amazon-ebs','done','aws',true,$5,$5)`,
-			[]any{org, project, "build-" + suffix, "version-" + suffix, now}},
-		{`INSERT INTO artifacts VALUES ($1,$2,$3,$4,'ami-123','us-east-1',$5)`,
-			[]any{org, project, "artifact-" + suffix, "build-" + suffix, now}},
-		{`INSERT INTO channels
-			(organization_id, project_id, id, bucket_id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'latest',$5,$5)`,
-			[]any{org, project, "channel-" + suffix, "bucket-" + suffix, now}},
-		{`INSERT INTO channel_assignments
-			(organization_id, project_id, id, channel_id, version_id, assigned_at)
-			VALUES ($1,$2,$3,$4,$5,$6)`,
-			[]any{org, project, "assignment-" + suffix, "channel-" + suffix, "version-" + suffix, now}},
-		{`INSERT INTO sboms
-			(organization_id, project_id, id, build_id, name, format, object_key, created_at)
-			VALUES ($1,$2,$3,$4,'sbom.spdx.json','SPDX','key-'||$3,$5)`,
-			[]any{org, project, "sbom-" + suffix, "build-" + suffix, now}},
-		{`INSERT INTO sbom_packages
-			(organization_id, project_id, sbom_id, name, version, purl)
-			VALUES ($1,$2,$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`,
-			[]any{org, project, "sbom-" + suffix}},
-		{`INSERT INTO scan_runs
-			(organization_id, project_id, id, build_id, run_sequence, status, adapter,
-			 engine, database_revision, observed_at, transcript_digest, created_at)
-			VALUES ($1,$2,$3,$4,1,'succeeded','osv',
-			 'https://api.osv.dev','unreported',$5,'digest',$5)`,
-			[]any{org, project, "scan-run-" + suffix, "build-" + suffix, now}},
-		{`INSERT INTO scan_findings
-			(organization_id, project_id, run_id, sbom_id, package_name, package_version,
-			 purl, advisory_id, derived_severity, first_seen_at)
-			VALUES ($1,$2,$3,$4,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0',
-			 'ALPINE-CVE-2022-48174','critical',$5)`,
-			[]any{org, project, "scan-run-" + suffix, "sbom-" + suffix, now}},
-		{`INSERT INTO scan_transcripts
-			(organization_id, project_id, run_id, object_key, expires_at)
-			VALUES ($1,$2,$3,'transcript-key-'||$3,$4)`,
-			[]any{org, project, "scan-run-" + suffix, now}},
-		{`INSERT INTO build_scan_state
-			(organization_id, project_id, build_id, current_findings_run_id, latest_attempt_run_id)
-			VALUES ($1,$2,$3,$4,$4)`,
-			[]any{org, project, "build-" + suffix, "scan-run-" + suffix}},
 		{`INSERT INTO scan_run_counters (organization_id, project_id, next_sequence)
 			VALUES ($1,$2,2)`, []any{org, project}},
-		{`INSERT INTO pending_scans
-			(organization_id, project_id, build_id, enqueued_at, reason)
-			VALUES ($1,$2,$3,$4,'channel_assignment')`,
-			[]any{org, project, "build-" + suffix, now}},
-		{`INSERT INTO pins
-			(organization_id, project_id, bucket_name, pinned_at, pinned_by)
-			VALUES ($1,$2,'images',$3,$4)`,
-			[]any{org, project, now, "principal-" + suffix}},
 		{`INSERT INTO bagdrop_configs
 			(organization_id, project_id, adapter, destination, sealed_secret, created_at, updated_at)
 			VALUES ($1,$2,'hcp-packer',$3,$4,$5,$5)`,
@@ -550,6 +600,92 @@ func insertAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, project
 			[]any{org, project, "20000000-0000-4000-8000-00000000000" + suffix,
 				"10000000-0000-4000-8000-00000000000" + suffix,
 				"01K0000000000000000000000" + suffix, now}},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("insert project aggregate for %s: %v", org, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertBucketAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, project, suffix string, runSequence int) {
+	t.Helper()
+	tx, err := store.BeginTenant(ctx, db, org, project, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = tx.Rollback()
+	}()
+	now := time.Now()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO buckets
+			(organization_id, project_id, id, name, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$5)`, []any{org, project, "bucket-" + suffix, "images-" + suffix, now}},
+		{`INSERT INTO versions
+			(organization_id, project_id, id, bucket_id, fingerprint, template_type,
+			 complete, sequence, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,'fingerprint','HCL2',true,1,$5,$5)`,
+			[]any{org, project, "version-" + suffix, "bucket-" + suffix, now}},
+		{`INSERT INTO builds
+			(organization_id, project_id, id, bucket_id, version_id, component_type, status,
+			 platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'amazon-ebs','done','aws',true,$6,$6)`,
+			[]any{org, project, "build-" + suffix, "bucket-" + suffix, "version-" + suffix, now}},
+		{`INSERT INTO artifacts
+			(organization_id, project_id, id, bucket_id, build_id, external_identifier, region, created_at)
+			VALUES ($1,$2,$3,$4,$5,'ami-123','us-east-1',$6)`,
+			[]any{org, project, "artifact-" + suffix, "bucket-" + suffix, "build-" + suffix, now}},
+		{`INSERT INTO channels
+			(organization_id, project_id, id, bucket_id, name, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,'latest',$5,$5)`,
+			[]any{org, project, "channel-" + suffix, "bucket-" + suffix, now}},
+		{`INSERT INTO channel_assignments
+			(organization_id, project_id, id, bucket_id, channel_id, version_id, assigned_at)
+			VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+			[]any{org, project, "assignment-" + suffix, "bucket-" + suffix, "channel-" + suffix, "version-" + suffix, now}},
+		{`INSERT INTO sboms
+			(organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at)
+			VALUES ($1,$2,$3,$4,$5,'sbom.spdx.json','SPDX','key-'||$3,$6)`,
+			[]any{org, project, "sbom-" + suffix, "bucket-" + suffix, "build-" + suffix, now}},
+		{`INSERT INTO sbom_packages
+			(organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,$3,$4,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`,
+			[]any{org, project, "bucket-" + suffix, "sbom-" + suffix}},
+		{`INSERT INTO scan_runs
+			(organization_id, project_id, id, bucket_id, build_id, run_sequence, status, adapter,
+			 engine, database_revision, observed_at, transcript_digest, created_at)
+			VALUES ($1,$2,$3,$4,$5,$6,'succeeded','osv',
+			 'https://api.osv.dev','unreported',$7,'digest',$7)`,
+			[]any{org, project, "scan-run-" + suffix, "bucket-" + suffix, "build-" + suffix, runSequence, now}},
+		{`INSERT INTO scan_findings
+			(organization_id, project_id, bucket_id, run_id, sbom_id, package_name, package_version,
+			 purl, advisory_id, derived_severity, first_seen_at)
+			VALUES ($1,$2,$3,$4,$5,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0',
+			 'ALPINE-CVE-2022-48174','critical',$6)`,
+			[]any{org, project, "bucket-" + suffix, "scan-run-" + suffix, "sbom-" + suffix, now}},
+		{`INSERT INTO scan_transcripts
+			(organization_id, project_id, bucket_id, run_id, object_key, expires_at)
+			VALUES ($1,$2,$3,$4,'transcript-key-'||$4,$5)`,
+			[]any{org, project, "bucket-" + suffix, "scan-run-" + suffix, now}},
+		{`INSERT INTO build_scan_state
+			(organization_id, project_id, bucket_id, build_id, current_findings_run_id, latest_attempt_run_id)
+			VALUES ($1,$2,$3,$4,$5,$5)`,
+			[]any{org, project, "bucket-" + suffix, "build-" + suffix, "scan-run-" + suffix}},
+		{`INSERT INTO pending_scans
+			(organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+			VALUES ($1,$2,$3,$4,$5,'channel_assignment')`,
+			[]any{org, project, "bucket-" + suffix, "build-" + suffix, now}},
+		{`INSERT INTO pins
+			(organization_id, project_id, bucket_id, pinned_at, pinned_by)
+			VALUES ($1,$2,$3,$4,$5)`,
+			[]any{org, project, "bucket-" + suffix, now, "principal-" + suffix}},
 	}
 	for _, statement := range statements {
 		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {

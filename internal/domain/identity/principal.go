@@ -15,8 +15,11 @@ const maxActiveSecrets = 2
 // Scope is the tenancy a principal may act within.
 //
 // Project is optional: with an organization set, the zero project means
-// organization-scoped, seeing every project in that organization. Both kinds
-// exist because the Packer CLI distinguishes them — a project-scoped principal
+// organization-scoped, seeing every project in that organization. Bucket is
+// optional too; until bucket-aware enforcement lands, it records a narrower
+// binding without changing the project-level authorization predicates. Both
+// project and organization scope exist because the Packer CLI distinguishes
+// them — a project-scoped principal
 // gets 403 from ProjectService_List, which the CLI turns into a
 // set-HCP_PROJECT_ID message, while an organization-scoped one seeing several
 // projects makes it warn and select the oldest (ADR-0016).
@@ -42,6 +45,7 @@ const maxActiveSecrets = 2
 type Scope struct {
 	OrganizationID uuid.UUID
 	ProjectID      uuid.UUID
+	BucketID       string
 }
 
 // OrganizationScoped reports whether this scope spans every project in its
@@ -191,6 +195,9 @@ func validBinding(scope Scope, role Role) error {
 	// neither platform nor tenancy scoped.
 	if scope.OrganizationID == uuid.Nil && scope.ProjectID != uuid.Nil {
 		return fmt.Errorf("%w: a project scope requires an organization", ErrInvalid)
+	}
+	if scope.BucketID != "" && scope.ProjectID == uuid.Nil {
+		return fmt.Errorf("%w: a bucket scope requires a project", ErrInvalid)
 	}
 	if role.PlatformOnly() != scope.PlatformScoped() {
 		return fmt.Errorf(

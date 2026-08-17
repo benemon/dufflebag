@@ -4,7 +4,7 @@ import {
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Label, Modal,
-  ModalBody, ModalFooter, ModalHeader, PageSection, Title,
+  ModalBody, ModalFooter, ModalHeader, PageSection, Title, ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -72,7 +72,7 @@ export function Version() {
       failure={failure}
       gap={gap}
       onRefresh={reload}
-      onBackToRegistry={() => navigate('/buckets')}
+      onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onOpenBuild={(build) => navigate(
         `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
@@ -698,14 +698,45 @@ function LineageSide({
   )
 }
 
-function ConsumeCard({ bucket, version }: { bucket: string; version: VersionData }) {
-  const snippet = terraformConsumeSnippet(bucket, version)
+type Consumer = 'terraform' | 'docker' | 'aws'
+
+export function ConsumeCard({
+  bucket,
+  version,
+  initialConsumer = 'terraform',
+}: {
+  bucket: string
+  version: VersionData
+  initialConsumer?: Consumer
+}) {
+  const consumers = availableConsumers(version)
+  const [consumer, setConsumer] = useState<Consumer>(
+    consumers.includes(initialConsumer) ? initialConsumer : 'terraform',
+  )
+  const snippet = consumer === 'terraform'
+    ? terraformConsumeSnippet(bucket, version)
+    : platformConsumeSnippet(consumer, bucket, version)
   return (
     <Card>
       <CardTitle>Consume this version</CardTitle>
       <CardBody>
+        <ToggleGroup
+          aria-label="Consumption method"
+          isCompact
+          style={{ marginBottom: 16 }}
+        >
+          {consumers.map((item) => (
+            <ToggleGroupItem
+              key={item}
+              text={item === 'terraform' ? 'Terraform' : item === 'docker' ? 'Docker' : 'AWS'}
+              buttonId={`consume-${item}`}
+              isSelected={consumer === item}
+              onChange={() => setConsumer(item)}
+            />
+          ))}
+        </ToggleGroup>
         {snippet ? (
-          <TerraformCode snippet={snippet} label="Copy consume configuration" />
+          <TerraformCode snippet={snippet} label={`Copy ${consumer} consume configuration`} />
         ) : (
           <Alert variant="info" isInline title="No Terraform lookup can identify this version">
             <Content component="p">
@@ -723,6 +754,46 @@ function ConsumeCard({ bucket, version }: { bucket: string; version: VersionData
       </CardBody>
     </Card>
   )
+}
+
+export function availableConsumers(version: VersionData): Consumer[] {
+  const builtPlatforms = new Set(
+    version.builds.filter((build) => build.artifacts.length > 0).map((build) => build.platform),
+  )
+  return ['terraform', ...(['docker', 'aws'] as const).filter((platform) => builtPlatforms.has(platform))]
+}
+
+export function platformConsumeSnippet(
+  platform: string,
+  bucket: string,
+  version: VersionData,
+): string | null {
+  const artifacts = version.builds
+    .filter((build) => build.platform === platform)
+    .flatMap((build) => build.artifacts)
+  if (artifacts.length === 0) return null
+
+  const heading = `# ${bucket} ${version.name}`
+  if (platform === 'docker') {
+    return [heading, ...artifacts.map((artifact) =>
+      '# image digest recorded for this build\n' +
+      `# pull with a known repository: docker pull <repo>@${artifact.externalIdentifier}\n` +
+      `docker image inspect ${artifact.externalIdentifier}\n\n` +
+      `- name: Pull ${bucket} ${version.name} image by digest\n` +
+      '  community.docker.docker_image_pull:\n' +
+      `    name: ${JSON.stringify(`<repo>@${artifact.externalIdentifier}`)}`,
+    )].join('\n\n')
+  }
+  if (platform === 'aws') {
+    return [heading, ...artifacts.map((artifact) =>
+      `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n\n` +
+      `- name: Launch ${bucket} ${version.name} in ${artifact.region}\n` +
+      '  amazon.aws.ec2_instance:\n' +
+      `    image_id: ${JSON.stringify(artifact.externalIdentifier)}\n` +
+      `    region: ${JSON.stringify(artifact.region)}`,
+    )].join('\n\n')
+  }
+  return null
 }
 
 export function OperationsCard({

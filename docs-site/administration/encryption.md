@@ -29,6 +29,8 @@ The key service is a startup dependency. If it is unreachable at boot, the
 process refuses to start and remains sealed. Running replicas continue serving
 during a key-service outage.
 
+![Dufflebag Encryption screen showing the keyring purposes and KEK versions](/screenshots/encryption.png)
+
 ## Health
 
 An encrypted instance heartbeats the key service about every five minutes by
@@ -78,15 +80,15 @@ not re-encrypted and existing verification continues. Tokens expire within
 their TTL. Audit HMAC correlation becomes specific to each key version.
 Multi-replica peers adopt the new versions at their next heartbeat.
 
-The [deployment guide](../deployment/encryption-setup.md#encryption-at-rest-optional-decided-at-first-boot)
+The [deployment guide](../components/encryption.md#encryption-at-rest-optional-decided-at-first-boot)
 contains the command sequences, seal-out recovery procedure, and
 Kubernetes-native Vault authentication mode.
 
 ## Where to go next
 
-- [Deployment guide](../deployment/index.md): serving, health probes, first run,
+- [Installation](../quick-start/installation.md): serving, health probes, first run,
   and recovery.
-- [Roles and principals](./roles-principals.md): the recovery shares and the
+- [Roles and principals](./principals.md): the recovery shares and the
   root principal.
 
 Related: [The audit trail](./audit.md).

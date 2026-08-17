@@ -33,6 +33,31 @@ func TestObjectStorageConfigurationIsNotAPlatformOperation(t *testing.T) {
 	}
 }
 
+func TestBucketScopedPrincipalCannotUseProjectLevelAdministration(t *testing.T) {
+	server := platformServer(testRoles{
+		role: identity.RoleMaintainer,
+		scope: identity.Scope{
+			OrganizationID: uuid.MustParse(testOrgID),
+			ProjectID:      uuid.MustParse(testProjID),
+			BucketID:       testBucketID,
+		},
+	})
+	for _, request := range []struct {
+		name, path string
+	}{
+		{"bagdrop", "/api/v1/organizations/" + testOrgID + "/projects/" + testProjID + "/bagdrop"},
+		{"webhooks", "/api/v1/organizations/" + testOrgID + "/projects/" + testProjID + "/webhooks"},
+		{"principal admin", "/api/v1/principals"},
+	} {
+		t.Run(request.name, func(t *testing.T) {
+			response := call(t, server, http.MethodGet, request.path, nil, testToken)
+			if response.Code != http.StatusNotFound {
+				t.Fatalf("status = %d, want 404; body %s", response.Code, response.Body)
+			}
+		})
+	}
+}
+
 func platformServerWithRepository(
 	roles testRoles, repository *fakeTenancyRepository,
 ) http.Handler {
@@ -1049,6 +1074,20 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 			body:      map[string]any{"name": "ci", "role": "builder", "organization_id": targetOrg},
 			fault:     func(r *fakeTenancyRepository) { r.createPrincipalErr = identity.ErrConflict },
 			operation: "principal.create", outcome: "failure", reason: "already_exists", actor: testPrincID,
+		},
+		{
+			name:   "a principal naming a missing bucket is recorded",
+			roles:  root,
+			method: http.MethodPost,
+			path:   "/api/v1/principals",
+			body: map[string]any{
+				"name": "ci", "role": "builder",
+				"organization_id": targetOrg,
+				"project_id":      "11111111-1111-1111-1111-111111111112",
+				"bucket_id":       testBucketID,
+			},
+			fault:     func(r *fakeTenancyRepository) { r.createPrincipalErr = identity.ErrNotFound },
+			operation: "principal.create", outcome: "refused", reason: "scope_not_found", actor: testPrincID,
 		},
 		{
 			name:      "storage failing to create is recorded",

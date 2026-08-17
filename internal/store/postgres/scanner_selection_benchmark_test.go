@@ -158,9 +158,9 @@ func seedScannerSelectionTenants(b *testing.B, admin *sql.DB, tenantCount int) {
 			FROM generate_series(1, $1) AS generated(tenant)
 		)
 		INSERT INTO builds
-			(organization_id, project_id, id, version_id, component_type, status, platform,
+			(organization_id, project_id, id, bucket_id, version_id, component_type, status, platform,
 			 metadata_seen, created_at, updated_at)
-		SELECT organization_id, project_id, 'scanner-selection-build', 'scanner-selection-version',
+		SELECT organization_id, project_id, 'scanner-selection-build', 'scanner-selection-bucket', 'scanner-selection-version',
 			'docker', 'done', 'docker', true,
 			TIMESTAMPTZ '2026-08-09 00:00:00+00', TIMESTAMPTZ '2026-08-09 00:00:00+00'
 		FROM tenants`,
@@ -170,8 +170,8 @@ func seedScannerSelectionTenants(b *testing.B, admin *sql.DB, tenantCount int) {
 				md5('scanner-selection-project-' || tenant::text)::uuid AS project_id
 			FROM generate_series(1, $1) AS generated(tenant)
 		)
-		INSERT INTO pending_scans (organization_id, project_id, build_id, enqueued_at, reason)
-		SELECT organization_id, project_id, 'scanner-selection-build',
+		INSERT INTO pending_scans (organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
+		SELECT organization_id, project_id, 'scanner-selection-bucket', 'scanner-selection-build',
 			TIMESTAMPTZ '2026-08-09 00:00:00+00' + tenant * INTERVAL '1 microsecond',
 			'manual_rescan'
 		FROM tenants`,
