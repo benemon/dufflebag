@@ -33,10 +33,21 @@ renders a copyable Terraform `hcp_packer_version` + `hcp_packer_artifact`
 block. The card provides the console's standing handoff to automation — see
 [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md).
 
-The card offers Terraform plus platform-appropriate commands for platforms
-the version actually built. Terraform is always present and selected by
-default; platforms without a confident command mapping fall back to
-Terraform.
+The card offers Terraform plus native commands for platforms the version
+actually built; Terraform is always present and selected by default.
+
+- **AWS** builds are fully tethered — the artifact records the AMI id and
+  region — so the tab renders runnable `aws ec2 describe-images` and
+  `aws ec2 run-instances` commands.
+- **Docker** builds record the image digest, never a repository. When the
+  build was tagged (a `docker-tag` post-processor), the tag travels in the
+  build labels and the card offers **Docker** and **Podman** tabs with
+  `pull` commands for each tag plus a digest `image inspect` line. An
+  untagged build gets a single Docker tab: the digest inspection plus a
+  plain statement that no repository was recorded — a pull command would be
+  an invention.
+
+Platforms without a confident command mapping fall back to Terraform.
 
 ![Dufflebag consumption card showing the Terraform and platform command toggle](/screenshots/version-consume.png)
 

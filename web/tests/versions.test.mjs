@@ -25,6 +25,7 @@ let RevokeModalView
 let RestoreModalView
 let DeleteVersionModalView
 let OperationsCard
+let VersionOverview
 let BuildTable
 let BuildView
 let ArtifactsCard
@@ -77,7 +78,8 @@ before(async () => {
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
     EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
-  ;({ VersionView, RevokeModalView, RestoreModalView, DeleteVersionModalView, OperationsCard, BuildTable,
+  ;({ VersionView, VersionOverview, RevokeModalView, RestoreModalView, DeleteVersionModalView,
+    OperationsCard, BuildTable,
     ConsumeCard, availableConsumers, platformConsumeSnippet,
     terraformConsumeSnippet, terraformPromotionSnippet, BuildStateLabel } =
     await vite.ssrLoadModule('/src/screens/Version.tsx'))
@@ -128,7 +130,7 @@ const completeVersion = {
         options: {
           path: './image.pkr.hcl', vars: ['base_image', 'run_label'],
           'var-files': ['./production.pkrvars.hcl'],
-          only: ['docker.ubuntu'], debug: true, force: true,
+          only: ['docker.ubuntu'], except: ['docker.legacy'], debug: true, force: true,
         },
         os: { type: 'linux', details: { arch: 'amd64', version: '6.12' } },
         plugins: [{ name: 'docker', version: '1.1.4' }],
@@ -220,7 +222,7 @@ const consumptionVersion = (builds, channels = ['latest']) => ({
   ...actionVersion(), name: 'v3', fingerprint: 'fp-consume', channels, builds,
 })
 
-const consumptionBuild = (platform, artifacts) => ({ platform, artifacts })
+const consumptionBuild = (platform, artifacts, labels = {}) => ({ platform, artifacts, labels })
 
 const channelFixture = (over = {}) => ({
   name: 'production', versionName: 'v7', fingerprint: 'fp-action', managed: false,
@@ -1101,7 +1103,7 @@ test('build and artifact details come through to the version page', async () => 
       options: {
         path: './image.pkr.hcl', variables: ['base_image', 'run_label'],
         variableFiles: ['./production.pkrvars.hcl'],
-        only: ['docker.ubuntu'], except: [], debug: true, force: true,
+        only: ['docker.ubuntu'], except: ['docker.legacy'], debug: true, force: true,
       },
       updated: '2026-07-31T10:05:00.000Z',
       packageInventory: { status: 'not-loaded' },
@@ -1119,6 +1121,57 @@ test('build and artifact details come through to the version page', async () => 
   assert.match(markup, /docker 1\.1\.4/)
   assert.match(markup, /<time[^>]*dateTime="2026-07-31T10:00:00.000Z"/)
   assert.match(markup, /<time[^>]*dateTime="2026-07-31T10:05:00.000Z"/)
+})
+
+test('consumption labels and artifact identities survive the build wire projection', async () => {
+  // These builds mirror the live docker-tag, untagged Docker, and AMI wire
+  // specimens: Docker external_identifier is always the bare digest and its
+  // repository refs live only in labels.tags.
+  const taggedLabels = {
+    ImageSha256: 'sha256:387f75...',
+    PackerArtifactID: 'dufflebag-probe/tagged:probe',
+    SourceImageDigest: 'alpine@sha256:d9e8...',
+    tags: 'dufflebag-probe/tagged:probe',
+  }
+  const wire = {
+    ...completeVersion,
+    builds: [
+      {
+        id: 'tagged', component_type: 'docker.tagged', status: 'BUILD_DONE', platform: 'docker',
+        labels: taggedLabels,
+        artifacts: [{ id: 'tagged-artifact', external_identifier: 'sha256:387f75...', region: 'docker' }],
+      },
+      {
+        id: 'untagged', component_type: 'docker.untagged', status: 'BUILD_DONE', platform: 'docker',
+        artifacts: [{ id: 'untagged-artifact', external_identifier: 'sha256:untagged', region: 'docker' }],
+      },
+      {
+        id: 'ami', component_type: 'amazon-ebs.ubuntu', status: 'BUILD_DONE', platform: 'aws',
+        artifacts: [{
+          id: 'ami-artifact', external_identifier: 'ami-0b6873e6a9ffc49be', region: 'eu-west-2',
+        }],
+      },
+    ],
+  }
+  const version = await withFetch(
+    {
+      '/versions/fp-complete': () => json({ version: wire }),
+      '/channels': () => json({ channels: [] }),
+    },
+    () => loadVersion(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images', 'fp-complete',
+    ),
+  )
+
+  assert.deepEqual(version.builds[0].labels, taggedLabels)
+  assert.deepEqual(version.builds[0].artifacts[0], {
+    id: 'tagged-artifact', externalIdentifier: 'sha256:387f75...', region: 'docker',
+  })
+  assert.deepEqual(version.builds[1].labels, {})
+  assert.deepEqual(version.builds[2].artifacts[0], {
+    id: 'ami-artifact', externalIdentifier: 'ami-0b6873e6a9ffc49be', region: 'eu-west-2',
+  })
+  assert.deepEqual(availableConsumers(version), ['terraform', 'docker', 'podman', 'aws'])
 })
 
 test('the build list renders metadata columns and expandable package detail', () => {
@@ -1183,7 +1236,7 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   assert.equal(detail.build.packageInventory.packages.length, 1)
   assert.equal(
     packerBuildCommand(detail.build),
-    'packer build \\\n  -var="base_image=***" \\\n  -var="run_label=***" \\\n  -var-file=./production.pkrvars.hcl \\\n  -only=docker.ubuntu \\\n  -debug \\\n  -force \\\n  ./image.pkr.hcl',
+    'packer build \\\n  -var="base_image=***" \\\n  -var="run_label=***" \\\n  -var-file=./production.pkrvars.hcl \\\n  -only=docker.ubuntu \\\n  -except=docker.legacy \\\n  -debug \\\n  -force \\\n  ./image.pkr.hcl',
   )
 
   const markup = renderToStaticMarkup(React.createElement(BuildView, {
@@ -1196,6 +1249,17 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   assert.match(markup, /Build options/)
   assert.match(markup, /Variable values are masked/)
   assert.match(markup, /Packer runner environment/)
+  for (const [label, value] of [
+    ['Template', './image.pkr.hcl'],
+    ['Debug', 'true'],
+    ['Force', 'true'],
+    ['Only', 'docker.ubuntu'],
+    ['Except', 'docker.legacy'],
+    ['Var files', './production.pkrvars.hcl'],
+    ['Vars', 'base_image, run_label'],
+  ]) {
+    assert.match(markup, new RegExp(`>${label}<[\\s\\S]*?${value.replace('.', '\\.')}`))
+  }
   assert.match(markup, /Build labels/)
   assert.match(markup, /base_image=\*\*\*/)
   assert.match(markup, /ImageDigest/)
@@ -1245,6 +1309,67 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   }))
   assert.doesNotMatch(bare, /aria-label="Download /)
   assert.doesNotMatch(bare, /pf-v6-c-card__title[^>]*>SBOM</)
+})
+
+test('Packer runner environment adds only reported option rows', async () => {
+  const load = (metadata, over = {}) => {
+    const wire = {
+      ...completeVersion,
+      builds: [{ ...completeVersion.builds[0], metadata, ...over }],
+    }
+    return withFetch(
+      {
+        '/versions/fp-complete': () => json({ version: wire }),
+        '/packages?pagination.page_size=100': () => json({ packages: [], pagination: {} }),
+        '/sboms': () => json({ sboms: [] }),
+      },
+      () => loadBuildDetail(
+        'token', { organizationID: 'org', projectID: 'project' }, 'images',
+        'fp-complete', wire.builds[0].id,
+      ),
+    )
+  }
+
+  // Minimal live options shape: null collection fields and false booleans are
+  // absent from the card; path alone contributes the Template row.
+  const minimal = await load({ packer: { options: {
+    path: 'ubuntu.pkr.hcl', debug: false, force: false,
+    only: null, except: null, 'var-files': null, vars: null,
+  } } })
+  assert.deepEqual(minimal.build.options, {
+    path: 'ubuntu.pkr.hcl', variables: [], variableFiles: [], only: [], except: [],
+    debug: false, force: false,
+  })
+  const minimalMarkup = renderToStaticMarkup(React.createElement(BuildView, {
+    bucket: 'images', detail: minimal, loading: false, failure: null,
+    onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
+  }))
+  assert.match(minimalMarkup, /Packer runner environment/)
+  assert.match(minimalMarkup, />Template<[\s\S]*?ubuntu\.pkr\.hcl/)
+  for (const label of ['Debug', 'Force', 'Only', 'Except', 'Var files', 'Vars']) {
+    assert.doesNotMatch(minimalMarkup, new RegExp(`>${label}<`))
+  }
+
+  // A metadata-less build keeps the card when it carries a Run UUID — the
+  // UUID is a top-level build field, not metadata, and the card is its only
+  // home. Only a build with genuinely nothing to show loses the card.
+  const withoutMetadata = await load(null)
+  const withoutMetadataMarkup = renderToStaticMarkup(React.createElement(BuildView, {
+    bucket: 'images', detail: withoutMetadata, loading: false, failure: null,
+    onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
+  }))
+  assert.match(withoutMetadataMarkup, /Packer runner environment/)
+  assert.match(withoutMetadataMarkup, /Run UUID/)
+  for (const label of ['Template', 'Debug', 'Force', 'Only', 'Except', 'Var files', 'Vars']) {
+    assert.doesNotMatch(withoutMetadataMarkup, new RegExp(`>${label}<`))
+  }
+
+  const bare = await load(null, { packer_run_uuid: undefined })
+  const bareMarkup = renderToStaticMarkup(React.createElement(BuildView, {
+    bucket: 'images', detail: bare, loading: false, failure: null,
+    onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
+  }))
+  assert.doesNotMatch(bareMarkup, /Packer runner environment/)
 })
 
 test('an unparseable SBOM is not rendered as a zero package inventory', async () => {
@@ -1689,6 +1814,13 @@ test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', ()
     consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
   ])), ['terraform', 'docker'])
   assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild(
+      'docker',
+      [{ externalIdentifier: 'sha256:abc', region: 'docker' }],
+      { tags: 'dufflebag-probe/tagged:probe' },
+    ),
+  ])), ['terraform', 'docker', 'podman'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'us-east-1' }]),
   ])), ['terraform', 'aws'])
   assert.deepEqual(availableConsumers(consumptionVersion([
@@ -1712,6 +1844,7 @@ test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', ()
   }))
   assert.match(vsphereMarkup, /id="consume-terraform"/)
   assert.doesNotMatch(vsphereMarkup, /id="consume-docker"/)
+  assert.doesNotMatch(vsphereMarkup, /id="consume-podman"/)
   assert.doesNotMatch(vsphereMarkup, /id="consume-aws"/)
 })
 
@@ -1741,28 +1874,80 @@ test('MUTATION_TERRAFORM_DEFAULT initially selects and renders the unchanged Ter
   )
 })
 
-test('MUTATION_SINGLE_CODEBLOCK keeps the selected Docker pane exclusive', () => {
+test('MUTATION_NATIVE_DOCKER renders every tagged pull and verifies the recorded digest', () => {
+  // Live docker-tag wire shape: the artifact remains a bare digest in region
+  // "docker" while repository refs are comma-splittable build labels.
   const version = consumptionVersion([
-    consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
+    consumptionBuild(
+      'docker',
+      [{ externalIdentifier: 'sha256:387f75...', region: 'docker' }],
+      {
+        ImageSha256: 'sha256:387f75...',
+        PackerArtifactID: 'dufflebag-probe/tagged:probe',
+        SourceImageDigest: 'alpine@sha256:d9e8...',
+        tags: 'dufflebag-probe/tagged:probe, dufflebag-probe/tagged:latest',
+      },
+    ),
   ])
   const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
     bucket: 'images', version, initialConsumer: 'docker',
   }))
 
   assert.match(markup, /aria-pressed="true"[^>]*id="consume-docker"/)
-  assert.match(markup, /# image digest recorded for this build/)
-  assert.match(markup, /docker pull &lt;repo&gt;@sha256:abc/)
-  assert.match(markup, /docker image inspect sha256:abc/)
-  assert.match(markup, /community\.docker\.docker_image_pull/)
-  assert.match(markup, /name: &quot;&lt;repo&gt;@sha256:abc&quot;/)
+  assert.match(markup, /id="consume-podman"/)
+  assert.match(markup, /docker pull dufflebag-probe\/tagged:probe/)
+  assert.match(markup, /docker pull dufflebag-probe\/tagged:latest/)
+  assert.match(markup, /docker image inspect sha256:387f75\.\.\./)
+  assert.doesNotMatch(markup, /community\.docker|&lt;repo&gt;@/)
   assert.doesNotMatch(markup, /hcp_packer_version|hcp_packer_artifact/)
   assert.equal((markup.match(/\bpf-v6-c-code-block\b/g) ?? []).length, 1)
 })
 
+test('untagged Docker has no Podman choice or invented pull reference', () => {
+  // Live untagged wire shape: labels can be absent/empty; PackerArtifactID,
+  // when present, repeats the digest and is not a pullable repository ref.
+  const version = consumptionVersion([
+    consumptionBuild(
+      'docker',
+      [{ externalIdentifier: 'sha256:387f75...', region: 'docker' }],
+      { PackerArtifactID: 'sha256:387f75...' },
+    ),
+  ])
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'docker',
+  }))
+
+  assert.deepEqual(availableConsumers(version), ['terraform', 'docker'])
+  assert.doesNotMatch(markup, /id="consume-podman"/)
+  assert.match(markup, /The builder recorded no repository, so no pull command exists\./)
+  assert.match(markup, /docker image inspect sha256:387f75\.\.\./)
+  assert.doesNotMatch(markup, /docker pull|&lt;repo&gt;/)
+})
+
+test('Podman uses native pulls and digest identity verification', () => {
+  const version = consumptionVersion([
+    consumptionBuild(
+      'docker',
+      [{ externalIdentifier: 'sha256:387f75...', region: 'docker' }],
+      { tags: 'dufflebag-probe/tagged:probe' },
+    ),
+  ])
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'podman',
+  }))
+
+  assert.match(markup, /aria-pressed="true"[^>]*id="consume-podman"/)
+  assert.match(markup, /podman pull dufflebag-probe\/tagged:probe/)
+  assert.match(markup, /podman image inspect sha256:387f75\.\.\./)
+  assert.doesNotMatch(markup, /docker pull|community\.docker/)
+})
+
 test('MUTATION_AWS_ALL_REGIONS includes every regional artifact in the AWS pane', () => {
+  // Live AMI wire shape: external_identifier is the AMI id and region is the
+  // region both native AWS CLI commands require.
   const version = consumptionVersion([
     consumptionBuild('aws', [
-      { externalIdentifier: 'ami-east', region: 'us-east-1' },
+      { externalIdentifier: 'ami-0b6873e6a9ffc49be', region: 'eu-west-2' },
       { externalIdentifier: 'ami-west', region: 'us-west-2' },
     ]),
   ])
@@ -1772,15 +1957,49 @@ test('MUTATION_AWS_ALL_REGIONS includes every regional artifact in the AWS pane'
   }))
 
   for (const command of [
-    'aws ec2 describe-images --image-ids ami-east --region us-east-1',
+    'aws ec2 describe-images --image-ids ami-0b6873e6a9ffc49be --region eu-west-2',
     'aws ec2 describe-images --image-ids ami-west --region us-west-2',
+    'aws ec2 run-instances --image-id ami-0b6873e6a9ffc49be --region eu-west-2',
+    'aws ec2 run-instances --image-id ami-west --region us-west-2',
   ]) {
     assert.match(snippet, new RegExp(command))
     assert.match(markup, new RegExp(command))
   }
-  assert.equal((snippet.match(/amazon\.aws\.ec2_instance/g) ?? []).length, 2)
-  assert.match(snippet, /image_id: "ami-east"[\s\S]*region: "us-east-1"/)
-  assert.match(snippet, /image_id: "ami-west"[\s\S]*region: "us-west-2"/)
+  assert.doesNotMatch(snippet, /amazon\.aws|ec2_instance|image_id:/)
+})
+
+test('version card order and breakpoint grid stay fixed for every consumer', () => {
+  const version = consumptionVersion([
+    consumptionBuild(
+      'docker',
+      [{ externalIdentifier: 'sha256:387f75...', region: 'docker' }],
+      { tags: 'dufflebag-probe/tagged:probe' },
+    ),
+    consumptionBuild('aws', [
+      { externalIdentifier: 'ami-0b6873e6a9ffc49be', region: 'eu-west-2' },
+    ]),
+  ])
+  const detail = { version, channels: [channelFixture()] }
+  const orders = ['terraform', 'docker', 'podman', 'aws'].map((initialConsumer) => {
+    const markup = renderToStaticMarkup(React.createElement(VersionOverview, {
+      bucket: 'images', version, detail, findings: [], callerRole: 'publisher',
+      onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
+      initialConsumer,
+    }))
+    assert.match(markup, /pf-v6-l-grid/)
+    assert.match(markup, /pf-m-7-col-on-lg/)
+    assert.match(markup, /pf-m-5-col-on-lg/)
+    // Toggle labels are explicit, not derived: capitalising the key once
+    // rendered 'Aws'.
+    assert.match(markup, />AWS</)
+    assert.doesNotMatch(markup, />Aws</)
+    return [...markup.matchAll(/pf-v6-c-card__title-text[^>]*>([^<]+)/g)]
+      .map((match) => match[1])
+  })
+
+  for (const order of orders) {
+    assert.deepEqual(order, ['Lineage', 'Consume this version', 'Operations'])
+  }
 })
 
 test('a versions failure is visible instead of empty successful data', () => {

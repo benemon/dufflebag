@@ -825,7 +825,7 @@ function toBuild(build: ApiBuild): Build {
   }
 }
 
-function optionValues(value?: string | string[]): string[] {
+function optionValues(value?: string | string[] | null): string[] {
   if (typeof value === 'string') return value ? [value] : []
   return value?.filter((item): item is string => typeof item === 'string' && item !== '') ?? []
 }

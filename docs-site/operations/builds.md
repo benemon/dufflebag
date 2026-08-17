@@ -10,6 +10,14 @@ A build shows its status history, artifacts and SBOMs. The **Packages** tab
 shows the package inventory projected from its SBOMs, with findings when a
 scanner is configured.
 
+The **Packer runner environment** card surfaces what the build reported
+about the machine and invocation that produced it: the Packer and plugin
+versions, runner OS and architecture, the template path, and — only when the
+build set them — the debug/force flags, `-only`/`-except` selections,
+variable files and variables, plus the copyable run UUID. Rows the build did
+not report are absent rather than blank, and a build that reported nothing
+shows no card.
+
 ![Dufflebag build screen showing the package inventory from an uploaded SBOM](/screenshots/build.png)
 
 ## SBOMs

@@ -1,13 +1,18 @@
 import type { ComponentType } from 'react'
 import { Tooltip } from '@patternfly/react-core'
+import AwsIcon from '@patternfly/react-icons/dist/esm/icons/aws-icon'
+import AzureIcon from '@patternfly/react-icons/dist/esm/icons/azure-icon'
 import DockerIcon from '@patternfly/react-icons/dist/esm/icons/docker-icon'
+import GoogleIcon from '@patternfly/react-icons/dist/esm/icons/google-icon'
 
-// Keys are platform values observed in real build metadata — the demo
-// registry's stock-Packer publishes — never guessed builder names. Packer's
-// platform values are an open set, so the unmapped path below is the
-// load-bearing one: an unknown platform renders its literal name.
+// Docker and AWS are observed in real build metadata. Azure and GCP are
+// recognised by the compatibility plane; their package-provided brand icons
+// are mapped ahead of a live specimen. Unknown platforms still render below.
 const PLATFORM_ICONS: Record<string, ComponentType<{ title?: string }>> = {
+  aws: AwsIcon,
+  azure: AzureIcon,
   docker: DockerIcon,
+  gcp: GoogleIcon,
 }
 
 // The icon's title carries the meaning for screen readers (createIcon renders
