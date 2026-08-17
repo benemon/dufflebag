@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 import { after, before, test } from 'node:test'
 
 import React from 'react'
@@ -6,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
-let InstanceView, BuildCard, ScannerCard, clientEnvironment
+let InstanceView, BuildCard, ScannerCard, clientEnvironment, shellValue
 
 before(async () => {
   vite = await createServer({
@@ -14,7 +15,7 @@ before(async () => {
     server: { middlewareMode: true }, appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ InstanceView, BuildCard, ScannerCard, clientEnvironment } =
+  ;({ InstanceView, BuildCard, ScannerCard, clientEnvironment, shellValue } =
     await vite.ssrLoadModule('/src/screens/Instance.tsx'))
 })
 
@@ -74,6 +75,38 @@ test('a bucket-scoped session environment names its bucket; others never do', ()
   // The rendered screen pins both shapes.
   assert.match(view({ bucketName: 'base-images' }), /HCP_PACKER_BUCKET_NAME=base-images/)
   assert.doesNotMatch(view(), /HCP_PACKER_BUCKET_NAME/)
+})
+
+// The block is made to be pasted into a shell, and bucket names are arbitrary
+// strings (the compat plane deliberately imposes no character class). An
+// unquoted name with spaces exports the wrong value; one with metacharacters
+// runs them on the operator's machine.
+test('a hostile bucket name is quoted, a plain one stays bare', () => {
+  assert.equal(shellValue('base-images'), 'base-images')
+  assert.equal(shellValue('base images'), "'base images'")
+  assert.equal(shellValue('x; rm -rf /'), "'x; rm -rf /'")
+  assert.equal(shellValue("it's"), `'it'\\''s'`)
+  const env = clientEnvironment({
+    host: 'h', organizationID: 'org-1', projectID: 'proj-1', bucketName: 'pw; do-evil',
+  })
+  assert.match(env, /export HCP_PACKER_BUCKET_NAME='pw; do-evil'/)
+})
+
+// A transient listing failure must not hand the operator a plausible-looking
+// block that silently omits the bucket variable: the omission is stated, with
+// a retry path through the screen's Refresh.
+test('an unresolved bucket name is stated above the block, never silent', () => {
+  const failed = view({ bucketNameFailure: 'listing unavailable' })
+  // The apostrophe renders HTML-escaped in static markup.
+  assert.match(failed, /The session&#x27;s bucket could not be resolved/)
+  assert.match(failed, /listing unavailable/)
+  assert.match(failed, /omits HCP_PACKER_BUCKET_NAME/)
+  assert.doesNotMatch(view(), /could not be resolved/)
+  // The resolution effect retries on the screen's Refresh counter.
+  const instanceSource = readFileSync(
+    new URL('../src/screens/Instance.tsx', import.meta.url), 'utf8',
+  )
+  assert.match(instanceSource, /signOut, refresh\]\)/)
 })
 
 // The SDK rejects a non-https auth URL on any network, so a console served over

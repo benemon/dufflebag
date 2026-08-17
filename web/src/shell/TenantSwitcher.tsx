@@ -458,50 +458,42 @@ export function BucketPickerView({
   const modal = creating ? (
     <BucketModal onCreate={onCreate} onClose={() => setCreating(false)} />
   ) : null
+  // One return, whatever the listing state: the branches swap the picker body
+  // while an open modal stays mounted. A refresh failing (or a renewal
+  // restarting the load) mid-create otherwise swapped into a branch with no
+  // modal and tore down the operator's half-typed form (review finding on
+  // duf-3p03).
+  let body: ReactNode
   if (!scoped) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
-      </PickerField>
-    )
-  }
-  if (loading) {
-    return (
-      <PickerField label="Bucket">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
-      </PickerField>
-    )
-  }
-  if (failure) {
-    return (
-      <PickerField label="Bucket">
-        <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (buckets.length === 0) {
-    return (
-      <PickerField label="Bucket">
+    body = <Content component="p" style={{ margin: 0 }}>Choose a project first</Content>
+  } else if (loading) {
+    body = <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading buckets…" />
+  } else if (failure) {
+    body = <Content component="p" style={{ margin: 0 }}>Buckets could not be loaded</Content>
+  } else if (buckets.length === 0) {
+    body = (
+      <>
         <Content component="p" style={{ margin: 0 }}>No buckets exist</Content>
         {createButton}
-        {modal}
-      </PickerField>
+      </>
     )
-  }
-
-  const options = bucketPickerOptions(buckets, pins, selectedBucket != null)
-  return (
-    <PickerField label="Bucket">
+  } else {
+    body = (
       <TypeaheadPicker
         id="tenant-bucket"
         label="Bucket"
-        options={options}
+        options={bucketPickerOptions(buckets, pins, selectedBucket != null)}
         selectedValue={selectedBucket}
         selectedLabel={selectedBucket ?? '—'}
         onSelect={onSelect}
         onOpen={() => refreshOnPickerOpen(true, onRefresh)}
         footer={<MenuFooter>{createButton}</MenuFooter>}
       />
+    )
+  }
+  return (
+    <PickerField label="Bucket">
+      {body}
       {modal}
     </PickerField>
   )

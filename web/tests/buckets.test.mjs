@@ -550,9 +550,13 @@ test('the create modal is owned by the picker, not the vanishing footer', () => 
     new URL('../src/shell/TenantSwitcher.tsx', import.meta.url), 'utf8',
   )
   assert.match(switcherSource, /const \[creating, setCreating\] = useState\(false\)/)
-  assert.match(
-    switcherSource,
-    /footer=\{<MenuFooter>\{createButton\}<\/MenuFooter>\}\s*\/>\s*\{modal\}/,
+  // Every listing state renders through the ONE return that carries the
+  // modal: a refresh failing mid-create must swap the picker body, never
+  // tear down the operator's half-typed form.
+  assert.match(switcherSource, /\{body\}\s*\{modal\}\s*<\/PickerField>/)
+  assert.equal(
+    (switcherSource.match(/<PickerField label="Bucket">/g) ?? []).length, 1,
+    'BucketPickerView must have exactly one Bucket PickerField return',
   )
   // The trigger component itself renders no modal: its footer placement would
   // couple the modal's lifetime to the picker's open state.

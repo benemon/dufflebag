@@ -192,13 +192,17 @@ export function AppShellView({
     }))
     .filter(({ items }) => items.length > 0)
 
-  // The swapped entry means "your bucket", whichever route currently shows it:
-  // the detail once the selection names it, the landing redirect before then.
-  // Matching on its `to` alone would light it up everywhere when the target is
-  // the root, and nowhere while the landing is still resolving.
-  const isActive = (key: NavKey, to: string) => (key === 'buckets' && bucketNav
-    ? pathname === '/' || pathname.startsWith('/buckets')
-    : pathname.startsWith(to))
+  // The swapped entry means "your bucket": current on the landing (mid-
+  // resolution) and on the bucket's own routes, bounded at path segments so a
+  // sibling bucket route — reachable by URL, refused by the server — does not
+  // light it up, and neither does a name that happens to share a prefix.
+  const isActive = (key: NavKey, to: string) => {
+    if (key === 'buckets' && bucketNav) {
+      if (pathname === '/') return true
+      return to !== '/' && (pathname === to || pathname.startsWith(`${to}/`))
+    }
+    return pathname.startsWith(to)
+  }
 
   const sidebar = (
     <PageSidebar className="app-sidebar">

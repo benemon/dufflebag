@@ -22,7 +22,9 @@ Bucket selection also lives in the masthead beside the organisation and
 project pickers: a searchable drop-down that follows the route, so the bucket
 in the address bar is always the bucket on screen. Pinned buckets group first;
 typing filters the list. For a bucket-scoped session the picker is the
-orientation point — it always names the bucket the session landed in.
+orientation point — it names the session's bucket whenever the session is
+standing in it, and the **Bucket** navigation entry leads back there from
+anywhere.
 
 ![Dufflebag bucket picker open in the masthead, pinned buckets grouped first](/screenshots/bucket-picker.png)
 

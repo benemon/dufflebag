@@ -112,6 +112,23 @@ test('bucket-scoped sessions swap Buckets for a Bucket entry pointing home', () 
   // entry falls back to the landing route rather than rendering a dead link.
   const resolving = view('builder', '/', { bucketNav: { to: '/' } })
   assert.match(resolving, /<a(?=[^>]*href="\/")(?=[^>]*class="[^"]*pf-m-current)[^>]*>(?:<span[^>]*>)?Bucket</)
+
+  // NOT current on a sibling bucket route (reachable by URL, refused by the
+  // server) nor on a name sharing a prefix — the current link must point at
+  // the page being displayed.
+  const onSibling = view('builder', '/buckets/sibling', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.doesNotMatch(onSibling, /pf-m-current/)
+  const onPrefix = view('builder', '/buckets/base-images-nightly', {
+    bucketNav: { to: '/buckets/base-images' },
+  })
+  assert.doesNotMatch(onPrefix, /pf-m-current/)
+
+  // The derivation feeding bucketNav is pinned at source: the carried
+  // selection must match the claim's bucket id, and the name is URL-encoded.
+  assert.match(shellSource, /selectedBucket\.id === state\?\.claims\.bucketID/)
+  assert.match(shellSource, /encodeURIComponent\(selectedBucket\.name\)/)
 })
 
 test('the landing routes by scope while bucket detail routes keep their paths', () => {
