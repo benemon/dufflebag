@@ -5,7 +5,7 @@ import {
   Spinner,
 } from '@patternfly/react-core'
 
-import { listBuckets, type Tenant } from './api/client'
+import { listBuckets, signOutIfUnauthorized, type Tenant } from './api/client'
 import { AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
 import { Buckets } from './screens/Buckets'
@@ -149,8 +149,10 @@ function ScopedBucketLanding({ token, tenant, bucketID }: {
 }) {
   const [name, setName] = useState<string | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
+  const { signOut } = useAuth()
   useEffect(() => {
     let cancelled = false
+    setFailure(null)
     listBuckets(token, tenant)
       .then((buckets) => {
         if (cancelled) return
@@ -159,12 +161,14 @@ function ScopedBucketLanding({ token, tenant, bucketID }: {
         else setFailure('The session names a bucket the listing cannot see.')
       })
       .catch((err: unknown) => {
-        if (!cancelled) setFailure(err instanceof Error ? err.message : 'Could not resolve the bucket.')
+        if (cancelled) return
+        if (signOutIfUnauthorized(err, signOut)) return
+        setFailure(err instanceof Error ? err.message : 'Could not resolve the bucket.')
       })
     return () => {
       cancelled = true
     }
-  }, [token, tenant.organizationID, tenant.projectID, bucketID])
+  }, [token, tenant.organizationID, tenant.projectID, bucketID, signOut])
   if (failure) {
     return (
       <PageSection>

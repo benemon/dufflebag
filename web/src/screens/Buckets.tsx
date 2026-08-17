@@ -12,7 +12,7 @@ import {
 } from '@patternfly/react-table'
 import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
 import TimesIcon from '@patternfly/react-icons/dist/esm/icons/times-icon'
-import { useLocation, useNavigate } from 'react-router'
+import { Navigate, useLocation, useNavigate } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
 import { SkeletonRows } from '../components/Loading'
@@ -56,6 +56,10 @@ export function Buckets() {
     bucket.drift.kind === 'behind' || bucket.drift.kind === 'absent')
   useAutoRefresh({ hot, onRefresh: reload })
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
+  // A bucket-scoped session has exactly one bucket; the list would be one row
+  // offering operations the server refuses. The route steps back to the
+  // scoped landing, matching the hidden nav entry.
+  if (state?.claims.bucketID != null) return <Navigate to="/" replace />
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null

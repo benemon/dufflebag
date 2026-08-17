@@ -454,10 +454,16 @@ test('the bucket picker shows the route absence as an em dash', () => {
   assert.match(markup, /value="—"/)
 })
 
-test('the bucket picker shows the route absence as an em dash', () => {
-  const markup = pickerMarkup()
-  assert.match(markup, /id="tenant-bucket"/)
-  assert.match(markup, /value="—"/)
+test('a failed bucket listing is stated on the screen, never an empty table', () => {
+  const markup = renderToStaticMarkup(React.createElement(BucketsView, {
+    buckets: [], total: 0, loading: false,
+    failure: 'organisations could not be listed',
+    gap: null, callerRole: 'root',
+    openBucket: () => {}, openInstance: () => {},
+  }))
+  assert.match(markup, /Buckets could not be loaded/)
+  assert.match(markup, /organisations could not be listed/)
+  assert.doesNotMatch(markup, /No buckets yet/)
 })
 
 test('pinned buckets form the first select group and the rest follow', () => {

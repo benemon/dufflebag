@@ -45,12 +45,13 @@ const headerScreenSources = [
   readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
 ])
 
-const view = (role, pathname = '/') => renderToStaticMarkup(React.createElement(
+const view = (role, pathname = '/', over = {}) => renderToStaticMarkup(React.createElement(
   MemoryRouter,
   { initialEntries: [pathname] },
   React.createElement(AppShellView, {
     pathname,
     visibleItems: visibleNavItems(role),
+    ...over,
   }, React.createElement('main', null, 'Screen')),
 ))
 
@@ -85,6 +86,13 @@ test('router links carry PatternFly native current navigation state', () => {
   for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
+})
+
+test('the nav names the Buckets item and hides it from bucket-scoped sessions', () => {
+  assert.match(shellSource, /key: 'buckets', to: '\/buckets', label: 'Buckets'/)
+  assert.match(shellSource, /bucketScoped && item === 'buckets'/)
+  const markup = view('root', '/audit', { visibleItems: ['principals', 'audit'] })
+  assert.doesNotMatch(markup, /href="\/buckets"/)
 })
 
 test('the landing routes by scope while bucket detail routes keep their paths', () => {

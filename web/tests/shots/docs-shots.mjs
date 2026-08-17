@@ -747,6 +747,23 @@ async function captureSeededScreens(seeded) {
   await waitForText('revoked')
   await capture('versions-table.png')
 
+  // A bucket created ahead of its first publish: seeded here, after the
+  // populated captures, so the list and picker shots keep their five buckets.
+  await api(seeded.builderToken, 'PUT', `${seeded.compatBase}/buckets`, {
+    name: 'windows-images',
+    description: 'Created in the console ahead of the first publish',
+    labels: { owner: 'platform-engineering', lifecycle: 'incubating' },
+  })
+  await page.goto(`${base}/buckets/windows-images`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Bucket details')
+  await clickByText('nav[aria-label="Bucket facets"] button', 'Versions')
+  await waitForText('No versions in this bucket')
+  await waitForText('Connect a client')
+  await capture('bucket-empty.png')
+
+  // Back to the populated bucket for the channel capture.
+  await page.goto(`${base}/buckets/base-images`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Bucket details')
   await clickByText('nav[aria-label="Bucket facets"] button', 'Channels')
   await waitForText('production')
   await capture('channels.png')
