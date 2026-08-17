@@ -21,9 +21,6 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
-	"github.com/golang-migrate/migrate/v4"
-	migratepostgres "github.com/golang-migrate/migrate/v4/database/postgres"
-	_ "github.com/golang-migrate/migrate/v4/source/file"
 	"github.com/google/uuid"
 	"github.com/klauspost/compress/zstd"
 )
@@ -1645,7 +1642,7 @@ func TestConcurrentVersionCompletionsAllocateDistinctSequences(t *testing.T) {
 	}
 }
 
-// The uniqueness that guards completion is migration 000001's
+// The uniqueness that guards completion is the baseline's
 // versions_bucket_sequence, scoped (organization_id, project_id, bucket_id,
 // sequence): duplicates are refused WITHIN a tenant, while two tenants that
 // happen to hold the same bucket id each keep their own sequence space. A bare
@@ -1696,184 +1693,6 @@ func TestVersionSequenceIsUniquePerBucketWithinATenant(t *testing.T) {
 		) VALUES ($1, $2, 'version-b', 'shared-bucket-id', 'fingerprint-b', 'HCL2', true, 1, now(), now())
 	`, orgB, projectB); err != nil {
 		t.Fatalf("another tenant's identical (bucket_id, sequence) must not be refused: %v", err)
-	}
-}
-
-// Migration 000008 backfills the managed "latest" for buckets that predate it,
-// and converges a hand-created "latest" onto the managed shape instead of
-// colliding with it (duf-08q). The dance: step the schema back to 000007,
-// write what an old deployment would hold, step forward, and read the result
-// through the RLS-bound repository — which also proves the backfilled ids are
-// ULIDs the restore path accepts.
-func TestMigrationBackfillsManagedLatest(t *testing.T) {
-	db, databaseURL, cleanup := openTestDatabase(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	adminURL, err := url.Parse(databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adminURL.User = url.UserPassword("postgres", "postgres")
-	admin, err := sql.Open("pgx", adminURL.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = admin.Close() }()
-
-	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	migrator, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := migrator.Migrate(7); err != nil {
-		t.Fatalf("step back to the pre-managed schema: %v", err)
-	}
-
-	at := time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)
-	bareBucket := registry.NewID(at)
-	latestBucket := registry.NewID(at.Add(time.Millisecond))
-	handMadeLatest := registry.NewID(at.Add(2 * time.Millisecond))
-	for _, statement := range []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,'legacy-bare',$4,$4)`,
-			[]any{orgA, projectA, bareBucket.String(), at}},
-		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,'legacy-latest',$4,$4)`,
-			[]any{orgA, projectA, latestBucket.String(), at}},
-		{`INSERT INTO channels (organization_id, project_id, id, bucket_id, name, restricted, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'latest',false,$5,$5)`,
-			[]any{orgA, projectA, handMadeLatest.String(), latestBucket.String(), at}},
-	} {
-		if _, err := admin.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("write pre-migration state: %v", err)
-		}
-	}
-
-	if err := migrator.Up(); err != nil {
-		t.Fatalf("apply the managed-latest migration over existing data: %v", err)
-	}
-
-	repository := store.NewRepository(db)
-	tenant := store.ParseTenant(orgA, projectA)
-	backfilled, err := repository.GetChannel(ctx, tenant, "legacy-bare", "latest")
-	if err != nil {
-		t.Fatalf("GetChannel backfilled latest: %v", err)
-	}
-	if !backfilled.Managed || !backfilled.Restricted || backfilled.Version != nil {
-		t.Fatalf("backfilled latest = %#v, want managed restricted unassigned", backfilled)
-	}
-	converted, err := repository.GetChannel(ctx, tenant, "legacy-latest", "latest")
-	if err != nil {
-		t.Fatalf("GetChannel converted latest: %v", err)
-	}
-	if !converted.Managed || !converted.Restricted {
-		t.Fatalf("hand-made latest = %#v, want converged onto the managed shape", converted)
-	}
-	if converted.ID != handMadeLatest {
-		t.Fatalf("conversion re-minted the channel: id %s, want %s", converted.ID, handMadeLatest)
-	}
-}
-
-// Migration 000009 cannot recover actors that were never stored. It backfills
-// the explicit unknown empty string, keeps the old writer compatible through a
-// default, and restores FORCE RLS after crossing tenants for the backfill.
-// Removing the UPDATE makes SET NOT NULL fail while applying the migration, so
-// this test is also the named backfill mutation gate.
-func TestMigrationBackfillsChannelAssignmentAuthor(t *testing.T) {
-	_, databaseURL, cleanup := openTestDatabase(t)
-	defer cleanup()
-	ctx := context.Background()
-
-	adminURL, err := url.Parse(databaseURL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	adminURL.User = url.UserPassword("postgres", "postgres")
-	admin, err := sql.Open("pgx", adminURL.String())
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = admin.Close() }()
-
-	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	migrator, err := migrate.NewWithDatabaseInstance("file://migrations", "postgres", driver)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := migrator.Migrate(8); err != nil {
-		t.Fatalf("step back to pre-author schema: %v", err)
-	}
-
-	at := time.Date(2026, 8, 1, 7, 0, 0, 0, time.UTC)
-	bucketID := registry.NewID(at)
-	versionID := registry.NewID(at.Add(time.Millisecond))
-	channelID := registry.NewID(at.Add(2 * time.Millisecond))
-	assignmentID := registry.NewID(at.Add(3 * time.Millisecond))
-	for _, statement := range []struct {
-		query string
-		args  []any
-	}{
-		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
-			VALUES ($1,$2,$3,'legacy-author',$4,$4)`, []any{orgA, projectA, bucketID.String(), at}},
-		{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint,
-			template_type, complete, sequence, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'legacy-fp','HCL2',true,1,$5,$5)`,
-			[]any{orgA, projectA, versionID.String(), bucketID.String(), at}},
-		{`INSERT INTO channels (organization_id, project_id, id, bucket_id, name,
-			restricted, managed, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,'production',false,false,$5,$5)`,
-			[]any{orgA, projectA, channelID.String(), bucketID.String(), at}},
-		{`INSERT INTO channel_assignments
-			(organization_id, project_id, id, channel_id, version_id, assigned_at)
-			VALUES ($1,$2,$3,$4,$5,$6)`,
-			[]any{orgA, projectA, assignmentID.String(), channelID.String(), versionID.String(), at}},
-	} {
-		if _, err := admin.ExecContext(ctx, statement.query, statement.args...); err != nil {
-			t.Fatalf("write pre-author state: %v", err)
-		}
-	}
-
-	if err := migrator.Up(); err != nil {
-		t.Fatalf("apply channel-author migration over existing data: %v", err)
-	}
-	var authorID string
-	if err := admin.QueryRowContext(ctx,
-		`SELECT author_id FROM channel_assignments WHERE id = $1`, assignmentID.String(),
-	).Scan(&authorID); err != nil {
-		t.Fatal(err)
-	}
-	if authorID != "" {
-		t.Fatalf("legacy assignment author = %q, want explicit unknown", authorID)
-	}
-	var rowSecurity, forceRowSecurity bool
-	if err := admin.QueryRowContext(ctx, `
-		SELECT relrowsecurity, relforcerowsecurity
-		FROM pg_class WHERE oid = 'channel_assignments'::regclass
-	`).Scan(&rowSecurity, &forceRowSecurity); err != nil {
-		t.Fatal(err)
-	}
-	if !rowSecurity || !forceRowSecurity {
-		t.Fatalf("channel_assignments RLS posture = enabled:%v forced:%v", rowSecurity, forceRowSecurity)
-	}
-	var policyCount int
-	if err := admin.QueryRowContext(ctx, `
-		SELECT count(*) FROM pg_policies
-		WHERE schemaname = current_schema() AND tablename = 'channel_assignments'
-	`).Scan(&policyCount); err != nil {
-		t.Fatal(err)
-	}
-	if policyCount != 1 {
-		t.Fatalf("channel_assignments policy count = %d, want 1", policyCount)
 	}
 }
 
@@ -2344,7 +2163,7 @@ func TestUpdateChannelClearsTheAssignment(t *testing.T) {
 
 // DeleteBucket takes the whole aggregate with it — versions, builds, artifacts,
 // channels and sboms — which requires the append-only trigger to let the
-// cascade through channel_assignments (migration 000006). The trigger keeps its
+// cascade through channel_assignments. The baseline trigger keeps its
 // teeth for everything else: live history is still immutable.
 func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
@@ -2426,7 +2245,7 @@ func TestDeleteBucketRemovesTheAggregate(t *testing.T) {
 	}
 
 	// The trigger still rejects tampering with live history before the bucket
-	// goes: migration 000006 narrowed the invariant, it did not drop it.
+	// goes: the baseline narrows the invariant; it does not drop it.
 	tx, err := store.BeginTenant(ctx, db, tenant.OrganizationID.String(), tenant.ProjectID.String(), "")
 	if err != nil {
 		t.Fatal(err)

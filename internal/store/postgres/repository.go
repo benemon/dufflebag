@@ -212,8 +212,8 @@ func (r *Repository) CreateBucket(ctx context.Context, tenant Tenant, bucket Buc
 	// exists: live CreateBucket auto-creates it with managed:true,
 	// restricted:true, unassigned, in the same instant (dossier §7, Appendix A
 	// probes 04-06). Same transaction, so no client can observe a channel-less
-	// bucket. Migration 000008 establishes the same invariant for buckets that
-	// predate it.
+	// bucket. Pre-0.1.0 databases are rebuildable, so the baseline needs no
+	// historical backfill for buckets that predate this invariant.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channels (
 			organization_id, project_id, id, bucket_id, name, restricted, managed, created_at, updated_at
@@ -257,7 +257,7 @@ func (r *Repository) GetBucket(ctx context.Context, tenant Tenant, name string) 
 // DeleteBucket removes a bucket and everything under it.
 //
 // Versions, builds, artifacts, channels and the sboms follow by cascade, and
-// migration 000006 lets the cascade through the append-only trigger on
+// the baseline trigger lets the cascade through the append-only guard on
 // channel_assignments. Unassignment markers (rows with no version) are left
 // behind deliberately: like history for a deleted channel, they outlive what
 // they describe, and nothing lists them once the channel is gone.
@@ -1026,7 +1026,7 @@ func (r *Repository) UpdateBuild(
 		// observed the channel's version flip and its updated_at land on the
 		// same sub-second instant as the completing UpdateBuild (Appendix A
 		// probes 13-14). The channel exists for every bucket (CreateBucket
-		// above, migration 000008), so a miss here is data corruption, not a
+		// above and the 0.1.0 baseline), so a miss here is data corruption, not a
 		// client condition.
 		if revocation := version.Revocation(); revocation == nil || revocation.RevokeAt.After(at) {
 			latest, err := r.getChannel(ctx, tx, q, tenant, bucketName, "latest")

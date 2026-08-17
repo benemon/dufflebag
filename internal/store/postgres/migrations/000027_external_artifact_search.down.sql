@@ -1,1 +1,0 @@
-DROP INDEX artifacts_external_identifier;
