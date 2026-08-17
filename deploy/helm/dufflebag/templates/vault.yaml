@@ -210,6 +210,7 @@ spec:
             {{- toYaml .Values.vault.resources | nindent 12 }}
         - name: escrow-bootstrap-credentials
           image: {{ printf "%s:%s" .Values.ceph.image.repository .Values.ceph.image.tag | quote }}
+          imagePullPolicy: {{ .Values.ceph.image.pullPolicy }}
           command:
             - /bin/sh
             - -ec
