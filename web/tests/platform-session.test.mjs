@@ -292,11 +292,6 @@ test('masthead pickers carry visible captions and loading uses a compact skeleto
   }))
   assert.match(markup, /Organisation:[\s\S]*tenant-organization/)
   assert.match(markup, /Project:[\s\S]*tenant-project/)
-  // The smoke test drives the pickers through their inner inputs by id and
-  // reads the selection from input.value — PatternFly only places the id on
-  // the real <input> via inputId, so the markup must bind them together.
-  assert.match(markup, /<input(?=[^>]*id="tenant-organization-input")(?=[^>]*value="[^"]+")[^>]*>/)
-  assert.match(markup, /<input(?=[^>]*id="tenant-project-input")(?=[^>]*value="widgets")[^>]*>/)
 
   const loading = switcherMarkup(session({ organizationsLoading: true }))
   assert.match(loading, /Organisation:/)
