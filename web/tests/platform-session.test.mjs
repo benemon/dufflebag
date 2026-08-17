@@ -5,6 +5,7 @@ import { after, before, test } from 'node:test'
 
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
+import { MemoryRouter } from 'react-router'
 import { createServer } from 'vite'
 
 let vite
@@ -23,7 +24,7 @@ let refreshOnPickerOpen
 let selectionAfterProjectsRefresh
 let grantableRoles
 let PrincipalsView
-let BucketsView
+let RegistryView
 const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
   'utf8',
@@ -50,7 +51,7 @@ before(async () => {
   } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ grantableRoles } = await vite.ssrLoadModule('/src/data/principals.ts'))
   ;({ PrincipalsView } = await vite.ssrLoadModule('/src/screens/Principals.tsx'))
-  ;({ BucketsView } = await vite.ssrLoadModule('/src/screens/Buckets.tsx'))
+  ;({ RegistryView } = await vite.ssrLoadModule('/src/screens/Registry.tsx'))
 })
 
 after(async () => {
@@ -258,8 +259,11 @@ function session(over = {}) {
 
 const switcherMarkup = (value) =>
   renderToStaticMarkup(React.createElement(
-    AuthContext.Provider, { value },
-    React.createElement(TenantSwitcher),
+    MemoryRouter, { initialEntries: ['/'] },
+    React.createElement(
+      AuthContext.Provider, { value },
+      React.createElement(TenantSwitcher),
+    ),
   ))
 
 // The organisation select in a PLATFORM session leads with an explicit
@@ -326,9 +330,10 @@ test('opening a picker refreshes once, while closing it does not', async () => {
 // duf-4hje: newly created projects only appeared after an organisation
 // round-trip, because the project picker opened onto a cached list. Both
 // pickers must wire the open-refresh, not just the organisation one.
-test('both pickers refresh their listing on open', () => {
-  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshOrganizations\)/)
-  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(nextOpen, refreshProjects\)/)
+test('all three pickers refresh their listing on open', () => {
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshOrganizations\)/)
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, refreshProjects\)/)
+  assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, onRefresh\)/)
 })
 
 test('concurrent organisation refresh signals share one request', async () => {
@@ -428,10 +433,15 @@ test('a tenancy session gets no dash row', () => {
   assert.doesNotMatch(markup, /—/)
 })
 
-test('both tenancy pickers render role-gated creation footers', () => {
-  assert.equal((tenantSwitcherSource.match(/<MenuFooter>/g) ?? []).length, 2)
+test('all three masthead pickers use typeahead toggles and role-gated creation footers', () => {
+  assert.match(tenantSwitcherSource, /<Select[\s\S]*?variant="typeahead"/)
+  assert.match(tenantSwitcherSource, /<MenuToggle[\s\S]*?variant="typeahead"/)
+  assert.match(tenantSwitcherSource, /<TextInputGroupMain/)
+  assert.match(tenantSwitcherSource, /label\.toLowerCase\(\)\.includes\(query\)/)
+  assert.equal((tenantSwitcherSource.match(/<MenuFooter>/g) ?? []).length, 3)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="organization"/)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="project"/)
+  assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?<CreateBucketButton/)
 })
 
 test('zero-organisation masthead keeps its compact recovery action', () => {
@@ -446,12 +456,11 @@ test('the data screens render a tenancy gap instead of a healthy empty state', (
     platform: true, organizationCount: 0,
     selectedOrganization: null, projectCount: 0, selectedProject: null,
   })
-  const buckets = renderToStaticMarkup(React.createElement(BucketsView, {
-    buckets: [], total: 0, loading: false, failure: null, gap,
+  assert.match(gap.title, /No organisations exist/)
+  const landing = renderToStaticMarkup(React.createElement(RegistryView, {
+    onConnectClient: () => {},
   }))
-  assert.match(buckets, /No organisations exist/)
-  assert.match(buckets, /Principals and Instance work/)
-  assert.match(buckets, /pf-v6-c-empty-state/)
-  assert.match(buckets, /Create organisation/)
-  assert.doesNotMatch(buckets, /No buckets yet/)
+  assert.match(landing, /Choose a bucket/)
+  assert.match(landing, /masthead picker/)
+  assert.doesNotMatch(landing, /No buckets yet/)
 })
