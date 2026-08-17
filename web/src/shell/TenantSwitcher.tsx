@@ -111,8 +111,14 @@ function TypeaheadPicker({
   const filtered = options.filter((option) => option.label.toLowerCase().includes(query))
   const groups = [...new Set(filtered.flatMap((option) => option.group ? [option.group] : []))]
 
+  // Resyncs on close and on SELECTION change — a refresh that removes or
+  // renames the selection must not leave an open picker naming it (duf-b4wo).
+  // filterValue is read but deliberately not a dependency: an in-progress
+  // search is never clobbered, and firing on filter transitions would refill
+  // a just-cleared search box and race the stale label right after a select.
   useEffect(() => {
-    if (!open) setInputValue(selectedLabel)
+    if (!open || filterValue === '') setInputValue(selectedLabel)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, selectedLabel])
 
   const setPickerOpen = (nextOpen: boolean) => {
