@@ -1431,11 +1431,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
     // Bucket choice is route state: type into the masthead picker, choose the
     // exact option, and the detail route becomes the selection.
+    // The typeahead filter states no-match rather than an empty menu, and
+    // clearing restores the listing — the list screen's filter contract, kept.
+    await page.click('#tenant-bucket-input')
+    await page.type('#tenant-bucket-input', 'no-such-bucket')
+    await waitForText('No results found for')
+    await page.click('[aria-label="Clear bucket search"]')
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await until('the bucket picker to navigate', () =>
       new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
     await waitForText('Bucket details')
+    // A fresh bucket states its emptiness (the old list's fresh-bucket proof).
+    await clickByText('button', 'Versions')
+    await waitForText('No versions in this bucket')
     // Channel names live on the Channels facet; Overview shows counts only.
     await clickByText('button', 'Channels')
     await waitForText('latest')
@@ -1448,8 +1457,17 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   await t.test('a privileged session pins and unpins from the bucket detail header', async () => {
     await clickByText('button', 'Pin bucket')
     await waitForText('Unpin bucket')
+    // Pinning surfaces the bucket in the picker's Pinned group; unpinning
+    // removes the group — the pinned-gallery contract in its new home.
+    await page.click('#tenant-bucket')
+    await waitForText('Pinned')
+    await page.keyboard.press('Escape')
     await clickByText('button', 'Unpin bucket')
     await waitForText('Pin bucket')
+    await page.click('#tenant-bucket')
+    await until('the pinned group to disappear', async () =>
+      !(await bodyText()).includes('Pinned'))
+    await page.keyboard.press('Escape')
   })
 
   await t.test('a completed version and an incomplete v0 drill down from the bucket row', async () => {

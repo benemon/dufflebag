@@ -310,7 +310,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // would scope queries to a project the new organisation does not contain.
   // '' — the platform row — is the deliberate step back up to platform standing
   // (ADR-0014), so it clears the pair the same way and lists nothing.
+  const projectEpoch = useRef(0)
   const selectOrganization = useCallback((organizationID: string) => {
+    // A refresh in flight for the previous organisation must not land its
+    // projects onto this one; bumping the epoch tells it to discard.
+    projectEpoch.current += 1
     setSelectedOrganization(organizationID)
     setSelectedProject(null)
     setOrganizationProjects([])
@@ -505,6 +509,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const platform = state.claims.organizationID === null
     const organizationID = platform ? selectedOrganization : state.claims.organizationID
     if (!organizationID) return null
+    const epoch = projectEpoch.current
     setProjectFailure(null)
     try {
       const projects = state.claims.projectID
@@ -512,11 +517,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         : platform
           ? await listOrganizationProjects(state.token, organizationID)
           : await listProjects(state.token, organizationID)
+      if (epoch !== projectEpoch.current) return null
       const ordered = [...projects].sort((a, b) => a.created_at.localeCompare(b.created_at))
       setOrganizationProjects(ordered)
       setSelectedProject((current) => selectionAfterProjectsRefresh(current, ordered))
       return ordered
     } catch (err: unknown) {
+      if (epoch !== projectEpoch.current) return null
       if (signOutIfUnauthorized(err, signOut)) return null
       setProjectFailure(err instanceof Error ? err.message : 'Could not refresh projects.')
       return null

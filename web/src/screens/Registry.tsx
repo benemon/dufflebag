@@ -1,5 +1,6 @@
 import {
-  Button, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
+  Alert, Button, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
+  PageSection,
 } from '@patternfly/react-core'
 import { useNavigate } from 'react-router'
 
@@ -11,13 +12,17 @@ import { platformTenancyGap, type TenancyGap } from '../data/tenant'
 export function Registry() {
   const navigate = useNavigate()
   const {
-    state, self, organizations, organizationsLoading, selectedOrganization,
-    permittedProjects, projectsLoading, projectFailure, selectedProject,
+    state, self, organizations, organizationsLoading, organizationFailure,
+    selectedOrganization, permittedProjects, projectsLoading, projectFailure, selectedProject,
   } = useAuth()
   const platform = state !== null && state.claims.organizationID === null
   const aboveProjects = state !== null && state.claims.projectID === null
-  const settling = organizationsLoading || projectsLoading || projectFailure !== null
-  const gap = aboveProjects && !settling
+  // Failures are stated, not classified as settling: an organisation list that
+  // failed to load must not read as "No organisations exist" (the old
+  // discoveryFailure wiring, data/buckets.ts before the picker rework).
+  const failure = aboveProjects ? (organizationFailure ?? projectFailure) : null
+  const settling = organizationsLoading || projectsLoading
+  const gap = aboveProjects && !settling && !failure
     ? platformTenancyGap({
         platform,
         organizationCount: organizations.length,
@@ -31,6 +36,7 @@ export function Registry() {
   return (
     <PageSection variant="secondary" isFilled>
       <RegistryView
+        failure={failure}
         gap={gap}
         callerRole={self?.role ?? null}
         onConnectClient={() => navigate('/instance')}
@@ -40,12 +46,20 @@ export function Registry() {
 }
 
 export function RegistryView({
-  gap, callerRole, onConnectClient,
+  failure = null, gap, callerRole, onConnectClient,
 }: {
+  failure?: string | null
   gap: TenancyGap | null
   callerRole: Role | null
   onConnectClient: () => void
 }) {
+  if (failure) {
+    return (
+      <Alert variant="danger" isInline title="Registry could not be loaded">
+        <Content component="p">{failure}</Content>
+      </Alert>
+    )
+  }
   if (gap) return <TenancyGapEmptyState gap={gap} callerRole={callerRole} />
   return (
     <EmptyState titleText="Choose a bucket" headingLevel="h2">

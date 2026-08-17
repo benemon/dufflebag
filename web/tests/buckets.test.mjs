@@ -65,6 +65,18 @@ test('the registry landing states the platform gap rather than a silent bucket p
   assert.doesNotMatch(markup, /Choose a bucket/)
 })
 
+test('a failed organisation listing is stated, never read as an empty registry', () => {
+  const markup = renderToStaticMarkup(React.createElement(RegistryView, {
+    failure: 'organisations could not be listed',
+    gap: null,
+    callerRole: 'root',
+    onConnectClient: () => {},
+  }))
+  assert.match(markup, /Registry could not be loaded/)
+  assert.match(markup, /organisations could not be listed/)
+  assert.doesNotMatch(markup, /No organisations exist|Choose a bucket/)
+})
+
 const pickerMarkup = (over = {}) => renderToStaticMarkup(React.createElement(BucketPickerView, {
   selectedBucket: undefined,
   buckets: [{ name: 'base-images' }, { name: 'database-images' }, { name: 'tools' }],
