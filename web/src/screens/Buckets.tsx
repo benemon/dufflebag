@@ -51,9 +51,12 @@ export function Buckets() {
   const [refresh, setRefresh] = useState(0)
   const bucketData = useBuckets(location.key, refresh)
   const reload = () => setRefresh((current) => current + 1)
-  const hot = bucketData.buckets.some((bucket) =>
-    bucket.newestVersion?.state === 'incomplete' ||
-    bucket.drift.kind === 'behind' || bucket.drift.kind === 'absent')
+  // An empty registry is the awaiting-change state: the first publish must
+  // appear without a reload, exactly as on the masthead picker.
+  const hot = (!bucketData.loading && !bucketData.failure && bucketData.buckets.length === 0) ||
+    bucketData.buckets.some((bucket) =>
+      bucket.newestVersion?.state === 'incomplete' ||
+      bucket.drift.kind === 'behind' || bucket.drift.kind === 'absent')
   useAutoRefresh({ hot, onRefresh: reload })
   const {
     state, self, selectedOrganization, selectedProject, selectedBucket, selectBucket, signOut,

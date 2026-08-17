@@ -883,6 +883,25 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('No buckets yet')
   })
 
+  await t.test('a bucket published from outside appears without a reload', async () => {
+    // The empty console is the awaiting-change state: demo-publish landing a
+    // bucket must surface in the masthead picker and the screen by polling,
+    // never by hard refresh (duf-ear2).
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
+    const wizardOrg = organizations.find((o) => o.name === wizardOrganizationName)
+    const { projects } = await api(
+      rootToken, 'GET', `/api/v1/organizations/${wizardOrg.id}/projects`)
+    await api(
+      rootToken, 'PUT',
+      `/packer/2023-01-01/organizations/${wizardOrg.id}/projects/${projects[0].id}/buckets`,
+      { name: 'first-published', description: 'landed from outside the console' },
+    )
+    await waitForText('first-published')
+    await until('the masthead picker to grow its toggle', () =>
+      page.$('#tenant-bucket').then((el) => el !== null))
+  })
+
   await t.test('the Instance build card matches the authenticated endpoint', async () => {
     const rootToken = await tokenFor(credentials.clientID, credentials.secret)
     const instance = await api(rootToken, 'GET', '/api/v1/instance')
