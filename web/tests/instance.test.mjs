@@ -54,6 +54,28 @@ test('an identifier the console does not have is omitted, not invented', () => {
   assert.match(env, /HCP_CLIENT_SECRET=<client secret>/)
 })
 
+// A bucket-scoped session can publish into exactly one bucket, and Packer reads
+// the fallback bucket name from HCP_PACKER_BUCKET_NAME (packer v1.16.0
+// internal/hcp/env/variables.go, HCPPackerBucket). Wider tenancies never emit
+// it: pinning a client to a bucket the credential is not bound to invents a
+// constraint the server does not hold.
+test('a bucket-scoped session environment names its bucket; others never do', () => {
+  const scoped = clientEnvironment({
+    host: 'h', organizationID: 'org-1', projectID: 'proj-1', bucketName: 'base-images',
+  })
+  assert.match(scoped, /export HCP_PACKER_BUCKET_NAME=base-images/)
+  const above = clientEnvironment({ host: 'h', organizationID: 'org-1', projectID: 'proj-1' })
+  assert.doesNotMatch(above, /HCP_PACKER_BUCKET_NAME/)
+  // Every other session shape is byte-identical to the block before the row
+  // existed.
+  assert.equal(above, clientEnvironment({
+    host: 'h', organizationID: 'org-1', projectID: 'proj-1', bucketName: null,
+  }))
+  // The rendered screen pins both shapes.
+  assert.match(view({ bucketName: 'base-images' }), /HCP_PACKER_BUCKET_NAME=base-images/)
+  assert.doesNotMatch(view(), /HCP_PACKER_BUCKET_NAME/)
+})
+
 // The SDK rejects a non-https auth URL on any network, so a console served over
 // http must say the value will not work rather than hand over a broken one.
 test('serving over http is called out, because the SDK will refuse the auth URL', () => {

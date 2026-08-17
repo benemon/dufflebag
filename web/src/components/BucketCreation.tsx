@@ -7,35 +7,37 @@ import {
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 
+/**
+ * The trigger alone — deliberately not the modal's owner. Its picker-footer
+ * placement sits inside the Select's popper, which unmounts on any outside
+ * click; a modal owned here vanished mid-submit and its failure state with it
+ * (duf-3p03). The modal's state lives with the caller, outside the picker.
+ */
 export function CreateBucketButton({
-  callerRole, onCreate, variant = 'primary',
+  callerRole, refusal = null, onOpen, variant = 'primary',
 }: {
   callerRole: Role | null
-  onCreate: (name: string) => Promise<void>
+  refusal?: string | null
+  onOpen: () => void
   variant?: ButtonProps['variant']
 }) {
-  const [open, setOpen] = useState(false)
   return (
-    <>
-      <RoleRestrictedButton
-        action="createBuckets"
-        callerRole={callerRole}
-        variant={variant}
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen(true)
-        }}
-      >
-        Create bucket
-      </RoleRestrictedButton>
-      {open ? (
-        <BucketModal onCreate={onCreate} onClose={() => setOpen(false)} />
-      ) : null}
-    </>
+    <RoleRestrictedButton
+      action="createBuckets"
+      callerRole={callerRole}
+      refusal={refusal}
+      variant={variant}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpen()
+      }}
+    >
+      Create bucket
+    </RoleRestrictedButton>
   )
 }
 
-function BucketModal({
+export function BucketModal({
   onCreate, onClose,
 }: {
   onCreate: (name: string) => Promise<void>

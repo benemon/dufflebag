@@ -88,11 +88,30 @@ test('router links carry PatternFly native current navigation state', () => {
   }
 })
 
-test('the nav names the Buckets item and hides it from bucket-scoped sessions', () => {
+test('bucket-scoped sessions swap Buckets for a Bucket entry pointing home', () => {
   assert.match(shellSource, /key: 'buckets', to: '\/buckets', label: 'Buckets'/)
-  assert.match(shellSource, /bucketScoped && item === 'buckets'/)
-  const markup = view('root', '/audit', { visibleItems: ['principals', 'audit'] })
-  assert.doesNotMatch(markup, /href="\/buckets"/)
+  // Above-bucket sessions keep the listing entry untouched.
+  assert.match(view('root', '/audit'), />Buckets</)
+
+  // A bucket-scoped session is never stranded on an admin screen: the entry
+  // renames to Bucket and points at the resolved bucket detail (duf-xmg5).
+  const onInstance = view('builder', '/instance', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.match(onInstance, /<a(?=[^>]*href="\/buckets\/base%20images")[^>]*>(?:<span[^>]*>)?Bucket</)
+  assert.doesNotMatch(onInstance, />Buckets</)
+  // Not current while an admin screen is showing.
+  assert.doesNotMatch(onInstance, /<a(?=[^>]*href="\/buckets\/base%20images")(?=[^>]*pf-m-current)[^>]*>/)
+
+  // Current whenever the session is looking at its bucket: the detail route…
+  const onDetail = view('builder', '/buckets/base%20images', {
+    bucketNav: { to: '/buckets/base%20images' },
+  })
+  assert.match(onDetail, /<a(?=[^>]*href="\/buckets\/base%20images")(?=[^>]*class="[^"]*pf-m-current)[^>]*>/)
+  // …and the landing redirect while the claim is still resolving, where the
+  // entry falls back to the landing route rather than rendering a dead link.
+  const resolving = view('builder', '/', { bucketNav: { to: '/' } })
+  assert.match(resolving, /<a(?=[^>]*href="\/")(?=[^>]*class="[^"]*pf-m-current)[^>]*>(?:<span[^>]*>)?Bucket</)
 })
 
 test('the landing routes by scope while bucket detail routes keep their paths', () => {

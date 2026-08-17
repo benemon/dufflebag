@@ -46,4 +46,7 @@ Buckets are created by a `packer build` (see
 [Build an image with Packer](../quick-start/build-with-packer.md)), by the
 `hcp_packer_bucket` Terraform resource, or from the picker's **Create bucket**
 action — which issues the same compatibility-plane request a client would, so
-a console-created bucket is indistinguishable from a published one.
+a console-created bucket is indistinguishable from a published one. For a
+bucket-scoped session the action is disabled with the reason stated: creating
+a bucket changes the set of buckets rather than acting inside the one the
+session is bound to, and the server refuses it whatever the role.

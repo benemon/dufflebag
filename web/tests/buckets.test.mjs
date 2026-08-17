@@ -19,6 +19,7 @@ let deleteBucket
 let ApiError
 let BucketPickerView
 let bucketPickerOptions
+let CreateBucketButton
 let loadBucketPicker
 let createBucket
 let refreshThenSelect
@@ -41,6 +42,7 @@ before(async () => {
   ;({ deleteBucket, ApiError, createBucket } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({ BucketPickerView, bucketPickerOptions } =
     await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
+  ;({ CreateBucketButton } = await vite.ssrLoadModule('/src/components/BucketCreation.tsx'))
   ;({ loadBucketPicker } = await vite.ssrLoadModule('/src/data/bucketPicker.ts'))
   ;({ refreshThenSelect } = await vite.ssrLoadModule('/src/components/TenancyCreation.tsx'))
 })
@@ -505,6 +507,59 @@ test('picker loading, failure and empty listings are text states, never empty me
   assert.match(empty, /No buckets exist/)
   assert.match(empty, /Create bucket/)
   assert.doesNotMatch(empty, /tenant-bucket/)
+})
+
+test('a bucket-scoped session sees Create bucket refused by scope, not by role', () => {
+  // The server refuses bucket creation by scope whatever the role (creating a
+  // bucket changes the set of buckets rather than acting inside this one), so
+  // the affordance says so instead of silently no-opping (duf-3p03). The
+  // scope reason wins over the role reason: "Requires builder" would send a
+  // maintainer chasing a role it already holds. SSR renders the Select closed,
+  // so the trigger is asserted directly and the wiring at source level.
+  const refused = renderToStaticMarkup(React.createElement(CreateBucketButton, {
+    callerRole: 'maintainer',
+    refusal: 'A bucket-scoped session cannot create buckets',
+    onOpen: () => {},
+  }))
+  assert.match(refused, /A bucket-scoped session cannot create buckets/)
+  assert.match(refused, /<button[^>]*\bdisabled\b/)
+  assert.doesNotMatch(refused, /Requires builder/)
+  // Above bucket scope the affordance stays live for builder and up.
+  const live = renderToStaticMarkup(React.createElement(CreateBucketButton, {
+    callerRole: 'maintainer', onOpen: () => {},
+  }))
+  assert.doesNotMatch(live, /<button[^>]*\bdisabled\b/)
+  // The picker derives the refusal from the session's scope, nothing else.
+  const switcherSource = readFileSync(
+    new URL('../src/shell/TenantSwitcher.tsx', import.meta.url), 'utf8',
+  )
+  assert.match(
+    switcherSource,
+    /bucketScoped \? 'A bucket-scoped session cannot create buckets' : null/,
+  )
+  assert.match(switcherSource, /bucketScoped=\{state\?\.claims\.bucketID != null\}/)
+})
+
+test('the create modal is owned by the picker, not the vanishing footer', () => {
+  // Any click into the portaled modal closes the Select, which unmounts its
+  // footer subtree; a modal owned by the footer vanished mid-submit and its
+  // failure state — the server's refusal — with it (duf-3p03). The picker view
+  // owns the modal state and renders the modal beside the Select; the footer
+  // carries only the trigger.
+  const switcherSource = readFileSync(
+    new URL('../src/shell/TenantSwitcher.tsx', import.meta.url), 'utf8',
+  )
+  assert.match(switcherSource, /const \[creating, setCreating\] = useState\(false\)/)
+  assert.match(
+    switcherSource,
+    /footer=\{<MenuFooter>\{createButton\}<\/MenuFooter>\}\s*\/>\s*\{modal\}/,
+  )
+  // The trigger component itself renders no modal: its footer placement would
+  // couple the modal's lifetime to the picker's open state.
+  const creationSource = readFileSync(
+    new URL('../src/components/BucketCreation.tsx', import.meta.url), 'utf8',
+  )
+  assert.doesNotMatch(creationSource, /<BucketModal /)
 })
 
 test('the picker listing makes no per-bucket fan-out requests', async () => {

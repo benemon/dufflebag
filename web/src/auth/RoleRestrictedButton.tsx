@@ -5,13 +5,19 @@ import {
 } from './permissions'
 
 export function RoleRestrictedButton({
-  action, callerRole, children, isDisabled, ...props
+  action, callerRole, refusal = null, children, isDisabled, ...props
 }: ButtonProps & {
   action: ConsoleAction
   callerRole: Role | null
+  /**
+   * A refusal that no role change can lift — a scope denial. When set it wins
+   * over the role reason: telling a bucket-scoped session "Requires builder"
+   * would send it chasing a role it may already hold.
+   */
+  refusal?: string | null
 }) {
-  const refused = !permitsAction(callerRole, action)
-  const reason = requirementReason(action)
+  const refused = refusal != null || !permitsAction(callerRole, action)
+  const reason = refusal ?? requirementReason(action)
   const button = (
     <Button {...props} isDisabled={isDisabled || refused}>
       {children}

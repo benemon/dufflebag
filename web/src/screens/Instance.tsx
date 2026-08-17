@@ -1,11 +1,11 @@
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   Alert, Card, CardBody, CardTitle, ClipboardCopyButton, CodeBlock, CodeBlockAction,
   CodeBlockCode, Content, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, PageSection,
 } from '@patternfly/react-core'
 
-import type { ApiInstance } from '../api/client'
+import { listBuckets, signOutIfUnauthorized, type ApiInstance } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { useInstance } from '../data/instance'
 import { ScreenHeader } from '../components/ScreenHeader'
@@ -19,9 +19,46 @@ import { SkeletonRows } from '../components/Loading'
  * backing-service state come from the authenticated instance endpoint.
  */
 export function Instance() {
-  const { state, selectedOrganization, selectedProject } = useAuth()
+  const { state, selectedOrganization, selectedProject, signOut } = useAuth()
   const [refresh, setRefresh] = useState(0)
   const { instance, loading, failure } = useInstance(refresh)
+  // A bucket-scoped session's environment block names its bucket: the server
+  // only accepts builds into that one, and Packer reads the name from
+  // HCP_PACKER_BUCKET_NAME. The claim carries only the id; resolve it against
+  // the scoped listing exactly as the landing does (App.tsx). Deliberately
+  // bucket-scoped sessions ONLY — for a wider tenancy that happens to be
+  // viewing a bucket, emitting one would pin clients to a bucket the
+  // credential is not bound to.
+  const claims = state?.claims
+  const bucketID = claims?.bucketID ?? null
+  const [bucketName, setBucketName] = useState<string | null>(null)
+  useEffect(() => {
+    // A renewal re-runs this effect (state carries the token); resetting first
+    // would blank the row every ~14 minutes for nothing. The claim never
+    // changes within a session, so only its absence clears the name.
+    if (!bucketID || !state || !claims?.organizationID || !claims.projectID) {
+      setBucketName(null)
+      return
+    }
+    let cancelled = false
+    listBuckets(state.token, {
+      organizationID: claims.organizationID,
+      projectID: claims.projectID,
+    })
+      .then((buckets) => {
+        if (cancelled) return
+        setBucketName(buckets.find((bucket) => bucket.id === bucketID)?.name ?? null)
+      })
+      .catch((err: unknown) => {
+        // The row is additive: an unresolvable name omits it rather than
+        // failing the screen.
+        if (cancelled) return
+        signOutIfUnauthorized(err, signOut)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [bucketID, state, claims?.organizationID, claims?.projectID, signOut])
   return (
     <InstanceView
       host={typeof window === 'undefined' ? '' : window.location.host}
@@ -32,6 +69,7 @@ export function Instance() {
       // identifier is omitted, exactly as the project already is.
       organizationID={selectedOrganization}
       projectID={selectedProject ?? state?.claims.projectID ?? null}
+      bucketName={bucketName}
       instance={instance}
       loading={loading}
       failure={failure}
@@ -41,12 +79,15 @@ export function Instance() {
 }
 
 export function InstanceView({
-  host, secure, organizationID, projectID, instance, loading, failure, onRefresh = () => {},
+  host, secure, organizationID, projectID, bucketName = null, instance, loading, failure,
+  onRefresh = () => {},
 }: {
   host: string
   secure: boolean
   organizationID: string | null
   projectID: string | null
+  /** The session's bucket, bucket-scoped sessions only — null everywhere else. */
+  bucketName?: string | null
   instance: ApiInstance | null
   loading: boolean
   failure: string | null
@@ -88,7 +129,9 @@ export function InstanceView({
                 </Content>
               </Alert>
             )}
-            <EnvironmentBlock value={clientEnvironment({ host, organizationID, projectID })} />
+            <EnvironmentBlock
+              value={clientEnvironment({ host, organizationID, projectID, bucketName })}
+            />
           </CardBody>
         </Card>
       </PageSection>
@@ -220,11 +263,12 @@ function EnvironmentBlock({ value }: { value: string }) {
  * one would send the client somewhere it may not be entitled to.
  */
 export function clientEnvironment({
-  host, organizationID, projectID,
+  host, organizationID, projectID, bucketName = null,
 }: {
   host: string
   organizationID: string | null
   projectID: string | null
+  bucketName?: string | null
 }): string {
   const lines = [
     `export HCP_API_ADDRESS=${host}`,
@@ -234,5 +278,10 @@ export function clientEnvironment({
   ]
   if (organizationID) lines.push(`export HCP_ORGANIZATION_ID=${organizationID}`)
   if (projectID) lines.push(`export HCP_PROJECT_ID=${projectID}`)
+  // Packer's fallback bucket name when the template names none — the exact
+  // variable the client reads (packer v1.16.0 internal/hcp/env/variables.go,
+  // HCPPackerBucket). Emitted only for bucket-scoped sessions, which can
+  // publish nowhere else.
+  if (bucketName) lines.push(`export HCP_PACKER_BUCKET_NAME=${bucketName}`)
   return lines.join('\n')
 }

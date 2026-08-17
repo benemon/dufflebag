@@ -11,7 +11,7 @@ import { useNavigate, useParams } from 'react-router'
 import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
-import { CreateBucketButton } from '../components/BucketCreation'
+import { BucketModal, CreateBucketButton } from '../components/BucketCreation'
 import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
 import { useAutoRefresh } from '../data/polling'
@@ -410,6 +410,7 @@ export function BucketPicker() {
       buckets={buckets}
       pins={pins}
       scoped={scoped}
+      bucketScoped={state?.claims.bucketID != null}
       loading={loading}
       failure={failure}
       callerRole={self?.role ?? null}
@@ -421,13 +422,14 @@ export function BucketPicker() {
 }
 
 export function BucketPickerView({
-  selectedBucket, buckets, pins, scoped, loading, failure, callerRole,
+  selectedBucket, buckets, pins, scoped, bucketScoped = false, loading, failure, callerRole,
   onRefresh, onSelect, onCreate,
 }: {
   selectedBucket?: string
   buckets: { name: string }[]
   pins: { bucket_name: string }[]
   scoped: boolean
+  bucketScoped?: boolean
   loading: boolean
   failure: string | null
   callerRole: Role | null
@@ -435,9 +437,27 @@ export function BucketPickerView({
   onSelect: (name: string) => void
   onCreate: (name: string) => Promise<void>
 }) {
+  // The modal's state lives here and the modal renders OUTSIDE the Select.
+  // The picker closes on any click into the portaled modal (the Select's
+  // window listener sees a click outside menu and toggle), and closing
+  // unmounts the footer — a modal owned by the footer vanished on the first
+  // click into its own name field, before any request was even sent
+  // (duf-3p03, reproduced against the live console).
+  const [creating, setCreating] = useState(false)
+  // The server refuses bucket creation by scope, whatever the role: creating
+  // a bucket changes the set of buckets rather than acting inside this one.
+  const refusal = bucketScoped ? 'A bucket-scoped session cannot create buckets' : null
   const createButton = (
-    <CreateBucketButton callerRole={callerRole} onCreate={onCreate} variant="link" />
+    <CreateBucketButton
+      callerRole={callerRole}
+      refusal={refusal}
+      onOpen={() => setCreating(true)}
+      variant="link"
+    />
   )
+  const modal = creating ? (
+    <BucketModal onCreate={onCreate} onClose={() => setCreating(false)} />
+  ) : null
   if (!scoped) {
     return (
       <PickerField label="Bucket">
@@ -464,6 +484,7 @@ export function BucketPickerView({
       <PickerField label="Bucket">
         <Content component="p" style={{ margin: 0 }}>No buckets exist</Content>
         {createButton}
+        {modal}
       </PickerField>
     )
   }
@@ -481,6 +502,7 @@ export function BucketPickerView({
         onOpen={() => refreshOnPickerOpen(true, onRefresh)}
         footer={<MenuFooter>{createButton}</MenuFooter>}
       />
+      {modal}
     </PickerField>
   )
 }
