@@ -184,8 +184,21 @@ const clickOptionExact = (text) =>
 
 /** Typeahead selection is type-then-click; the stable id remains on its toggle. */
 const choosePickerOption = async (id, text) => {
-  await page.click(id)
-  await page.click(`${id}-input`, { clickCount: 3 })
+  await page.waitForSelector(`${id}-input`)
+  const expanded = await page.$eval(
+    `${id}-input`,
+    (input) => input.getAttribute('aria-expanded') === 'true',
+  )
+  if (!expanded) await page.click(id)
+  await page.waitForFunction(
+    (inputId) => document.querySelector(inputId)?.getAttribute('aria-expanded') === 'true',
+    {},
+    `${id}-input`,
+  )
+  await page.$eval(`${id}-input`, (input) => {
+    input.focus()
+    input.select()
+  })
   await page.type(`${id}-input`, text)
   await clickOptionExact(text)
 }
@@ -1010,9 +1023,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       await pickerValue('#tenant-organization'),
       wizardOrganizationName,
     )
-    await page.click('#tenant-organization-input', { clickCount: 3 })
-    await page.type('#tenant-organization-input', 'All organisations')
-    await clickOptionExact('All organisations (platform)')
+    await choosePickerOption('#tenant-organization', 'All organisations (platform)')
     await until('the organisation toggle to show platform standing', async () =>
       (await pickerValue('#tenant-organization')) ===
         'All organisations (platform)')
