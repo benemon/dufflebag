@@ -68,7 +68,7 @@ export function Build() {
       failure={failure}
       gap={gap}
       callerRole={self?.role ?? null}
-      onBackToRegistry={() => navigate('/buckets')}
+      onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onBackToVersion={() => navigate(versionPath)}
       onRefresh={reload}
