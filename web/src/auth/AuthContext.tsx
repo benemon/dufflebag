@@ -162,6 +162,13 @@ type RenewalScheduler = (
 ) => ReturnType<typeof setTimeout>
 type RenewalClearer = (timer: ReturnType<typeof setTimeout>) => void
 
+export function sameSessionPrincipal(current: TokenClaims, next: TokenClaims): boolean {
+  return current.sub === next.sub &&
+    current.organizationID === next.organizationID &&
+    current.projectID === next.projectID &&
+    current.bucketID === next.bucketID
+}
+
 export function scheduleSessionRenewal(
   claims: TokenClaims,
   renew: () => void,
@@ -287,8 +294,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     if (!state) return
+    const refreshSession = (token: string, claims: TokenClaims) => {
+      // Renewal is token rotation, not a session change. Re-entry unmounted the
+      // routed tree for organization-scoped sessions and destroyed open modals.
+      if (sameSessionPrincipal(state.claims, claims)) {
+        setState({ token, claims })
+        return
+      }
+      enterSession(token, claims)
+    }
     const cancel = scheduleSessionRenewal(state.claims, () => {
-      void renewConsoleSession(fetchSession, enterSession, () => signOut('expired')).catch(() => {})
+      void renewConsoleSession(fetchSession, refreshSession, () => signOut('expired')).catch(() => {})
     })
     return cancel ?? undefined
   }, [state, enterSession, signOut])

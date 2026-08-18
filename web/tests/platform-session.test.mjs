@@ -20,6 +20,7 @@ let selectionAfterOrganizationRefresh
 let startOrganizationRefresh
 let scheduleSessionRenewal
 let renewConsoleSession
+let sameSessionPrincipal
 let refreshOnPickerOpen
 let selectionAfterProjectsRefresh
 let grantableRoles
@@ -64,7 +65,7 @@ before(async () => {
     AuthContext, applyOrganizationRefresh, selectionAfterInitialOrganizationLoad,
     selectionAfterOrganizationRefresh,
     startOrganizationRefresh, scheduleSessionRenewal, renewConsoleSession,
-    selectionAfterProjectsRefresh,
+    sameSessionPrincipal, selectionAfterProjectsRefresh,
   } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
   ;({
     TenantSwitcher, refreshOnPickerOpen,
@@ -114,6 +115,62 @@ function platformToken(exp = inFifteenMinutes()) {
     grants: [],
   })
 }
+
+test('session renewal recognizes only the same principal and scope', () => {
+  const current = {
+    sub: 'principal-1',
+    organizationID: 'org-1',
+    projectID: 'project-1',
+    bucketID: 'bucket-1',
+    expiresAt: new Date('2026-08-18T12:00:00Z'),
+  }
+  assert.equal(sameSessionPrincipal(current, {
+    ...current,
+    expiresAt: new Date('2026-08-18T12:15:00Z'),
+  }), true)
+
+  for (const [field, value] of [
+    ['sub', 'principal-2'],
+    ['organizationID', 'org-2'],
+    ['projectID', 'project-2'],
+    ['bucketID', 'bucket-2'],
+  ]) {
+    assert.equal(
+      sameSessionPrincipal(current, { ...current, [field]: value }),
+      false,
+      `${field} must identify a different session principal`,
+    )
+  }
+
+  for (const field of ['organizationID', 'projectID', 'bucketID']) {
+    assert.equal(
+      sameSessionPrincipal(current, { ...current, [field]: null }),
+      false,
+      `${field} null must differ from a value`,
+    )
+    assert.equal(
+      sameSessionPrincipal({ ...current, [field]: null }, current),
+      false,
+      `${field} value must differ from null`,
+    )
+  }
+})
+
+test('session renewal uses a guarded token refresh and retains full re-entry as fallback', () => {
+  const renewalEffect = authContextSource.match(
+    /useEffect\(\(\) => \{\n    if \(!state\) return\n    const refreshSession[\s\S]*?\n  \}, \[state, enterSession, signOut\]\)/,
+  )?.[0] ?? ''
+  const matchedPath = renewalEffect.match(
+    /if \(sameSessionPrincipal\(state\.claims, claims\)\) \{[\s\S]*?\n      \}/,
+  )?.[0] ?? ''
+
+  assert.match(renewalEffect, /renewConsoleSession\(fetchSession, refreshSession,/)
+  assert.doesNotMatch(renewalEffect, /renewConsoleSession\(fetchSession, enterSession,/)
+  assert.match(renewalEffect, /if \(sameSessionPrincipal\(state\.claims, claims\)\)/)
+  assert.match(renewalEffect, /\n      enterSession\(token, claims\)\n/)
+  assert.match(matchedPath, /setState\(\{ token, claims \}\)/)
+  assert.doesNotMatch(matchedPath, /setSelectedProject\(|setProjectsLoading\(/)
+})
 
 test('session renewal schedules one minute before expiry and reschedules after success', async () => {
   const now = Date.now
