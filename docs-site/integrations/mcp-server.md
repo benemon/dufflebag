@@ -109,7 +109,7 @@ that only consume.
 A bucket-scoped service principal uses the ordinary client id and secret
 variables — the scope rides in the credential, and the server confines it
 regardless of client configuration. From dufflebag-mcp v0.2.1 it needs no
-further variable at all: the server reads the credential's own bucket binding
+`DFBG_MCP_BUCKET_ID`: the server reads the credential's own bucket binding
 from the registry, `whoami` reports it as `bucket_id`, and bucket-taking
 tools omit their bucket argument.
 
