@@ -1,0 +1,30 @@
+name: live HCP conformance
+
+# Manual-only by design: Ben can add a schedule later for runs against the paid account.
+# With no pull_request trigger, repository secrets are never exposed to fork pull requests.
+on:
+  workflow_dispatch:
+
+concurrency: { group: live-hcp, cancel-in-progress: false }
+
+jobs:
+  live-conformance:
+    if: ${{ secrets.HCP_CLIENT_ID != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            contract/go.sum
+      - name: Run live HCP conformance suite
+        run: make test-live-conformance
+        env:
+          HCP_CLIENT_ID: ${{ secrets.HCP_CLIENT_ID }}
+          HCP_CLIENT_SECRET: ${{ secrets.HCP_CLIENT_SECRET }}

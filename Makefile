@@ -225,9 +225,12 @@ test: test-ui ## Run tests
 	go test ./...
 
 .PHONY: test-live-conformance
-# Deliberately manual and not wired into CI: this suite requires live-account access.
+# Live-account access required. In CI this runs only as the manual
+# workflow_dispatch lane (live-conformance.yml), never on pull requests;
+# credentials come from the environment there and from the env file locally.
 test-live-conformance: ## Check the public compatibility dossier against live HCP
 	@set -a; \
+	if [ -z "$${HCP_CLIENT_ID:-}" ] || [ -z "$${HCP_CLIENT_SECRET:-}" ]; then \
 	env_file="$${HCP_SPN_ENV_FILE:-hcp-packer-spn.env}"; \
 	if [ ! -f "$$env_file" ]; then \
 		echo "live HCP conformance credentials not found: $$env_file" >&2; \
@@ -235,6 +238,7 @@ test-live-conformance: ## Check the public compatibility dossier against live HC
 		exit 1; \
 	fi; \
 	. "$$env_file"; \
+	fi; \
 	set +a; \
 	go test -tags=liveconf ./e2e/liveconf/ -count=1 -timeout 15m
 
