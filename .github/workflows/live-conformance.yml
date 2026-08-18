@@ -9,10 +9,20 @@ concurrency: { group: live-hcp, cancel-in-progress: false }
 
 jobs:
   live-conformance:
-    if: ${{ secrets.HCP_CLIENT_ID != '' }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # The secrets context is not valid in a job-level if, so the gate is the
+    # first step: a manual dispatch without the repository secret fails fast
+    # with the reason rather than pretending to run.
+    env:
+      HCP_CLIENT_ID: ${{ secrets.HCP_CLIENT_ID }}
+      HCP_CLIENT_SECRET: ${{ secrets.HCP_CLIENT_SECRET }}
     steps:
+      - name: Refuse without the repository secret
+        if: ${{ env.HCP_CLIENT_ID == '' }}
+        run: |
+          echo "HCP_CLIENT_ID/HCP_CLIENT_SECRET repository secrets are not configured" >&2
+          exit 1
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Set up Go
@@ -25,6 +35,3 @@ jobs:
             contract/go.sum
       - name: Run live HCP conformance suite
         run: make test-live-conformance
-        env:
-          HCP_CLIENT_ID: ${{ secrets.HCP_CLIENT_ID }}
-          HCP_CLIENT_SECRET: ${{ secrets.HCP_CLIENT_SECRET }}
