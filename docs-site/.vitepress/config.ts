@@ -20,6 +20,7 @@ const sidebar = [
       { text: 'Architecture', link: '/components/architecture' },
       { text: 'The console', link: '/components/console' },
       { text: 'Database', link: '/components/database' },
+      { text: 'Backup and restore', link: '/components/backup-restore' },
       { text: 'Object storage', link: '/components/object-storage' },
       { text: 'Encryption', link: '/components/encryption' },
       { text: 'Vulnerability scanning', link: '/components/vulnerability-scanning' },
