@@ -32,6 +32,10 @@ after(async () => {
 
 const labels = ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
 const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
+const tenantSwitcherSource = readFileSync(
+  new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
+  'utf8',
+)
 const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
 const screenHeaderSource = readFileSync(
   new URL('../src/components/ScreenHeader.tsx', import.meta.url),
@@ -153,6 +157,14 @@ test('the masthead keeps the labelled tenancy pickers in one toolbar item', () =
     shellSource,
     /<ToolbarItem className="tenant-switcher-item">[\s\S]*?<TenantSwitcher \/>/,
   )
+})
+
+test('typeahead pickers resync an unfiltered input while open', () => {
+  // A refresh must replace a removed or renamed selection while open
+  // (duf-b4wo) — firing on SELECTION change only: filter transitions must
+  // neither refill a cleared search box nor race the label after a select.
+  assert.match(tenantSwitcherSource, /if \(!open \|\| filterValue === ''\) setInputValue\(selectedLabel\)/)
+  assert.match(tenantSwitcherSource, /\}, \[open, selectedLabel\]\)/)
 })
 
 test('the bucket picker renders its selection from the matched route parameter', () => {
