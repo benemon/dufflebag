@@ -392,6 +392,10 @@ docs-shots: $(if $(DUFFLEBAG_BIN),,build-ui) ## Regenerate console screenshots a
 test-kind: ## Validate the single-replica Kubernetes manifests on KIND
 	e2e/kubernetes/test-kind.sh
 
+.PHONY: test-backup-restore
+test-backup-restore: ## Prove logical PostgreSQL backup and restore on KIND
+	e2e/kubernetes/test-backup-restore.sh
+
 HELM_UPDATE_GOLDEN ?= 0
 HELM_GOLDEN := deploy/helm/testdata/dufflebag.golden.yaml
 

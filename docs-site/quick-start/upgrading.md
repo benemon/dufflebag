@@ -45,19 +45,22 @@ Prerequisites: Access to the deployment configuration. On a
 also the automation that runs migrations with the privileged role. Select the
 target tag after reading its GitHub release notes.
 
-1. Replace the dufflebag image tag in the deployment configuration with the
+1. Back up the database before changing the deployment. Follow
+   [Backup and restore](../components/backup-restore.md).
+
+2. Replace the dufflebag image tag in the deployment configuration with the
    target release tag. The [image reference](./installation.md#the-image)
    describes the published tag forms.
 
-2. On a two-role deployment only: let your automation run the target image's
+3. On a two-role deployment only: let your automation run the target image's
    `migrate` subcommand with the migration role, and wait for it to finish
    before the target image serves. See
    [Migrations](../components/database.md#migrations). A single-role deployment
    skips this step; the server migrates at startup.
 
-3. Start the target image. See
+4. Start the target image. See
    [Serving](./installation.md#serving-and-readiness) for the container layout.
 
-4. Request `GET /sys/health` without credentials. Confirm that it returns 200.
+5. Request `GET /sys/health` without credentials. Confirm that it returns 200.
    The [serving reference](./installation.md#serving-and-readiness) documents the
    readiness response and its non-200 states.
