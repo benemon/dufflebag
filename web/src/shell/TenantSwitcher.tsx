@@ -12,7 +12,9 @@ import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
 import { BucketModal, CreateBucketButton } from '../components/BucketCreation'
-import { CreateTenancyButton, TenancyModal, refreshThenSelect } from '../components/TenancyCreation'
+import {
+  CreateTenancyButton, TenancyModal, projectCreationRefusal, refreshThenSelect,
+} from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
 import { useAutoRefresh } from '../data/polling'
 import { organizationRows, useTenant } from '../data/tenant'
@@ -290,7 +292,7 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
 
 function ProjectSelect({ combined = false }: { combined?: boolean }) {
   const {
-    self, selectedOrganization, permittedProjects, projectsLoading, projectFailure,
+    state, self, selectedOrganization, permittedProjects, projectsLoading, projectFailure,
     refreshProjects,
   } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
@@ -303,6 +305,7 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
       kind="project"
       callerRole={self?.role ?? null}
       organizationID={selectedOrganization ?? undefined}
+      refusal={projectCreationRefusal(state?.claims ?? null)}
       onOpen={() => setCreating(true)}
       variant="link"
     />

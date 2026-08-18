@@ -137,11 +137,13 @@ test('principal mutations follow the server-resolved maintainer requirement', ()
 // validBinding ties root to platform scope exactly, so "root in an organisation"
 // is malformed rather than narrower. The form must not offer it.
 test('root is never offered inside a tenancy, and is the only option above one', () => {
-  assert.deepEqual(grantableRoles('tenancy', null), ['reader', 'builder', 'publisher', 'maintainer'])
+  assert.deepEqual(grantableRoles('organization', 'root'), ['reader', 'builder', 'publisher', 'maintainer'])
+  assert.deepEqual(grantableRoles('project', 'root'), ['reader', 'builder', 'publisher', 'maintainer'])
+  assert.deepEqual(grantableRoles('bucket', 'root'), ['reader', 'builder', 'publisher'])
   assert.deepEqual(grantableRoles('platform', null), ['root'])
 
   const inTenancy = renderToStaticMarkup(React.createElement(CreatePrincipalForm, {
-    roles: grantableRoles('tenancy', 'maintainer'), standing: 'project',
+    roles: grantableRoles('project', 'maintainer'), standing: 'project',
     callerRole: 'maintainer',
     onCreate: async () => {}, onCancel: () => {},
   }))
@@ -156,13 +158,16 @@ test('root is never offered inside a tenancy, and is the only option above one',
 // list is the load-bearing part and is what this asserts.
 test('the offered roles follow the standing, root never inside a tenancy', () => {
   const at = (standing) => renderToStaticMarkup(React.createElement(CreatePrincipalForm, {
-    roles: grantableRoles(standing === 'platform' ? 'platform' : 'tenancy', null),
+    roles: grantableRoles(standing, null),
     callerRole: standing === 'platform' ? 'root' : 'maintainer',
     onCreate: async () => {}, onCancel: () => {},
   }))
   assert.match(at('platform'), /value="root"/)
   assert.doesNotMatch(at('organization'), /value="root"/)
   assert.doesNotMatch(at('project'), /value="root"/)
+  const bucket = at('bucket')
+  assert.doesNotMatch(bucket, /value="maintainer"/)
+  assert.match(bucket, /<option[^>]*value="reader" selected="">reader<\/option>/)
   // The relocated prose must not linger in the form.
   assert.doesNotMatch(at('project'), /for the selected project only/)
   assert.doesNotMatch(at('platform'), /above every tenancy/)
@@ -170,9 +175,11 @@ test('the offered roles follow the standing, root never inside a tenancy', () =>
 
 // No identity may grant a role more permissive than its own (ADR-0019).
 test('a granter is never offered a role above its own', () => {
-  assert.deepEqual(grantableRoles('tenancy', 'builder'), ['reader', 'builder'])
-  assert.deepEqual(grantableRoles('tenancy', 'reader'), ['reader'])
-  assert.ok(!grantableRoles('tenancy', 'publisher').includes('maintainer'))
+  assert.deepEqual(grantableRoles('organization', 'builder'), ['reader', 'builder'])
+  assert.deepEqual(grantableRoles('project', 'reader'), ['reader'])
+  for (const standing of ['platform', 'organization', 'project', 'bucket']) {
+    assert.ok(!grantableRoles(standing, 'publisher').includes('maintainer'))
+  }
 })
 
 // The secret exists nowhere else. The card carries the warning and both values;

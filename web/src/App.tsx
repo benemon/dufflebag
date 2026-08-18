@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useContext, useEffect, useState } from 'react'
 import { Navigate, Outlet, Route, Routes } from 'react-router'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
@@ -6,7 +6,7 @@ import {
 } from '@patternfly/react-core'
 
 import { listBuckets, signOutIfUnauthorized, type Tenant } from './api/client'
-import { AuthProvider, useAuth } from './auth/AuthContext'
+import { AuthContext, AuthProvider, useAuth } from './auth/AuthContext'
 import { AppShell } from './shell/AppShell'
 import { Buckets } from './screens/Buckets'
 import { Versions } from './screens/Versions'
@@ -19,7 +19,9 @@ import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
-import { CreateTenancyButton, TenancyModal } from './components/TenancyCreation'
+import {
+  CreateTenancyButton, TenancyModal, projectCreationRefusal,
+} from './components/TenancyCreation'
 import type { Role } from './auth/permissions'
 import { useTheme, type Theme } from './theme/theme'
 
@@ -205,6 +207,7 @@ export function NoProjectsYet({
   callerRole: Role | null
   organizationID?: string
 }) {
+  const auth = useContext(AuthContext)
   const [creating, setCreating] = useState(false)
   return (
     <>
@@ -216,6 +219,7 @@ export function NoProjectsYet({
               kind="project"
               callerRole={callerRole}
               organizationID={organizationID}
+              refusal={projectCreationRefusal(auth?.state?.claims ?? null)}
               onOpen={() => setCreating(true)}
             />
           </EmptyStateActions>

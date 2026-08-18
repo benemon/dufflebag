@@ -1,11 +1,11 @@
-import { useState } from 'react'
+import { useContext, useState } from 'react'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter,
   Modal, ModalHeader, type ButtonProps,
 } from '@patternfly/react-core'
 
 import { createOrganization, createProject } from '../api/client'
-import { useAuth } from '../auth/AuthContext'
+import { AuthContext, useAuth } from '../auth/AuthContext'
 import { RoleRestrictedButton } from '../auth/RoleRestrictedButton'
 import type { Role } from '../auth/permissions'
 import { useTenant, type TenancyGap } from '../data/tenant'
@@ -29,13 +29,22 @@ export async function refreshThenSelect<T>(
   select(created)
 }
 
+export function projectCreationRefusal(
+  claims: { projectID: string | null } | null,
+): string | null {
+  return claims?.projectID != null
+    ? 'A project is created at organisation scope; this session is scoped to a project.'
+    : null
+}
+
 /** A stateless trigger; callers own the modal outside any vanishing footer. */
 export function CreateTenancyButton({
-  kind, callerRole, organizationID, onOpen, variant = 'primary',
+  kind, callerRole, organizationID, refusal = null, onOpen, variant = 'primary',
 }: {
   kind: TenancyKind
   callerRole: Role | null
   organizationID?: string
+  refusal?: string | null
   onOpen: () => void
   variant?: ButtonProps['variant']
 }) {
@@ -43,6 +52,7 @@ export function CreateTenancyButton({
     <RoleRestrictedButton
       action={kind === 'organization' ? 'createOrganizations' : 'createProjects'}
       callerRole={callerRole}
+      refusal={refusal}
       variant={variant}
       isDisabled={kind === 'project' && !organizationID}
       onClick={(event) => {
@@ -145,6 +155,7 @@ export function TenancyGapEmptyState({
   gap: TenancyGap
   callerRole: Role | null
 }) {
+  const auth = useContext(AuthContext)
   const [creating, setCreating] = useState(false)
   return (
     <>
@@ -156,6 +167,9 @@ export function TenancyGapEmptyState({
               kind={gap.resource}
               callerRole={callerRole}
               organizationID={gap.organizationID}
+              refusal={gap.resource === 'project'
+                ? projectCreationRefusal(auth?.state?.claims ?? null)
+                : null}
               onOpen={() => setCreating(true)}
             />
           </EmptyStateActions>

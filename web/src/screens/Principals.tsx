@@ -65,11 +65,12 @@ export function PrincipalsView({
   // here (duf-4qr): nothing selected is the platform, an organisation with the
   // blank project row is that organisation, a whole pair is that project. The
   // form never asks for tenancy, so it cannot express a pairing validBinding
-  // would refuse — only root above every tenancy, never root inside one.
+  // would refuse — only root above every tenancy, never root inside one, and
+  // no role above publisher at bucket standing.
   const standing: Standing = organizationID
     ? (projectID ? (bucketID ? 'bucket' : 'project') : 'organization')
     : 'platform'
-  const offerable = grantableRoles(standing === 'platform' ? 'platform' : 'tenancy', callerRole)
+  const offerable = grantableRoles(standing, callerRole)
 
   async function run(work: () => Promise<void>) {
     setActionFailure(null)
