@@ -103,7 +103,22 @@ that only consume.
 | `DFBG_MCP_CA_FILE` | PEM chain for a private CA | no |
 | `DFBG_MCP_ORGANIZATION_ID` | Default organization for tenancy-scoped tools | no |
 | `DFBG_MCP_PROJECT_ID` | Default project for tenancy-scoped tools | no |
+| `DFBG_MCP_BUCKET_ID` | Default bucket id for bucket-scoped tools | no |
 | `DFBG_MCP_READ_ONLY` | When truthy, mutating tools are neither listed nor callable | no |
+
+A bucket-scoped service principal uses the ordinary client id and secret
+variables — the scope rides in the credential, and the server confines it
+regardless of client configuration. Setting `DFBG_MCP_BUCKET_ID` to the
+bucket's ULID (its id, not its name) additionally lets bucket-taking tools
+omit their bucket argument; the first such call resolves the id against the
+buckets the credential can see, and answers with the visible bucket ids when
+the declared one is not among them.
+
+The console prints the id where it is needed: issuing a credential for a
+bucket-scoped principal — at creation, or from **Issue secret** on an
+existing one — shows a ready-to-paste MCP environment block that includes
+`DFBG_MCP_BUCKET_ID`. The id appears nowhere else in the console, so if the
+block is gone, issue a fresh secret rather than hunting for the ULID.
 
 ## Available tools
 
