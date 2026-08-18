@@ -13,7 +13,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func TestBaselineMigrationRoundTrips(t *testing.T) {
+func TestMigrationsRoundTrip(t *testing.T) {
 	_, databaseURL, cleanup := openTestDatabase(t)
 	defer cleanup()
 
@@ -33,8 +33,8 @@ func TestBaselineMigrationRoundTrips(t *testing.T) {
 	if err := admin.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 1 || dirty {
-		t.Fatalf("baseline migration state = version %d dirty %v, want version 1 clean", version, dirty)
+	if version != 2 || dirty {
+		t.Fatalf("migration state = version %d dirty %v, want version 2 clean", version, dirty)
 	}
 
 	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})

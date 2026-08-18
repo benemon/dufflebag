@@ -269,7 +269,6 @@ func (s *ScannerService) observeProvider(detail string) {
 }
 
 type pendingScanClaim struct {
-	tx      *sql.Tx
 	tenant  Tenant
 	buildID string
 	reason  string
@@ -338,57 +337,92 @@ func (s *ScannerService) pendingTenantsByAge(ctx context.Context) ([]pendingTena
 	return pending, nil
 }
 
-// claimNextForTenant claims one entry within a tenant. SKIP LOCKED is what
-// lets several workers, and several replicas, work the same tenant without
-// ever claiming the same row twice.
+// claimNextForTenant claims one entry within a short tenant transaction.
+// SKIP LOCKED lets several workers, and several replicas, work the same
+// tenant without ever claiming the same row twice. A crashed worker's claim
+// becomes available after one pass timeout.
 func (s *ScannerService) claimNextForTenant(ctx context.Context, tenant Tenant) (*pendingScanClaim, error) {
 	tx, _, err := s.repository.begin(ctx, tenant)
 	if err != nil {
 		return nil, err
 	}
-	claim := &pendingScanClaim{tx: tx, tenant: tenant}
+	defer func() { _ = tx.Rollback() }()
+	claim := &pendingScanClaim{tenant: tenant}
 	err = tx.QueryRowContext(ctx, `
 		SELECT build_id, reason FROM pending_scans
+		WHERE claimed_at IS NULL
+		   OR claimed_at < now() - make_interval(secs => $1)
 		ORDER BY enqueued_at, build_id
-		FOR UPDATE SKIP LOCKED LIMIT 1`).Scan(&claim.buildID, &claim.reason)
+		FOR UPDATE SKIP LOCKED LIMIT 1`, s.config.PassTimeout.Seconds()).Scan(&claim.buildID, &claim.reason)
 	if errors.Is(err, sql.ErrNoRows) {
-		_ = tx.Rollback()
 		return nil, nil
 	}
 	if err != nil {
-		_ = tx.Rollback()
 		return nil, fmt.Errorf("claim pending scan: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE pending_scans SET claimed_at = now() WHERE build_id = $1`, claim.buildID); err != nil {
+		return nil, fmt.Errorf("mark pending scan claimed: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("commit pending scan claim: %w", err)
 	}
 	return claim, nil
 }
 
 func (s *ScannerService) processClaim(ctx context.Context, claim *pendingScanClaim) error {
-	defer func() { _ = claim.tx.Rollback() }()
-	inventory, eligible, err := scanInventoryTx(ctx, claim.tx, claim.buildID)
+	tx, _, err := s.repository.begin(ctx, claim.tenant)
 	if err != nil {
-		return err
+		return errors.Join(err, s.releasePendingScan(ctx, claim))
 	}
-	if !eligible {
-		if err := deletePendingScan(ctx, claim.tx, claim.buildID); err != nil {
-			return err
+	inventory, eligible, err := scanInventoryTx(ctx, tx, claim.buildID)
+	if err == nil {
+		err = tx.Commit()
+		if err != nil {
+			err = fmt.Errorf("commit scan inventory: %w", err)
 		}
-		return claim.tx.Commit()
+	} else {
+		_ = tx.Rollback()
+	}
+	if err != nil {
+		return errors.Join(err, s.releasePendingScan(ctx, claim))
+	}
+
+	if !eligible {
+		return s.deletePendingScan(ctx, claim)
 	}
 	terminal, dispatchErr := s.dispatch(ctx, claim.tenant, claim.buildID, inventory)
 	if terminal {
-		if err := deletePendingScan(ctx, claim.tx, claim.buildID); err != nil {
-			return errors.Join(dispatchErr, err)
-		}
-		if err := claim.tx.Commit(); err != nil {
-			return errors.Join(dispatchErr, err)
-		}
+		return errors.Join(dispatchErr, s.deletePendingScan(ctx, claim))
 	}
-	return dispatchErr
+	return errors.Join(dispatchErr, s.releasePendingScan(ctx, claim))
 }
 
-func deletePendingScan(ctx context.Context, tx *sql.Tx, buildID string) error {
-	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_scans WHERE build_id = $1`, buildID); err != nil {
+func (s *ScannerService) deletePendingScan(ctx context.Context, claim *pendingScanClaim) error {
+	tx, _, err := s.repository.begin(ctx, claim.tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_scans WHERE build_id = $1`, claim.buildID); err != nil {
 		return fmt.Errorf("delete pending scan: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit delete pending scan: %w", err)
+	}
+	return nil
+}
+
+func (s *ScannerService) releasePendingScan(ctx context.Context, claim *pendingScanClaim) error {
+	tx, _, err := s.repository.begin(ctx, claim.tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, `UPDATE pending_scans SET claimed_at = NULL WHERE build_id = $1`, claim.buildID); err != nil {
+		return fmt.Errorf("release pending scan: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit release pending scan: %w", err)
 	}
 	return nil
 }
