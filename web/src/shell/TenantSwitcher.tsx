@@ -12,7 +12,7 @@ import { createBucket } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
 import { BucketModal, CreateBucketButton } from '../components/BucketCreation'
-import { CreateTenancyButton, refreshThenSelect } from '../components/TenancyCreation'
+import { CreateTenancyButton, TenancyModal, refreshThenSelect } from '../components/TenancyCreation'
 import { useBucketPicker } from '../data/bucketPicker'
 import { useAutoRefresh } from '../data/polling'
 import { organizationRows, useTenant } from '../data/tenant'
@@ -29,6 +29,7 @@ export function TenantSwitcher() {
     state, self, organizations, organizationsLoading, organizationFailure,
     organizationRefreshFailure, selectedOrganization,
   } = useAuth()
+  const [creatingOrganization, setCreatingOrganization] = useState(false)
 
   const platform = state !== null && state.claims.organizationID === null
   if (!platform) {
@@ -57,7 +58,12 @@ export function TenantSwitcher() {
     organizationPicker = (
       <PickerField label="Organisation">
         <Content component="p" style={{ margin: 0 }}>No organisations exist</Content>
-        <CreateTenancyButton kind="organization" callerRole={self?.role ?? null} variant="link" />
+        <CreateTenancyButton
+          kind="organization"
+          callerRole={self?.role ?? null}
+          onOpen={() => setCreatingOrganization(true)}
+          variant="link"
+        />
       </PickerField>
     )
   } else {
@@ -67,6 +73,9 @@ export function TenantSwitcher() {
   return (
     <span className="tenant-switchers">
       {organizationPicker}
+      {creatingOrganization ? (
+        <TenancyModal kind="organization" onClose={() => setCreatingOrganization(false)} />
+      ) : null}
       {selectedOrganization ? <ProjectSelect /> : null}
       <BucketPicker />
     </span>
@@ -227,8 +236,12 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
   const {
     self, organizations, selectedOrganization, selectOrganization, refreshOrganizations,
   } = useAuth()
+  const [creating, setCreating] = useState(false)
   const rows = organizationRows(organizations)
   const selected = rows.find((candidate) => candidate.id === selectedOrganization)
+  const modal = creating ? (
+    <TenancyModal kind="organization" onClose={() => setCreating(false)} />
+  ) : null
   return (
     <PickerField label="Organisation">
       <TypeaheadPicker
@@ -247,6 +260,7 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
             <CreateTenancyButton
               kind="organization"
               callerRole={self?.role ?? null}
+              onOpen={() => setCreating(true)}
               variant="link"
             />
           </MenuFooter>
@@ -269,6 +283,7 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
           />
         </Popover>
       ) : null}
+      {modal}
     </PickerField>
   )
 }
@@ -279,40 +294,40 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
     refreshProjects,
   } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
+  const [creating, setCreating] = useState(false)
   const label = (candidate: typeof tenant) => (
     combined ? `${candidate.organization} / ${candidate.project}` : candidate.project
   )
-
+  const createButton = (
+    <CreateTenancyButton
+      kind="project"
+      callerRole={self?.role ?? null}
+      organizationID={selectedOrganization ?? undefined}
+      onOpen={() => setCreating(true)}
+      variant="link"
+    />
+  )
+  const modal = creating ? (
+    <TenancyModal
+      kind="project"
+      organizationID={selectedOrganization ?? undefined}
+      onClose={() => setCreating(false)}
+    />
+  ) : null
+  let body: ReactNode
   if (projectsLoading) {
-    return (
-      <PickerField label="Project">
-        <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading projects…" />
-      </PickerField>
-    )
-  }
-  if (projectFailure) {
-    return (
-      <PickerField label="Project">
-        <Content component="p" style={{ margin: 0 }}>Projects could not be loaded</Content>
-      </PickerField>
-    )
-  }
-  if (permittedProjects.length === 0) {
-    return (
-      <PickerField label="Project">
+    body = <Skeleton width="10rem" fontSize="lg" screenreaderText="Loading projects…" />
+  } else if (projectFailure) {
+    body = <Content component="p" style={{ margin: 0 }}>Projects could not be loaded</Content>
+  } else if (permittedProjects.length === 0) {
+    body = (
+      <>
         <Content component="p" style={{ margin: 0 }}>No projects exist</Content>
-        <CreateTenancyButton
-          kind="project"
-          callerRole={self?.role ?? null}
-          organizationID={selectedOrganization ?? undefined}
-          variant="link"
-        />
-      </PickerField>
+        {createButton}
+      </>
     )
-  }
-
-  return (
-    <PickerField label="Project">
+  } else {
+    body = (
       <TypeaheadPicker
         id="tenant-project"
         label="Project"
@@ -327,17 +342,14 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
           if (next) setTenant(next)
         }}
         onOpen={() => refreshOnPickerOpen(true, refreshProjects)}
-        footer={(
-          <MenuFooter>
-            <CreateTenancyButton
-              kind="project"
-              callerRole={self?.role ?? null}
-              organizationID={selectedOrganization ?? undefined}
-              variant="link"
-            />
-          </MenuFooter>
-        )}
+        footer={<MenuFooter>{createButton}</MenuFooter>}
       />
+    )
+  }
+  return (
+    <PickerField label="Project">
+      {body}
+      {modal}
     </PickerField>
   )
 }

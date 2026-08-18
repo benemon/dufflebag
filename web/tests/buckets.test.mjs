@@ -6,6 +6,11 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
+const bucketPickerSource = readFileSync(
+  new URL('../src/data/bucketPicker.ts', import.meta.url),
+  'utf8',
+)
+
 let vite
 let BucketsView
 let bucketComparator
@@ -566,6 +571,19 @@ test('the create modal is owned by the picker, not the vanishing footer', () => 
   assert.doesNotMatch(creationSource, /<BucketModal /)
 })
 
+test('bucket picker refresh stays stable across token renewals', () => {
+  const refreshSource = bucketPickerSource.slice(
+    bucketPickerSource.indexOf('const refresh = useCallback'),
+    bucketPickerSource.indexOf('useEffect(() =>'),
+  )
+  assert.match(refreshSource, /const session = stateRef\.current/)
+  assert.match(
+    refreshSource,
+    /\}, \[selectedOrganization, selectedProject, signOut\]\)/,
+    'refresh dependencies must not include state',
+  )
+})
+
 test('the picker listing makes no per-bucket fan-out requests', async () => {
   const originalFetch = globalThis.fetch
   const calls = []
@@ -640,4 +658,3 @@ test('a created bucket is selected only after the refreshed listing contains it'
     /listing could not be refreshed/,
   )
 })
-

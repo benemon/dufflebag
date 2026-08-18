@@ -90,10 +90,11 @@ test('tenancy modal renders an inline danger Alert on failure', () => {
 
 test('creation buttons expose the settled role requirements', () => {
   const organization = renderToStaticMarkup(React.createElement(CreateTenancyButton, {
-    kind: 'organization', callerRole: 'maintainer', variant: 'link',
+    kind: 'organization', callerRole: 'maintainer', onOpen: () => {}, variant: 'link',
   }))
   const project = renderToStaticMarkup(React.createElement(CreateTenancyButton, {
-    kind: 'project', callerRole: 'reader', organizationID: 'org-1', variant: 'link',
+    kind: 'project', callerRole: 'reader', organizationID: 'org-1',
+    onOpen: () => {}, variant: 'link',
   }))
   assert.match(organization, /Create organisation/)
   assert.match(organization, /Requires root/)
