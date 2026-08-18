@@ -33,23 +33,26 @@ renders a copyable Terraform `hcp_packer_version` + `hcp_packer_artifact`
 block. The card provides the console's standing handoff to automation — see
 [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md).
 
-The card offers Terraform plus native commands for platforms the version
-actually built; Terraform is always present and selected by default.
+The card always offers Terraform. It adds native commands only when the
+version carries the artifact data needed to run them; Terraform remains
+selected by default.
 
 - **AWS** builds are fully tethered — the artifact records the AMI id and
   region — so the tab renders runnable `aws ec2 describe-images` and
   `aws ec2 run-instances` commands.
-- **Docker** builds record the image digest, never a repository. When the
-  build was tagged (a `docker-tag` post-processor), the tag travels in the
-  build labels and the card offers **Docker** and **Podman** tabs with
-  `pull` commands for each tag plus a digest `image inspect` line. An
-  untagged build gets a single Docker tab: the digest inspection plus a
-  plain statement that no repository was recorded — a pull command would be
-  an invention.
+- **Docker** and **Podman** render `pull` commands for every tag carried by
+  the build labels, followed by a digest `image inspect` line. Both tabs
+  appear only when a `docker-tag` post-processor tagged the build. An
+  untagged container build gets no container tabs; its artifact digests
+  remain on the build screen for verification.
 
 Platforms without a confident command mapping fall back to Terraform.
 
-![Dufflebag consumption card showing the Terraform and platform command toggle](/screenshots/version-consume.png)
+![Dufflebag consumption card showing Terraform, Docker, Podman and AWS with the tagged Docker command selected](/screenshots/version-consume.png)
+
+An untagged container version offers no container tabs:
+
+![Dufflebag consumption card for an untagged container version showing no Docker or Podman tabs](/screenshots/version-consume-untagged.png)
 
 ## Revoking a version
 

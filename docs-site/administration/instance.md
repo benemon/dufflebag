@@ -20,6 +20,8 @@ a bucket: the credential is not bound to one. If the bucket cannot be
 resolved, the console says so above the block rather than emitting an
 incomplete one silently.
 
+![Dufflebag Instance screen in a bucket-scoped session showing the Bucket navigation entry and HCP_PACKER_BUCKET_NAME](/screenshots/instance-bucket-scoped.png)
+
 ::: warning
 The console warns if it is not served over HTTPS. Authentication requires an
 HTTPS URL.
