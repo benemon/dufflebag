@@ -777,8 +777,7 @@ export function availableConsumers(version: VersionData): Consumer[] {
   )
   return [
     'terraform',
-    ...(builtPlatforms.has('docker') ? ['docker' as const] : []),
-    ...(taggedDocker ? ['podman' as const] : []),
+    ...(taggedDocker ? ['docker' as const, 'podman' as const] : []),
     ...(builtPlatforms.has('aws') ? ['aws' as const] : []),
   ]
 }
@@ -791,15 +790,14 @@ export function platformConsumeSnippet(
   const heading = `# ${bucket} ${version.name}`
   if (platform === 'docker' || platform === 'podman') {
     const builds = version.builds.filter((build) =>
-      build.platform === 'docker' && build.artifacts.length > 0,
+      build.platform === 'docker' && build.artifacts.length > 0 &&
+      (build.labels.tags ?? '').split(',').some((tag) => tag.trim() !== ''),
     )
     if (builds.length === 0) return null
     return [heading, ...builds.map((build) => {
       const tags = (build.labels.tags ?? '').split(',').map((tag) => tag.trim()).filter(Boolean)
       return [
-        ...(tags.length > 0
-          ? tags.map((tag) => `${platform} pull ${tag}`)
-          : ['# The builder recorded no repository, so no pull command exists.']),
+        ...tags.map((tag) => `${platform} pull ${tag}`),
         ...build.artifacts.map((artifact) =>
           `${platform} image inspect ${artifact.externalIdentifier}`),
       ].join('\n')

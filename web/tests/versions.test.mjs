@@ -1812,7 +1812,7 @@ test('version detail renders persisted parent links and Terraform from real iden
 test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', () => {
   assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
-  ])), ['terraform', 'docker'])
+  ])), ['terraform'])
   assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild(
       'docker',
@@ -1898,12 +1898,19 @@ test('MUTATION_NATIVE_DOCKER renders every tagged pull and verifies the recorded
   assert.match(markup, /docker pull dufflebag-probe\/tagged:probe/)
   assert.match(markup, /docker pull dufflebag-probe\/tagged:latest/)
   assert.match(markup, /docker image inspect sha256:387f75\.\.\./)
+  assert.equal(
+    platformConsumeSnippet('docker', 'images', version),
+    '# images v3\n\n' +
+      'docker pull dufflebag-probe/tagged:probe\n' +
+      'docker pull dufflebag-probe/tagged:latest\n' +
+      'docker image inspect sha256:387f75...',
+  )
   assert.doesNotMatch(markup, /community\.docker|&lt;repo&gt;@/)
   assert.doesNotMatch(markup, /hcp_packer_version|hcp_packer_artifact/)
   assert.equal((markup.match(/\bpf-v6-c-code-block\b/g) ?? []).length, 1)
 })
 
-test('untagged Docker has no Podman choice or invented pull reference', () => {
+test('untagged Docker has no container choices or container snippet', () => {
   // Live untagged wire shape: labels can be absent/empty; PackerArtifactID,
   // when present, repeats the digest and is not a pullable repository ref.
   const version = consumptionVersion([
@@ -1917,11 +1924,13 @@ test('untagged Docker has no Podman choice or invented pull reference', () => {
     bucket: 'images', version, initialConsumer: 'docker',
   }))
 
-  assert.deepEqual(availableConsumers(version), ['terraform', 'docker'])
+  assert.deepEqual(availableConsumers(version), ['terraform'])
+  assert.equal(platformConsumeSnippet('docker', 'images', version), null)
+  assert.equal(platformConsumeSnippet('podman', 'images', version), null)
+  assert.match(markup, /aria-pressed="true"[^>]*id="consume-terraform"/)
+  assert.doesNotMatch(markup, /id="consume-docker"/)
   assert.doesNotMatch(markup, /id="consume-podman"/)
-  assert.match(markup, /The builder recorded no repository, so no pull command exists\./)
-  assert.match(markup, /docker image inspect sha256:387f75\.\.\./)
-  assert.doesNotMatch(markup, /docker pull|&lt;repo&gt;/)
+  assert.doesNotMatch(markup, /The builder recorded no repository|image inspect|docker pull|podman pull|&lt;repo&gt;/)
 })
 
 test('Podman uses native pulls and digest identity verification', () => {

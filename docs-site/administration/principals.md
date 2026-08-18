@@ -61,6 +61,8 @@ bucket selection answers exactly that bucket's principals, and a project
 selection never lists bucket-scoped principals as a subtree. Over the API,
 pass `bucket_id` (the bucket's ULID) alongside the organisation and project.
 
+![Dufflebag bucket-scoped session showing its Bucket navigation entry and bound client environment](/screenshots/instance-bucket-scoped.png)
+
 The two tenancy-scoped kinds behave differently in the Packer CLI. A
 project-scoped principal gets a 403 from project discovery, which Packer
 turns into "try setting `HCP_PROJECT_ID`". An organisation-scoped principal

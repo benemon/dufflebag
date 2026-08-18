@@ -639,7 +639,8 @@ async function seedFixtures(credentials) {
     description: 'Application runtimes layered on the hardened bases',
     labels: { owner: 'app-platform', lifecycle: 'managed' },
   })
-  await completeVersion(builderToken, `${bucketBase}/app-images/versions`, {
+  const appVersions = `${bucketBase}/app-images/versions`
+  await completeVersion(builderToken, appVersions, {
     fingerprint: 'node-22-2026-08',
     component: 'docker.node',
     platform: 'docker',
@@ -649,7 +650,7 @@ async function seedFixtures(credentials) {
     template: './images/node.pkr.hcl',
     os: 'ubuntu-24.04',
   })
-  await completeVersion(builderToken, `${bucketBase}/app-images/versions`, {
+  await completeVersion(builderToken, appVersions, {
     fingerprint: 'python-313-2026-08',
     component: 'docker.python',
     platform: 'docker',
@@ -659,6 +660,84 @@ async function seedFixtures(credentials) {
     template: './images/python.pkr.hcl',
     os: 'ubuntu-24.04',
   })
+
+  // One real consumption handoff: the version carries both an AMI and a
+  // docker-tag result. Both builds must exist before either finishes or the
+  // first terminal update would complete the version.
+  const taggedConsumptionFingerprint = 'dufflebag-demo-app-1-0-0'
+  await api(builderToken, 'POST', appVersions, {
+    fingerprint: taggedConsumptionFingerprint,
+    template_type: 'HCL2',
+  })
+  const { build: consumptionAWSBuild } = await api(
+    builderToken,
+    'POST',
+    `${appVersions}/${taggedConsumptionFingerprint}/builds`,
+    {
+      component_type: 'amazon-ebs.dufflebag-demo-app',
+      packer_run_uuid: 'run-dufflebag-demo-app-1-0-0',
+      artifacts: [],
+    },
+  )
+  const { build: consumptionDockerBuild } = await api(
+    builderToken,
+    'POST',
+    `${appVersions}/${taggedConsumptionFingerprint}/builds`,
+    {
+      component_type: 'docker.dufflebag-demo-app',
+      packer_run_uuid: 'run-dufflebag-demo-app-1-0-0',
+      artifacts: [],
+    },
+  )
+  await api(
+    builderToken,
+    'PATCH',
+    `${appVersions}/${taggedConsumptionFingerprint}/builds/${consumptionAWSBuild.id}`,
+    {
+      status: 'BUILD_DONE',
+      platform: 'aws',
+      artifacts: [{
+        external_identifier: 'ami-0b6873e6a9ffc49be',
+        region: 'eu-west-2',
+      }],
+      // Completion requires seen metadata; shapes mirror the live dual-output
+      // specimen (app-multi-verify, packer 1.16.0).
+      metadata: {
+        packer: {
+          version: '1.16.0',
+          options: { path: 'app-multi.pkr.hcl' },
+          os: { type: 'darwin', details: { arch: 'arm64', version: '24.6.0' } },
+          plugins: [{ name: 'amazon', version: '1.8.2' }],
+        },
+      },
+    },
+  )
+  const consumptionDigest =
+    'sha256:387f75c3949157f96595e5cb3b6c6b2a99ebef7d9c535d2ce5bdc8807e44ad02'
+  const consumptionTag = 'quay.io/benjamin_holmes/dufflebag-demo-app:1.0.0'
+  await api(
+    builderToken,
+    'PATCH',
+    `${appVersions}/${taggedConsumptionFingerprint}/builds/${consumptionDockerBuild.id}`,
+    {
+      status: 'BUILD_DONE',
+      platform: 'docker',
+      labels: {
+        tags: consumptionTag,
+        PackerArtifactID: consumptionTag,
+        ImageSha256: consumptionDigest,
+      },
+      artifacts: [{ external_identifier: consumptionDigest, region: 'docker' }],
+      metadata: {
+        packer: {
+          version: '1.16.0',
+          options: { path: 'app-multi.pkr.hcl' },
+          os: { type: 'darwin', details: { arch: 'arm64', version: '24.6.0' } },
+          plugins: [{ name: 'docker', version: '1.1.4' }],
+        },
+      },
+    },
+  )
   await api(builderToken, 'PUT', bucketBase, {
     name: 'builder-images',
     description: 'CI build agents with pinned toolchains',
@@ -700,6 +779,16 @@ async function seedFixtures(credentials) {
     `/api/v1/organizations/${organization.id}/projects/${project.id}/pins/database-images`,
   )
 
+  const { buckets } = await api(rootToken, 'GET', bucketBase)
+  const baseImagesBucket = buckets.find((candidate) => candidate.name === 'base-images')
+  assert.ok(baseImagesBucket, 'base-images was not returned by the seeded bucket listing')
+  const bucketPrincipal = await createPrincipal(rootToken, {
+    name: 'base-images-builder',
+    role: 'builder',
+    ...scope,
+    bucket_id: baseImagesBucket.id,
+  })
+
   await api(rootToken, 'POST', '/api/v1/audit/targets', {
     path: join(tmpdir(), `dufflebag-docs-shots-audit-${process.pid}.log`),
   })
@@ -721,6 +810,8 @@ async function seedFixtures(credentials) {
     postgresBuildID: postgresBuild.id,
     compatBase: `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`,
     builderToken,
+    bucketPrincipal,
+    rootCredentials: credentials,
   }
 }
 
@@ -782,7 +873,25 @@ async function captureSeededScreens(seeded) {
       return card.getBoundingClientRect().height > 0
     }))
   await capture('version-operations.png')
-  await until('the Consume card to be visible', () =>
+
+  await clickByText('button', 'Revoke')
+  await waitForText('Revoke base-images v1')
+  await page.waitForSelector('#typed-confirm-modal-input')
+  await page.type('#typed-confirm-modal-input', 'v1')
+  await capture('typed-confirm.png')
+  await clickByText('[role="dialog"] button', 'Cancel')
+
+  await page.goto(
+    `${base}/buckets/app-images/versions/dufflebag-demo-app-1-0-0`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await waitForText('Consume this version')
+  for (const consumer of ['terraform', 'docker', 'podman', 'aws']) {
+    await page.waitForSelector(`#consume-${consumer}`)
+  }
+  await page.click('#consume-docker')
+  await waitForText('docker pull quay.io/benjamin_holmes/dufflebag-demo-app:1.0.0')
+  await until('the tagged Consume card to be visible', () =>
     page.$$eval('.pf-v6-c-card', (cards) => {
       const card = cards.find((candidate) => candidate.innerText.includes('Consume this version'))
       if (!card) return false
@@ -791,12 +900,22 @@ async function captureSeededScreens(seeded) {
     }))
   await capture('version-consume.png')
 
-  await clickByText('button', 'Revoke')
-  await waitForText('Revoke base-images v1')
-  await page.waitForSelector('#typed-confirm-modal-input')
-  await page.type('#typed-confirm-modal-input', 'v1')
-  await capture('typed-confirm.png')
-  await clickByText('[role="dialog"] button', 'Cancel')
+  await page.goto(
+    `${base}/buckets/app-images/versions/node-22-2026-08`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await waitForText('Consume this version')
+  await page.waitForSelector('#consume-terraform')
+  assert.equal(await page.$('#consume-docker'), null, 'untagged version offered Docker')
+  assert.equal(await page.$('#consume-podman'), null, 'untagged version offered Podman')
+  await until('the untagged Consume card to be visible', () =>
+    page.$$eval('.pf-v6-c-card', (cards) => {
+      const card = cards.find((candidate) => candidate.innerText.includes('Consume this version'))
+      if (!card) return false
+      card.scrollIntoView({ block: 'center' })
+      return card.getBoundingClientRect().height > 0
+    }))
+  await capture('version-consume-untagged.png')
 
   // The 2s-cadence scanner should have findings for the seeded vulnerable
   // go module by now; wait on the API before photographing the build.
@@ -867,6 +986,34 @@ async function captureSeededScreens(seeded) {
   await clickByText('button', 'Sign out')
   await waitForText('Log in')
   await capture('login.png')
+
+  // This capture is last because it deliberately replaces the browser's root
+  // session. Restore that original session before returning to keep additions
+  // after this block independent of the bucket binding.
+  await page.type('#client-id', seeded.bucketPrincipal.client_id)
+  await page.type('#client-secret', seeded.bucketPrincipal.secret)
+  await clickByText('button', 'Log in')
+  await waitForText('Sign out')
+  await page.goto(`${base}/instance`, { waitUntil: 'domcontentloaded' })
+  await waitForText('HCP_PACKER_BUCKET_NAME=base-images')
+  await until('the Bucket navigation entry and client environment to be visible', () =>
+    page.evaluate(() => {
+      const hasBucketNav = [...document.querySelectorAll('nav.app-global-nav a')]
+        .some((link) => link.textContent?.trim() === 'Bucket')
+      const card = [...document.querySelectorAll('.pf-v6-c-card')]
+        .find((candidate) => candidate.textContent?.includes('Client environment'))
+      if (!hasBucketNav || !card) return false
+      card.scrollIntoView({ block: 'center' })
+      return card.getBoundingClientRect().height > 0
+    }))
+  await capture('instance-bucket-scoped.png')
+
+  await clickByText('button', 'Sign out')
+  await waitForText('Log in')
+  await page.type('#client-id', seeded.rootCredentials.clientID)
+  await page.type('#client-secret', seeded.rootCredentials.clientSecret)
+  await clickByText('button', 'Log in')
+  await waitForText('Sign out')
 }
 
 async function cleanup() {
