@@ -572,13 +572,20 @@ before(async () => {
   )
 
   // Postgres, exactly as test-integration runs it: postgres:17-alpine, with a
-  // random host port so concurrent runs cannot collide.
+  // random host port so concurrent runs cannot collide. Lock waits over one
+  // second are logged to the container so an intermittent server-side stall
+  // (duf-3wo8: a bucket DELETE once hung ~5 minutes, unreproduced across 12
+  // instrumented runs) self-diagnoses in `docker logs` at its next natural
+  // occurrence instead of dying as an opaque fetch failure.
   await execFile('docker', [
     'run', '-d', '--rm', '--name', container,
     '-e', 'POSTGRES_PASSWORD=postgres',
     '-e', 'POSTGRES_DB=dufflebag',
     '-p', '127.0.0.1::5432',
     'postgres:17-alpine',
+    '-c', 'log_lock_waits=on',
+    '-c', 'deadlock_timeout=1s',
+    '-c', 'log_min_duration_statement=5000',
   ])
   const { stdout: portLine } = await execFile('docker', ['port', container, '5432/tcp'])
   const pgPort = portLine.trim().split('\n')[0].split(':').pop()
