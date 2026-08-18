@@ -479,7 +479,62 @@ func TestScannerHubIntegration(t *testing.T) {
 		}
 	})
 
-	t.Run("concurrent drainers cannot double claim", func(t *testing.T) {
+	t.Run("claimed scan does not block bucket deletion", func(t *testing.T) {
+		seed := seedScannerBuild(t, db, "delete-during-dispatch", true, true)
+		// Keep this assertion about the pending_scans row lock only. The
+		// repository deletes SBOM objects after committing the bucket cascade,
+		// and object-store latency is unrelated to the database hang at issue.
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM sboms WHERE build_id = $1`, seed.buildID); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+		release := make(chan struct{})
+		var releaseOnce sync.Once
+		releaseScan := func() { releaseOnce.Do(func() { close(release) }) }
+		defer releaseScan()
+
+		adapter := &scannerStub{
+			started: make(chan int, 1),
+			wait:    func(int) <-chan struct{} { return release },
+		}
+		service := newScannerService(t, repository, adapter, &scannerAuditWriter{}, 1, time.Now)
+		drainDone := make(chan error, 1)
+		go func() { drainDone <- service.DrainOnce(ctx) }()
+		<-adapter.started
+
+		deleteDone := make(chan error, 1)
+		go func() { deleteDone <- repository.DeleteBucket(ctx, tenant, seed.bucketName) }()
+		select {
+		case err := <-deleteDone:
+			if err != nil {
+				t.Fatalf("DeleteBucket while scanner dispatch was blocked: %v", err)
+			}
+		case <-time.After(time.Second):
+			t.Fatal("DeleteBucket blocked on the claimed pending_scans row")
+		}
+
+		releaseScan()
+		select {
+		case err := <-drainDone:
+			if err != nil {
+				t.Fatalf("scanner terminal path after build deletion: %v", err)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("scanner did not finish after the deleted build's adapter was released")
+		}
+		if got := pendingCount(t, db, seed.buildID); got != 0 {
+			t.Fatalf("pending rows after bucket deletion = %d, want 0", got)
+		}
+	})
+
+	t.Run("two concurrent claims never dispatch the same row", func(t *testing.T) {
 		seed := seedScannerBuild(t, db, "double-claim", true, true)
 		release := make(chan struct{})
 		adapter := &scannerStub{started: make(chan int, 2), wait: func(int) <-chan struct{} { return release }}
@@ -497,6 +552,32 @@ func TestScannerHubIntegration(t *testing.T) {
 		}
 		if calls, _ := adapter.snapshot(); calls != 1 {
 			t.Fatalf("adapter calls = %d for %s", calls, seed.buildID)
+		}
+	})
+
+	t.Run("stale claim is reclaimable after pass timeout", func(t *testing.T) {
+		seed := seedScannerBuild(t, db, "stale-claim", true, true)
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE pending_scans SET claimed_at = now() - interval '6 seconds' WHERE build_id = $1`, seed.buildID); err != nil {
+			_ = tx.Rollback()
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+
+		adapter := &scannerStub{}
+		if err := newScannerService(t, repository, adapter, &scannerAuditWriter{}, 1, time.Now).DrainOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+		if calls, _ := adapter.snapshot(); calls != 1 {
+			t.Fatalf("adapter calls for stale claim = %d, want 1", calls)
+		}
+		if got := pendingCount(t, db, seed.buildID); got != 0 {
+			t.Fatalf("pending rows after stale reclaim = %d, want 0", got)
 		}
 	})
 
