@@ -300,6 +300,43 @@ func TestRoleAndScopeMustAgree(t *testing.T) {
 	}
 }
 
+func TestBucketScopeRoleCeiling(t *testing.T) {
+	bucketScope := Scope{OrganizationID: orgA, ProjectID: projA, BucketID: "bucket-1"}
+	for _, test := range []struct {
+		name        string
+		scope       Scope
+		role        Role
+		wantInvalid bool
+	}{
+		{"bucket maintainer", bucketScope, RoleMaintainer, true},
+		{"bucket publisher", bucketScope, RolePublisher, false},
+		{"bucket builder", bucketScope, RoleBuilder, false},
+		{"bucket reader", bucketScope, RoleReader, false},
+		{"project maintainer", Scope{OrganizationID: orgA, ProjectID: projA}, RoleMaintainer, false},
+		{"organization maintainer", Scope{OrganizationID: orgA}, RoleMaintainer, false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, newErr := NewPrincipal("p", "n", "c", test.scope, test.role, epoch)
+			_, restoreErr := RestorePrincipal("p", "n", "c", test.scope, test.role, epoch, nil)
+			if test.wantInvalid {
+				if !errors.Is(newErr, ErrInvalid) {
+					t.Fatalf("NewPrincipal = %v, want ErrInvalid", newErr)
+				}
+				if !errors.Is(restoreErr, ErrInvalid) {
+					t.Fatalf("RestorePrincipal = %v, want ErrInvalid", restoreErr)
+				}
+				return
+			}
+			if newErr != nil {
+				t.Fatalf("NewPrincipal = %v, want nil", newErr)
+			}
+			if restoreErr != nil {
+				t.Fatalf("RestorePrincipal = %v, want nil", restoreErr)
+			}
+		})
+	}
+}
+
 // A service principal without a role is made impossible rather than handled: it
 // could never do anything, so it is a mistake rather than a stage (ADR-0019).
 // Refused on the way in AND on the way out of storage, since a row could be

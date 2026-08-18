@@ -199,6 +199,9 @@ func validBinding(scope Scope, role Role) error {
 	if scope.BucketID != "" && scope.ProjectID == uuid.Nil {
 		return fmt.Errorf("%w: a bucket scope requires a project", ErrInvalid)
 	}
+	if scope.BucketID != "" && rank[role] > rank[RolePublisher] {
+		return fmt.Errorf("%w: a bucket scope cannot hold %s", ErrInvalid, role)
+	}
 	if role.PlatformOnly() != scope.PlatformScoped() {
 		return fmt.Errorf(
 			"%w: role %s and %s scope cannot be held together", ErrInvalid, role, scopeName(scope),

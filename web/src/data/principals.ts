@@ -48,10 +48,10 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
  * Two independent rules, both enforced server-side, mirrored so the form cannot
  * offer a combination the API will refuse:
  *
- * TENANCY. `root` is platform-scoped only and every other role is tenancy-only —
+ * STANDING. `root` is platform-scoped only and every other role is tenancy-only —
  * validBinding ties them together exactly, so "root in an organisation" is not a
- * narrower root, it is a malformed principal. Creating within a tenancy
- * therefore never offers root, and creating above one offers nothing else.
+ * narrower root, it is a malformed principal. A bucket narrows that further to
+ * reader, builder or publisher: principal administration belongs above it.
  *
  * GRANTER. No identity may grant a role more permissive than its own
  * (ADR-0019). A maintainer creating a principal cannot make it root, and the
@@ -62,11 +62,13 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
  * end.
  */
 export function grantableRoles(
-  scope: 'platform' | 'tenancy',
+  standing: Standing,
   granter: Role | null,
 ): Role[] {
   const permittedHere: Role[] =
-    scope === 'platform' ? ['root'] : ROLES.filter((role) => role !== 'root')
+    standing === 'platform' ? ['root']
+      : standing === 'bucket' ? ROLES.slice(0, ROLES.indexOf('maintainer'))
+        : ROLES.filter((role) => role !== 'root')
   if (granter === null) return permittedHere
   const ceiling = ROLES.indexOf(granter)
   return permittedHere.filter((role) => ROLES.indexOf(role) <= ceiling)

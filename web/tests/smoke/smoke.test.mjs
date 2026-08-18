@@ -2666,6 +2666,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('No bucket-scoped principals')
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
     await clickByText('button', 'Create principal')
+    assert.deepEqual(await roleOptions(), ['reader', 'builder', 'publisher'])
+    assert.equal(await page.$eval('#principal-role', (select) => select.value), 'reader')
     await page.type('#principal-name', 'smoke-bucket-scoped')
     await clickByText('button', 'Create principal')
     await waitForText('smoke-bucket-scoped')

@@ -20,8 +20,10 @@ let TenancyModalView
 let TenancyGapEmptyState
 let CreateTenancyButton
 let refreshThenSelect
+let projectCreationRefusal
 let NoProjectsYet
 let platformTenancyGap
+let AuthContext
 
 before(async () => {
   vite = await createServer({
@@ -32,10 +34,14 @@ before(async () => {
     ssr: { noExternal: [/@patternfly\//] },
   })
   ;({ TenancyForm } = await vite.ssrLoadModule('/src/components/TenancyForm.tsx'))
-  ;({ TenancyModalView, TenancyGapEmptyState, CreateTenancyButton, refreshThenSelect } =
+  ;({
+    TenancyModalView, TenancyGapEmptyState, CreateTenancyButton, projectCreationRefusal,
+    refreshThenSelect,
+  } =
     await vite.ssrLoadModule('/src/components/TenancyCreation.tsx'))
   ;({ NoProjectsYet } = await vite.ssrLoadModule('/src/App.tsx'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
+  ;({ AuthContext } = await vite.ssrLoadModule('/src/auth/AuthContext.tsx'))
 })
 
 after(async () => { await vite.close() })
@@ -74,6 +80,12 @@ const findElement = (node, predicate) => {
   return findElement(node.props.children, predicate)
 }
 
+const withClaims = (element, claims) => React.createElement(
+  AuthContext.Provider,
+  { value: { state: { claims } } },
+  element,
+)
+
 test('tenancy modal renders an inline danger Alert on failure', () => {
   const tree = TenancyModalView({
     kind: 'project', submitting: false, failure: 'name already exists',
@@ -102,6 +114,33 @@ test('creation buttons expose the settled role requirements', () => {
   assert.match(project, /Requires maintainer/)
 })
 
+test('project creation is refused below organisation scope', () => {
+  const reason = 'A project is created at organisation scope; this session is scoped to a project.'
+  const projectClaims = { organizationID: 'org-1', projectID: 'project-1' }
+  const organizationClaims = { organizationID: 'org-1', projectID: null }
+  const platformClaims = { organizationID: null, projectID: null }
+
+  assert.equal(projectCreationRefusal(projectClaims), reason)
+  assert.equal(projectCreationRefusal(organizationClaims), null)
+  assert.equal(projectCreationRefusal(platformClaims), null)
+
+  const refused = renderToStaticMarkup(React.createElement(CreateTenancyButton, {
+    kind: 'project', callerRole: 'reader', organizationID: 'org-1',
+    refusal: projectCreationRefusal(projectClaims), onOpen: () => {},
+  }))
+  assert.match(refused, new RegExp(reason.replace('.', '\\.')))
+  assert.match(refused, /<button[^>]*\bdisabled\b/)
+  assert.doesNotMatch(refused, /Requires maintainer/)
+
+  for (const claims of [organizationClaims, platformClaims]) {
+    const live = renderToStaticMarkup(React.createElement(CreateTenancyButton, {
+      kind: 'project', callerRole: 'maintainer', organizationID: 'org-1',
+      refusal: projectCreationRefusal(claims), onOpen: () => {},
+    }))
+    assert.doesNotMatch(live, /<button[^>]*\bdisabled\b/)
+  }
+})
+
 test('created project is selected after its refreshed listing includes it', async () => {
   const events = []
   const created = { id: 'project-new', name: 'new', created_at: '2026-08-13T00:00:00Z' }
@@ -117,9 +156,12 @@ test('created project is selected after its refreshed listing includes it', asyn
 })
 
 test('no-project gate is an actionable EmptyState', () => {
-  const markup = renderToStaticMarkup(React.createElement(NoProjectsYet, {
-    callerRole: 'maintainer', organizationID: 'org-1',
-  }))
+  const markup = renderToStaticMarkup(withClaims(
+    React.createElement(NoProjectsYet, {
+      callerRole: 'maintainer', organizationID: 'org-1',
+    }),
+    { organizationID: 'org-1', projectID: null },
+  ))
   assert.match(markup, /<h2[^>]*>No projects yet<\/h2>/)
   assert.match(markup, /A project scopes buckets, principals and channels\./)
   assert.match(markup, />Create project</)
@@ -135,9 +177,10 @@ test('every tenancy-gap data screen uses the actionable EmptyState', () => {
     platform: false, organizationCount: 0,
     selectedOrganization: 'org-1', projectCount: 0, selectedProject: null,
   })
-  const markup = renderToStaticMarkup(React.createElement(TenancyGapEmptyState, {
-    gap, callerRole: 'maintainer',
-  }))
+  const markup = renderToStaticMarkup(withClaims(
+    React.createElement(TenancyGapEmptyState, { gap, callerRole: 'maintainer' }),
+    { organizationID: 'org-1', projectID: null },
+  ))
   assert.match(markup, /No projects in this organisation/)
   assert.match(markup, /Buckets live inside a project/)
   assert.match(markup, />Create project</)
