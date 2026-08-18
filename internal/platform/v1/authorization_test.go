@@ -34,8 +34,12 @@ func TestObjectStorageConfigurationIsNotAPlatformOperation(t *testing.T) {
 }
 
 func TestBucketScopedPrincipalCannotUseProjectLevelAdministration(t *testing.T) {
+	// Publisher is the highest role a bucket scope may hold (bucket bindings
+	// above publisher are unrepresentable, duf-0vds), so this proves the
+	// scope funnel refuses project-level administration even to the most
+	// privileged bucket-scoped principal.
 	server := platformServer(testRoles{
-		role: identity.RoleMaintainer,
+		role: identity.RolePublisher,
 		scope: identity.Scope{
 			OrganizationID: uuid.MustParse(testOrgID),
 			ProjectID:      uuid.MustParse(testProjID),
