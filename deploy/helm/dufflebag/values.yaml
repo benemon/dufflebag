@@ -7,7 +7,12 @@
 dufflebag:
   image:
     repository: quay.io/benjamin_holmes/dufflebag
-    tag: latest
+    tag: v0.2.0
+  # The osv adapter scans stored SBOMs against api.osv.dev. Set adapter to ""
+  # to run without a scanner (air-gapped clusters); the server then reports
+  # scanner: disabled and the console shows no Vulnerabilities tab.
+  scanner:
+    adapter: osv
   resources: {}
 
 postgres:

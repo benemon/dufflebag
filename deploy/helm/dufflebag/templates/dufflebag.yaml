@@ -90,6 +90,10 @@ spec:
                   key: app-database-url
             - name: DFBG_HTTP_ADDR
               value: :8080
+            {{- if .Values.dufflebag.scanner.adapter }}
+            - name: DFBG_SCANNER_ADAPTER
+              value: {{ .Values.dufflebag.scanner.adapter | quote }}
+            {{- end }}
             - name: DFBG_KEY_PROVIDER
               value: vault
             - name: DFBG_VAULT_ADDR
