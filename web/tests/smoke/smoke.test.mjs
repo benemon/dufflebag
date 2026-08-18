@@ -2745,6 +2745,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await pickerValue('#tenant-bucket')) === 'smoke-footer-created')
   })
 
+  await t.test('the tenancy picker-footer create survives the picker closing under it', async () => {
+    // Organisation perturbs no exact fixture list or count. Click into the
+    // portaled field after opening from the footer: that closes the picker and
+    // proves its unmounted footer does not own the modal.
+    await page.click('#tenant-organization')
+    await clickByText('button', 'Create organisation')
+    await page.waitForSelector('#create-organization-name')
+    await page.click('#create-organization-name')
+    await page.type('#create-organization-name', 'smoke-footer-org')
+    await clickInModal('Create organisation')
+    await until('the created organisation to become the selection', async () =>
+      (await pickerValue('#tenant-organization')) === 'smoke-footer-org')
+  })
+
   await t.test('the console-minted builder signs in, scoped to exactly its project', async () => {
     assert.ok(consoleBuilder, 'the create-through-the-form step must have captured a credential')
     await clickByText('button', 'Sign out')

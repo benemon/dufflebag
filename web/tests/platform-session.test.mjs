@@ -29,6 +29,22 @@ const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
   'utf8',
 )
+const tenancyCreationSource = readFileSync(
+  new URL('../src/components/TenancyCreation.tsx', import.meta.url),
+  'utf8',
+)
+const organizationSelectSource = tenantSwitcherSource.slice(
+  tenantSwitcherSource.indexOf('function OrganizationSelect'),
+  tenantSwitcherSource.indexOf('function ProjectSelect'),
+)
+const projectSelectSource = tenantSwitcherSource.slice(
+  tenantSwitcherSource.indexOf('function ProjectSelect'),
+  tenantSwitcherSource.indexOf('export function BucketPicker'),
+)
+const createTenancyButtonSource = tenancyCreationSource.slice(
+  tenancyCreationSource.indexOf('export function CreateTenancyButton'),
+  tenancyCreationSource.indexOf('export function TenancyModal'),
+)
 const authContextSource = readFileSync(
   new URL('../src/auth/AuthContext.tsx', import.meta.url),
   'utf8',
@@ -492,6 +508,18 @@ test('all three masthead pickers use typeahead toggles and role-gated creation f
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="organization"/)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?kind="project"/)
   assert.match(tenantSwitcherSource, /<MenuFooter>[\s\S]*?<CreateBucketButton/)
+})
+
+test('tenancy create modals are owned by the pickers, not the vanishing footers', () => {
+  // A click into either portaled modal closes its Select and unmounts the
+  // footer. Each picker therefore has one return whose PickerField carries
+  // the modal beside its body; the footer carries only the stateless trigger.
+  assert.equal((organizationSelectSource.match(/\breturn \(/g) ?? []).length, 1)
+  assert.match(organizationSelectSource, /\{modal\}\s*<\/PickerField>/)
+  assert.equal((projectSelectSource.match(/\breturn \(/g) ?? []).length, 1)
+  assert.match(projectSelectSource, /\{body\}\s*\{modal\}\s*<\/PickerField>/)
+  assert.doesNotMatch(createTenancyButtonSource, /useState|<TenancyModal/)
+  assert.match(createTenancyButtonSource, /event\.stopPropagation\(\)[\s\S]*onOpen\(\)/)
 })
 
 test('zero-organisation masthead keeps its compact recovery action', () => {

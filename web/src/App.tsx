@@ -19,7 +19,7 @@ import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
-import { CreateTenancyButton } from './components/TenancyCreation'
+import { CreateTenancyButton, TenancyModal } from './components/TenancyCreation'
 import type { Role } from './auth/permissions'
 import { useTheme, type Theme } from './theme/theme'
 
@@ -205,19 +205,30 @@ export function NoProjectsYet({
   callerRole: Role | null
   organizationID?: string
 }) {
+  const [creating, setCreating] = useState(false)
   return (
-    <EmptyState titleText="No projects yet" headingLevel="h2">
-      <EmptyStateBody>A project scopes buckets, principals and channels.</EmptyStateBody>
-      <EmptyStateFooter>
-        <EmptyStateActions>
-          <CreateTenancyButton
-            kind="project"
-            callerRole={callerRole}
-            organizationID={organizationID}
-          />
-        </EmptyStateActions>
-      </EmptyStateFooter>
-    </EmptyState>
+    <>
+      <EmptyState titleText="No projects yet" headingLevel="h2">
+        <EmptyStateBody>A project scopes buckets, principals and channels.</EmptyStateBody>
+        <EmptyStateFooter>
+          <EmptyStateActions>
+            <CreateTenancyButton
+              kind="project"
+              callerRole={callerRole}
+              organizationID={organizationID}
+              onOpen={() => setCreating(true)}
+            />
+          </EmptyStateActions>
+        </EmptyStateFooter>
+      </EmptyState>
+      {creating ? (
+        <TenancyModal
+          kind="project"
+          organizationID={organizationID}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </>
   )
 }
 

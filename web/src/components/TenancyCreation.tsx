@@ -29,37 +29,33 @@ export async function refreshThenSelect<T>(
   select(created)
 }
 
+/** A stateless trigger; callers own the modal outside any vanishing footer. */
 export function CreateTenancyButton({
-  kind, callerRole, organizationID, variant = 'primary',
+  kind, callerRole, organizationID, onOpen, variant = 'primary',
 }: {
   kind: TenancyKind
   callerRole: Role | null
   organizationID?: string
+  onOpen: () => void
   variant?: ButtonProps['variant']
 }) {
-  const [open, setOpen] = useState(false)
   return (
-    <>
-      <RoleRestrictedButton
-        action={kind === 'organization' ? 'createOrganizations' : 'createProjects'}
-        callerRole={callerRole}
-        variant={variant}
-        isDisabled={kind === 'project' && !organizationID}
-        onClick={(event) => {
-          event.stopPropagation()
-          setOpen(true)
-        }}
-      >
-        {labels[kind]}
-      </RoleRestrictedButton>
-      {open ? (
-        <TenancyModal kind={kind} organizationID={organizationID} onClose={() => setOpen(false)} />
-      ) : null}
-    </>
+    <RoleRestrictedButton
+      action={kind === 'organization' ? 'createOrganizations' : 'createProjects'}
+      callerRole={callerRole}
+      variant={variant}
+      isDisabled={kind === 'project' && !organizationID}
+      onClick={(event) => {
+        event.stopPropagation()
+        onOpen()
+      }}
+    >
+      {labels[kind]}
+    </RoleRestrictedButton>
   )
 }
 
-function TenancyModal({
+export function TenancyModal({
   kind, organizationID, onClose,
 }: {
   kind: TenancyKind
@@ -149,18 +145,29 @@ export function TenancyGapEmptyState({
   gap: TenancyGap
   callerRole: Role | null
 }) {
+  const [creating, setCreating] = useState(false)
   return (
-    <EmptyState titleText={gap.title} headingLevel="h2">
-      <EmptyStateBody>{gap.detail}</EmptyStateBody>
-      <EmptyStateFooter>
-        <EmptyStateActions>
-          <CreateTenancyButton
-            kind={gap.resource}
-            callerRole={callerRole}
-            organizationID={gap.organizationID}
-          />
-        </EmptyStateActions>
-      </EmptyStateFooter>
-    </EmptyState>
+    <>
+      <EmptyState titleText={gap.title} headingLevel="h2">
+        <EmptyStateBody>{gap.detail}</EmptyStateBody>
+        <EmptyStateFooter>
+          <EmptyStateActions>
+            <CreateTenancyButton
+              kind={gap.resource}
+              callerRole={callerRole}
+              organizationID={gap.organizationID}
+              onOpen={() => setCreating(true)}
+            />
+          </EmptyStateActions>
+        </EmptyStateFooter>
+      </EmptyState>
+      {creating ? (
+        <TenancyModal
+          kind={gap.resource}
+          organizationID={gap.organizationID}
+          onClose={() => setCreating(false)}
+        />
+      ) : null}
+    </>
   )
 }

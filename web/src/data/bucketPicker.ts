@@ -31,18 +31,22 @@ export function useBucketPicker() {
   // Keyed on the TENANCY, deliberately not the token: a session renewal mints
   // a new token every ~14 minutes, and keying on it blanked every picker
   // instance mid-interaction while the same tenancy reloaded for no reason.
-  // The refresh callback always reads the current token for its requests.
+  // The state ref keeps that promise: the stable refresh callback always reads
+  // the current token for its requests without making renewal an effect key.
   const identity = state && selectedOrganization && selectedProject
     ? `${selectedOrganization}\u0000${selectedProject}`
     : ''
+  const stateRef = useRef(state)
+  stateRef.current = state
   const identityRef = useRef(identity)
   identityRef.current = identity
 
   const refresh = useCallback(async (): Promise<ApiBucket[] | null> => {
-    if (!state || !selectedOrganization || !selectedProject) return null
+    const session = stateRef.current
+    if (!session || !selectedOrganization || !selectedProject) return null
     const requestIdentity = `${selectedOrganization}\u0000${selectedProject}`
     try {
-      const listed = await loadBucketPicker(state.token, {
+      const listed = await loadBucketPicker(session.token, {
         organizationID: selectedOrganization,
         projectID: selectedProject,
       })
@@ -59,7 +63,7 @@ export function useBucketPicker() {
       }
       return null
     }
-  }, [state, selectedOrganization, selectedProject, signOut])
+  }, [selectedOrganization, selectedProject, signOut])
 
   useEffect(() => {
     setBuckets([])
