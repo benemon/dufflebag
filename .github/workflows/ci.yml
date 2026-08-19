@@ -216,6 +216,24 @@ jobs:
       - name: Run linters
         run: make lint
 
+  # Fast lane: catches a dependency changing licence on upgrade, in either
+  # module graph. The allowlist lives in the Makefile beside the audit note.
+  licenses:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            contract/go.sum
+      - name: Check dependency licences
+        run: make check-licenses
+
   # ADR-0007: the spec is the source of truth. Generated code that has drifted
   # from the vendored specs is a build failure, not a nag.
   generate-check:
@@ -240,7 +258,7 @@ jobs:
   # which commit :latest is. Push-only: there is nothing to publish from a PR.
   publish-latest:
     if: ${{ github.event_name == 'push' }}
-    needs: [build, terraform, packer, lint, generate-check, check-markers]
+    needs: [build, terraform, packer, lint, licenses, generate-check, check-markers]
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
