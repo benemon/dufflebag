@@ -8,7 +8,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 ---
 # Source: dufflebag/templates/serviceaccounts-rbac.yaml
 apiVersion: v1
@@ -19,7 +19,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 ---
 # Source: dufflebag/templates/serviceaccounts-rbac.yaml
 apiVersion: v1
@@ -30,7 +30,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 ---
 # Source: dufflebag/templates/serviceaccounts-rbac.yaml
 apiVersion: v1
@@ -41,7 +41,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 ---
 # Source: dufflebag/templates/secrets.yaml
 apiVersion: v1
@@ -52,7 +52,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 type: Opaque
 stringData:
   postgres-password: "migrate"
@@ -68,7 +68,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 type: Opaque
 stringData:
   access-key: "demoaccess"
@@ -83,7 +83,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 data:
   bootstrap.sh: |
     #!/bin/sh
@@ -167,7 +167,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 data:
   01-roles.sh: |
     #!/bin/sh
@@ -187,7 +187,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
@@ -206,7 +206,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 rules:
   - apiGroups: [""]
     resources: ["secrets"]
@@ -225,7 +225,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -244,7 +244,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   selector:
     app.kubernetes.io/instance: dufflebag
@@ -263,7 +263,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   selector:
     app.kubernetes.io/instance: dufflebag
@@ -282,7 +282,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   selector:
     app.kubernetes.io/instance: dufflebag
@@ -301,7 +301,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   publishNotReadyAddresses: true
   selector:
@@ -321,7 +321,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   replicas: 1
   selector:
@@ -391,7 +391,7 @@ spec:
             {}
       containers:
         - name: dufflebag
-          image: "quay.io/benjamin_holmes/dufflebag:v0.2.0"
+          image: "quay.io/benjamin_holmes/dufflebag:v0.2.1"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -468,7 +468,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   serviceName: dufflebag-ceph
   replicas: 1
@@ -571,7 +571,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   serviceName: dufflebag-postgres
   replicas: 1
@@ -682,7 +682,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
 spec:
   serviceName: dufflebag-vault
   replicas: 1
@@ -808,7 +808,7 @@ metadata:
     app.kubernetes.io/name: dufflebag
     app.kubernetes.io/instance: dufflebag
     app.kubernetes.io/managed-by: Helm
-    helm.sh/chart: dufflebag-0.2.1
+    helm.sh/chart: dufflebag-0.2.2
   annotations:
     # A Job's pod template is immutable, so upgrades would fail against the
     # completed install-time Job. As a hook it is replaced each install and

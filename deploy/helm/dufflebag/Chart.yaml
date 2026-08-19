@@ -2,6 +2,6 @@ apiVersion: v2
 name: dufflebag
 description: Self-contained single-replica dufflebag stack
 type: application
-version: 0.2.1
-appVersion: v0.2.0
+version: 0.2.2
+appVersion: v0.2.1
 
