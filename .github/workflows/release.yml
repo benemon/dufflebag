@@ -41,9 +41,24 @@ jobs:
   publish:
     needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # release creation and SBOM upload on plain tags
+      id-token: write      # provenance attestation signing
+      attestations: write
     steps:
       - name: Check out repository
         uses: actions/checkout@v7
+        with:
+          # cyclonedx-gomod derives the release version from the tag history;
+          # a depth-1 checkout can leave it nothing to describe against.
+          fetch-depth: 0
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Write the SBOM
+        run: make sbom
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
       - name: Log in to Quay
@@ -70,3 +85,48 @@ jobs:
         run: |
           case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
           make image-push-release IMAGE_TAG="$RELEASE_TAG"
+      # An RC expires, so its SBOM rides the workflow run rather than a
+      # permanent release.
+      - name: Attach the SBOM to the run (release candidate)
+        if: contains(github.ref_name, '-rc')
+        uses: actions/upload-artifact@v7
+        with:
+          name: dufflebag-sbom
+          path: dufflebag.cdx.json
+          if-no-files-found: error
+      # A plain tag is the release act, so the SBOM lands on a GitHub release
+      # for the tag — created here when the tag does not have one yet.
+      - name: Attach the SBOM to the release
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 || \
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --generate-notes
+          gh release upload "$RELEASE_TAG" dufflebag.cdx.json --clobber
+      # The image name matches the Makefile IMAGE default; the digest is what
+      # the attestation binds to, so it is read back from the registry rather
+      # than assumed.
+      - name: Resolve the pushed image digest
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        id: digest
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
+          digest=$(docker buildx imagetools inspect \
+            "quay.io/benjamin_holmes/dufflebag:$RELEASE_TAG" \
+            --format '{{json .Manifest}}' | jq -r '.digest')
+          [ -n "$digest" ] && [ "$digest" != "null" ]
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      # Signed build provenance for the permanent image, stored in the
+      # repository's attestation store. Verify with:
+      #   gh attestation verify oci://quay.io/benjamin_holmes/dufflebag:<tag> -R benemon/dufflebag
+      - name: Attest the release image provenance
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-name: quay.io/benjamin_holmes/dufflebag
+          subject-digest: ${{ steps.digest.outputs.digest }}

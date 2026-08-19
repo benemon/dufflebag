@@ -10,6 +10,8 @@ OAPI            := $(shell go env GOPATH)/bin/oapi-codegen
 SQLC            := $(shell go env GOPATH)/bin/sqlc
 GO_LICENSES_VERSION := v1.6.0
 GO_LICENSES     := $(shell go env GOPATH)/bin/go-licenses
+CYCLONEDX_VERSION := v1.11.0
+CYCLONEDX       := $(shell go env GOPATH)/bin/cyclonedx-gomod
 SPECS           := spec/vendor
 HCP2023_SPEC_OVERLAY := spec/overlays/hcp2023-version-revoke-at.py
 PREVIOUS_REF    ?= HEAD
@@ -113,6 +115,9 @@ $(OAPI):
 
 $(GO_LICENSES):
 	go install github.com/google/go-licenses@$(GO_LICENSES_VERSION)
+
+$(CYCLONEDX):
+	go install github.com/CycloneDX/cyclonedx-gomod/cmd/cyclonedx-gomod@$(CYCLONEDX_VERSION)
 
 .PHONY: generate-platform
 generate-platform: $(OAPI) ## Regenerate the platform plane server interface from its spec
@@ -591,6 +596,16 @@ LICENCE_ALLOWLIST := MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
 check-licenses: $(GO_LICENSES) ## Fail on dependency licences outside the allowlist
 	$(GO_LICENSES) check ./... --allowed_licenses=$(LICENCE_ALLOWLIST)
 	cd contract && $(GO_LICENSES) check ./... --allowed_licenses=$(LICENCE_ALLOWLIST)
+
+SBOM_OUT ?= dufflebag.cdx.json
+
+.PHONY: sbom
+# `app` mode, not `mod`: the SBOM describes what the server binary actually
+# links, not the whole module graph with its test-only dependencies. The tool
+# reads git through go-git, which does not understand linked worktrees or
+# shared clones — run it from a plain clone with tags fetched.
+sbom: $(CYCLONEDX) ## Write a CycloneDX SBOM for the server binary
+	$(CYCLONEDX) app -json -licenses -output $(SBOM_OUT) -main cmd/dufflebag .
 
 .PHONY: check-markers
 # The history was rewritten once to strip AI-tooling markers from tracked files
