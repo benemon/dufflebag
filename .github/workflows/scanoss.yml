@@ -1,0 +1,40 @@
+name: scanoss
+
+# Provenance guard: fingerprints committed code against the public OSSKB
+# corpus and comments on the pull request when a file or snippet matches
+# known open-source code. Only winnowing fingerprints leave the runner,
+# never source.
+#
+# Informational by design — no policies are enabled. The generated trees
+# (skipped via scanoss.json, alongside the vendored specs whose provenance
+# spec/vendor/PROVENANCE.md documents) match hashicorp/hcp-sdk-go by
+# construction: the same public swagger specs run through the same
+# generator. A copyleft policy would therefore fail every pull request
+# touching them. A match is only meaningful in hand-written code, where a
+# human reads the comment and decides.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Scan for open-source matches
+        uses: scanoss/gha-code-scan@v1
+        with:
+          # Cost split (see ci.yml): pull requests scan only their changed
+          # files; the push to main scans the full tree.
+          scanMode: ${{ github.event_name == 'pull_request' && 'delta' || 'full' }}
