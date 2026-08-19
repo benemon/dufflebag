@@ -8,6 +8,8 @@ SQLC_VERSION    := v1.30.0
 OAPI_VERSION    := v2.8.0
 OAPI            := $(shell go env GOPATH)/bin/oapi-codegen
 SQLC            := $(shell go env GOPATH)/bin/sqlc
+GO_LICENSES_VERSION := v1.6.0
+GO_LICENSES     := $(shell go env GOPATH)/bin/go-licenses
 SPECS           := spec/vendor
 HCP2023_SPEC_OVERLAY := spec/overlays/hcp2023-version-revoke-at.py
 PREVIOUS_REF    ?= HEAD
@@ -108,6 +110,9 @@ $(SQLC):
 
 $(OAPI):
 	go install github.com/oapi-codegen/oapi-codegen/v2/cmd/oapi-codegen@$(OAPI_VERSION)
+
+$(GO_LICENSES):
+	go install github.com/google/go-licenses@$(GO_LICENSES_VERSION)
 
 .PHONY: generate-platform
 generate-platform: $(OAPI) ## Regenerate the platform plane server interface from its spec
@@ -575,6 +580,17 @@ image-push-release: ## Build and push a release image (no expiry)
 		--provenance=false --sbom=false \
 		--build-arg VERSION=$(VERSION) --build-arg COMMIT=$(COMMIT) \
 		-t $(IMAGE):$(IMAGE_TAG) --push .
+
+LICENCE_ALLOWLIST := MIT,Apache-2.0,BSD-2-Clause,BSD-3-Clause,ISC,MPL-2.0
+
+.PHONY: check-licenses
+# The allowlist mirrors the dependency audit of 2026-08-18: every module in
+# both graphs carries one of these licences, so this passes today by
+# construction. A failure means a dependency changed licence on upgrade —
+# investigate the module, do not widen the list to get green.
+check-licenses: $(GO_LICENSES) ## Fail on dependency licences outside the allowlist
+	$(GO_LICENSES) check ./... --allowed_licenses=$(LICENCE_ALLOWLIST)
+	cd contract && $(GO_LICENSES) check ./... --allowed_licenses=$(LICENCE_ALLOWLIST)
 
 .PHONY: check-markers
 # The history was rewritten once to strip AI-tooling markers from tracked files
