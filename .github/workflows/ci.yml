@@ -4,15 +4,26 @@ on:
   push:
     branches: [main]
   pull_request:
+    # `labeled` is here so applying the full-ci label (below) starts a run;
+    # the other three are the defaults this list would otherwise replace.
+    types: [opened, synchronize, reopened, labeled]
 
-# Cost split (duf-qlo3, private-repo Actions budget): pull requests run the
-# fast, high-signal lanes only — compile, unit, lint, generated-code drift and
-# the AI-marker guard. The heavy suite — scanner, contract, Postgres
+# Time split (established as a cost split by duf-qlo3, kept for wall-clock by
+# duf-ca96): pull requests run the fast, high-signal lanes only — compile,
+# unit, lint, generated-code drift and the AI-marker guard — and answer in
+# about 2.5 minutes. The heavy suite — scanner, contract, Postgres
 # integration, RLS sabotage, browser smoke, Terraform and the Packer matrix —
-# runs on the push to main, which is where every change lands and is fully
-# validated. Steps and jobs so gated carry `if: github.event_name == 'push'`.
-# This is a private-repo economy; a public repo gets free standard runners and
-# the gates can go back to running on every PR.
+# takes about 23 and runs where every change lands: the push to main. Full
+# validation happens when it matters, not on every commit. When it matters
+# BEFORE merge, label the pull request `full-ci` and the gated lanes run on
+# that PR too — every gate carries the same push-or-labelled condition, except
+# publish-latest, which stays push-only.
+
+# Superseded pull-request runs are cancelled; a main run never is — it ends by
+# publishing :latest and must not be killed mid-publish.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build:
@@ -44,29 +55,29 @@ jobs:
         run: make test-without-scanner
       # Built once, here, and driven by every heavy gate below. Each of them
       # would otherwise compile its own copy of the same commit, and no lane
-      # would be proving the artifact another lane tested. Push-only: the gates
-      # it feeds are push-only.
+      # would be proving the artifact another lane tested. Gated exactly like
+      # the lanes it feeds.
       - name: Build the server the gates will drive
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: make server SERVER_BIN="$GITHUB_WORKSPACE/dufflebag"
       - name: Run scanner tests on an internal network
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: make test-scanner
       - name: Run API contract tests
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: make test-contract
       - name: Run Postgres integration tests
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: make test-integration
       - name: Prove tenant isolation detects disabled RLS
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: make test-rls-sabotage
       - name: Set up Chrome
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         id: chrome
         uses: browser-actions/setup-chrome@v2
       - name: Run browser smoke test
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         run: |
           make test-smoke \
             DUFFLEBAG_BIN="$GITHUB_WORKSPACE/dufflebag" \
@@ -75,7 +86,7 @@ jobs:
       # queueing behind each other. They drive this exact binary, so a failure
       # there is a failure of the artifact this job built and tested.
       - name: Publish the server for the client gates
-        if: ${{ github.event_name == 'push' }}
+        if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
         uses: actions/upload-artifact@v7
         with:
           name: dufflebag-server
@@ -84,9 +95,9 @@ jobs:
           if-no-files-found: error
 
   # Real Terraform and the real provider against the built server (ADR-0013).
-  # Push-only (private-repo cost split): validated on the merge to main.
+  # Heavy lane (time split): the merge to main, or a full-ci-labelled PR.
   terraform:
-    if: ${{ github.event_name == 'push' }}
+    if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -127,12 +138,14 @@ jobs:
   # The only lane that drives the real Packer binary, and until now the only one
   # CI never ran: it wanted the lab's CA, a provisioned certificate and a DNS
   # record. None of that is needed any more — the CA is minted inside the run and
-  # the hostname is loopback — so it runs on every pull request, including from
-  # forks, because there is no secret in it to steal.
+  # the hostname is loopback — so nothing stops it running on a pull request,
+  # including from forks: there is no secret in it to steal. Only the time
+  # split holds it to main and full-ci-labelled PRs.
   packer:
     name: Packer ${{ matrix.packer_version }}
-    # Push-only (private-repo cost split): the matrix runs on the merge to main.
-    if: ${{ github.event_name == 'push' }}
+    # Heavy lane (time split): the matrix runs on the merge to main, or a
+    # full-ci-labelled PR.
+    if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
     needs: build
     runs-on: ubuntu-latest
     strategy:
