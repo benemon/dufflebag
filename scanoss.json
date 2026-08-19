@@ -1,0 +1,16 @@
+{
+  "settings": {
+    "skip": {
+      "patterns": {
+        "scanning": [
+          "internal/compat/hcp2023/models/",
+          "internal/compat/rm2019/models/",
+          "internal/platform/v1/",
+          "internal/store/postgres/postgresdb/",
+          "spec/vendor/",
+          "docs-site/"
+        ]
+      }
+    }
+  }
+}
