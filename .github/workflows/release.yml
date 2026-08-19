@@ -9,7 +9,37 @@ on:
     tags: ['v*']
 
 jobs:
+  # A tag names a commit; this proves that commit survived the full main
+  # validation before anything permanent is published. It queries rather than
+  # re-runs — the suite already ran where the commit landed — so a tag on an
+  # unvalidated, still-running, or failed commit stops here. The same
+  # character check as the publish steps runs before the tag name is used in
+  # an API path, and the commits API peels annotated tags to their commit.
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Require a green ci run for the tagged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
+          sha=$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq .sha)
+          conclusion=$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&status=completed" \
+            --jq '.workflow_runs[0].conclusion // "absent"')
+          if [ "$conclusion" != "success" ]; then
+            echo "ci for $sha concluded: $conclusion (need: success)." >&2
+            echo "Tag a commit whose push to main finished green — 'absent' means no completed run exists yet (not on main, or still running)." >&2
+            exit 1
+          fi
+          echo "ci for $sha concluded success"
+
   publish:
+    needs: validate
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
