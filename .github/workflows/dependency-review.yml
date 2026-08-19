@@ -1,0 +1,32 @@
+name: dependency review
+
+# Gate on what a pull request ADDS: a newly introduced dependency carrying a
+# licence outside the family this project ships under, or a known-vulnerable
+# version, fails the check before it lands. Complements check-licenses in
+# ci.yml, which watches the whole graph for licences changing on upgrade —
+# this lane sees only the diff, so it also covers ecosystems go-licenses
+# does not (npm, Actions). The denylist is the inverse of the Makefile
+# allowlist: GPL-family copyleft stronger than MPL-2.0, and BUSL.
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Review new dependencies
+        uses: actions/dependency-review-action@v4
+        with:
+          deny-licenses: >-
+            GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later,
+            AGPL-1.0-only, AGPL-1.0-or-later, AGPL-3.0-only, AGPL-3.0-or-later,
+            LGPL-2.0-only, LGPL-2.0-or-later, LGPL-2.1-only, LGPL-2.1-or-later,
+            LGPL-3.0-only, LGPL-3.0-or-later, BUSL-1.1
+          fail-on-severity: low
+          comment-summary-in-pr: on-failure
