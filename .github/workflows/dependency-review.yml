@@ -21,7 +21,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Review new dependencies
-        uses: actions/dependency-review-action@v4
+        uses: actions/dependency-review-action@v5
         with:
           deny-licenses: >-
             GPL-2.0-only, GPL-2.0-or-later, GPL-3.0-only, GPL-3.0-or-later,
