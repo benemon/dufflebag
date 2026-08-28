@@ -2768,6 +2768,21 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await pickerValue('#tenant-organization')) === 'smoke-footer-org')
   })
 
+  await t.test('a project created from outside appears without a round-trip', async () => {
+    // duf-4hje's second leg: the empty project listing renders text with no
+    // toggle, so refetch-on-open cannot fire — it polls instead. A project
+    // created over the API while the console sits on the empty organisation
+    // must reach the masthead with no reload and no organisation round-trip.
+    await waitForText('No projects exist')
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
+    const footerOrg = organizations.find((o) => o.name === 'smoke-footer-org')
+    await api(rootToken, 'POST',
+      `/api/v1/organizations/${footerOrg.id}/projects`, { name: 'landed-outside' })
+    await until('the project toggle to name the new project', async () =>
+      (await pickerValue('#tenant-project')) === 'landed-outside')
+  })
+
   await t.test('the console-minted builder signs in, scoped to exactly its project', async () => {
     assert.ok(consoleBuilder, 'the create-through-the-form step must have captured a credential')
     await clickByText('button', 'Sign out')

@@ -29,11 +29,20 @@ type PickerOption = {
 export function TenantSwitcher() {
   const {
     state, self, organizations, organizationsLoading, organizationFailure,
-    organizationRefreshFailure, selectedOrganization,
+    organizationRefreshFailure, selectedOrganization, refreshOrganizations,
   } = useAuth()
   const [creatingOrganization, setCreatingOrganization] = useState(false)
 
   const platform = state !== null && state.claims.organizationID === null
+  // An empty listing renders text with no toggle, so refetch-on-open cannot
+  // fire — the bucket picker's lesson, applied to tenancy (duf-4hje): poll
+  // hot while empty so organisations created elsewhere appear without a
+  // reload, relaxing to the standing cadence once anything lands.
+  useAutoRefresh({
+    hot: platform && !organizationsLoading && organizationFailure === null
+      && organizations.length === 0,
+    onRefresh: refreshOrganizations,
+  })
   if (!platform) {
     return (
       <span className="tenant-switchers">
@@ -297,6 +306,14 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
   } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
   const [creating, setCreating] = useState(false)
+  // Same empty-listing rule as the organisation picker: no toggle, so poll
+  // hot until the organisation's first project lands.
+  const organizationID = state?.claims.organizationID ?? selectedOrganization
+  useAutoRefresh({
+    hot: Boolean(organizationID) && !projectsLoading && projectFailure === null
+      && permittedProjects.length === 0,
+    onRefresh: refreshProjects,
+  })
   const label = (candidate: typeof tenant) => (
     combined ? `${candidate.organization} / ${candidate.project}` : candidate.project
   )

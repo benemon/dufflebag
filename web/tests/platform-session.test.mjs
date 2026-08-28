@@ -436,6 +436,22 @@ test('all three pickers refresh their listing on open', () => {
   assert.match(tenantSwitcherSource, /refreshOnPickerOpen\(true, onRefresh\)/)
 })
 
+// duf-4hje, second leg: an empty listing renders text with no toggle, so the
+// open-refresh above can never fire on it. Empty tenancy listings poll hot
+// (the bucket picker's pattern), relaxing to the standing cadence once
+// anything lands — the hot flag must require an empty listing and clear on
+// load and failure alike.
+test('empty organisation and project listings poll until something lands', () => {
+  assert.match(
+    tenantSwitcherSource,
+    /hot: platform && !organizationsLoading && organizationFailure === null\s*&& organizations\.length === 0,\s*onRefresh: refreshOrganizations/,
+  )
+  assert.match(
+    tenantSwitcherSource,
+    /hot: Boolean\(organizationID\) && !projectsLoading && projectFailure === null\s*&& permittedProjects\.length === 0,\s*onRefresh: refreshProjects/,
+  )
+})
+
 test('opening and typing into a picker starts from an unfiltered listing', () => {
   const typeahead = tenantSwitcherSource.match(
     /function TypeaheadPicker\([\s\S]*?\nfunction OrganizationSelect/,
