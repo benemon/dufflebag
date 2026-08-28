@@ -2,7 +2,7 @@
 
 Back up the single PostgreSQL database as a whole-database logical dump. The
 dump contains dufflebag's schema and data. It does not contain PostgreSQL
-roles, Kubernetes Secrets or deployment configuration; retain those
+roles, Kubernetes Secrets or deployment configuration. Retain those
 separately. The `dufflebag` owner role must exist before a restore.
 
 The reference Kubernetes manifests do not configure object storage. In that

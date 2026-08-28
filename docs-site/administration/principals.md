@@ -16,7 +16,7 @@ Roles are strictly ordered. Each role adds to the one below it:
 | Role | Adds |
 |---|---|
 | `reader` | Sees buckets, versions, builds, unrestricted channels, SBOMs and findings. |
-| `builder` | Creates buckets, versions and builds, and sees and consumes restricted channels — the smallest role that completes a `packer build`, and what a CI build credential should hold. |
+| `builder` | Creates buckets, versions and builds, and sees and consumes restricted channels - the smallest role that completes a `packer build`, and what a CI build credential should hold. |
 | `publisher` | Assigns and manages unrestricted channels, promotes, revokes and restores versions, and deletes buckets, versions and builds. |
 | `maintainer` | Creates, assigns, updates and deletes restricted channels, and manages principals, role bindings and operational configuration such as Bag Drop within its scope. |
 | `root` | Everything, including creating organisations and configuring authentication and audit. Platform scope only. |
@@ -26,7 +26,7 @@ Declaring a channel requests promotion.
 
 Restricted channels, including the managed `latest`, are invisible below
 `builder`. Restricted user channels require `maintainer` to create or
-manage; the existing service-managed mutation refusals continue to govern
+manage. The existing service-managed mutation refusals continue to govern
 `latest` for every role.
 
 ::: warning
@@ -43,20 +43,20 @@ A principal is bound to exactly one scope:
 - **Organisation:** sees every project in its organisation.
 - **Project:** sees exactly one project.
 - **Bucket:** sees exactly one bucket inside its project. The narrowest
-  binding — the right shape for a CI pipeline that publishes one image line.
+  binding - the right shape for a CI pipeline that publishes one image line.
   It can read and (with `builder`) publish into its bucket, and nothing else
-  in the project exists for it: sibling buckets answer not-found, and bucket
+  in the project exists for it. Sibling buckets answer not-found, and bucket
   creation and deletion are refused. In the console it lands directly in its
   bucket rather than on the Buckets screen, and the navigation offers a
-  **Bucket** entry in place of **Buckets** — one click back to the bucket from
+  **Bucket** entry in place of **Buckets** - one click back to the bucket from
   any administration screen. The bucket must exist before the
   principal is created, and cannot be deleted while the principal lives.
 
-Bucket-scoped principals are created the way every principal is: the picker
-selection IS the scope. Pick the bucket in the header — the selection carries
-onto this screen — and create; the principal binds to that bucket, and the
+Bucket-scoped principals are created the way every principal is. The picker
+selection IS the scope. Pick the bucket in the header - the selection carries
+onto this screen - and create. The principal binds to that bucket, and the
 issued-credential card offers the ready-to-paste `DFBG_MCP_*` environment
-with the bucket binding included. The listing is scope-exact here too: a
+with the bucket binding included. The listing is scope-exact here too. A
 bucket selection answers exactly that bucket's principals, and a project
 selection never lists bucket-scoped principals as a subtree. Over the API,
 pass `bucket_id` (the bucket's ULID) alongside the organisation and project.
@@ -90,8 +90,8 @@ operations are in the [platform API reference](/platform-api.html) under
 
 ### Create a principal and issue its first secret
 
-Prerequisites: Permission to manage principals in the target scope — a
-maintainer manages principals within its organisation or project; a root
+Prerequisites: Permission to manage principals in the target scope - a
+maintainer manages principals within its organisation or project. A root
 manages every principal.
 
 1. Create the principal. A new principal has no credentials and cannot
@@ -147,4 +147,4 @@ On an unencrypted deployment, `POST /sys/recovery` accepts a threshold of
 shares and mints a fresh root if the credentials are ever lost. Every
 recovery attempt is audited, including refusals. The recovery ceremony and
 the break-glass floor below it are in
-[Encryption — recovery](../components/encryption.md#recovery).
+[Encryption - recovery](../components/encryption.md#recovery).

@@ -13,7 +13,7 @@ The per-screen walkthroughs live in [Operations](../operations/buckets.md)
 ## Sign in
 
 Prerequisites: A service principal's client ID and secret. On a fresh
-instance, the console opens the first-run wizard instead — see
+instance, the console opens the first-run wizard instead - see
 [Bootstrap](../quick-start/bootstrap.md).
 
 1. Sign in with the service principal's client ID and secret.

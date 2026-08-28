@@ -1,19 +1,19 @@
 # Versions
 
-A version is one publish of a bucket — created incomplete by `packer build`,
+A version is one publish of a bucket - created incomplete by `packer build`,
 becoming active when every build completes. This page covers the versions
 table, the version screen, consumption, and revocation and restore.
 
 ## The versions table
 
 A bucket's versions table shows each version's completion and revocation
-state. An incomplete version is named `v0` until it completes; a complete
+state. An incomplete version is named `v0` until it completes. A complete
 version takes its sequence name and the managed `latest` channel moves to it.
 
 ![Dufflebag versions table showing completed, incomplete and revoked versions](/screenshots/versions-table.png)
 
-Before the first publish — a bucket created from the console or Terraform
-ahead of its pipeline — the table states its emptiness and points at client
+Before the first publish - a bucket created from the console or Terraform
+ahead of its pipeline - the table states its emptiness and points at client
 connection, the same affordance an empty project shows:
 
 ![Dufflebag empty bucket pointing at client connection before the first publish](/screenshots/bucket-empty.png)
@@ -30,20 +30,20 @@ schedule, restore it, or delete it.
 
 When a channel points at the version, the **Consume this version** card
 renders a copyable Terraform `hcp_packer_version` + `hcp_packer_artifact`
-block. The card provides the console's standing handoff to automation — see
+block. The card provides the console's standing handoff to automation - see
 [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md).
 
 The card always offers Terraform. It adds native commands only when the
-version carries the artifact data needed to run them; Terraform remains
+version carries the artifact data needed to run them. Terraform remains
 selected by default.
 
-- **AWS** builds are fully tethered — the artifact records the AMI id and
-  region — so the tab renders runnable `aws ec2 describe-images` and
+- **AWS** builds are fully tethered - the artifact records the AMI id and
+  region - so the tab renders runnable `aws ec2 describe-images` and
   `aws ec2 run-instances` commands.
 - **Docker** and **Podman** render `pull` commands for every tag carried by
   the build labels, followed by a digest `image inspect` line. Both tabs
   appear only when a `docker-tag` post-processor tagged the build. An
-  untagged container build gets no container tabs; its artifact digests
+  untagged container build gets no container tabs. Its artifact digests
   remain on the build screen for verification.
 
 Platforms without a confident command mapping fall back to Terraform.
@@ -94,7 +94,7 @@ Two actions accompany a revocation by default:
   recorded in build ancestry, are revoked with it. They are marked
   `INHERITED` and name the ancestor. A descendant that already has its own
   revocation keeps it. Set `skip_descendants_revocation: true` to opt out.
-  Inheritance also applies at record time: a new build that records an
+  Inheritance also applies at record time. A new build that records an
   already-revoked parent starts as inherited-revoked.
 - **Channels roll back.** Every channel pointing to the revoked version,
   including user channels and managed `latest`, is reassigned in the same
@@ -106,7 +106,7 @@ Two actions accompany a revocation by default:
 
 ## Restoring a version
 
-The console's **Restore** action — a single-click recovery confirmation —
+The console's **Restore** action - a single-click recovery confirmation -
 sends a `PATCH` with `restore` set to `true`:
 
 ```sh
@@ -118,7 +118,7 @@ curl -sX PATCH \
 ```
 
 This clears a scheduled or effective revocation. Promote the restored version
-again if it should regain a channel: restoration does not move channels
+again if it should regain a channel. Restoration does not move channels
 forward, and assignments remain at the targets chosen by revocation
 rollback.
 

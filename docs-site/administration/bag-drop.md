@@ -86,7 +86,7 @@ The client secret is required the first time. When editing an existing
 configuration, leave it blank to keep the stored credential.
 
 To confirm that a stored destination is still reachable without changing
-anything, use the API's read-only verification —
+anything, use the API's read-only verification -
 `POST .../bagdrop/verify` repeats the same resolution enable performs and
 persists nothing. The console offers enable only.
 
@@ -112,7 +112,7 @@ Prerequisites: A Bag Drop configuration that you want to retire.
 
 ::: warning
 Deleting an enabled configuration is refused with
-`409 — Bag Drop is enabled; disable it first`. Deletion is also refused with
+`409 - Bag Drop is enabled; disable it first`. Deletion is also refused with
 `Bag Drop destination cleanup is pending` while any association is pending
 removal or has ever synced work to the destination. These guards prevent a
 configuration from being deleted while it still owes the destination work.
@@ -198,18 +198,18 @@ Enabling or verifying an HCP Packer Bag Drop destination makes outbound
 HTTPS requests to `auth.idp.hashicorp.com` for the client-credentials grant
 and `api.cloud.hashicorp.com` for scoped reads and destination writes.
 Permit egress to both hosts. A dufflebag destination instead uses its
-configured HTTPS endpoint; a supplied PEM CA chain augments system trust and
+configured HTTPS endpoint. A supplied PEM CA chain augments system trust and
 is stored as public configuration data, not as a path or secret.
 
 Once an enabled configuration has active associations, the background
 reconciler creates and converges destination buckets, completed versions,
-completed builds and their artifacts. Mirror semantics are complete: drift
+completed builds and their artifacts. Mirror semantics are complete. Drift
 inside associated buckets is removed, local bucket deletions propagate, and
-un-associating deletes the destination copy — a pending removal is retained
+un-associating deletes the destination copy - a pending removal is retained
 and retried until that deletion succeeds. Ordinary channels and their
-assignments mirror as pointers; the managed `latest` channel is never
-touched. The association set is the reconciler's entire authority to delete:
-nothing outside an associated bucket is ever touched.
+assignments mirror as pointers. The managed `latest` channel is never
+touched. The association set is the reconciler's entire authority to delete.
+Nothing outside an associated bucket is ever touched.
 
 SBOMs mirror by name during the build's mirrored running window. SBOMs added
 after a destination build has completed surface as permanent drift rather
@@ -223,7 +223,7 @@ local revocation schedules and messages are pushed, while a remotely revoked
 version whose local source is active is restored.
 
 `DFBG_BAGDROP_RECONCILE_INTERVAL` controls the level-reconcile cadence as a
-Go duration and defaults to `5m`; an invalid or non-positive value refuses
+Go duration and defaults to `5m`. An invalid or non-positive value refuses
 startup. Per-project failures back off in memory at `interval * 2^failures`,
 capped at one hour, and a successful run resets the count. A `Retry-After`
 header, if a destination ever supplies one, is honoured when it asks for a
@@ -231,7 +231,7 @@ longer delay.
 
 Destination mutations are audit fail-closed. If no configured audit sink can
 accept the pre-mutation or outcome record, Bag Drop sync pauses until the
-next cadence tick; the ordinary API and compatibility serving paths remain
+next cadence tick. The ordinary API and compatibility serving paths remain
 available because reconciliation runs outside them.
 
 ### The credential key
@@ -240,7 +240,7 @@ The destination client secret is always stored in an AES-256-GCM envelope.
 On an unencrypted deployment, set the general `DFBG_CREDENTIAL_KEY` to
 exactly 32 random bytes. `DFBG_BAGDROP_CREDENTIAL_KEY` remains a supported
 migration alias with the same behaviour. If both are set, they must be
-identical; different values refuse startup. Without either, ordinary reads
+identical. Different values refuse startup. Without either, ordinary reads
 and deletion of a disabled existing configuration still work, but writes
 that seal a secret and verify/enable operations that unseal one refuse and
 name the missing variable. There is no plaintext fallback.
@@ -253,7 +253,7 @@ credential material and source it from the deployment's secret manager.
 On a deployment with
 [encryption at rest](../components/encryption.md), Bag Drop credentials use
 the wrapped keyring instead. In that posture neither `DFBG_CREDENTIAL_KEY`
-nor `DFBG_BAGDROP_CREDENTIAL_KEY` may be set; the process refuses to start
+nor `DFBG_BAGDROP_CREDENTIAL_KEY` may be set. The process refuses to start
 rather than accepting a second source of truth.
 
 ## Where to go next

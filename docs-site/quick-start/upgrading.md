@@ -2,10 +2,10 @@
 
 Upgrading a deployment means replacing the dufflebag image with a newer tag.
 The server applies pending schema migrations at startup, so a single-role
-deployment upgrades by starting the new image — nothing else. On a hardened
+deployment upgrades by starting the new image - nothing else. On a hardened
 two-role deployment, the automation that runs the `migrate` subcommand (your
 init container or pre-deploy step) applies them instead.
-[Database — migrations](../components/database.md#migrations) defines both
+[Database - migrations](../components/database.md#migrations) defines both
 paths.
 
 ## Before 1.0
@@ -56,7 +56,7 @@ target tag after reading its GitHub release notes.
    `migrate` subcommand with the migration role, and wait for it to finish
    before the target image serves. See
    [Migrations](../components/database.md#migrations). A single-role deployment
-   skips this step; the server migrates at startup.
+   skips this step. The server migrates at startup.
 
 4. Start the target image. See
    [Serving](./installation.md#serving-and-readiness) for the container layout.

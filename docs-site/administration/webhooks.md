@@ -88,12 +88,12 @@ the cloud metadata address `169.254.169.254`), RFC1918, unspecified, and
 multicast addresses. The checked address is the address dialled, which
 prevents a second DNS lookup from rebinding the connection after admission.
 Redirects are never followed, requests time out after ten seconds, and
-response reads are capped at 64 KiB; only a bounded snippet is retained in
+response reads are capped at 64 KiB. Only a bounded snippet is retained in
 the last-100 delivery history.
 
 `DFBG_WEBHOOK_ALLOW_PRIVATE=true` disables the private/local address refusal
 for isolated labs whose receiver deliberately lives on a private network. It
-defaults to `false`; do not enable it on a deployment where project
+defaults to `false`. Do not enable it on a deployment where project
 maintainers must not reach internal services. A refused address is recorded
 once as a refused delivery and is not retried.
 
@@ -107,7 +107,7 @@ deployments refuse either environment variable.
 Delivery runs outside the serving path. A failed request is retried at most
 five times with exponential backoff over roughly fifteen minutes, then
 marked failed and dropped. The transactional outbox means a domain write and
-its event commit or roll back together; endpoint latency and failure never
+its event commit or roll back together. Endpoint latency and failure never
 delay that write.
 
 ## Where to go next

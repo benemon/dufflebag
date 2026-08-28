@@ -4,7 +4,7 @@
 typed tools over the [Model Context Protocol](https://modelcontextprotocol.io/).
 A client that speaks MCP can query registry state, check whether an artifact
 is safe to consume, drill into vulnerability findings, generate ready-to-paste
-consumption configuration, and — with the right authority — promote a version
+consumption configuration, and - with the right authority - promote a version
 to a channel.
 
 The server is an ordinary API client. Registry reads go through the
@@ -19,11 +19,11 @@ The MCP server is experimental. Its tool surface may change between releases.
 
 ## How it works
 
-The transport is MCP stdio: the client spawns the server process and speaks
+The transport is MCP stdio. The client spawns the server process and speaks
 newline-delimited JSON-RPC over stdin and stdout. The server holds a service
 principal's client id and secret, mints access tokens through the instance's
 ordinary token endpoint, and refreshes them as they expire. There is no new
-authentication surface — revoking the service principal's secret cuts the
+authentication surface - revoking the service principal's secret cuts the
 server off like any other API client.
 
 Every tool that operates on registry state takes `organization_id` and
@@ -68,7 +68,7 @@ The transport is stdio, so the container must run with an attached stdin
 ## Configure an MCP client
 
 Most MCP clients accept a server entry naming a command and its environment.
-The shape varies by client; the common JSON form is:
+The shape varies by client. The common JSON form is:
 
 ```json
 {
@@ -89,7 +89,7 @@ The shape varies by client; the common JSON form is:
 ```
 
 The credential sits in client configuration, so treat that file as a secret
-store: scope the service principal down rather than reaching for a root or
+store. Scope the service principal down rather than reaching for a root or
 maintainer credential, and prefer the read-only posture below for clients
 that only consume.
 
@@ -107,20 +107,20 @@ that only consume.
 | `DFBG_MCP_READ_ONLY` | When truthy, mutating tools are neither listed nor callable | no |
 
 A bucket-scoped service principal uses the ordinary client id and secret
-variables — the scope rides in the credential, and the server confines it
+variables - the scope rides in the credential, and the server confines it
 regardless of client configuration. From dufflebag-mcp v0.2.1 it needs no
-`DFBG_MCP_BUCKET_ID`: the server reads the credential's own bucket binding
+`DFBG_MCP_BUCKET_ID`. The server reads the credential's own bucket binding
 from the registry, `whoami` reports it as `bucket_id`, and bucket-taking
 tools omit their bucket argument.
 
-`DFBG_MCP_BUCKET_ID` remains for wider credentials pinning a default bucket —
+`DFBG_MCP_BUCKET_ID` remains for wider credentials pinning a default bucket -
 and for bucket-scoped principals on older dufflebag-mcp releases. Set it to
-the bucket's ULID (its id, not its name); the first bucket-taking call
+the bucket's ULID (its id, not its name). The first bucket-taking call
 resolves the id against the buckets the credential can see, and answers with
 the visible bucket ids when the declared one is not among them. The console
 prints the ULID in the ready-to-paste MCP environment block shown when a
-bucket-scoped credential is issued — at creation, or from **Issue secret** on
-an existing principal — and nowhere else; if the block is gone, issue a fresh
+bucket-scoped credential is issued - at creation, or from **Issue secret** on
+an existing principal - and nowhere else. If the block is gone, issue a fresh
 secret rather than hunting for the id.
 
 ## Available tools
@@ -142,7 +142,7 @@ project is it pointed at?"*
 
 | Tool | Purpose | What it returns |
 | --- | --- | --- |
-| `list_buckets` | A project's buckets | Compact rows: name, platforms, the latest version's identity and revocation flag, and ancestry freshness — build detail stays with `list_versions` |
+| `list_buckets` | A project's buckets | Compact rows: name, platforms, the latest version's identity and revocation flag, and ancestry freshness - build detail stays with `list_versions` |
 | `list_versions` | A bucket's versions, newest first | Versions with builds, artifacts and revocation state |
 | `list_channels` | A bucket's channels | Channels with their assigned versions |
 | `resolve_channel` | Resolve a channel before consuming | The assigned version, its fingerprint, and whether it is safe to consume |
@@ -184,8 +184,8 @@ demo-ubuntu."*
 | --- | --- | --- |
 | `promote_channel` | Assign a version to a channel (mutating) | The updated channel and its assignment |
 
-`promote_channel` requires the exact version fingerprint — there is no
-promote-whatever-is-on-latest shortcut — so the version a client verified
+`promote_channel` requires the exact version fingerprint - there is no
+promote-whatever-is-on-latest shortcut - so the version a client verified
 with `version_diff`, `vulnerability_summary` and `resolve_channel` is the
 version that lands on the channel. `create_if_missing` creates the channel
 with the assignment when it does not yet exist. Managed channels are refused,
@@ -199,6 +199,6 @@ scanner findings, and if both are clean promote v3 to release."*
 Setting `DFBG_MCP_READ_ONLY` removes `create_organization`, `create_project`
 and `promote_channel` from the advertised tool list and refuses their
 dispatch. Combined with a `reader` service principal this gives a deployment
-that cannot mutate the registry regardless of what a client asks for —
+that cannot mutate the registry regardless of what a client asks for -
 `whoami` reports the posture, so a client can tell why the writes are
 absent.
