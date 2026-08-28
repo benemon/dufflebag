@@ -1,5 +1,7 @@
 # Dufflebag
 
+## Track, promote and revoke your Packer-built images — from a registry you run.
+
 Packer builds machine images, but that's where its responsibilities end. In
 isolation, it is not designed to answer questions such as:
 
