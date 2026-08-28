@@ -7,16 +7,28 @@
 
 *Chuck it in the bag.*
 
-dufflebag is a self-hosted registry for build metadata produced by
-[Packer](https://developer.hashicorp.com/packer/docs). It reimplements the API
-contract used by Packer's
-[HCP registry integration](https://developer.hashicorp.com/packer/docs/hcp),
-including client quirks that are absent from the published specification, so
-the stock community `packer` binary can publish to an endpoint you run instead
-of `api.hashicorp.cloud`.
+[Packer](https://developer.hashicorp.com/packer/docs) builds machine images,
+but that's where its responsibilities end. In isolation, it is not designed
+to answer questions such as:
 
-The same endpoint supports the Packer resources and data sources in
-[`terraform-provider-hcp`](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs).
+- Which image should production be using right now?
+- Is the image that was deployed into staging the same one that production
+  is about to get?
+- When a CVE lands in a base image, which of your images carry it — and how
+  do you stop the next deployment from using them?
+
+Answering those questions takes a registry — one record of every build, with
+named channels that say which version each environment should consume,
+instead of image IDs pasted into tfvars files and wikis. dufflebag is an
+independent, self-hosted implementation of the
+[HCP Packer APIs](https://developer.hashicorp.com/hcp/api-docs/packer)
+behind Packer's
+[HCP registry integration](https://developer.hashicorp.com/packer/docs/hcp):
+the stock community `packer` binary publishes to an endpoint you run instead
+of `api.hashicorp.cloud`, and the Packer resources and data sources in
+[`terraform-provider-hcp`](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs)
+work against the same endpoint.
+
 An embedded [PatternFly](https://www.patternfly.org/) console provides first-run
 initialisation, registry browsing, service-principal management, audit
 configuration, encryption and key-rotation status, and vulnerability findings

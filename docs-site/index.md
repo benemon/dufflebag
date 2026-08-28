@@ -1,15 +1,56 @@
 # Dufflebag
 
-Dufflebag is a self-hosted registry serving the HCP Packer API. Stock Packer
-can publish build metadata to it, and `terraform-provider-hcp` can read and
-manage the supported registry resources.
+Packer builds machine images, but that's where its responsibilities end. In
+isolation, it is not designed to answer questions such as:
 
-It stores registry metadata, not machine images. The server also includes a
-console for initialisation, tenancy and service-principal management, and
-registry browsing.
+- Which image should production be using right now?
+- Is the image that was deployed into staging the same one that production
+  is about to get?
+- When a CVE lands in a base image, which of your images carry it — and how
+  do you stop the next deployment from using them?
 
-Dufflebag is an independent community project. It is not maintained, supported
-or endorsed by IBM or HashiCorp.
+Answering those questions takes a registry: one record of every build, with
+named pointers that say which version each environment should consume —
+instead of image IDs pasted into tfvars files, wikis and pipeline variables.
+HashiCorp built that workflow into
+[HCP Packer](https://developer.hashicorp.com/hcp/docs/packer), as a hosted
+service on their cloud platform.
+
+Dufflebag is an independent implementation of the
+[HCP Packer APIs](https://developer.hashicorp.com/hcp/api-docs/packer) that
+you host yourself. The stock `packer` binary publishes to it and
+`terraform-provider-hcp` reads from it with nothing changed but environment
+variables. Your build metadata stays on infrastructure you run.
+
+::: info
+Dufflebag is an independent community project. It is not maintained,
+supported or endorsed by IBM or HashiCorp.
+:::
+
+What the workflow gives you:
+
+- **One record of every build.** Buckets group image families; a version
+  collects the builds of one `packer build` run, with the resulting artifact
+  identifiers recorded per platform and region.
+- **Promotion through channels.** Channels are named pointers into a
+  bucket's version history: assign a version to staging, promote it to
+  production when it passes. A release is a channel reassignment, not an
+  edit to every consumer.
+- **Image lookups from Terraform.** The `hcp_packer_version` and
+  `hcp_packer_artifact` data sources resolve "whatever production points at"
+  to a concrete image ID at plan time. No hard-coded image IDs.
+- **Revocation.** Revoke a version that must no longer be consumed —
+  immediately or on a schedule — and restore it if circumstances change.
+- **SBOMs and findings.** Builds carry the SBOMs Packer reports, giving each
+  image a recorded package inventory. With a scanner configured, that
+  inventory is checked against a vulnerability service and findings surface
+  in the console — the CVE question answered from recorded inventory rather
+  than by re-scanning every image.
+
+Dufflebag stores registry metadata, not the machine images themselves —
+images stay wherever Packer put them. The server also includes a console for
+initialisation, tenancy and service-principal management, and registry
+browsing.
 
 This documentation tracks the current development branch.
 
