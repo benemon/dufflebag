@@ -3,9 +3,9 @@
 `terraform-provider-hcp` is the automation interface for a dufflebag
 registry. It includes resources, not only data sources, so it can manage
 buckets, channels, and channel assignments declaratively. Dufflebag supports
-version 0.84.0 or newer; the end-to-end suite runs version 0.112.0.
+version 0.84.0 or newer. The end-to-end suite runs version 0.112.0.
 
-This page starts with the consumption lookup — resolving a published image —
+This page starts with the consumption lookup - resolving a published image -
 then covers declarative management.
 
 ## Configure the provider
@@ -15,7 +15,7 @@ Prerequisites: The `HCP_*` environment variables from
 `terraform-provider-hcp` 0.84.0 or newer.
 
 1. Set `skip_status_check = true` in the provider configuration. The HCP
-   status page is outside dufflebag's surface; skipping the check prevents
+   status page is outside dufflebag's surface. Skipping the check prevents
    the run from calling the HCP service.
 
 2. Run Terraform with the `HCP_*` environment variables set.
@@ -79,7 +79,7 @@ data "hcp_packer_artifact" "example" {
 }
 ```
 
-- `hcp_packer_version` resolves a channel to its current version — the
+- `hcp_packer_version` resolves a channel to its current version - the
   consumption pattern, most often against `latest`. It refuses a revoked
   version, so consumers cannot build from a version that has been pulled.
 - `hcp_packer_artifact` returns the `external_identifier` consumed by a
@@ -87,15 +87,15 @@ data "hcp_packer_artifact" "example" {
 - `hcp_packer_bucket_names` lists the project's buckets.
 
 The console's consumption card on a version screen renders this block
-ready-to-paste for any resolvable version — see
+ready-to-paste for any resolvable version - see
 [Versions](../operations/versions.md).
 
 ## Manage the registry declaratively
 
 The three resources manage buckets, channels and promotion. One behaviour is
-worth knowing before writing a channel block: `CreateBucket` creates the
+worth knowing before writing a channel block. `CreateBucket` creates the
 managed `latest` channel, so an `hcp_packer_channel` block naming `latest`
-receives an already-exists response and adopts the existing channel — omit
+receives an already-exists response and adopts the existing channel - omit
 the `restricted` argument from that block, since setting it makes the
 provider try to update a managed channel, and dufflebag refuses the update.
 
@@ -135,9 +135,9 @@ fingerprint of a version that passed testing.
 2. Apply the change.
 
 The server accumulates the channel's assignment history. Revocation rollback
-walks that history when a version is pulled; after a revocation rolls a
+walks that history when a version is pulled. After a revocation rolls a
 channel back, the assignment in Terraform state appears as drift on the next
-plan. See [Versions — revocation](../operations/versions.md) and
+plan. See [Versions - revocation](../operations/versions.md) and
 [Channels](../operations/channels.md).
 
 The console provides the same operations to publishers. Use Terraform to
@@ -145,4 +145,4 @@ keep pipeline operations declarative.
 
 ## Next
 
-[Upgrading](./upgrading.md) — replacing the image and verifying readiness.
+[Upgrading](./upgrading.md) - replacing the image and verifying readiness.

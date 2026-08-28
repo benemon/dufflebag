@@ -3,7 +3,7 @@
 Channels are named pointers into a bucket's version history. Consumers
 resolve a channel, usually `latest`, instead of hard-coding a fingerprint.
 Promotion reassigns the pointer. This page covers the channels tab and the
-channel semantics — including restriction and what revocation does to
+channel semantics - including restriction and what revocation does to
 assignments.
 
 ::: info
@@ -41,17 +41,17 @@ rule.
 
 ## Restricted channels
 
-Restricted channels are hidden from readers: they are omitted from channel
+Restricted channels are hidden from readers. They are omitted from channel
 lists, and resolving one returns the same not-found response as an absent
 channel. Builders and above may see and consume them. Creating a restricted
 channel, changing its restriction flag in either direction, or assigning,
 updating or deleting it requires `maintainer`. The managed `latest` channel
-is also restricted and hidden from readers; its existing managed-channel
+is also restricted and hidden from readers. Its existing managed-channel
 refusals still prevent every role from managing it through these operations.
 
 ::: tip
-Because readers cannot resolve `latest`, create an unrestricted channel —
-`release`, say — as the reader-consumable pointer.
+Because readers cannot resolve `latest`, create an unrestricted channel -
+`release`, say - as the reader-consumable pointer.
 :::
 
 ## Assignment on the wire
@@ -69,14 +69,14 @@ curl -sX PATCH \
 An empty `version_fingerprint` with the same mask clears the assignment. This
 is the request sent by `terraform destroy` for an
 `hcp_packer_channel_assignment`. The `hcp_packer_channel` and
-`hcp_packer_channel_assignment` resources manage channels declaratively —
+`hcp_packer_channel_assignment` resources manage channels declaratively -
 see [Manage dufflebag with Terraform](../quick-start/manage-with-terraform.md).
 
 ## Channels and revocation
 
 The server accumulates each channel's assignment history. When a version is
 revoked, every channel pointing at it rolls back to the most recent
-non-revoked version in that history — see
-[Versions — revoking](./versions.md#revoking-a-version). After a rollback,
+non-revoked version in that history - see
+[Versions - revoking](./versions.md#revoking-a-version). After a rollback,
 an `hcp_packer_channel_assignment` in Terraform state appears as drift on
 the next plan.

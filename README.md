@@ -14,17 +14,17 @@ to answer questions such as:
 - Which image should production be using right now?
 - Is the image that was deployed into staging the same one that production
   is about to get?
-- When a CVE lands in a base image, which of your images carry it — and how
+- When a CVE lands in a base image, which of your images carry it - and how
   do you stop the next deployment from using them?
 
-Answering those questions takes a registry — one record of every build, with
+Answering those questions takes a registry - one record of every build, with
 named channels that say which version each environment should consume,
 instead of image IDs pasted into tfvars files and wikis. dufflebag is an
 independent, self-hosted implementation of the
 [HCP Packer APIs](https://developer.hashicorp.com/hcp/api-docs/packer)
 behind Packer's
-[HCP registry integration](https://developer.hashicorp.com/packer/docs/hcp):
-the stock community `packer` binary publishes to an endpoint you run instead
+[HCP registry integration](https://developer.hashicorp.com/packer/docs/hcp).
+The stock community `packer` binary publishes to an endpoint you run instead
 of `api.hashicorp.cloud`, and the Packer resources and data sources in
 [`terraform-provider-hcp`](https://registry.terraform.io/providers/hashicorp/hcp/latest/docs)
 work against the same endpoint.
@@ -38,7 +38,7 @@ when a scanner is configured.
 
 **Two API planes.** The frozen compatibility plane serves the externally owned
 auth, resource-manager and registry contracts. Its wire models are generated
-from vendored Swagger specifications; handlers preserve client-observed
+from vendored Swagger specifications. Handlers preserve client-observed
 behaviour, including its accidents. The platform plane is dufflebag's own
 OpenAPI contract for tenancy, identity, audit and console sessions. See the
 [architecture reference](https://benemon.github.io/dufflebag/components/architecture) and the
@@ -48,10 +48,10 @@ OpenAPI contract for tenancy, identity, audit and console sessions. See the
 channels, artefact identifiers and client-reported SBOMs. It does not store or
 scan the machine images Packer creates. When a scanner adapter is configured it
 checks the client-reported SBOM package inventory against an external
-vulnerability service; it never certifies that an SBOM describes the image it
+vulnerability service. It never certifies that an SBOM describes the image it
 was reported against.
 
-**Existing clients are the interfaces.** There is no dufflebag client CLI; the
+**Existing clients are the interfaces.** There is no dufflebag client CLI. The
 server binary's only subcommand is `migrate`. Packer
 publishes build metadata, Terraform manages supported registry resources, and
 the console covers bootstrap and operational workflows. The supported
@@ -81,10 +81,10 @@ covers tenant isolation, audit availability and SBOM custody.
 
 ## Development and testing
 
-Development uses Go 1.26.4 and npm; the local integration,
+Development uses Go 1.26.4 and npm. The local integration,
 browser and Packer lanes also require Docker. The tested Packer lane uses stock
 Packer 1.16.0, while the compatibility scope starts at Packer 1.15.4. The
-Terraform lane pins Terraform 1.14.7 and `terraform-provider-hcp` 0.112.0; the
+Terraform lane pins Terraform 1.14.7 and `terraform-provider-hcp` 0.112.0. The
 provider compatibility floor is 0.84.0.
 
 ```sh
@@ -101,7 +101,7 @@ make lint               # go vet and golangci-lint
 ```
 
 `make test-packer` as shown drives the lab CA, hostname certificate and DNS
-entry, so that invocation is local-only; CI runs the same gate as
+entry, so that invocation is local-only. CI runs the same gate as
 `make test-packer-ci` (and `-encrypted`) against a CA minted inside the run.
 Run `make help` for generation, schema-compatibility, demo and other targets.
 

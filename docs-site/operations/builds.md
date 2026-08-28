@@ -1,6 +1,6 @@
 # Builds
 
-A build is one component of a version — created running by `packer build`,
+A build is one component of a version - created running by `packer build`,
 completing with its artifacts. This page covers the build screen, SBOMs, the
 package inventory and vulnerability findings.
 
@@ -12,8 +12,8 @@ scanner is configured.
 
 The **Packer runner environment** card surfaces what the build reported
 about the machine and invocation that produced it: the Packer and plugin
-versions, runner OS and architecture, the template path, and — only when the
-build set them — the debug/force flags, `-only`/`-except` selections,
+versions, runner OS and architecture, the template path, and - only when the
+build set them - the debug/force flags, `-only`/`-except` selections,
 variable files and variables, plus the copyable run UUID. Rows the build did
 not report are absent rather than blank, and a build that reported nothing
 shows no card.
@@ -81,12 +81,12 @@ empty list that could be mistaken for an SBOM with no packages.
 
 ::: info
 Package names, versions, and purls are reported by the client. Dufflebag
-records them; it does not verify the SBOM against the image.
+records them. It does not verify the SBOM against the image.
 :::
 
 ## Vulnerability findings
 
-Scanning is optional — the operator side (enabling the adapter, what leaves
+Scanning is optional - the operator side (enabling the adapter, what leaves
 the deployment, transcripts) is
 [Vulnerability scanning](../components/vulnerability-scanning.md).
 
@@ -114,5 +114,5 @@ With a scanner configured:
   show individual findings. Rows without findings do not expand.
 
 When findings require removing an image from circulation, revoke the
-version: channels roll back, and consumers stop resolving it. See
-[Versions — revoking](./versions.md#revoking-a-version).
+version. Channels roll back, and consumers stop resolving it. See
+[Versions - revoking](./versions.md#revoking-a-version).
