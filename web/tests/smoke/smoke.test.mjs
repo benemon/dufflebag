@@ -2743,6 +2743,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await choosePickerOption('#tenant-organization', seeded.organization.name)
     await until('the project to follow', async () =>
       (await pickerValue('#tenant-project')) !== '')
+    // The organisation switch reloads the bucket listing, and a loading
+    // picker renders a skeleton with no toggle — wait for the toggle or a
+    // slow listing loses the race (red main, 2026-08-28).
+    await page.waitForSelector('#tenant-bucket')
     await page.click('#tenant-bucket')
     await clickByText('button', 'Create bucket')
     await page.waitForSelector('#create-bucket-name')
