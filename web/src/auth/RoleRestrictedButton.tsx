@@ -10,9 +10,10 @@ export function RoleRestrictedButton({
   action: ConsoleAction
   callerRole: Role | null
   /**
-   * A refusal that no role change can lift — a scope denial. When set it wins
-   * over the role reason: telling a bucket-scoped session "Requires builder"
-   * would send it chasing a role it may already hold.
+   * A refusal that no role change can lift, such as a scope or current-state
+   * denial. When set it wins over the role reason: telling a bucket-scoped
+   * session "Requires builder" would send it chasing a role it may already
+   * hold.
    */
   refusal?: string | null
 }) {

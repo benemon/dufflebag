@@ -300,6 +300,7 @@ func TestTransitAppRoleAuth(t *testing.T) {
 path "transit/encrypt/dufflebag" { capabilities = ["update"] }
 path "transit/decrypt/dufflebag" { capabilities = ["update"] }
 path "transit/rewrap/dufflebag" { capabilities = ["update"] }
+path "transit/keys/dufflebag" { capabilities = ["read"] }
 `); err != nil {
 		t.Fatalf("create transit policy: %v", err)
 	}
@@ -365,6 +366,18 @@ path "transit/rewrap/dufflebag" { capabilities = ["update"] }
 	if string(unwrapped) != string(plaintext) {
 		t.Fatalf("Unwrap = %q, want %q", unwrapped, plaintext)
 	}
+	t.Run("latest KEK follows rotation", func(t *testing.T) {
+		if _, err := client.Logical().Write("transit/keys/dufflebag/rotate", nil); err != nil {
+			t.Fatalf("rotate transit key: %v", err)
+		}
+		latest, err := provider.(*transitProvider).LatestKEK(ctx)
+		if err != nil {
+			t.Fatalf("LatestKEK after rotation: %v", err)
+		}
+		if latest != "v2" {
+			t.Fatalf("LatestKEK after rotation = %q, want v2", latest)
+		}
+	})
 }
 
 func tokenAccessor(t *testing.T, client *vault.Client) string {

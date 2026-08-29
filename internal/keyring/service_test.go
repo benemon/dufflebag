@@ -109,6 +109,16 @@ type nativeServiceProvider struct {
 	nativeCalls int
 }
 
+type versionedServiceProvider struct {
+	*serviceProvider
+	latest    string
+	latestErr error
+}
+
+func (p *versionedServiceProvider) LatestKEK(context.Context) (string, error) {
+	return p.latest, p.latestErr
+}
+
 func (p *nativeServiceProvider) Rewrap(_ context.Context, blob []byte, _ string) ([]byte, string, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -171,6 +181,69 @@ func TestServiceProbeTracksOnlyKeyServiceFailures(t *testing.T) {
 	}
 	if got := service.State(); got != "ok" {
 		t.Fatalf("database error changed encryption state to %q", got)
+	}
+}
+
+func TestServiceProbeStoresLatestKEK(t *testing.T) {
+	service, _, provider := serviceFixture(t)
+	service.provider = &versionedServiceProvider{serviceProvider: provider, latest: "v6"}
+	if err := service.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if got := service.LatestKEK(); got != "v6" {
+		t.Fatalf("LatestKEK = %q, want v6", got)
+	}
+}
+
+func TestServiceProbeLatestKEKErrorClearsValueWithoutDegrading(t *testing.T) {
+	service, _, provider := serviceFixture(t)
+	versioned := &versionedServiceProvider{serviceProvider: provider, latest: "v6"}
+	service.provider = versioned
+	if err := service.Probe(context.Background()); err != nil {
+		t.Fatalf("initial Probe: %v", err)
+	}
+	versioned.latestErr = errors.New("read capability denied")
+	if err := service.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe with Versioner error: %v", err)
+	}
+	if got := service.LatestKEK(); got != "" {
+		t.Fatalf("LatestKEK after Versioner error = %q, want unknown", got)
+	}
+	if got := service.State(); got != "ok" {
+		t.Fatalf("state after Versioner error = %q, want ok", got)
+	}
+}
+
+func TestServiceRefreshLatestKEKReadsLiveAndStores(t *testing.T) {
+	service, _, provider := serviceFixture(t)
+	versioned := &versionedServiceProvider{serviceProvider: provider, latest: "v6"}
+	service.provider = versioned
+	if got := service.RefreshLatestKEK(context.Background()); got != "v6" {
+		t.Fatalf("RefreshLatestKEK = %q, want v6", got)
+	}
+	versioned.latest = "v7"
+	if got := service.RefreshLatestKEK(context.Background()); got != "v7" {
+		t.Fatalf("RefreshLatestKEK after rotation = %q, want v7", got)
+	}
+	if got := service.LatestKEK(); got != "v7" {
+		t.Fatalf("LatestKEK after refresh = %q, want v7", got)
+	}
+	versioned.latestErr = errors.New("read capability denied")
+	if got := service.RefreshLatestKEK(context.Background()); got != "" {
+		t.Fatalf("RefreshLatestKEK under error = %q, want unknown", got)
+	}
+	if got := service.State(); got != "ok" {
+		t.Fatalf("state after refresh error = %q, want ok", got)
+	}
+}
+
+func TestServiceProbeWithoutVersionerLeavesLatestKEKUnknown(t *testing.T) {
+	service, _, _ := serviceFixture(t)
+	if err := service.Probe(context.Background()); err != nil {
+		t.Fatalf("Probe: %v", err)
+	}
+	if got := service.LatestKEK(); got != "" {
+		t.Fatalf("LatestKEK = %q, want unknown", got)
 	}
 }
 

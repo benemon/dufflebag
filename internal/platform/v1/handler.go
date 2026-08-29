@@ -89,6 +89,8 @@ type AuditTargetBroker interface {
 
 type EncryptionService interface {
 	State() string
+	LatestKEK() string
+	RefreshLatestKEK(context.Context) string
 	Entries(context.Context) ([]keyring.Entry, error)
 	Rewrap(context.Context) ([]keyring.Entry, error)
 	Rotate(context.Context) ([]keyring.Entry, error)

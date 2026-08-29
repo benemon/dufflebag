@@ -766,6 +766,9 @@ type BagDropVerificationResult struct {
 
 // Encryption defines model for Encryption.
 type Encryption struct {
+	// KekLatest The key service's current KEK version, in the same form as kek_ref. Reading this state refreshes it, so a KEK rotated at the key service shows here on the next read; between reads the heartbeat keeps it current. Absent when the provider cannot report it — for Vault transit that requires read capability on the key — and on unencrypted instances.
+	KekLatest *string `json:"kek_latest,omitempty"`
+
 	// Keyring Empty on an unencrypted instance. Never carries key material.
 	Keyring []KeyringEntry `json:"keyring"`
 

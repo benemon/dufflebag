@@ -136,6 +136,12 @@ export function KeyringCard({
   onCancelRotation: () => void
   onConfirmRotation: () => void
 }) {
+  const latestKEK = encryption.kek_latest
+  const rewrapRefusal = latestKEK &&
+    encryption.keyring.every((entry) => entry.kek_ref === latestKEK)
+    ? `The keyring is already wrapped under the key service's current KEK version (${latestKEK}).`
+    : null
+
   return (
     <Card>
       <CardTitle>Keyring</CardTitle>
@@ -153,6 +159,7 @@ export function KeyringCard({
         <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
           <RoleRestrictedButton
             action="manageEncryption" callerRole={callerRole} variant="secondary"
+            refusal={rewrapRefusal}
             onClick={onRewrap}
           >
             Rewrap keyring
@@ -164,7 +171,7 @@ export function KeyringCard({
             Rotate keys
           </RoleRestrictedButton>
         </div>
-        <KeyringTable entries={encryption.keyring} />
+        <KeyringTable entries={encryption.keyring} latestKEK={latestKEK} />
       </CardBody>
     </Card>
   )
@@ -262,7 +269,12 @@ export function summarizeKeyring(entries: KeyringEntry[]): KeyringPurposeSummary
   }))
 }
 
-export function KeyringTable({ entries }: { entries: KeyringEntry[] }) {
+export function KeyringTable({
+  entries, latestKEK,
+}: {
+  entries: KeyringEntry[]
+  latestKEK?: string
+}) {
   return (
     <>
       <Content component="p">
@@ -272,6 +284,8 @@ export function KeyringTable({ entries }: { entries: KeyringEntry[] }) {
         under: it advances only after the KEK is rotated at the key service
         and the keyring is rewrapped here. More than one KEK version listed
         against a purpose means a rewrap is still owed.
+        The Latest KEK column reports the key service&apos;s current version when
+        the deployment can read it.
       </Content>
       <Table aria-label="Encryption keyring" variant="compact">
         <Thead>
@@ -280,6 +294,7 @@ export function KeyringTable({ entries }: { entries: KeyringEntry[] }) {
             <Th>Active</Th>
             <Th>Retained</Th>
             <Th>KEK version</Th>
+            <Th>Latest KEK</Th>
             <Th>Wrapped at</Th>
           </Tr>
         </Thead>
@@ -290,6 +305,7 @@ export function KeyringTable({ entries }: { entries: KeyringEntry[] }) {
               <Td dataLabel="Active">{summary.activeVersion}</Td>
               <Td dataLabel="Retained">{summary.retained}</Td>
               <Td dataLabel="KEK version">{summary.kekRefs}</Td>
+              <Td dataLabel="Latest KEK">{latestKEK ?? '—'}</Td>
               <Td dataLabel="Wrapped at"><When iso={summary.wrappedAt} /></Td>
             </Tr>
           ))}

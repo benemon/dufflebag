@@ -17,6 +17,7 @@ export type KeyringEntry = {
 export type Encryption = {
   state: EncryptionState
   keyring: KeyringEntry[]
+  kek_latest?: string
 }
 
 export async function loadEncryption(token: string): Promise<Encryption> {

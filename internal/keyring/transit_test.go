@@ -3,6 +3,7 @@ package keyring
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -45,6 +46,51 @@ func TestTransitRewrapUsesServerSideEndpoint(t *testing.T) {
 	}
 	if string(wrapped) != "vault:v2:new" || kekRef != "v2" {
 		t.Fatalf("Rewrap = %q, %q", wrapped, kekRef)
+	}
+}
+
+func TestTransitLatestKEK(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet || r.URL.Path != "/v1/transit/keys/dufflebag" {
+			t.Fatalf("request = %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"latest_version":6}}`))
+	}))
+	defer server.Close()
+
+	client, err := vault.NewClient(&vault.Config{Address: server.URL, HttpClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &transitProvider{client: client, mount: "transit", key: "dufflebag"}
+	latest, err := provider.LatestKEK(context.Background())
+	if err != nil {
+		t.Fatalf("LatestKEK: %v", err)
+	}
+	if latest != "v6" {
+		t.Fatalf("LatestKEK = %q, want v6", latest)
+	}
+}
+
+func TestTransitLatestKEKWrapsServerError(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, "canary Vault failure", http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	client, err := vault.NewClient(&vault.Config{Address: server.URL, HttpClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	provider := &transitProvider{client: client, mount: "transit", key: "dufflebag"}
+	_, err = provider.LatestKEK(context.Background())
+	if err == nil || !strings.HasPrefix(err.Error(), "transit latest kek: ") {
+		t.Fatalf("LatestKEK error = %v, want wrapped transit latest kek error", err)
+	}
+	var responseErr *vault.ResponseError
+	if !errors.As(err, &responseErr) {
+		t.Fatalf("LatestKEK error = %v, want wrapped Vault response error", err)
 	}
 }
 

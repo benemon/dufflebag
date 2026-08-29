@@ -55,11 +55,16 @@ the key service's key.
 
 1. Rotate the key at the key service.
 
-2. Select **Rewrap** to rewrap the keyring rows.
+2. Refresh the page and confirm that the **Latest KEK** column shows the
+   rotated version. **Rewrap** is offered while any keyring row trails that
+   version; a keyring already at the current version has nothing to rewrap,
+   and the control says so.
 
-3. Confirm that every entry names the new key version.
+3. Select **Rewrap** to rewrap the keyring rows.
 
-4. Retire the old version at the key service.
+4. Confirm that every entry names the new key version.
+
+5. Retire the old version at the key service.
 
 ::: warning
 Do not retire an old key version while any keyring row still names it. Running

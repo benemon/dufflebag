@@ -229,6 +229,7 @@ const keyringRows = () =>
       active: row.querySelector('td[data-label="Active"]')?.innerText.trim() ?? '',
       retained: row.querySelector('td[data-label="Retained"]')?.innerText.trim() ?? '',
       kekRef: row.querySelector('td[data-label="KEK version"]')?.innerText.trim() ?? '',
+      latestKek: row.querySelector('td[data-label="Latest KEK"]')?.innerText.trim() ?? '',
     })))
 
 const rowCellBytes = (name, label) =>
@@ -1329,10 +1330,24 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('four fresh keyring rows wrapped under v1', async () => {
       const rows = await keyringRows()
       return rows.length === 4 && hasPurposes(rows) &&
-        rows.every((row) => row.active === '1' && row.retained === '1' && row.kekRef === 'v1')
+        rows.every((row) =>
+          row.active === '1' && row.retained === '1' &&
+          row.kekRef === 'v1' && row.latestKek === 'v1')
     })
+    // A current keyring gates rewrap: there is no outcome to derive.
+    assert.equal(
+      await buttonDisabled('Rewrap keyring'), true,
+      'a current keyring left rewrap enabled',
+    )
+    await waitForText("already wrapped under the key service's current KEK version (v1)")
 
     await vaultWrite('/v1/transit/keys/dufflebag/rotate', {})
+    // The gate follows the key service through a screen refresh, not a heartbeat.
+    await page.click('button[aria-label="Refresh"]')
+    await until('the Latest KEK column to follow the rotation to v2', async () => {
+      const rows = await keyringRows()
+      return rows.length === 4 && rows.every((row) => row.latestKek === 'v2')
+    })
     await clickByText('button', 'Rewrap keyring')
     await typeToConfirm('rewrap')
     await clickInModal('Rewrap keyring')
@@ -1353,6 +1368,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await vaultWrite('/v1/transit/keys/dufflebag/rotate', {})
     await vaultWrite('/v1/transit/keys/dufflebag/config', { min_decryption_version: 3 })
+    await page.click('button[aria-label="Refresh"]')
+    await until('the Latest KEK column to follow the rotation to v3', async () => {
+      const rows = await keyringRows()
+      return rows.length === 4 && rows.every((row) => row.latestKek === 'v3')
+    })
     await clickByText('button', 'Rewrap keyring')
     await typeToConfirm('rewrap')
     await clickInModal('Rewrap keyring')

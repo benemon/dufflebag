@@ -40,6 +40,7 @@ type Service struct {
 	opMu                sync.Mutex
 	mu                  sync.RWMutex
 	state               string
+	latestKEK           string
 	since               time.Time
 	consecutiveFailures int
 }
@@ -55,6 +56,39 @@ func (s *Service) State() string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.state
+}
+
+func (s *Service) LatestKEK() string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.latestKEK
+}
+
+// RefreshLatestKEK re-reads the key service's current KEK version and returns
+// it. Reads serve the rewrap gate, so they cannot lean on the remembered
+// heartbeat value: a KEK rotated at the key service moments ago must enable
+// rewrap on the next screen refresh, not up to a heartbeat later.
+func (s *Service) RefreshLatestKEK(ctx context.Context) string {
+	s.refreshLatestKEK(ctx)
+	return s.LatestKEK()
+}
+
+func (s *Service) refreshLatestKEK(ctx context.Context) {
+	versioner, ok := s.provider.(Versioner)
+	if !ok {
+		return
+	}
+	latest, err := versioner.LatestKEK(ctx)
+	s.mu.Lock()
+	if err != nil {
+		s.latestKEK = ""
+	} else {
+		s.latestKEK = latest
+	}
+	s.mu.Unlock()
+	if err != nil {
+		s.logger.Debug("encryption heartbeat could not read latest KEK", "error", err)
+	}
 }
 
 func (s *Service) Entries(ctx context.Context) ([]Entry, error) {
@@ -126,6 +160,7 @@ func (s *Service) Probe(ctx context.Context) error {
 	}
 	s.ring.adopt(missing)
 	s.succeeded()
+	s.refreshLatestKEK(ctx)
 	return nil
 }
 

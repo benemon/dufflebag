@@ -31,6 +31,11 @@ type Rewrapper interface {
 	Rewrap(ctx context.Context, blob []byte, kekRef string) ([]byte, string, error)
 }
 
+// Versioner reports the key service's current KEK version.
+type Versioner interface {
+	LatestKEK(ctx context.Context) (string, error)
+}
+
 // ProviderEnv selects the key provider. Empty means encryption at rest is not
 // configured; the mode marker makes that a permanent property of the instance
 // at first boot (ADR-0024).

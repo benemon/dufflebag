@@ -96,6 +96,13 @@ performs. The remembered result is reported as `encryption` on `/sys/health`
 and `GET /api/v1/instance` - `unconfigured`, `ok` or `degraded` - and on the
 console's Encryption page.
 
+The heartbeat also records the key service's current KEK version when the role
+can read the key, and reading the encryption state refreshes it - a KEK
+rotated at the key service shows on the next screen refresh rather than up to
+a heartbeat later. For Vault, that requires `read` on `<mount>/keys/<key>`;
+without the grant the console's Latest KEK column stays empty and nothing else
+changes.
+
 `degraded` means the last heartbeat could not unwrap the keyring. The key
 service is unreachable, the credential it authenticates with has expired, or
 the key service has retired the KEK version the rows are wrapped under (the
