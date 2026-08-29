@@ -15,13 +15,20 @@ import (
 )
 
 type fakeEncryptionService struct {
-	state     string
-	entries   []keyring.Entry
-	rewrapErr error
-	rotateErr error
+	state        string
+	latestKEK    string
+	refreshedKEK string
+	entries      []keyring.Entry
+	rewrapErr    error
+	rotateErr    error
 }
 
-func (s *fakeEncryptionService) State() string { return s.state }
+func (s *fakeEncryptionService) State() string     { return s.state }
+func (s *fakeEncryptionService) LatestKEK() string { return s.latestKEK }
+func (s *fakeEncryptionService) RefreshLatestKEK(context.Context) string {
+	s.latestKEK = s.refreshedKEK
+	return s.latestKEK
+}
 func (s *fakeEncryptionService) Entries(context.Context) ([]keyring.Entry, error) {
 	return s.entries, nil
 }
@@ -101,6 +108,65 @@ func TestEncryptionUnconfiguredShapes(t *testing.T) {
 		if failure.Message != "this instance does not have encryption at rest" {
 			t.Fatalf("POST %s message = %q", path, failure.Message)
 		}
+	}
+}
+
+func TestGetEncryptionIncludesLatestKEKOnlyWhenKnown(t *testing.T) {
+	for _, test := range []struct {
+		name      string
+		latestKEK string
+	}{
+		{name: "known", latestKEK: "v6"},
+		{name: "unknown"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			service := configuredEncryption()
+			service.refreshedKEK = test.latestKEK
+			response := call(t, encryptionHandler(identity.RoleRoot, service), http.MethodGet, "/api/v1/encryption", nil, testToken)
+			if response.Code != http.StatusOK {
+				t.Fatalf("GET encryption = %d, want 200: %s", response.Code, response.Body)
+			}
+			var body map[string]json.RawMessage
+			if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+				t.Fatal(err)
+			}
+			encoded, present := body["kek_latest"]
+			if test.latestKEK == "" {
+				if present {
+					t.Fatalf("unknown kek_latest was emitted as %s", encoded)
+				}
+				return
+			}
+			if !present {
+				t.Fatal("known kek_latest was omitted")
+			}
+			var latest string
+			if err := json.Unmarshal(encoded, &latest); err != nil {
+				t.Fatal(err)
+			}
+			if latest != test.latestKEK {
+				t.Fatalf("kek_latest = %q, want %q", latest, test.latestKEK)
+			}
+		})
+	}
+}
+
+func TestGetEncryptionRefreshesLatestKEKRatherThanServingRemembered(t *testing.T) {
+	service := configuredEncryption()
+	service.latestKEK = "v5"
+	service.refreshedKEK = "v6"
+	response := call(t, encryptionHandler(identity.RoleRoot, service), http.MethodGet, "/api/v1/encryption", nil, testToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("GET encryption = %d, want 200: %s", response.Code, response.Body)
+	}
+	var body struct {
+		KekLatest string `json:"kek_latest"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &body); err != nil {
+		t.Fatal(err)
+	}
+	if body.KekLatest != "v6" {
+		t.Fatalf("kek_latest = %q, want the refreshed v6, not the remembered v5", body.KekLatest)
 	}
 }
 

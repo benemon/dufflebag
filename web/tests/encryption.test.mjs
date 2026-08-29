@@ -150,6 +150,54 @@ test('a purpose wrapped under more than one KEK version shows the mixed set', ()
   assert.match(markup, /data-label="Retained"[^>]*>2</)
 })
 
+test('the Latest KEK column renders the heartbeat value rather than the row KEK', () => {
+  const markup = view({
+    encryption: { state: 'ok', kek_latest: 'v6', keyring: [entry({ kek_ref: 'v2' })] },
+  })
+  assert.match(markup, /<th[^>]*>Latest KEK</)
+  assert.match(markup, /data-label="KEK version"[^>]*>v2</)
+  assert.match(markup, /data-label="Latest KEK"[^>]*>v6</)
+})
+
+test('the Latest KEK column renders an em dash when the heartbeat value is unknown', () => {
+  const markup = view({ encryption: { state: 'ok', keyring: [entry({ kek_ref: 'v2' })] } })
+  assert.match(markup, /data-label="Latest KEK"[^>]*>—</)
+})
+
+test('rewrap is disabled with the current-version reason when every entry is current', () => {
+  const markup = view({
+    encryption: {
+      state: 'ok',
+      kek_latest: 'v6',
+      keyring: [entry({ kek_ref: 'v6' }), entry({ purpose: 'integrity', kek_ref: 'v6' })],
+    },
+  })
+  const end = markup.indexOf('>Rewrap keyring<')
+  assert.ok(end >= 0, 'Rewrap keyring is absent')
+  assert.match(markup.slice(Math.max(0, end - 500), end), /disabled/)
+  assert.match(markup, /already wrapped under the key service&#x27;s current KEK version \(v6\)\./)
+})
+
+test('rewrap remains enabled when the latest KEK is unknown', () => {
+  const markup = view({ encryption: { state: 'ok', keyring: [entry({ kek_ref: 'v6' })] } })
+  const end = markup.indexOf('>Rewrap keyring<')
+  assert.ok(end >= 0, 'Rewrap keyring is absent')
+  assert.doesNotMatch(markup.slice(Math.max(0, end - 500), end), /disabled/)
+})
+
+test('rewrap remains enabled when any keyring entry trails the latest KEK', () => {
+  const markup = view({
+    encryption: {
+      state: 'ok',
+      kek_latest: 'v6',
+      keyring: [entry({ kek_ref: 'v6' }), entry({ purpose: 'integrity', kek_ref: 'v5' })],
+    },
+  })
+  const end = markup.indexOf('>Rewrap keyring<')
+  assert.ok(end >= 0, 'Rewrap keyring is absent')
+  assert.doesNotMatch(markup.slice(Math.max(0, end - 500), end), /disabled/)
+})
+
 test('non-root encryption controls show the root requirement and are disabled nearby', () => {
   const markup = view({ callerRole: 'reader', encryption: { state: 'ok', keyring: [entry()] } })
   assert.match(markup, /Requires root/)

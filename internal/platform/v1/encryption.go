@@ -22,7 +22,7 @@ func (s *server) GetEncryption(
 	if err != nil {
 		return nil, err
 	}
-	return GetEncryption200JSONResponse(renderEncryption(s.encryption.State(), entries)), nil
+	return GetEncryption200JSONResponse(renderEncryption(s.encryption.State(), s.encryption.RefreshLatestKEK(ctx), entries)), nil
 }
 
 func (s *server) RewrapEncryption(
@@ -44,7 +44,7 @@ func (s *server) RewrapEncryption(
 	if err != nil {
 		return nil, err
 	}
-	return RewrapEncryption200JSONResponse(renderEncryption(s.encryption.State(), entries)), nil
+	return RewrapEncryption200JSONResponse(renderEncryption(s.encryption.State(), s.encryption.LatestKEK(), entries)), nil
 }
 
 func (s *server) RotateEncryption(
@@ -70,10 +70,10 @@ func (s *server) RotateEncryption(
 	if err != nil {
 		return nil, err
 	}
-	return RotateEncryption200JSONResponse(renderEncryption(s.encryption.State(), entries)), nil
+	return RotateEncryption200JSONResponse(renderEncryption(s.encryption.State(), s.encryption.LatestKEK(), entries)), nil
 }
 
-func renderEncryption(state string, entries []keyring.Entry) Encryption {
+func renderEncryption(state, latestKEK string, entries []keyring.Entry) Encryption {
 	rendered := make([]KeyringEntry, 0, len(entries))
 	for _, entry := range entries {
 		rendered = append(rendered, KeyringEntry{
@@ -81,5 +81,9 @@ func renderEncryption(state string, entries []keyring.Entry) Encryption {
 			KekRef: entry.KEKRef, WrappedAt: entry.WrappedAt,
 		})
 	}
-	return Encryption{State: EncryptionState(state), Keyring: rendered}
+	encryption := Encryption{State: EncryptionState(state), Keyring: rendered}
+	if latestKEK != "" {
+		encryption.KekLatest = &latestKEK
+	}
+	return encryption
 }

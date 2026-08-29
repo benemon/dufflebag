@@ -3,6 +3,7 @@ package keyring
 import (
 	"context"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"os"
@@ -306,6 +307,21 @@ func (p *transitProvider) Unwrap(ctx context.Context, blob []byte, _ string) ([]
 		return nil, fmt.Errorf("transit unwrap: %w", err)
 	}
 	return plaintext, nil
+}
+
+func (p *transitProvider) LatestKEK(ctx context.Context) (string, error) {
+	secret, err := p.client.Logical().ReadWithContext(ctx, p.mount+"/keys/"+p.key)
+	if err != nil {
+		return "", fmt.Errorf("transit latest kek: %w", err)
+	}
+	if secret == nil {
+		return "", fmt.Errorf("transit latest kek: response carries no latest version")
+	}
+	latest, ok := secret.Data["latest_version"].(json.Number)
+	if !ok || latest == "" {
+		return "", fmt.Errorf("transit latest kek: response carries no latest version")
+	}
+	return "v" + latest.String(), nil
 }
 
 // Rewrap re-encrypts a stored blob under the current KEK server-side — the
