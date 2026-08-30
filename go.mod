@@ -3,9 +3,9 @@ module github.com/benemon/dufflebag
 go 1.26.4
 
 require (
-	github.com/aws/aws-sdk-go-v2 v1.43.6
-	github.com/aws/aws-sdk-go-v2/credentials v1.19.36
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.107.2
+	github.com/aws/aws-sdk-go-v2 v1.44.0
+	github.com/aws/aws-sdk-go-v2/credentials v1.19.39
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.108.0
 	github.com/cloudflare/circl v1.6.5
 	github.com/go-openapi/errors v0.22.7
 	github.com/go-openapi/strfmt v0.26.3
@@ -23,7 +23,7 @@ require (
 	github.com/lib/pq v1.12.3
 	github.com/oapi-codegen/runtime v1.7.0
 	github.com/oklog/ulid/v2 v2.1.2
-	github.com/pandatix/go-cvss v0.6.2
+	github.com/pandatix/go-cvss v0.6.4
 	github.com/prometheus/client_golang v1.24.1
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/testcontainers/testcontainers-go v0.44.0
@@ -37,15 +37,15 @@ require (
 	github.com/Azure/go-ansiterm v0.0.0-20250102033503-faa5f7b0171c // indirect
 	github.com/Microsoft/go-winio v0.6.2 // indirect
 	github.com/apapsch/go-jsonmerge/v2 v2.0.0 // indirect
-	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.18 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.37 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.37 // indirect
-	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.38 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.17 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.9.30 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.37 // indirect
-	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.38 // indirect
-	github.com/aws/smithy-go v1.27.8 // indirect
+	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.20 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.40 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/endpoints/v2 v2.7.40 // indirect
+	github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.41 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.19 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.10.0 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.40 // indirect
+	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.41 // indirect
+	github.com/aws/smithy-go v1.28.1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/bwesterb/go-ristretto v1.2.4 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
