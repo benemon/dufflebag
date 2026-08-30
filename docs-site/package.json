@@ -7,7 +7,7 @@
     "reference": "redocly build-docs ../spec/platform/openapi.yaml --output public/platform-api.html"
   },
   "devDependencies": {
-    "@redocly/cli": "^2.46.2",
+    "@redocly/cli": "^2.48.0",
     "vitepress": "^1.6.0"
   },
   "overrides": {
