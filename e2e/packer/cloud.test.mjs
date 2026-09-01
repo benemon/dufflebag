@@ -382,7 +382,9 @@ async function assertScanPipeline(rootToken, principalToken, registryBase, publi
         `/builds/${build.id}/packages?pagination.page_size=1`,
       )))
     return observed.every(Boolean) ? observed : false
-  }, 4 * 60 * 1000, 2000)
+    // Seven builds, five of them whole-VM inventories of hundreds of
+    // packages each: OSV needs minutes per SBOM, not seconds.
+  }, 20 * 60 * 1000, 5000)
 
   for (const [index, scan] of scans.entries()) {
     const { publishedRun, build } = builds[index]
@@ -685,7 +687,7 @@ test('available Packer builders publish solo and multi-platform registry version
     DFBG_OBJECT_STORAGE_SECRET_KEY: 'testsecret',
     DFBG_SCANNER_ADAPTER: 'osv',
     DFBG_SCANNER_INTERVAL: '2s',
-    DFBG_SCANNER_PASS_TIMEOUT: '4m',
+    DFBG_SCANNER_PASS_TIMEOUT: '10m',
     DFBG_SCANNER_WORKERS: '4',
     // A whole-VM SPDX overflows the 4MiB compat default even compressed, and
     // an UploadSbom refusal hard-fails a stock Packer build. The operator
