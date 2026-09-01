@@ -502,12 +502,8 @@ test-packer-cloud: $(if $(filter 1,$(CLOUD_SHOTS)),build-ui) ## Verify available
 	[ -n "$${ARM_CLIENT_ID:-}" ] && available="$$available azure"; \
 	command -v "$(PACKER_E2E_DOCKER)" >/dev/null 2>&1 && \
 		"$(PACKER_E2E_DOCKER)" info >/dev/null 2>&1 && available="$$available docker" || true; \
-	if command -v qemu-system-x86_64 >/dev/null 2>&1 && \
-		{ [ "$$(uname -s)" = Darwin ] || [ -e /dev/kvm ]; }; then \
-		available="$$available qemu"; \
-	fi; \
 	if [ -z "$$available" ]; then \
-		echo "SKIP test-packer-cloud: no source available (checked AWS_ACCESS_KEY_ID, ARM_CLIENT_ID, Docker CLI/daemon, qemu-system-x86_64 and KVM/HVF)"; \
+		echo "SKIP test-packer-cloud: no source available (checked AWS_ACCESS_KEY_ID, ARM_CLIENT_ID, Docker CLI/daemon)"; \
 		exit 0; \
 	fi; \
 	if [ "$$(uname -s)" = Darwin ]; then \

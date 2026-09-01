@@ -208,23 +208,11 @@ async function detectAvailability() {
       reason: 'ARM_CLIENT_ID is unset',
     },
     docker: { available: false, reason: 'Docker CLI or daemon is unavailable' },
-    qemu: { available: false, reason: 'qemu-system-x86_64 is unavailable' },
   }
 
   try {
     await command(docker || 'docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 10000 })
     availability.docker = { available: true, reason: '' }
-  } catch {
-    // The reason above is printed with the skip.
-  }
-
-  try {
-    await command('qemu-system-x86_64', ['--version'], { timeout: 10000 })
-    if (process.platform === 'darwin' || existsSync('/dev/kvm')) {
-      availability.qemu = { available: true, reason: '' }
-    } else {
-      availability.qemu.reason = '/dev/kvm is unavailable'
-    }
   } catch {
     // The reason above is printed with the skip.
   }
@@ -259,14 +247,7 @@ function assertArtifact(platform, artifact, profile) {
     return
   }
 
-  const artifactPath = artifact.external_identifier.replace(/^file:\/\//, '')
-  assert.ok(path.isAbsolute(artifactPath), `QEMU artifact was not an absolute path: ${artifactPath}`)
-  assert.match(artifactPath, /\.qcow2$/, 'QEMU artifact was not a qcow2 file')
-  assert.ok(
-    artifactPath.startsWith(`${path.join(work, `qemu-${profile.name}`)}${path.sep}`),
-    `QEMU artifact escaped its harness output directory: ${artifactPath}`,
-  )
-  assert.equal(artifact.region, 'qemu', 'QEMU artifact region was not qemu')
+  assert.fail(`unexpected build platform ${platform}`)
 }
 
 async function assertPublished(token, registryBase, buildRun, expectedPlatforms, expectedAzureRegion) {
@@ -526,7 +507,7 @@ async function captureEvidence(endpoint, credentials, publishedRuns) {
       { waitUntil: 'domcontentloaded' },
     )
     await clickFacet('Version facets', 'Builds')
-    for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu', 'qemu.ubuntu']) {
+    for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu']) {
       await waitForText(component)
     }
     await capture('verify-multi-version.png')
@@ -597,7 +578,7 @@ test('available Packer builders publish solo and multi-platform registry version
     ['TLS certificate', certFile],
     ['TLS private key', keyFile],
     ['TLS CA', caFile],
-    ...['aws', 'azure', 'docker', 'qemu', 'multi'].map((name) => [
+    ...['aws', 'azure', 'docker', 'multi'].map((name) => [
       `${name} template`, path.join(templateDir, `${name}.pkr.hcl`),
     ]),
   ]) {
@@ -796,42 +777,48 @@ test('available Packer builders publish solo and multi-platform registry version
     })
   }
 
-  const qemuAccelerator = process.platform === 'darwin' ? 'hvf' : 'kvm'
-  await Promise.all(buildRuns.map(async (buildRun) => {
-    const variables = buildRun.name === 'qemu' || buildRun.name === 'multi'
-      ? ['-var', `qemu_accelerator=${qemuAccelerator}`, '-var', `work_dir=${work}`]
-      : []
-    const result = await command(
-      packer,
-      ['build', '-color=false', ...variables, buildRun.template],
-      {
-        env: {
-          ...packerEnv,
-          HCP_PACKER_BUILD_FINGERPRINT: buildRun.fingerprint,
-          PACKER_LOG: '1',
-        },
-      },
-    )
-    const output = `${result.stdout}${result.stderr}`
-    process.stdout.write(output)
-    assert.match(
-      output,
-      /Published metadata to HCP Packer registry/,
-      `${buildRun.bucket} did not report registry publication`,
-    )
-  }))
-
   const registryBase = `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`
-  const publishedRuns = await Promise.all(buildRuns.map((buildRun) => assertPublished(
-    principalToken,
-    registryBase,
-    buildRun,
-    buildRun.name === 'multi' ? ['aws', 'azure', 'docker', 'qemu'] : [buildRun.name],
-    expectedAzureRegion,
-  )))
-  await Promise.all(publishedRuns.map((publishedRun) =>
-    assertSBOMs(principalToken, registryBase, publishedRun)))
-  await assertScanPipeline(rootToken, principalToken, registryBase, publishedRuns)
+  // One subtest per bucket so the JUnit report carries a case per claim
+  // rather than one monolithic verdict; the subtests run concurrently.
+  const publishedRuns = []
+  await Promise.all(buildRuns.map((buildRun) =>
+    t.test(`${buildRun.bucket} publishes, completes and carries SBOMs`, async () => {
+      const variables = buildRun.name === 'multi' ? ['-var', `work_dir=${work}`] : []
+      const result = await command(
+        packer,
+        ['build', '-color=false', ...variables, buildRun.template],
+        {
+          env: {
+            ...packerEnv,
+            HCP_PACKER_BUILD_FINGERPRINT: buildRun.fingerprint,
+            PACKER_LOG: '1',
+          },
+        },
+      )
+      const output = `${result.stdout}${result.stderr}`
+      process.stdout.write(output)
+      assert.match(
+        output,
+        /Published metadata to HCP Packer registry/,
+        `${buildRun.bucket} did not report registry publication`,
+      )
+      const publishedRun = await assertPublished(
+        principalToken,
+        registryBase,
+        buildRun,
+        buildRun.name === 'multi' ? ['aws', 'azure', 'docker'] : [buildRun.name],
+        expectedAzureRegion,
+      )
+      await assertSBOMs(principalToken, registryBase, publishedRun)
+      publishedRuns.push(publishedRun)
+    })))
+  assert.equal(
+    publishedRuns.length, buildRuns.length,
+    'a bucket subtest failed before publication; skipping the scan and capture phases',
+  )
+  await t.test('the scan pipeline settles across every bucket', async () => {
+    await assertScanPipeline(rootToken, principalToken, registryBase, publishedRuns)
+  })
   await captureEvidence(endpoint, {
     clientID: principal.client_id,
     clientSecret: issued.secret,

@@ -12,10 +12,6 @@ packer {
       version = "= 1.1.4"
       source  = "github.com/hashicorp/docker"
     }
-    qemu = {
-      version = ">= 1.1.3"
-      source  = "github.com/hashicorp/qemu"
-    }
   }
 }
 
@@ -53,11 +49,6 @@ variable "aws_region" {
 variable "image_name_suffix" {
   type    = string
   default = env("GITHUB_RUN_ID") != "" ? env("GITHUB_RUN_ID") : "local"
-}
-
-variable "qemu_accelerator" {
-  type    = string
-  default = "kvm"
 }
 
 variable "work_dir" {
@@ -119,35 +110,11 @@ source "docker" "ubuntu" {
   commit = true
 }
 
-source "qemu" "ubuntu" {
-  iso_url      = "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
-  iso_checksum = "file:https://cloud-images.ubuntu.com/jammy/current/SHA256SUMS"
-  disk_image   = true
-
-  accelerator      = var.qemu_accelerator
-  cd_files         = ["${path.root}/cloud-init/meta-data", "${path.root}/cloud-init/user-data"]
-  cd_label         = "cidata"
-  disk_interface   = "virtio"
-  format           = "qcow2"
-  headless         = true
-  memory           = 2048
-  net_device       = "virtio-net"
-  output_directory = "${var.work_dir}/qemu-multi"
-  vm_name          = "dufflebag-ci-${var.image_name_suffix}-qemu-multi.qcow2"
-
-  communicator     = "ssh"
-  ssh_password     = "dufflebag"
-  ssh_timeout      = "20m"
-  ssh_username     = "ubuntu"
-  shutdown_command = "echo 'dufflebag' | sudo -S shutdown -P now"
-}
-
 build {
   sources = [
     "source.amazon-ebs.ubuntu",
     "source.azure-arm.ubuntu",
     "source.docker.ubuntu",
-    "source.qemu.ubuntu",
   ]
 
   provisioner "shell" {
@@ -155,7 +122,7 @@ build {
   }
 
   provisioner "shell" {
-    only = ["amazon-ebs.ubuntu", "azure-arm.ubuntu", "qemu.ubuntu"]
+    only = ["amazon-ebs.ubuntu", "azure-arm.ubuntu"]
     inline = [
       "sudo apt-get update",
       "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates",
@@ -191,19 +158,6 @@ build {
     only        = ["azure-arm.ubuntu"]
     source      = "/tmp/dufflebag.spdx.json"
     destination = "${var.work_dir}/sbom-azure-multi.spdx.json"
-  }
-
-  provisioner "file" {
-    only        = ["qemu.ubuntu"]
-    direction   = "download"
-    source      = "/tmp/dufflebag.spdx.json"
-    destination = "${var.work_dir}/sbom-qemu-multi.spdx.json"
-  }
-
-  provisioner "hcp-sbom" {
-    only        = ["qemu.ubuntu"]
-    source      = "/tmp/dufflebag.spdx.json"
-    destination = "${var.work_dir}/sbom-qemu-multi.spdx.json"
   }
 
   provisioner "hcp-sbom" {

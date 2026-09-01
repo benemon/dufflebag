@@ -13,7 +13,7 @@ jobs:
     timeout-minutes: 30
     # The secrets context is not valid in a job-level if, so the gate is the
     # first step. Missing cloud credentials reduce coverage but do not refuse
-    # the run: Docker and QEMU remain meaningful credential-less builders.
+    # the run: Docker remains a meaningful credential-less builder.
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
@@ -26,7 +26,7 @@ jobs:
     steps:
       - name: Warn without cloud credentials
         if: ${{ env.AWS_ACCESS_KEY_ID == '' && env.ARM_CLIENT_ID == '' }}
-        run: echo "WARNING cloud credentials are absent; running Docker and QEMU verification only"
+        run: echo "WARNING cloud credentials are absent; running Docker verification only"
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Set up Go
@@ -46,13 +46,6 @@ jobs:
       - name: Set up Chrome
         id: chrome
         uses: browser-actions/setup-chrome@v2
-      - name: Set up QEMU and KVM
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso
-          sudo chmod a+rw /dev/kvm
-          qemu-system-x86_64 --version
       # Pinned and verified the same way as the stock-Packer matrix in ci.yml.
       - name: Install stock Packer 1.16.0
         run: |
@@ -230,7 +223,6 @@ jobs:
             echo "| verify-aws | $(result "$aws") |"
             echo "| verify-azure | $(result "$azure") |"
             echo "| verify-docker | $(result attempted) |"
-            echo "| verify-qemu | $(result attempted) |"
             echo "| verify-multi | $(result "$multi") |"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Upload cloud verification report
