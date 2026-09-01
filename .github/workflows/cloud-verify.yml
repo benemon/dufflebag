@@ -1,0 +1,245 @@
+name: cloud verification
+
+# Manual-only by design: release-gate wiring is a later decision.
+# With no pull_request trigger, repository secrets are never exposed to fork pull requests.
+on:
+  workflow_dispatch:
+
+concurrency: { group: cloud-verify, cancel-in-progress: false }
+
+jobs:
+  cloud:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    # The secrets context is not valid in a job-level if, so the gate is the
+    # first step. Missing cloud credentials reduce coverage but do not refuse
+    # the run: Docker and QEMU remain meaningful credential-less builders.
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
+      AWS_DEFAULT_REGION: eu-west-2
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CI_CLIENT_ID }}
+      ARM_CLIENT_SECRET: ${{ secrets.AZURE_CI_CLIENT_SECRET }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_CI_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_CI_SUBSCRIPTION_ID }}
+      AZURE_CI_RESOURCE_GROUP: rg-dufflebag-ci
+    steps:
+      - name: Warn without cloud credentials
+        if: ${{ env.AWS_ACCESS_KEY_ID == '' && env.ARM_CLIENT_ID == '' }}
+        run: echo "WARNING cloud credentials are absent; running Docker and QEMU verification only"
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+          cache-dependency-path: |
+            go.sum
+            contract/go.sum
+      - name: Set up Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Set up Chrome
+        id: chrome
+        uses: browser-actions/setup-chrome@v2
+      - name: Set up QEMU and KVM
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y qemu-system-x86 qemu-utils xorriso
+          sudo chmod a+rw /dev/kvm
+          qemu-system-x86_64 --version
+      # Pinned and verified the same way as the stock-Packer matrix in ci.yml.
+      - name: Install stock Packer 1.16.0
+        run: |
+          set -euo pipefail
+          version='1.16.0'
+          base="https://releases.hashicorp.com/packer/$version"
+          curl -fsSLO "$base/packer_${version}_linux_amd64.zip"
+          curl -fsSLO "$base/packer_${version}_SHA256SUMS"
+          grep "packer_${version}_linux_amd64.zip" "packer_${version}_SHA256SUMS" | sha256sum -c -
+          sudo unzip -o -d /usr/local/bin "packer_${version}_linux_amd64.zip"
+          packer version
+      - name: Sweep stale AWS CI resources
+        if: ${{ env.AWS_ACCESS_KEY_ID != '' }}
+        run: |
+          set -euo pipefail
+          cutoff=$(date -u -d '6 hours ago' +%s)
+          aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=dufflebag-ci-*" \
+            --query 'Images[].[ImageId,CreationDate]' \
+            --output text |
+          while read -r image_id created; do
+            [ -n "$image_id" ] || continue
+            created_epoch=$(date -u -d "$created" +%s)
+            if [ "$created_epoch" -lt "$cutoff" ]; then
+              snapshots=$(aws ec2 describe-images \
+                --image-ids "$image_id" \
+                --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' \
+                --output text)
+              echo "Deregistering stale AMI $image_id created at $created"
+              aws ec2 deregister-image --image-id "$image_id"
+              for snapshot in $snapshots; do
+                [ "$snapshot" = "None" ] || aws ec2 delete-snapshot --snapshot-id "$snapshot"
+              done
+            fi
+          done
+          aws ec2 describe-instances \
+            --filters \
+              "Name=tag:dufflebag-ci,Values=packer" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].[InstanceId,LaunchTime]' \
+            --output text |
+          while read -r instance_id launched; do
+            [ -n "$instance_id" ] || continue
+            launched_epoch=$(date -u -d "$launched" +%s)
+            if [ "$launched_epoch" -lt "$cutoff" ]; then
+              echo "Terminating stale Packer instance $instance_id launched at $launched"
+              aws ec2 terminate-instances --instance-ids "$instance_id" >/dev/null
+            fi
+          done
+      - name: Sweep stale Azure CI images
+        if: ${{ env.ARM_CLIENT_ID != '' }}
+        run: |
+          set -euo pipefail
+          az login --service-principal \
+            --username "$ARM_CLIENT_ID" \
+            --password "$ARM_CLIENT_SECRET" \
+            --tenant "$ARM_TENANT_ID" >/dev/null
+          az account set --subscription "$ARM_SUBSCRIPTION_ID"
+          cutoff=$(date -u -d '6 hours ago' +%s)
+          resources_url="https://management.azure.com/subscriptions/$ARM_SUBSCRIPTION_ID/resourceGroups/$AZURE_CI_RESOURCE_GROUP/resources?api-version=2021-04-01&\$expand=createdTime"
+          az rest \
+            --method get \
+            --url "$resources_url" \
+            --query "value[?type == 'Microsoft.Compute/images' && starts_with(name, 'dufflebag-ci-')].[name,createdTime]" \
+            --output tsv |
+          while IFS=$'\t' read -r name created; do
+            [ -n "$name" ] || continue
+            if [ -z "$created" ]; then
+              echo "Keeping $name: Azure returned no creation timestamp"
+              continue
+            fi
+            created_epoch=$(date -u -d "$created" +%s) || {
+              echo "Keeping $name: could not parse creation timestamp $created"
+              continue
+            }
+            if [ "$created_epoch" -lt "$cutoff" ]; then
+              echo "Deleting stale image $name created at $created"
+              az image delete \
+                --resource-group "$AZURE_CI_RESOURCE_GROUP" \
+                --subscription "$ARM_SUBSCRIPTION_ID" \
+                --name "$name"
+            fi
+          done
+      - name: Run the Packer builder verification gate
+        id: cloud_test
+        run: |
+          make test-packer-cloud \
+            CLOUD_JUNIT="$GITHUB_WORKSPACE/cloud-report/junit.xml" \
+            CLOUD_SHOTS=1 \
+            CLOUD_SHOTS_DIR="$GITHUB_WORKSPACE/cloud-report/shots" \
+            CLOUD_CHROME='${{ steps.chrome.outputs.chrome-path }}'
+      - name: Clean up this run's AWS resources
+        if: ${{ always() && env.AWS_ACCESS_KEY_ID != '' }}
+        run: |
+          set +e
+          for name in \
+            "dufflebag-ci-${GITHUB_RUN_ID}-aws-solo" \
+            "dufflebag-ci-${GITHUB_RUN_ID}-aws-multi"; do
+            image_ids=$(aws ec2 describe-images \
+              --owners self \
+              --filters "Name=name,Values=$name" \
+              --query 'Images[].ImageId' \
+              --output text)
+            for image_id in $image_ids; do
+              [ "$image_id" = "None" ] && continue
+              snapshots=$(aws ec2 describe-images \
+                --image-ids "$image_id" \
+                --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' \
+                --output text)
+              echo "Deregistering this run's AMI: $name ($image_id)"
+              aws ec2 deregister-image --image-id "$image_id"
+              for snapshot in $snapshots; do
+                [ "$snapshot" = "None" ] || aws ec2 delete-snapshot --snapshot-id "$snapshot"
+              done
+            done
+          done
+          echo "AWS CI images left:"
+          aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=dufflebag-ci-*" \
+            --query 'Images[].[Name,ImageId,CreationDate,BlockDeviceMappings[].Ebs.SnapshotId]' \
+            --output table
+          echo "AWS Packer instances left:"
+          aws ec2 describe-instances \
+            --filters \
+              "Name=tag:dufflebag-ci,Values=packer" \
+              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
+            --query 'Reservations[].Instances[].[InstanceId,LaunchTime,State.Name]' \
+            --output table
+      - name: Clean up this run's Azure resources
+        if: ${{ always() && env.ARM_CLIENT_ID != '' }}
+        run: |
+          set +e
+          for image in \
+            "dufflebag-ci-${GITHUB_RUN_ID}-azure-solo" \
+            "dufflebag-ci-${GITHUB_RUN_ID}-azure-multi"; do
+            echo "Deleting this run's Azure image: $image"
+            az image delete \
+              --resource-group "$AZURE_CI_RESOURCE_GROUP" \
+              --subscription "$ARM_SUBSCRIPTION_ID" \
+              --name "$image"
+          done
+          echo "Resources left in $AZURE_CI_RESOURCE_GROUP:"
+          az resource list \
+            --resource-group "$AZURE_CI_RESOURCE_GROUP" \
+            --subscription "$ARM_SUBSCRIPTION_ID" \
+            --output table
+      - name: Summarize cloud verification claims
+        if: ${{ always() }}
+        env:
+          CLOUD_TEST_OUTCOME: ${{ steps.cloud_test.outcome }}
+        run: |
+          set -euo pipefail
+          result() {
+            if [ "$1" = "skipped" ]; then
+              echo 'skipped - source unavailable'
+            elif [ "$CLOUD_TEST_OUTCOME" = "success" ]; then
+              echo 'passed'
+            else
+              echo 'not proven - gate did not complete'
+            fi
+          }
+          aws=attempted
+          azure=attempted
+          multi=attempted
+          [ -n "$AWS_ACCESS_KEY_ID" ] || aws=skipped
+          [ -n "$ARM_CLIENT_ID" ] || azure=skipped
+          if [ "$aws" = skipped ] || [ "$azure" = skipped ]; then multi=skipped; fi
+          {
+            echo '## Cloud verification claims'
+            echo
+            echo '| Bucket | Result |'
+            echo '| --- | --- |'
+            echo "| verify-aws | $(result "$aws") |"
+            echo "| verify-azure | $(result "$azure") |"
+            echo "| verify-docker | $(result attempted) |"
+            echo "| verify-qemu | $(result attempted) |"
+            echo "| verify-multi | $(result "$multi") |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload cloud verification report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: cloud-verify-report
+          path: |
+            cloud-report/junit.xml
+            cloud-report/shots/
+          if-no-files-found: warn
+          retention-days: 30
