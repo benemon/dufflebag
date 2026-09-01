@@ -29,7 +29,7 @@ hcp_packer_registry {
 
 source "amazon-ebs" "ubuntu" {
   ami_name      = "dufflebag-ci-${var.image_name_suffix}-aws-solo"
-  instance_type = "t3.micro"
+  instance_type = "t3.small"
   region        = var.region
   ssh_username  = "ubuntu"
 
@@ -60,7 +60,7 @@ build {
       "curl -fsSL -o /tmp/syft.tar.gz https://github.com/anchore/syft/releases/download/v1.51.0/syft_1.51.0_linux_amd64.tar.gz",
       "echo '2a2e837a2c8d59ec9af5472ee22d3b04ee463c4e44476ecf993fd1e5ab6ebc7f  /tmp/syft.tar.gz' | sha256sum -c -",
       "sudo tar -xzf /tmp/syft.tar.gz -C /usr/local/bin syft",
-      "sudo /usr/local/bin/syft scan dir:/ -o spdx-json=/tmp/dufflebag.spdx.json",
+      "sudo /usr/local/bin/syft scan dir:/ --exclude ./proc --exclude ./sys --exclude ./dev --exclude ./run -o spdx-json=/tmp/dufflebag.spdx.json",
       "sudo chown $(id -u):$(id -g) /tmp/dufflebag.spdx.json",
     ]
   }
