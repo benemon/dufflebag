@@ -10,7 +10,10 @@ concurrency: { group: cloud-verify, cancel-in-progress: false }
 jobs:
   cloud:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Two cloud builds each run 10-20 minutes and the scan and capture phases
+    # follow; 30 minutes proved too tight and a timeout cancels the reporter
+    # mid-write, losing the failure detail the run existed to surface.
+    timeout-minutes: 60
     # The secrets context is not valid in a job-level if, so the gate is the
     # first step. Missing cloud credentials reduce coverage but do not refuse
     # the run: Docker remains a meaningful credential-less builder.
