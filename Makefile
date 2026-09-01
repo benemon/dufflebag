@@ -29,6 +29,10 @@ PACKER_E2E_KEY_FILE  ?= $(HOME)/.config/dufflebag/tls.key
 # wherever the invocation runs.
 PACKER_E2E_CA_FILE   ?= $(abspath $(shell git rev-parse --path-format=absolute --git-common-dir)/../../ca-chain.pem)
 PACKER_E2E_IMAGE     ?= alpine:3.20
+CLOUD_JUNIT          ?=
+CLOUD_SHOTS          ?= 0
+CLOUD_SHOTS_DIR      ?= $(CURDIR)/shots
+CLOUD_CHROME         ?=
 SCANNER_DOCKER       ?= docker
 SCANNER_TEST_IMAGE   ?= dufflebag-scanner-test:dev
 OSV_STUB_IMAGE       ?= dufflebag-osv-stub:dev
@@ -489,6 +493,43 @@ test-packer-ci: ## Run the packer gate against an in-run CA (no lab, unencrypted
 		PACKER_E2E_CERT_FILE="$$tls/tls.crt" \
 		PACKER_E2E_KEY_FILE="$$tls/tls.key" \
 		PACKER_E2E_CA_FILE="$$tls/ca.pem"
+
+.PHONY: test-packer-cloud
+test-packer-cloud: $(if $(filter 1,$(CLOUD_SHOTS)),build-ui) ## Verify available cloud, container and local VM Packer builders
+	@set -e; \
+	available=""; \
+	[ -n "$${AWS_ACCESS_KEY_ID:-}" ] && available="$$available aws"; \
+	[ -n "$${ARM_CLIENT_ID:-}" ] && available="$$available azure"; \
+	command -v "$(PACKER_E2E_DOCKER)" >/dev/null 2>&1 && \
+		"$(PACKER_E2E_DOCKER)" info >/dev/null 2>&1 && available="$$available docker" || true; \
+	if command -v qemu-system-x86_64 >/dev/null 2>&1 && \
+		{ [ "$$(uname -s)" = Darwin ] || [ -e /dev/kvm ]; }; then \
+		available="$$available qemu"; \
+	fi; \
+	if [ -z "$$available" ]; then \
+		echo "SKIP test-packer-cloud: no source available (checked AWS_ACCESS_KEY_ID, ARM_CLIENT_ID, Docker CLI/daemon, qemu-system-x86_64 and KVM/HVF)"; \
+		exit 0; \
+	fi; \
+	if [ "$$(uname -s)" = Darwin ]; then \
+		echo "REFUSING test-packer-cloud on macOS: Go ignores SSL_CERT_FILE here, so an in-run CA cannot be trusted."; \
+		echo "  The cloud verification workflow runs this gate on Linux."; \
+		exit 1; \
+	fi; \
+	work=$$(mktemp -d); tls=$$(mktemp -d); \
+	trap 'rm -rf "$$work" "$$tls"' EXIT; \
+	if [ -n "$(CLOUD_JUNIT)" ]; then mkdir -p "$$(dirname "$(CLOUD_JUNIT)")"; fi; \
+	e2e/support/mint-tls.sh "$$tls" $(PACKER_CI_HOSTNAME); \
+	$(resolve-server-bin); \
+	$(SCANNER_DISABLED_ENV) E2E_PACKER_BIN="$$bin" E2E_PACKER_WORK="$$work" \
+	E2E_PACKER_TEMPLATE_DIR="$(CURDIR)/e2e/packer" \
+	E2E_PACKER_CLI="$(PACKER_E2E_PACKER)" E2E_PACKER_DOCKER="$(PACKER_E2E_DOCKER)" \
+	E2E_PACKER_HOSTNAME="$(PACKER_CI_HOSTNAME)" \
+	E2E_PACKER_CERT_FILE="$$tls/tls.crt" E2E_PACKER_KEY_FILE="$$tls/tls.key" \
+	E2E_PACKER_CA_FILE="$$tls/ca.pem" CLOUD_SHOTS="$(CLOUD_SHOTS)" \
+	CLOUD_SHOTS_DIR="$(CLOUD_SHOTS_DIR)" SMOKE_CHROME="$(CLOUD_CHROME)" \
+		node --test \
+		$(if $(strip $(CLOUD_JUNIT)),--test-reporter spec --test-reporter-destination stdout --test-reporter junit --test-reporter-destination "$(CLOUD_JUNIT)") \
+		e2e/packer/cloud.test.mjs
 
 # The encrypted posture needs a key service, not the lab's. A dev-mode Vault in
 # a container is the same shape the smoke lane already runs, and the keyring

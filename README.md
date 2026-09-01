@@ -103,6 +103,19 @@ make lint               # go vet and golangci-lint
 `make test-packer` as shown drives the lab CA, hostname certificate and DNS
 entry, so that invocation is local-only. CI runs the same gate as
 `make test-packer-ci` (and `-encrypted`) against a CA minted inside the run.
+
+The manual-only `cloud-verify` workflow proves documented registry claims
+against available AWS, Azure, Docker and QEMU builders. Missing cloud
+credentials skip only those cloud sources, and the lane skips cleanly when no
+source is available. Solo buckets check each platform's completed version,
+artifact identity, region and managed `latest` assignment. The joint bucket
+checks that one version completes across all four platforms and receives one
+managed `latest` assignment.
+
+Dufflebag registers artifacts from any Packer builder - cloud images,
+container images and local VM images - including multi-platform buckets where
+one version spans them.
+
 Run `make help` for generation, schema-compatibility, demo and other targets.
 
 ## Clean-room development
