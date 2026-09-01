@@ -124,6 +124,7 @@ build {
   provisioner "shell" {
     only = ["amazon-ebs.ubuntu", "azure-arm.ubuntu"]
     inline = [
+      "sudo cloud-init status --wait || true",
       "sudo apt-get update",
       "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates",
       "curl -fsSL -o /tmp/syft.tar.gz https://github.com/anchore/syft/releases/download/v1.51.0/syft_1.51.0_linux_amd64.tar.gz",

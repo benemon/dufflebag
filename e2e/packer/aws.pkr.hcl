@@ -55,6 +55,7 @@ build {
   provisioner "shell" {
     inline = [
       "echo dufflebag cloud verification",
+      "sudo cloud-init status --wait || true",
       "sudo apt-get update",
       "sudo DEBIAN_FRONTEND=noninteractive apt-get install -y curl ca-certificates",
       "curl -fsSL -o /tmp/syft.tar.gz https://github.com/anchore/syft/releases/download/v1.51.0/syft_1.51.0_linux_amd64.tar.gz",
