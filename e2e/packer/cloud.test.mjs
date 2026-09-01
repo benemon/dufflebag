@@ -687,6 +687,10 @@ test('available Packer builders publish solo and multi-platform registry version
     DFBG_SCANNER_INTERVAL: '2s',
     DFBG_SCANNER_PASS_TIMEOUT: '4m',
     DFBG_SCANNER_WORKERS: '4',
+    // A whole-VM SPDX overflows the 4MiB compat default even compressed, and
+    // an UploadSbom refusal hard-fails a stock Packer build. The operator
+    // knob is the product's answer for VM-scale SBOMs; the lane uses it too.
+    DFBG_API_MAX_BODY_BYTES: String(64 << 20),
   })
   await until('the trusted TLS server to answer', async () => {
     if (server.exitCode !== null) throw new Error(`server exited ${server.exitCode}: ${serverOutput}`)
