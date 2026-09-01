@@ -538,7 +538,9 @@ async function captureEvidence(endpoint, credentials, publishedRuns) {
   browser = undefined
 }
 
-test('available Packer builders publish solo and multi-platform registry versions', async (t) => {
+// Subtest concurrency is the point: the builds must overlap or wall-clock is
+// the sum of three 15-minute cloud builds, not the slowest one.
+test('available Packer builders publish solo and multi-platform registry versions', { concurrency: 5 }, async (t) => {
   t.after(async () => {
     if (browser) await browser.close().catch(() => {})
     await stopServer()
@@ -713,6 +715,8 @@ test('available Packer builders publish solo and multi-platform registry version
   })
   const issued = await api(rootToken, 'POST', `/api/v1/principals/${principal.id}/secrets`, {})
   assert.ok(issued.secret, 'ordinary secret issuance returned no one-time secret')
+  // Minted before any build starts purely to prove the credential works;
+  // assertion-time tokens are minted fresh because builds outlive the TTL.
   const principalToken = await tokenFor({
     client_id: principal.client_id,
     client_secret: issued.secret,
@@ -802,14 +806,20 @@ test('available Packer builders publish solo and multi-platform registry version
         /Published metadata to HCP Packer registry/,
         `${buildRun.bucket} did not report registry publication`,
       )
+      // Tokens age out within 15 minutes and a cloud build can outlive that:
+      // mint at the assertion boundary, never before the build.
+      const freshToken = await tokenFor({
+        client_id: principal.client_id,
+        client_secret: issued.secret,
+      })
       const publishedRun = await assertPublished(
-        principalToken,
+        freshToken,
         registryBase,
         buildRun,
         buildRun.name === 'multi' ? ['aws', 'azure', 'docker'] : [buildRun.name],
         expectedAzureRegion,
       )
-      await assertSBOMs(principalToken, registryBase, publishedRun)
+      await assertSBOMs(freshToken, registryBase, publishedRun)
       publishedRuns.push(publishedRun)
     })))
   assert.equal(
@@ -817,7 +827,12 @@ test('available Packer builders publish solo and multi-platform registry version
     'a bucket subtest failed before publication; skipping the scan and capture phases',
   )
   await t.test('the scan pipeline settles across every bucket', async () => {
-    await assertScanPipeline(rootToken, principalToken, registryBase, publishedRuns)
+    const scanRootToken = await tokenFor(initialized.json)
+    const scanPrincipalToken = await tokenFor({
+      client_id: principal.client_id,
+      client_secret: issued.secret,
+    })
+    await assertScanPipeline(scanRootToken, scanPrincipalToken, registryBase, publishedRuns)
   })
   await captureEvidence(endpoint, {
     clientID: principal.client_id,
