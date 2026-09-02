@@ -795,14 +795,21 @@ test('available Packer builders publish solo and multi-platform registry version
   process.stdout.write(`${initializedPlugins.stdout}${initializedPlugins.stderr}`)
 
   const started = Date.now()
-  const buildRuns = availableSources.map((name) => ({
+  // CLOUD_ONLY restricts this run to one bucket so CI can fan the lane out
+  // across independent jobs — a runner eviction then costs one bucket, not
+  // the whole matrix. Unset runs everything available (the local default).
+  const onlyBucket = process.env.CLOUD_ONLY
+  const solos = onlyBucket
+    ? availableSources.filter((name) => name === onlyBucket)
+    : availableSources
+  const buildRuns = solos.map((name) => ({
     name,
     bucket: `verify-${name}`,
     fingerprint: `verify-${name}-${runSuffix}-${started}`,
     profile: 'solo',
     template: path.join(templateDir, `${name}.pkr.hcl`),
   }))
-  if (missingJointSources.length === 0) {
+  if (missingJointSources.length === 0 && (!onlyBucket || onlyBucket === 'multi')) {
     buildRuns.push({
       name: 'multi',
       bucket: 'verify-multi',
@@ -810,6 +817,12 @@ test('available Packer builders publish solo and multi-platform registry version
       profile: 'multi',
       template: path.join(templateDir, 'multi.pkr.hcl'),
     })
+  }
+  if (buildRuns.length === 0) {
+    t.skip(onlyBucket
+      ? `CLOUD_ONLY=${onlyBucket} has nothing to run: source unavailable or joint incomplete`
+      : 'no build selected')
+    return
   }
 
   const registryBase = `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`
