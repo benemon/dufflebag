@@ -8,15 +8,20 @@ on:
 concurrency: { group: cloud-verify, cancel-in-progress: false }
 
 jobs:
-  cloud:
+  # One independent job per bucket. A hosted-runner eviction then costs a
+  # single bucket's verdict, not the whole lane, and each bucket sweeps and
+  # cleans only its own cloud. CLOUD_ONLY tells the harness which bucket to
+  # build; the solos are self-contained, and 'multi' is the joint build that
+  # needs every cloud at once. fail-fast is off so one bucket's failure or
+  # eviction never cancels the others.
+  verify:
+    name: verify-${{ matrix.bucket }}
     runs-on: ubuntu-latest
-    # Two cloud builds each run 10-20 minutes and the scan and capture phases
-    # follow; 30 minutes proved too tight and a timeout cancels the reporter
-    # mid-write, losing the failure detail the run existed to surface.
-    timeout-minutes: 60
-    # The secrets context is not valid in a job-level if, so the gate is the
-    # first step. Missing cloud credentials reduce coverage but do not refuse
-    # the run: Docker remains a meaningful credential-less builder.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        bucket: [aws, azure, docker, multi]
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_CI_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_CI_SECRET_ACCESS_KEY }}
@@ -26,10 +31,18 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_CI_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_CI_SUBSCRIPTION_ID }}
       AZURE_CI_RESOURCE_GROUP: rg-dufflebag-ci
+      CLOUD_ONLY: ${{ matrix.bucket }}
     steps:
-      - name: Warn without cloud credentials
-        if: ${{ env.AWS_ACCESS_KEY_ID == '' && env.ARM_CLIENT_ID == '' }}
-        run: echo "WARNING cloud credentials are absent; running Docker verification only"
+      # The secrets context is not valid in a job-level if, so credential
+      # gating happens in the harness (an unavailable source skips cleanly).
+      # Docker needs no credentials; the cloud buckets do.
+      - name: Note credential state
+        run: |
+          if { [ "${{ matrix.bucket }}" = aws ] && [ -z "$AWS_ACCESS_KEY_ID" ]; } ||
+             { [ "${{ matrix.bucket }}" = azure ] && [ -z "$ARM_CLIENT_ID" ]; } ||
+             { [ "${{ matrix.bucket }}" = multi ] && { [ -z "$AWS_ACCESS_KEY_ID" ] || [ -z "$ARM_CLIENT_ID" ]; }; }; then
+            echo "WARNING credentials for ${{ matrix.bucket }} are absent; the harness will skip this bucket"
+          fi
       - name: Check out repository
         uses: actions/checkout@v7
       - name: Set up Go
@@ -61,7 +74,7 @@ jobs:
           sudo unzip -o -d /usr/local/bin "packer_${version}_linux_amd64.zip"
           packer version
       - name: Sweep stale AWS CI resources
-        if: ${{ env.AWS_ACCESS_KEY_ID != '' }}
+        if: ${{ (matrix.bucket == 'aws' || matrix.bucket == 'multi') && env.AWS_ACCESS_KEY_ID != '' }}
         run: |
           set -euo pipefail
           cutoff=$(date -u -d '6 hours ago' +%s)
@@ -100,7 +113,7 @@ jobs:
             fi
           done
       - name: Sweep stale Azure CI images
-        if: ${{ env.ARM_CLIENT_ID != '' }}
+        if: ${{ (matrix.bucket == 'azure' || matrix.bucket == 'multi') && env.ARM_CLIENT_ID != '' }}
         run: |
           set -euo pipefail
           az login --service-principal \
@@ -142,28 +155,27 @@ jobs:
             CLOUD_SHOTS_DIR="$GITHUB_WORKSPACE/cloud-report/shots" \
             CLOUD_CHROME='${{ steps.chrome.outputs.chrome-path }}'
       - name: Clean up this run's AWS resources
-        if: ${{ always() && env.AWS_ACCESS_KEY_ID != '' }}
+        if: ${{ always() && (matrix.bucket == 'aws' || matrix.bucket == 'multi') && env.AWS_ACCESS_KEY_ID != '' }}
         run: |
           set +e
-          for name in \
-            "dufflebag-ci-${GITHUB_RUN_ID}-aws-solo" \
-            "dufflebag-ci-${GITHUB_RUN_ID}-aws-multi"; do
-            image_ids=$(aws ec2 describe-images \
-              --owners self \
-              --filters "Name=name,Values=$name" \
-              --query 'Images[].ImageId' \
+          # The aws bucket makes the -aws-solo image; the joint makes -aws-multi.
+          [ "${{ matrix.bucket }}" = multi ] && suffix=aws-multi || suffix=aws-solo
+          name="dufflebag-ci-${GITHUB_RUN_ID}-${suffix}"
+          image_ids=$(aws ec2 describe-images \
+            --owners self \
+            --filters "Name=name,Values=$name" \
+            --query 'Images[].ImageId' \
+            --output text)
+          for image_id in $image_ids; do
+            [ "$image_id" = "None" ] && continue
+            snapshots=$(aws ec2 describe-images \
+              --image-ids "$image_id" \
+              --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' \
               --output text)
-            for image_id in $image_ids; do
-              [ "$image_id" = "None" ] && continue
-              snapshots=$(aws ec2 describe-images \
-                --image-ids "$image_id" \
-                --query 'Images[].BlockDeviceMappings[].Ebs.SnapshotId' \
-                --output text)
-              echo "Deregistering this run's AMI: $name ($image_id)"
-              aws ec2 deregister-image --image-id "$image_id"
-              for snapshot in $snapshots; do
-                [ "$snapshot" = "None" ] || aws ec2 delete-snapshot --snapshot-id "$snapshot"
-              done
+            echo "Deregistering this run's AMI: $name ($image_id)"
+            aws ec2 deregister-image --image-id "$image_id"
+            for snapshot in $snapshots; do
+              [ "$snapshot" = "None" ] || aws ec2 delete-snapshot --snapshot-id "$snapshot"
             done
           done
           echo "AWS CI images left:"
@@ -172,67 +184,41 @@ jobs:
             --filters "Name=name,Values=dufflebag-ci-*" \
             --query 'Images[].[Name,ImageId,CreationDate,BlockDeviceMappings[].Ebs.SnapshotId]' \
             --output table
-          echo "AWS Packer instances left:"
-          aws ec2 describe-instances \
-            --filters \
-              "Name=tag:dufflebag-ci,Values=packer" \
-              "Name=instance-state-name,Values=pending,running,stopping,stopped" \
-            --query 'Reservations[].Instances[].[InstanceId,LaunchTime,State.Name]' \
-            --output table
       - name: Clean up this run's Azure resources
-        if: ${{ always() && env.ARM_CLIENT_ID != '' }}
+        if: ${{ always() && (matrix.bucket == 'azure' || matrix.bucket == 'multi') && env.ARM_CLIENT_ID != '' }}
         run: |
           set +e
-          for image in \
-            "dufflebag-ci-${GITHUB_RUN_ID}-azure-solo" \
-            "dufflebag-ci-${GITHUB_RUN_ID}-azure-multi"; do
-            echo "Deleting this run's Azure image: $image"
-            az image delete \
-              --resource-group "$AZURE_CI_RESOURCE_GROUP" \
-              --subscription "$ARM_SUBSCRIPTION_ID" \
-              --name "$image"
-          done
+          [ "${{ matrix.bucket }}" = multi ] && suffix=azure-multi || suffix=azure-solo
+          image="dufflebag-ci-${GITHUB_RUN_ID}-${suffix}"
+          echo "Deleting this run's Azure image: $image"
+          az image delete \
+            --resource-group "$AZURE_CI_RESOURCE_GROUP" \
+            --subscription "$ARM_SUBSCRIPTION_ID" \
+            --name "$image"
           echo "Resources left in $AZURE_CI_RESOURCE_GROUP:"
           az resource list \
             --resource-group "$AZURE_CI_RESOURCE_GROUP" \
             --subscription "$ARM_SUBSCRIPTION_ID" \
             --output table
-      - name: Summarize cloud verification claims
+      - name: Summarize this bucket's claim
         if: ${{ always() }}
         env:
           CLOUD_TEST_OUTCOME: ${{ steps.cloud_test.outcome }}
         run: |
           set -euo pipefail
-          result() {
-            if [ "$1" = "skipped" ]; then
-              echo 'skipped - source unavailable'
-            elif [ "$CLOUD_TEST_OUTCOME" = "success" ]; then
-              echo 'passed'
-            else
-              echo 'not proven - gate did not complete'
-            fi
-          }
-          aws=attempted
-          azure=attempted
-          multi=attempted
-          [ -n "$AWS_ACCESS_KEY_ID" ] || aws=skipped
-          [ -n "$ARM_CLIENT_ID" ] || azure=skipped
-          if [ "$aws" = skipped ] || [ "$azure" = skipped ]; then multi=skipped; fi
+          case "$CLOUD_TEST_OUTCOME" in
+            success) result='passed' ;;
+            skipped) result='skipped - source unavailable' ;;
+            *) result='not proven - gate did not complete' ;;
+          esac
           {
-            echo '## Cloud verification claims'
-            echo
-            echo '| Bucket | Result |'
-            echo '| --- | --- |'
-            echo "| verify-aws | $(result "$aws") |"
-            echo "| verify-azure | $(result "$azure") |"
-            echo "| verify-docker | $(result attempted) |"
-            echo "| verify-multi | $(result "$multi") |"
+            echo "## verify-${{ matrix.bucket }}: $result"
           } >> "$GITHUB_STEP_SUMMARY"
-      - name: Upload cloud verification report
+      - name: Upload this bucket's report
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
-          name: cloud-verify-report
+          name: cloud-verify-${{ matrix.bucket }}
           path: |
             cloud-report/junit.xml
             cloud-report/server.log

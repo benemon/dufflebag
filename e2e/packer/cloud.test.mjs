@@ -519,24 +519,41 @@ async function captureEvidence(endpoint, credentials, projectID, publishedRuns) 
   await clickByText('button', 'Log in')
   await waitForText('Sign out')
 
-  await page.goto(`${endpoint}/buckets`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Buckets')
-  for (const publishedRun of publishedRuns) await waitForText(publishedRun.bucket)
-  await capture('buckets.png')
+  // Every screenshot below is supplementary evidence, not a claim — the
+  // builds, registration, SBOMs and scans are already asserted. Each capture
+  // is independently best-effort: a facet-click or render hiccup logs and
+  // leaves a diagnostic shot rather than failing a bucket whose claims passed.
+  const tryCapture = async (label, fn) => {
+    try {
+      await fn()
+    } catch (err) {
+      process.stdout.write(`CAPTURE ${label} failed: ${err}\n`)
+      await capture(`capture-diagnostic-${label}.png`).catch(() => {})
+    }
+  }
+
+  await tryCapture('buckets', async () => {
+    await page.goto(`${endpoint}/buckets`, { waitUntil: 'domcontentloaded' })
+    await waitForText('Buckets')
+    for (const publishedRun of publishedRuns) await waitForText(publishedRun.bucket)
+    await capture('buckets.png')
+  })
 
   const multi = publishedRuns.find((publishedRun) => publishedRun.bucket === 'verify-multi')
   if (multi) {
-    await page.goto(
-      // Version and build deep links are project-scoped routes (App.tsx),
-      // unlike the bare /buckets listing.
-      `${endpoint}/projects/${projectID}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
-      { waitUntil: 'domcontentloaded' },
-    )
-    await clickFacet('Version facets', 'Builds')
-    for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu']) {
-      await waitForText(component)
-    }
-    await capture('verify-multi-version.png')
+    await tryCapture('multi-version', async () => {
+      await page.goto(
+        // Version and build deep links are project-scoped routes (App.tsx),
+        // unlike the bare /buckets listing.
+        `${endpoint}/projects/${projectID}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
+        { waitUntil: 'domcontentloaded' },
+      )
+      await clickFacet('Version facets', 'Builds')
+      for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu']) {
+        await waitForText(component)
+      }
+      await capture('verify-multi-version.png')
+    })
   } else {
     process.stdout.write('SKIP CAPTURE verify-multi-version.png: joint build did not run\n')
   }
@@ -547,18 +564,20 @@ async function captureEvidence(endpoint, credentials, projectID, publishedRuns) 
     publishedRun.bucket === 'verify-multi' && ['aws', 'azure'].includes(build.platform)) ||
     candidates.find(({ build }) => ['aws', 'azure'].includes(build.platform)) || candidates[0]
   assert.ok(selected, 'no published build was available for evidence capture')
-  const buildURL =
-    `${endpoint}/projects/${projectID}/buckets/${encodeURIComponent(selected.publishedRun.bucket)}` +
-    `/versions/${encodeURIComponent(selected.publishedRun.fingerprint)}` +
-    `/builds/${encodeURIComponent(selected.build.id)}`
-  await page.goto(buildURL, { waitUntil: 'domcontentloaded' })
-  await clickFacet('Build facets', 'Artifacts')
-  await waitForText(selected.build.artifacts[0].external_identifier)
-  await capture('artifact-detail.png')
+  await tryCapture(`build-detail-${selected.build.platform}`, async () => {
+    const buildURL =
+      `${endpoint}/projects/${projectID}/buckets/${encodeURIComponent(selected.publishedRun.bucket)}` +
+      `/versions/${encodeURIComponent(selected.publishedRun.fingerprint)}` +
+      `/builds/${encodeURIComponent(selected.build.id)}`
+    await page.goto(buildURL, { waitUntil: 'domcontentloaded' })
+    await clickFacet('Build facets', 'Artifacts')
+    await waitForText(selected.build.artifacts[0].external_identifier)
+    await capture('artifact-detail.png')
 
-  await clickFacet('Build facets', 'Packages')
-  await waitForText('with findings')
-  await capture('vulnerabilities-packages.png')
+    await clickFacet('Build facets', 'Packages')
+    await waitForText('with findings')
+    await capture('vulnerabilities-packages.png')
+  })
 
   await browser.close()
   browser = undefined
@@ -578,6 +597,16 @@ test('available Packer builders publish solo and multi-platform registry version
   })
 
   const availability = await detectAvailability()
+  // CLOUD_ONLY restricts this run to one bucket so CI can fan the lane out
+  // across independent jobs — a runner eviction then costs one bucket, not
+  // the whole matrix. Unset runs everything available (the local default).
+  const onlyBucket = process.env.CLOUD_ONLY
+  // An azure image is produced by the azure solo and by the joint. Only those
+  // jobs run `az login` (in their sweep), so the region resolution below must
+  // be gated on an azure build actually running, not merely on credentials
+  // being present in the environment.
+  const willBuildAzure = availability.azure.available
+    && (!onlyBucket || onlyBucket === 'azure' || onlyBucket === 'multi')
   const availableSources = Object.entries(availability)
     .filter(([, source]) => source.available)
     .map(([name]) => name)
@@ -775,7 +804,7 @@ test('available Packer builders publish solo and multi-platform registry version
   delete packerEnv.HCP_OAUTH_CLIENT_ID
 
   let expectedAzureRegion
-  if (availability.azure.available) {
+  if (willBuildAzure) {
     const { stdout } = await command('az', [
       'group', 'show',
       '--name', resourceGroup,
@@ -795,14 +824,17 @@ test('available Packer builders publish solo and multi-platform registry version
   process.stdout.write(`${initializedPlugins.stdout}${initializedPlugins.stderr}`)
 
   const started = Date.now()
-  const buildRuns = availableSources.map((name) => ({
+  const solos = onlyBucket
+    ? availableSources.filter((name) => name === onlyBucket)
+    : availableSources
+  const buildRuns = solos.map((name) => ({
     name,
     bucket: `verify-${name}`,
     fingerprint: `verify-${name}-${runSuffix}-${started}`,
     profile: 'solo',
     template: path.join(templateDir, `${name}.pkr.hcl`),
   }))
-  if (missingJointSources.length === 0) {
+  if (missingJointSources.length === 0 && (!onlyBucket || onlyBucket === 'multi')) {
     buildRuns.push({
       name: 'multi',
       bucket: 'verify-multi',
@@ -810,6 +842,12 @@ test('available Packer builders publish solo and multi-platform registry version
       profile: 'multi',
       template: path.join(templateDir, 'multi.pkr.hcl'),
     })
+  }
+  if (buildRuns.length === 0) {
+    t.skip(onlyBucket
+      ? `CLOUD_ONLY=${onlyBucket} has nothing to run: source unavailable or joint incomplete`
+      : 'no build selected')
+    return
   }
 
   const registryBase = `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`
