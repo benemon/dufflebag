@@ -578,6 +578,16 @@ test('available Packer builders publish solo and multi-platform registry version
   })
 
   const availability = await detectAvailability()
+  // CLOUD_ONLY restricts this run to one bucket so CI can fan the lane out
+  // across independent jobs — a runner eviction then costs one bucket, not
+  // the whole matrix. Unset runs everything available (the local default).
+  const onlyBucket = process.env.CLOUD_ONLY
+  // An azure image is produced by the azure solo and by the joint. Only those
+  // jobs run `az login` (in their sweep), so the region resolution below must
+  // be gated on an azure build actually running, not merely on credentials
+  // being present in the environment.
+  const willBuildAzure = availability.azure.available
+    && (!onlyBucket || onlyBucket === 'azure' || onlyBucket === 'multi')
   const availableSources = Object.entries(availability)
     .filter(([, source]) => source.available)
     .map(([name]) => name)
@@ -775,7 +785,7 @@ test('available Packer builders publish solo and multi-platform registry version
   delete packerEnv.HCP_OAUTH_CLIENT_ID
 
   let expectedAzureRegion
-  if (availability.azure.available) {
+  if (willBuildAzure) {
     const { stdout } = await command('az', [
       'group', 'show',
       '--name', resourceGroup,
@@ -795,10 +805,6 @@ test('available Packer builders publish solo and multi-platform registry version
   process.stdout.write(`${initializedPlugins.stdout}${initializedPlugins.stderr}`)
 
   const started = Date.now()
-  // CLOUD_ONLY restricts this run to one bucket so CI can fan the lane out
-  // across independent jobs — a runner eviction then costs one bucket, not
-  // the whole matrix. Unset runs everything available (the local default).
-  const onlyBucket = process.env.CLOUD_ONLY
   const solos = onlyBucket
     ? availableSources.filter((name) => name === onlyBucket)
     : availableSources
