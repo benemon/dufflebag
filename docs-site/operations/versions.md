@@ -10,13 +10,13 @@ A bucket's versions table shows each version's completion and revocation
 state. An incomplete version is named `v0` until it completes. A complete
 version takes its sequence name and the managed `latest` channel moves to it.
 
-![Dufflebag versions table showing completed, incomplete and revoked versions](/screenshots/versions-table.png)
+![dufflebag versions table showing completed, incomplete and revoked versions](/screenshots/versions-table.png)
 
 Before the first publish - a bucket created from the console or Terraform
 ahead of its pipeline - the table states its emptiness and points at client
 connection, the same affordance an empty project shows:
 
-![Dufflebag empty bucket pointing at client connection before the first publish](/screenshots/bucket-empty.png)
+![dufflebag empty bucket pointing at client connection before the first publish](/screenshots/bucket-empty.png)
 
 ## A version
 
@@ -24,7 +24,7 @@ A version shows its builds, artifacts, findings and ancestry. Its operations
 card can promote the version to a channel, revoke it immediately or on a
 schedule, restore it, or delete it.
 
-![Dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
+![dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
 
 ## Consume this version
 
@@ -48,11 +48,11 @@ selected by default.
 
 Platforms without a confident command mapping fall back to Terraform.
 
-![Dufflebag consumption card showing Terraform, Docker, Podman and AWS with the tagged Docker command selected](/screenshots/version-consume.png)
+![dufflebag consumption card showing Terraform, Docker, Podman and AWS with the tagged Docker command selected](/screenshots/version-consume.png)
 
 An untagged container version offers no container tabs:
 
-![Dufflebag consumption card for an untagged container version showing no Docker or Podman tabs](/screenshots/version-consume-untagged.png)
+![dufflebag consumption card for an untagged container version showing no Docker or Podman tabs](/screenshots/version-consume-untagged.png)
 
 ## Revoking a version
 

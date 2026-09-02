@@ -2,7 +2,7 @@
 
 `terraform-provider-hcp` is the automation interface for a dufflebag
 registry. It includes resources, not only data sources, so it can manage
-buckets, channels, and channel assignments declaratively. Dufflebag supports
+buckets, channels, and channel assignments declaratively. The dufflebag registry supports
 version 0.84.0 or newer. The end-to-end suite runs version 0.112.0.
 
 This page starts with the consumption lookup - resolving a published image -
@@ -23,7 +23,7 @@ Prerequisites: The `HCP_*` environment variables from
 ::: info
 The provider fetches the selected project through the resource-manager API,
 even when `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` are set. Packer skips
-this call. Dufflebag serves the provider's request without additional
+this call. The dufflebag server serves the provider's request without additional
 configuration.
 :::
 

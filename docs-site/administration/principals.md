@@ -61,7 +61,7 @@ bucket selection answers exactly that bucket's principals, and a project
 selection never lists bucket-scoped principals as a subtree. Over the API,
 pass `bucket_id` (the bucket's ULID) alongside the organisation and project.
 
-![Dufflebag bucket-scoped session showing its Bucket navigation entry and bound client environment](/screenshots/instance-bucket-scoped.png)
+![dufflebag bucket-scoped session showing its Bucket navigation entry and bound client environment](/screenshots/instance-bucket-scoped.png)
 
 The two tenancy-scoped kinds behave differently in the Packer CLI. A
 project-scoped principal gets a 403 from project discovery, which Packer
@@ -86,7 +86,7 @@ deletes principals. One-time secrets are shown exactly once. The same
 operations are in the [platform API reference](/platform-api.html) under
 `principals`.
 
-![Dufflebag Principals screen showing principal credentials and actions](/screenshots/principals.png)
+![dufflebag Principals screen showing principal credentials and actions](/screenshots/principals.png)
 
 ### Create a principal and issue its first secret
 

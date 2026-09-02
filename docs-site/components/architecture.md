@@ -1,19 +1,19 @@
 # Architecture
 
-Dufflebag is a single stateless server in front of PostgreSQL, serving two
+The dufflebag deployment is a single stateless server in front of PostgreSQL, serving two
 API surfaces and an embedded console. This page describes the system's
 structure and the boundaries between its parts. The
 [compatibility reference](../reference/compatibility.md) records everything
 an external client can observe. This page covers everything else.
 
-![Dufflebag architecture: clients, the single container's serving and background surfaces, state, and optional external services](/diagrams/architecture.svg)
+![dufflebag architecture: clients, the single container's serving and background surfaces, state, and optional external services](/diagrams/architecture.svg)
 
 Solid connections are required. Dashed components and connections are
 optional, chosen by the deployment.
 
 ## API planes
 
-Dufflebag serves one domain through two contracts.
+The dufflebag server serves one domain through two contracts.
 
 The **compatibility plane** serves the externally owned surfaces: the OAuth
 token endpoint, the Packer registry API (`/packer/2023-01-01/...`), and the
@@ -114,7 +114,7 @@ reports `degraded` on failure rather than failing its readiness probe.
 
 ## Vulnerability scanning
 
-Dufflebag does not scan in-process and does not mirror a vulnerability feed.
+The dufflebag server does not scan in-process and does not mirror a vulnerability feed.
 A configured adapter queries an external service with versioned package
 identities derived from the stored SBOM projection. Package names,
 ecosystems and versions leave the deployment. SBOM documents and raw reports
@@ -199,7 +199,7 @@ Every connection the deployment must permit, in both directions of concern:
 | dufflebag | Destination registry | HTTPS | Bag Drop mirror pushes | With Bag Drop |
 | dufflebag | Webhook receivers | HTTP(S) | Signed event deliveries | With webhooks |
 
-Dufflebag accepts no inbound connections other than its one listener, and
+The dufflebag server accepts no inbound connections other than its one listener, and
 initiates nothing beyond this table.
 
 ## Failure behaviour

@@ -4,7 +4,7 @@ Webhooks send project registry changes to your own HTTP endpoint. They are
 operational configuration. A project `maintainer` can create, verify, update,
 or delete them and inspect their delivery history.
 
-![Dufflebag Webhooks screen showing an active webhook](/screenshots/webhooks.png)
+![dufflebag Webhooks screen showing an active webhook](/screenshots/webhooks.png)
 
 ## Create and activate a webhook
 
@@ -22,7 +22,7 @@ receiver.
 
 5. Create the webhook.
 
-Dufflebag immediately sends a signed verification payload. The webhook remains
+The dufflebag server immediately sends a signed verification payload. The webhook remains
 `pending` until the endpoint returns a 2xx status. Pending webhooks receive no
 project events.
 

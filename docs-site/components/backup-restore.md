@@ -29,7 +29,7 @@ kubectl exec postgres -- env PGPASSWORD=postgres pg_dump \
   --format=custom > "$dump"
 ```
 
-Use a PostgreSQL superuser for the dump. Dufflebag forces row-level security
+Use a PostgreSQL superuser for the dump. The dufflebag server forces row-level security
 on tenant tables, so the serving role is not a whole-database backup role.
 Custom format retains ownership metadata and lets `pg_restore` stop at the
 first error. Protect the archive as production data.
