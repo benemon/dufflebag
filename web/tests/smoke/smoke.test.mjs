@@ -791,17 +791,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   await t.test('credentials are shown once, and Continue is gated on acknowledgement', async () => {
     credentials = await until('the minted credentials to be readable', () =>
       page.evaluate(() => {
-        const text = document.body.innerText
-        const values = [...document.querySelectorAll('input')].map((i) => i.value)
-        const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
-        const clientID =
-          values.find((v) => uuid.test(v)) ?? (text.match(uuid) ?? [])[0]
-        // The recovery share also sits in a long readonly input, so the
-        // secret is whichever long value is NOT a share.
-        const secret = values.find(
-          (v) => v && v.length >= 40 && !uuid.test(v) && !v.startsWith('dfbg-recovery-'),
-        )
-        return clientID && secret ? { clientID, secret } : null
+        // The client id and secret are inline-copy chips, not inputs; read
+        // each by the field id the wizard sets. The uuid check on the id is
+        // self-validating — a dirty read fails it and the wait continues.
+        const read = (id) => document.getElementById(id)?.textContent?.trim()
+        const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        const clientID = read('init-client-id')
+        const secret = read('init-client-secret')
+        return clientID && uuid.test(clientID) && secret ? { clientID, secret } : null
       }),
     )
     // The recovery share is displayed in the same shown-once step, behind the
