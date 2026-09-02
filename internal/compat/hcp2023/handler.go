@@ -25,8 +25,12 @@ import (
 
 const (
 	basePath = "/packer/2023-01-01/organizations/{organization}/projects/{project}"
-	// DefaultMaxRequestBodyBytes is the request-body limit for the Packer compatibility plane.
-	DefaultMaxRequestBodyBytes = 4 << 20
+	// DefaultMaxRequestBodyBytes is the request-body limit for the Packer
+	// compatibility plane, calibrated against the live service (probe
+	// 2026-09-03): every request up to 17,555,437 bytes was accepted, so the
+	// default sits inside that envelope. Whole-VM SBOM uploads fit; anything
+	// larger would fail against real HCP too.
+	DefaultMaxRequestBodyBytes = 16 << 20
 )
 
 // Repository is the domain-facing storage contract used by the adapter.

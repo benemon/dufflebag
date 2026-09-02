@@ -447,15 +447,33 @@ bytes (1,399,558 HTTP request bytes after base64 and JSON framing) returned 200.
 The next coarse step, 5,244,663 compressed bytes / 6,992,942 request bytes,
 returned bare `HTTP 504` with body `Gateway Timeout` (Appendix A, probes 66–67).
 That is a gateway/transport-shaped refusal, not a `google.rpc.Status` body and
-not evidence of an exact numeric threshold. The honest observed ceiling is
-bracketed between those two requests. The dufflebag server therefore defaults its entire
-2023 compatibility plane to a 4 MiB raw request-body limit: 2.99 times the
-accepted request, 40.0% below the first refusal, and enough for approximately
-3 MiB of compressed SBOM bytes after encoding overhead. The limit is
-configurable rather than inferred from the constraint-free specification. The
-refusal itself is reproduced as observed. An over-limit body answers `504` with a
-`text/plain` body of exactly `Gateway Timeout` - deliberately **not** a
-`google.rpc.Status`, and therefore the one served refusal exempt from the
+not evidence of an exact numeric threshold.
+
+**Re-probe 2026-09-03 - the ceiling is higher than the 2026-08-01 bracket,
+and an over-limit body degrades the route.** A producer-valid CycloneDX
+upload of 17,555,437 request bytes returned 200, as did every coarse step
+below it (1, 4, 8 and 16 MiB). A 35,109,864-byte request was not refused but
+severed - a `text/plain` 503 reporting upstream connection termination - and
+for a recovery window afterwards the same route answered 503 or
+`404 page not found` to unrelated half-megabyte requests and a bucket delete.
+Two independent runs reproduced both behaviours. The 2026-08-01 refusal at
+7 MB is therefore read as duration- or deployment-dependent rather than a
+size threshold. No size produced a `google.rpc.Status` refusal at either
+date: the ceiling is edge infrastructure, not application contract. The exact
+threshold between 17.6 MB and 35.1 MB was deliberately not bisected - each
+over-limit request breaks the route for the requests behind it.
+
+The dufflebag server defaults its entire 2023 compatibility plane to a 16 MiB
+raw request-body limit: wholly inside the accepted envelope observed on
+2026-09-03, 52% below the size that severed the connection, and enough for
+whole-VM SBOM uploads - a body the default refuses would fail against the
+live service too. The limit is configurable
+(`DFBG_API_MAX_BODY_BYTES`) rather than inferred from the constraint-free
+specification. The refusal is reproduced from the 2026-08-01 capture: an
+over-limit body answers `504` with a `text/plain` body of exactly
+`Gateway Timeout` - deterministic where the live edge's over-limit behaviour
+(504, 503, degraded-route 404) is not, and deliberately **not** a
+`google.rpc.Status`, therefore the one served refusal exempt from the
 parseable-body rule that
 [version identity errors](#version-identity-errors) and the 501 catch-all
 otherwise insist on.
