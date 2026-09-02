@@ -1,4 +1,4 @@
-# Dufflebag
+# dufflebag
 
 ## Track, promote and revoke your Packer-built images - from a registry you run.
 

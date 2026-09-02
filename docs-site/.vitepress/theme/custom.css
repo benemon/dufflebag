@@ -1,0 +1,211 @@
+/* dufflebag brand tokens — "Paper"
+ * The single source of truth. Everything else (PatternFly overrides, VitePress
+ * theme, README badges) reads from here — do not hard-code these hexes elsewhere.
+ *
+ * Independent community project. Not affiliated with, endorsed by or supported
+ * by IBM or HashiCorp.
+ */
+
+:root {
+  /* ── Field ────────────────────────────────────────────────────────────
+   * Warm off-white. Infrastructure tooling is overwhelmingly dark, so a
+   * light brand field is the cheapest differentiation available.
+   */
+  --db-paper-50:  #ffffff;
+  --db-paper-100: #faf8f4;   /* the brand field */
+  --db-paper-200: #f0ece4;   /* secondary surface, wells */
+
+  /* ── Ink ──────────────────────────────────────────────────────────────
+   * Navy is the brand colour AND the text-safe colour: 11.9:1 on paper.
+   * There is no separate "-700 text step" in this scheme — that workaround
+   * existed because the old palette led with a 2.3:1 blue.
+   */
+  --db-navy-500: #0d2c56;    /* mark, wordmark, headings on paper */
+  --db-navy-700: #071b36;    /* pressed states, deep surfaces */
+  --db-navy-300: #4a5b75;    /* subtle brand text on paper — 5.6:1 */
+
+  /* ── Seams ────────────────────────────────────────────────────────────
+   * Packer blue, verbatim, and contained to the two seams of the mark.
+   * That containment is the whole point: it reads as a deliberate nod to
+   * the ecosystem rather than as the identity's primary colour.
+   *
+   * SHAPE COLOUR ONLY — 2.3:1 on paper. It never carries text, a border
+   * that means something, or a fill behind text.
+   */
+  --db-seam: #02a8ef;
+
+  /* ── Dark mode (.pf-v6-theme-dark) ────────────────────────────────────
+   * The field inverts to PatternFly black; the mark goes white; the seams
+   * hold #02a8ef unchanged, which is where the blue finally reads loudest.
+   */
+  --db-dark-field: #151515;
+  --db-dark-100:   #1f1f1f;
+  --db-dark-200:   #292929;
+  --db-dark-300:   #383838;
+  --db-dark-ink:   #ffffff;
+
+  /* ── Neutrals (PatternFly 6, as set in web/src/theme.css) ──────────── */
+  --db-text:           #151515;
+  --db-text-subtle:    #4d4d4d;
+  --db-border:         #e0e0e0;
+  --db-border-strong:  #c7c7c7;
+  --db-bg:             #f2f2f2;
+  --db-surface:        #ffffff;
+
+  /* ── Interface blue ───────────────────────────────────────────────────
+   * PatternFly's own. Buttons, links, selection and focus inside the
+   * console stay on this. Brand navy is not an action colour.
+   */
+  --db-action:         #0066cc;
+  --db-action-hover:   #004d99;
+  --db-action-clicked: #003366;
+
+  /* ── Status (PatternFly 6, as set in web/src/theme.css) ───────────── */
+  --db-success: #3d7317;
+  --db-danger:  #b1380b;
+  --db-warning: #dca614;
+  --db-info:    #5e40be;
+
+  /* ── Type ─────────────────────────────────────────────────────────────
+   * There is NO wordmark font. The wordmark is drawn letterforms shipped as
+   * SVG (assets/dufflebag-wordmark.svg) — it shares the mark's grid, stroke
+   * weight and round caps, so mark and wordmark are one drawing rather than
+   * a logo placed beside some type.
+   *
+   * Consequences: no second font family, no subsetting, no OFL to ship, no
+   * webfont fallback problem, and it renders identically everywhere
+   * including GitHub's README renderer.
+   *
+   * Never re-set "dufflebag" in a typeface to stand in for the wordmark.
+   */
+  /* VF names first: the variable webfonts patternfly/patternfly actually
+     ships register as "Red Hat <x> VF". The unsuffixed names are what the
+     npm package registers in some builds, so keep both. */
+  --db-font-heading:  "Red Hat Display VF", "Red Hat Display", Helvetica, Arial, sans-serif;
+  --db-font-body:     "Red Hat Text VF", "Red Hat Text", Helvetica, Arial, sans-serif;
+  --db-font-mono:     "Red Hat Mono VF", "Red Hat Mono", ui-monospace, monospace;
+
+  /* Minimum rendered width of the horizontal lockup. Below this, use the
+     mark alone — the letterforms are monoline and close up when small. */
+  --db-lockup-min-width: 120px;
+
+  /* ── Shape (PatternFly 6 roles) ───────────────────────────────────── */
+  --db-radius-control: 6px;
+  --db-radius-card: 16px;
+  --db-radius-pill: 999px;
+
+  /* The favicon tile needs this hairline to hold its edge against white
+     browser chrome. It is the one cost of a light field. */
+  --db-tile-hairline: var(--db-navy-500);
+}
+
+/* dufflebag × VitePress
+ * docs-site/.vitepress/theme/custom.css
+ *
+ * NOTE: docs-site/.vitepress/theme/ does not exist in the repo yet. Create it
+ * with an index.ts that imports this file:
+ *
+ *   import DefaultTheme from 'vitepress/theme'
+ *   import './custom.css'
+ *   export default DefaultTheme
+ *
+ * Concatenate dufflebag-brand.css above this, or @import it — the base path
+ * is '/dufflebag/', so a bare url() to another stylesheet needs that prefix.
+ *
+ * "Paper": warm off-white field, navy ink. Navy is both the brand colour and
+ * the text-safe colour (11.9:1), so it drives links and buttons directly —
+ * no separate text step. Packer blue stays on the mark's seams only and is
+ * never used for text or links.
+ */
+
+:root {
+  /* Brand ramp. VitePress uses brand-1 for link TEXT, so it gets the
+     text-safe step, not the mark colour. brand-3 is for solid fills where
+     the text sits on top in white. */
+  --vp-c-brand-1: var(--db-navy-500);
+  --vp-c-brand-2: #14407a;
+  --vp-c-brand-3: var(--db-navy-500);
+  --vp-c-brand-soft: rgba(13, 44, 86, 0.10);
+
+  --vp-c-bg: var(--db-paper-100);
+  --vp-c-bg-alt: var(--db-paper-200);
+
+  --vp-c-tip-1: var(--db-navy-500);
+  --vp-c-tip-soft: var(--vp-c-brand-soft);
+
+  /* Type. Red Hat carries the docs so they read as one product with the
+     console. There is no wordmark font — the hero mark is the SVG lockup. */
+  --vp-font-family-base: var(--db-font-body);
+  --vp-font-family-mono: var(--db-font-mono);
+
+  /* Buttons */
+  --vp-button-brand-bg: var(--db-navy-500);
+  --vp-button-brand-hover-bg: #14407a;
+  --vp-button-brand-active-bg: var(--db-navy-700);
+  --vp-button-brand-border: transparent;
+  --vp-button-brand-text: #ffffff;
+
+  /* Home hero */
+  --vp-home-hero-name-color: var(--db-navy-500);
+  --vp-home-hero-image-background-image: none;
+  --vp-home-hero-image-filter: none;
+}
+
+.dark {
+  /* Dark mode is where the seam blue finally gets to be loud. */
+  --vp-c-brand-1: #35bcf3;
+  --vp-c-brand-2: var(--db-seam);
+  --vp-c-brand-3: var(--db-seam);
+  --vp-c-bg: var(--db-dark-field);
+  --vp-c-bg-alt: var(--db-dark-100);
+  --vp-home-hero-name-color: #ffffff;
+  --vp-button-brand-bg: var(--db-navy-500);
+  --vp-button-brand-hover-bg: #14407a;
+}
+
+/* Headings in Red Hat Display, matching the console. */
+.vp-doc h1,
+.vp-doc h2,
+.vp-doc h3,
+.vp-doc h4,
+.VPHero .name,
+.VPHero .text {
+  font-family: var(--db-font-heading);
+  font-weight: 700;
+}
+
+/* The hero "name" is the drawn lockup, not type. Hide VitePress's text
+   heading and let the hero image slot carry dufflebag-logo-horizontal.svg
+   (themeConfig.hero.image), or replace .name's contents with the inline SVG.
+   Do NOT set a font here — re-setting "dufflebag" in a typeface is misuse. */
+.VPHero .name {
+  font-family: var(--db-font-heading);
+}
+.VPHero .name .clip {
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  -webkit-text-fill-color: currentColor;
+  color: var(--vp-home-hero-name-color);
+}
+
+/* Tagline. Used once, on the home page only. */
+.VPHero .tagline {
+  font-family: var(--db-font-body);
+  font-weight: 400;
+}
+
+/* Nav lockup. Replace the default title text with the SVG lockup in
+   .vitepress/config.ts via themeConfig.logo, then hide the text title. */
+.VPNavBarTitle .logo {
+  height: 28px;
+  width: auto;
+}
+
+/* The disclaimer belongs within one scroll of the identity — put it in the
+   footer and let it look like a footnote, not an alert. */
+.VPFooter .message {
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--vp-c-text-3);
+}

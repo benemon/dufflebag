@@ -71,11 +71,27 @@ for (const group of sidebar) {
 }
 
 export default defineConfig({
-  title: 'Dufflebag',
+  title: 'dufflebag',
   description: 'Documentation for the dufflebag registry.',
   base: '/dufflebag/',
   ignoreDeadLinks: false,
+  head: [
+    // Base-path prefixed: '/dufflebag/' is the site root, so a bare
+    // '/favicon-32.png' 404s. The dark tile is served by prefers-color-scheme.
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/dufflebag/favicon-32.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '16x16', href: '/dufflebag/favicon-16.png' }],
+    ['link', { rel: 'icon', type: 'image/png', sizes: '32x32', href: '/dufflebag/favicon-32-dark.png', media: '(prefers-color-scheme: dark)' }],
+    ['link', { rel: 'apple-touch-icon', sizes: '180x180', href: '/dufflebag/favicon-180.png' }],
+    ['meta', { name: 'theme-color', content: '#0d2c56' }],
+    ['meta', { property: 'og:title', content: 'dufflebag' }],
+    ['meta', { property: 'og:description', content: 'A self-hosted registry for Packer builds. One record of every build, with named channels that say which version each environment should consume.' }],
+    // Absolute URL: social scrapers do not resolve the base path. The card
+    // image itself is still to be produced.
+    ['meta', { property: 'og:image', content: 'https://benemon.github.io/dufflebag/social-card.png' }],
+    ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
+  ],
   themeConfig: {
+    logo: '/dufflebag/dufflebag-logo-horizontal.svg',
     nav: [
       { text: 'Overview', link: '/' },
       { text: 'API Reference', link: '/platform-api.html', target: '_self' },
