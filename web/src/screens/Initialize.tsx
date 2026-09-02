@@ -129,8 +129,7 @@ export function StoreCredentials({
             id="init-client-secret"
             hoverTip="Copy"
             clickTip="Copied"
-            variant={ClipboardCopyVariant.expansion}
-            isReadOnly
+            variant={ClipboardCopyVariant.inlineCompact}
           >
             {credentials.client_secret}
           </ClipboardCopy>
