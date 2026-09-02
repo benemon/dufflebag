@@ -451,7 +451,7 @@ async function assertScanPipeline(mintRootToken, mintPrincipalToken, registryBas
   }
 }
 
-async function captureEvidence(endpoint, credentials, publishedRuns) {
+async function captureEvidence(endpoint, credentials, projectID, publishedRuns) {
   if (!captureScreenshots) return
   assert.ok(chrome && existsSync(chrome), `CLOUD_SHOTS=1 requires Chrome at ${chrome}`)
   const webPackage = path.join(templateDir, '..', '..', 'web', 'package.json')
@@ -527,7 +527,9 @@ async function captureEvidence(endpoint, credentials, publishedRuns) {
   const multi = publishedRuns.find((publishedRun) => publishedRun.bucket === 'verify-multi')
   if (multi) {
     await page.goto(
-      `${endpoint}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
+      // Version and build deep links are project-scoped routes (App.tsx),
+      // unlike the bare /buckets listing.
+      `${endpoint}/projects/${projectID}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
       { waitUntil: 'domcontentloaded' },
     )
     await clickFacet('Version facets', 'Builds')
@@ -546,7 +548,7 @@ async function captureEvidence(endpoint, credentials, publishedRuns) {
     candidates.find(({ build }) => ['aws', 'azure'].includes(build.platform)) || candidates[0]
   assert.ok(selected, 'no published build was available for evidence capture')
   const buildURL =
-    `${endpoint}/buckets/${encodeURIComponent(selected.publishedRun.bucket)}` +
+    `${endpoint}/projects/${projectID}/buckets/${encodeURIComponent(selected.publishedRun.bucket)}` +
     `/versions/${encodeURIComponent(selected.publishedRun.fingerprint)}` +
     `/builds/${encodeURIComponent(selected.build.id)}`
   await page.goto(buildURL, { waitUntil: 'domcontentloaded' })
@@ -880,5 +882,5 @@ test('available Packer builders publish solo and multi-platform registry version
   await captureEvidence(endpoint, {
     clientID: principal.client_id,
     clientSecret: issued.secret,
-  }, publishedRuns)
+  }, project.id, publishedRuns)
 })
