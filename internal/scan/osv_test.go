@@ -98,10 +98,15 @@ type stubOSV struct {
 	details map[string]stubResponse
 	// queries maps "ecosystem|name|version" to a phase-2 response.
 	queries map[string]stubResponse
-	delay   time.Duration
+	// queryPages, when set for a key, is consumed one response per call
+	// before queries is consulted — pagination tests need the same key to
+	// answer differently across pages.
+	queryPages map[string][]stubResponse
+	delay      time.Duration
 
 	batchBodies [][]byte
 	queryKeys   []string
+	queryTokens []string
 }
 
 type stubResponse struct {
@@ -147,6 +152,12 @@ func (s *stubOSV) server() *httptest.Server {
 			}
 			key := q.Package.Ecosystem + "|" + q.Package.Name + "|" + q.Version
 			s.queryKeys = append(s.queryKeys, key)
+			s.queryTokens = append(s.queryTokens, q.PageToken)
+			if pages, ok := s.queryPages[key]; ok && len(pages) > 0 {
+				s.queryPages[key] = pages[1:]
+				s.write(w, pages[0])
+				return
+			}
 			resp, ok := s.queries[key]
 			if !ok {
 				s.t.Errorf("unexpected confirmation query %q", key)
@@ -448,11 +459,17 @@ func TestScanFailsClosed(t *testing.T) {
 			wantRecords: 1,
 		},
 		{
-			name: "next_page_token",
+			// A page token is followed, not refused — but a continuation
+			// that cannot proceed still fails the scan closed, with the
+			// provider's error body retained in the transcript.
+			name: "pagination continuation failure",
 			stub: &stubOSV{t: t,
-				batches: []stubResponse{fixtureResponse([]byte(`{"results":[{"vulns":[],"next_page_token":"x"}]}`))},
+				batches: []stubResponse{
+					fixtureResponse([]byte(`{"results":[{"vulns":[],"next_page_token":"x"}]}`)),
+					{status: http.StatusInternalServerError, body: []byte("boom")},
+				},
 				details: map[string]stubResponse{}},
-			wantRecords: 1,
+			wantRecords: 2,
 		},
 		{
 			// A failed request's body was still received: the transcript
@@ -1106,5 +1123,150 @@ func TestFixedVersionIgnoresGitCommits(t *testing.T) {
 	fixed := res.Findings[0].FixedVersions
 	if len(fixed) != 1 || fixed[0] != "3.7" {
 		t.Fatalf("fixed versions = %v, want only the released version 3.7", fixed)
+	}
+}
+
+// Pagination: OSV pages a single query's vulnerability list when it exceeds
+// the service page size — whole-VM inventories hit this routinely through
+// kernel-family source packages (duf-1aon).
+
+func TestQuerybatchFollowsPagination(t *testing.T) {
+	page1 := batchBody(t, `{"vulns":[{"id":"CVE-A"}],"next_page_token":"tok-1"}`)
+	page2 := batchBody(t, `{"vulns":[{"id":"CVE-B"}]}`)
+	stub := &stubOSV{t: t, batches: []stubResponse{fixtureResponse(page1), fixtureResponse(page2)}}
+	srv := stub.server()
+	defer srv.Close()
+	o := NewOSV(srv.URL, srv.Client(), testClock())
+	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
+	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "5.15.0-113.123"}}}
+
+	candidates, err := o.querybatch(context.Background(), subs, state)
+	if err != nil {
+		t.Fatalf("querybatch: %v", err)
+	}
+	if got := candidates[0]; len(got) != 2 || got[0] != "CVE-A" || got[1] != "CVE-B" {
+		t.Fatalf("candidates = %v, want [CVE-A CVE-B]", got)
+	}
+	if len(stub.batchBodies) != 2 {
+		t.Fatalf("querybatch calls = %d, want 2", len(stub.batchBodies))
+	}
+	continuation := string(stub.batchBodies[1])
+	for _, needle := range []string{`"page_token":"tok-1"`, `"name":"linux"`, `"version":"5.15.0-113.123"`} {
+		if !strings.Contains(continuation, needle) {
+			t.Errorf("continuation request missing %s: %s", needle, continuation)
+		}
+	}
+	if got := len(state.chunks); got != 2 {
+		t.Errorf("transcript chunks = %d, want both pages", got)
+	}
+}
+
+func TestQuerybatchPaginationCapFails(t *testing.T) {
+	endless := batchBody(t, `{"vulns":[{"id":"CVE-A"}],"next_page_token":"again"}`)
+	responses := make([]stubResponse, osvMaxResultPages+1)
+	for i := range responses {
+		responses[i] = fixtureResponse(endless)
+	}
+	stub := &stubOSV{t: t, batches: responses}
+	srv := stub.server()
+	defer srv.Close()
+	o := NewOSV(srv.URL, srv.Client(), testClock())
+	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
+	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "1"}}}
+
+	_, err := o.querybatch(context.Background(), subs, state)
+	if err == nil || !strings.Contains(err.Error(), "pagination exceeded") {
+		t.Fatalf("querybatch error = %v, want pagination cap", err)
+	}
+}
+
+func TestConfirmationQueryFollowsPagination(t *testing.T) {
+	batch := batchBody(t, `{"vulns":[{"id":"RHSA-2023:7877"}]}`)
+	confirmation := readFixture(t, "query-redhat-baseos-vulnerable.json")
+	var full map[string]json.RawMessage
+	if err := json.Unmarshal(confirmation, &full); err != nil {
+		t.Fatal(err)
+	}
+	// Page one carries no vulns and a token; page two is the real capture, so
+	// the merged outcome must equal the single-page control test's.
+	page1 := []byte(`{"vulns":[],"next_page_token":"conf-tok"}`)
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		details: map[string]stubResponse{
+			"RHSA-2023:7877": fixtureResponse(readFixture(t, "detail-RHSA-2023-7877.json")),
+		},
+		queryPages: map[string][]stubResponse{
+			"Red Hat:enterprise_linux:8::baseos|openssl|1:1.1.1k-7.el8": {
+				fixtureResponse(page1),
+				fixtureResponse(confirmation),
+			},
+		},
+	}
+	res, err := scanOne(t, stub, Package{SBOMID: "s", Name: "openssl", Version: "1.1.1k-7.el8", Purl: redhatVulnerablePurl})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(res.Findings) != 1 || res.Findings[0].ID != "RHSA-2023:7877" {
+		t.Fatalf("findings = %+v, want the stream-confirmed RHSA", res.Findings)
+	}
+	if got := len(stub.queryKeys); got != 2 {
+		t.Fatalf("confirmation queries = %d, want 2 pages", got)
+	}
+	// Transcript: batch chunk, detail, then BOTH confirmation pages.
+	if got := len(res.Transcript.Records); got != 4 {
+		t.Errorf("transcript = %d records, want 4", got)
+	}
+}
+
+func TestConfirmationPaginationSendsToken(t *testing.T) {
+	// Guards the wire contract the merge test cannot see: the continuation
+	// request must carry the token the previous page returned.
+	batch := batchBody(t, `{"vulns":[{"id":"RHSA-2023:7877"}]}`)
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		details: map[string]stubResponse{
+			"RHSA-2023:7877": fixtureResponse(readFixture(t, "detail-RHSA-2023-7877.json")),
+		},
+		queryPages: map[string][]stubResponse{
+			"Red Hat:enterprise_linux:8::baseos|openssl|1:1.1.1k-7.el8": {
+				fixtureResponse([]byte(`{"vulns":[],"next_page_token":"conf-tok"}`)),
+				fixtureResponse(readFixture(t, "query-redhat-baseos-vulnerable.json")),
+			},
+		},
+	}
+	if _, err := scanOne(t, stub, Package{SBOMID: "s", Name: "openssl", Version: "1.1.1k-7.el8", Purl: redhatVulnerablePurl}); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	want := []string{"", "conf-tok"}
+	if len(stub.queryTokens) != 2 || stub.queryTokens[0] != want[0] || stub.queryTokens[1] != want[1] {
+		t.Fatalf("confirmation page tokens = %v, want %v", stub.queryTokens, want)
+	}
+}
+
+func TestPaginationSucceedsAtExactlyTheBound(t *testing.T) {
+	// Both paths must accept exactly osvMaxResultPages continuations - the
+	// bound is inclusive, and the two loops count differently internally.
+	tokened := batchBody(t, `{"vulns":[{"id":"CVE-A"}],"next_page_token":"again"}`)
+	final := batchBody(t, `{"vulns":[{"id":"CVE-Z"}]}`)
+	responses := make([]stubResponse, 0, osvMaxResultPages+1)
+	for i := 0; i < osvMaxResultPages; i++ {
+		responses = append(responses, fixtureResponse(tokened))
+	}
+	responses = append(responses, fixtureResponse(final))
+	stub := &stubOSV{t: t, batches: responses}
+	srv := stub.server()
+	defer srv.Close()
+	o := NewOSV(srv.URL, srv.Client(), testClock())
+	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
+	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "1"}}}
+
+	candidates, err := o.querybatch(context.Background(), subs, state)
+	if err != nil {
+		t.Fatalf("querybatch at the bound: %v", err)
+	}
+	if got := len(candidates[0]); got != osvMaxResultPages+1 {
+		t.Fatalf("candidates = %d ids, want one per page", got)
 	}
 }
