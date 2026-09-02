@@ -1469,7 +1469,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
     assert.deepEqual(navStyles, {
       panel: {
-        width: '212px', background: 'rgb(255, 255, 255)',
+        width: '240px', background: 'rgb(255, 255, 255)',
         border: '1px solid rgb(224, 224, 224)', padding: '8px 0px 8px 0px',
       },
       heading: {
@@ -1478,8 +1478,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       },
       selected: {
         // PF's native link is inset within the item rather than a full-bleed
-        // row — 175px is the 212px sidebar minus PatternFly's item insets.
-        display: 'flex', width: '175px', padding: '8px 16px 8px 16px',
+        // row - 203px is the 240px sidebar minus PatternFly's item insets.
+        display: 'flex', width: '203px', padding: '8px 16px 8px 16px',
         borderLeft: '0px none rgb(21, 21, 21)', background: 'rgb(255, 255, 255)',
         fontWeight: '500', fontSize: '14px', lineHeight: '19.6px',
       },
