@@ -519,24 +519,41 @@ async function captureEvidence(endpoint, credentials, projectID, publishedRuns) 
   await clickByText('button', 'Log in')
   await waitForText('Sign out')
 
-  await page.goto(`${endpoint}/buckets`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Buckets')
-  for (const publishedRun of publishedRuns) await waitForText(publishedRun.bucket)
-  await capture('buckets.png')
+  // Every screenshot below is supplementary evidence, not a claim — the
+  // builds, registration, SBOMs and scans are already asserted. Each capture
+  // is independently best-effort: a facet-click or render hiccup logs and
+  // leaves a diagnostic shot rather than failing a bucket whose claims passed.
+  const tryCapture = async (label, fn) => {
+    try {
+      await fn()
+    } catch (err) {
+      process.stdout.write(`CAPTURE ${label} failed: ${err}\n`)
+      await capture(`capture-diagnostic-${label}.png`).catch(() => {})
+    }
+  }
+
+  await tryCapture('buckets', async () => {
+    await page.goto(`${endpoint}/buckets`, { waitUntil: 'domcontentloaded' })
+    await waitForText('Buckets')
+    for (const publishedRun of publishedRuns) await waitForText(publishedRun.bucket)
+    await capture('buckets.png')
+  })
 
   const multi = publishedRuns.find((publishedRun) => publishedRun.bucket === 'verify-multi')
   if (multi) {
-    await page.goto(
-      // Version and build deep links are project-scoped routes (App.tsx),
-      // unlike the bare /buckets listing.
-      `${endpoint}/projects/${projectID}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
-      { waitUntil: 'domcontentloaded' },
-    )
-    await clickFacet('Version facets', 'Builds')
-    for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu']) {
-      await waitForText(component)
-    }
-    await capture('verify-multi-version.png')
+    await tryCapture('multi-version', async () => {
+      await page.goto(
+        // Version and build deep links are project-scoped routes (App.tsx),
+        // unlike the bare /buckets listing.
+        `${endpoint}/projects/${projectID}/buckets/verify-multi/versions/${encodeURIComponent(multi.fingerprint)}`,
+        { waitUntil: 'domcontentloaded' },
+      )
+      await clickFacet('Version facets', 'Builds')
+      for (const component of ['amazon-ebs.ubuntu', 'azure-arm.ubuntu', 'docker.ubuntu']) {
+        await waitForText(component)
+      }
+      await capture('verify-multi-version.png')
+    })
   } else {
     process.stdout.write('SKIP CAPTURE verify-multi-version.png: joint build did not run\n')
   }
@@ -547,12 +564,7 @@ async function captureEvidence(endpoint, credentials, projectID, publishedRuns) 
     publishedRun.bucket === 'verify-multi' && ['aws', 'azure'].includes(build.platform)) ||
     candidates.find(({ build }) => ['aws', 'azure'].includes(build.platform)) || candidates[0]
   assert.ok(selected, 'no published build was available for evidence capture')
-  // The build-detail and packages shots are supplementary evidence, not
-  // claims — the build, registration, SBOM and scan are already asserted. A
-  // best-effort wrapper keeps a screenshot hiccup from failing a bucket whose
-  // claims all passed, while a diagnostic shot preserves the page state if the
-  // rendering genuinely broke.
-  try {
+  await tryCapture(`build-detail-${selected.build.platform}`, async () => {
     const buildURL =
       `${endpoint}/projects/${projectID}/buckets/${encodeURIComponent(selected.publishedRun.bucket)}` +
       `/versions/${encodeURIComponent(selected.publishedRun.fingerprint)}` +
@@ -565,10 +577,7 @@ async function captureEvidence(endpoint, credentials, projectID, publishedRuns) 
     await clickFacet('Build facets', 'Packages')
     await waitForText('with findings')
     await capture('vulnerabilities-packages.png')
-  } catch (err) {
-    process.stdout.write(`CAPTURE build-detail evidence failed (${selected.build.platform}): ${err}\n`)
-    await capture('capture-diagnostic.png').catch(() => {})
-  }
+  })
 
   await browser.close()
   browser = undefined
