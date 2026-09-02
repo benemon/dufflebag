@@ -371,13 +371,17 @@ async function scanAttribution(token, requestPath) {
   }
 }
 
-async function assertScanPipeline(rootToken, principalToken, registryBase, publishedRuns) {
+// Token MINTERS, not tokens: the settling poll can outlive the 15-minute
+// token TTL, so every request inside this phase authenticates with a token
+// minted at use time.
+async function assertScanPipeline(mintRootToken, mintPrincipalToken, registryBase, publishedRuns) {
   const builds = publishedRuns.flatMap((publishedRun) =>
     publishedRun.version.builds.map((build) => ({ publishedRun, build })))
   const scans = await until('all published SBOMs to finish scanning', async () => {
+    const pollToken = await mintPrincipalToken()
     const observed = await Promise.all(builds.map(({ publishedRun, build }) =>
       scanAttribution(
-        principalToken,
+        pollToken,
         `${registryBase}/buckets/${publishedRun.bucket}/versions/${publishedRun.fingerprint}` +
         `/builds/${build.id}/packages?pagination.page_size=1`,
       )))
@@ -407,14 +411,15 @@ async function assertScanPipeline(rootToken, principalToken, registryBase, publi
   ])
   assert.equal(Number(pendingOutput.trim()), 0, 'completed cloud versions retained pending scans')
 
-  const health = await api(rootToken, 'GET', '/api/v1/scanner/health')
+  const health = await api(await mintRootToken(), 'GET', '/api/v1/scanner/health')
   assert.equal(health.state, 'ok', `scanner health was ${health.state}: ${health.detail ?? ''}`)
   assert.equal(health.adapter, 'osv', 'scanner health named another adapter')
   assert.ok(health.last_observed_at, 'scanner health returned no observation time')
 
+  const summaryToken = await mintPrincipalToken()
   for (const publishedRun of publishedRuns) {
     const summary = await api(
-      principalToken,
+      summaryToken,
       'GET',
       `${registryBase}/buckets/${publishedRun.bucket}/packages/vulnerability-summary`,
     )
@@ -833,12 +838,12 @@ test('available Packer builders publish solo and multi-platform registry version
     'a bucket subtest failed before publication; skipping the scan and capture phases',
   )
   await t.test('the scan pipeline settles across every bucket', async () => {
-    const scanRootToken = await tokenFor(initialized.json)
-    const scanPrincipalToken = await tokenFor({
-      client_id: principal.client_id,
-      client_secret: issued.secret,
-    })
-    await assertScanPipeline(scanRootToken, scanPrincipalToken, registryBase, publishedRuns)
+    await assertScanPipeline(
+      () => tokenFor(initialized.json),
+      () => tokenFor({ client_id: principal.client_id, client_secret: issued.secret }),
+      registryBase,
+      publishedRuns,
+    )
   })
   await captureEvidence(endpoint, {
     clientID: principal.client_id,
