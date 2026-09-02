@@ -235,6 +235,7 @@ jobs:
           name: cloud-verify-report
           path: |
             cloud-report/junit.xml
+            cloud-report/server.log
             cloud-report/shots/
           if-no-files-found: warn
           retention-days: 30

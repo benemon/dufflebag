@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { execFile as execFileCb, spawn } from 'node:child_process'
 import { randomBytes } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import https from 'node:https'
 import { createRequire } from 'node:module'
 import net from 'node:net'
@@ -115,6 +115,21 @@ function startServer(env) {
 
 function waitForExit(child) {
   return new Promise((resolve) => child.once('exit', (code) => resolve(code)))
+}
+
+// The report artifact must carry the server's own account of a red run - the
+// workflow log never sees the child's stderr, and scanner faults are
+// invisible without it.
+function persistServerLog() {
+  try {
+    const dir = process.env.CLOUD_SHOTS_DIR
+      ? path.dirname(process.env.CLOUD_SHOTS_DIR)
+      : (work || '.')
+    mkdirSync(dir, { recursive: true })
+    writeFileSync(path.join(dir, 'server.log'), serverOutput)
+  } catch {
+    // Diagnostics must never fail the run.
+  }
 }
 
 async function stopServer() {
@@ -550,6 +565,7 @@ async function captureEvidence(endpoint, credentials, publishedRuns) {
 test('available Packer builders publish solo and multi-platform registry versions', { concurrency: 5 }, async (t) => {
   t.after(async () => {
     if (browser) await browser.close().catch(() => {})
+    persistServerLog()
     await stopServer()
     if (containerStarted) await command(docker, ['rm', '-f', container]).catch(() => {})
     if (objectContainerStarted) {
@@ -838,12 +854,26 @@ test('available Packer builders publish solo and multi-platform registry version
     'a bucket subtest failed before publication; skipping the scan and capture phases',
   )
   await t.test('the scan pipeline settles across every bucket', async () => {
-    await assertScanPipeline(
-      () => tokenFor(initialized.json),
-      () => tokenFor({ client_id: principal.client_id, client_secret: issued.secret }),
-      registryBase,
-      publishedRuns,
-    )
+    try {
+      await assertScanPipeline(
+        () => tokenFor(initialized.json),
+        () => tokenFor({ client_id: principal.client_id, client_secret: issued.secret }),
+        registryBase,
+        publishedRuns,
+      )
+    } catch (err) {
+      // Post-mortem before failing: what does the scanner's own table say?
+      for (const query of [
+        'SELECT build_id, reason, claimed_at FROM pending_scans',
+        'SELECT build_id, status, error, run_sequence FROM scan_runs ORDER BY created_at DESC LIMIT 20',
+      ]) {
+        const { stdout } = await command(docker, [
+          'exec', container, 'psql', '-At', '-U', 'postgres', '-d', 'dufflebag', '-c', query,
+        ]).catch(() => ({ stdout: '(post-mortem query failed)\n' }))
+        process.stdout.write(`SCAN POST-MORTEM ${query}\n${stdout}\n`)
+      }
+      throw err
+    }
   })
   await captureEvidence(endpoint, {
     clientID: principal.client_id,
