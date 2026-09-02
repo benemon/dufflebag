@@ -91,7 +91,10 @@ export default defineConfig({
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
   ],
   themeConfig: {
-    logo: '/dufflebag/dufflebag-logo-horizontal.svg',
+    logo: '/dufflebag-logo-horizontal.svg', // VitePress prepends the base; no /dufflebag/ prefix here (unlike the raw head links)
+    // The lockup already carries the wordmark; a second title text would
+    // render "dufflebag" twice.
+    siteTitle: false,
     nav: [
       { text: 'Overview', link: '/' },
       { text: 'API Reference', link: '/platform-api.html', target: '_self' },
