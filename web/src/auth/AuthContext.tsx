@@ -339,10 +339,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // (ADR-0014), so it clears the pair the same way and lists nothing.
   const [selectedBucket, setSelectedBucket] = useState<{ id: string; name: string } | null>(null)
   const projectEpoch = useRef(0)
+  // Re-asserting the already-selected organisation is a legitimate reload, but
+  // setSelectedOrganization is then a no-op, so the projects effect keyed on
+  // the id alone would not re-run - stranding the projectsLoading flag set
+  // below true forever. This nonce, bumped on every selection, is a dependency
+  // the effect always sees change, so a same-id reselection reloads.
+  const [organizationSelectNonce, setOrganizationSelectNonce] = useState(0)
   const selectOrganization = useCallback((organizationID: string) => {
     // A refresh in flight for the previous organisation must not land its
     // projects onto this one; bumping the epoch tells it to discard.
     projectEpoch.current += 1
+    setOrganizationSelectNonce((nonce) => nonce + 1)
     setSelectedOrganization(organizationID)
     setSelectedProject(null)
     // A bucket belongs to the pair that named it.
@@ -532,7 +539,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true
     }
-  }, [state, selectedOrganization, signOut])
+  }, [state, selectedOrganization, organizationSelectNonce, signOut])
 
   const refreshProjects = useCallback(async (): Promise<ApiProject[] | null> => {
     if (!state) return null

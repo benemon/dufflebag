@@ -1509,6 +1509,34 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bucket details')
   })
 
+  await t.test('re-selecting the current organisation reloads instead of wedging', async () => {
+    // Regression for the picker wedge: clearing the org search then choosing
+    // the already-selected organisation calls selectOrganization with an
+    // unchanged id. setSelectedOrganization is then a no-op, so a projects
+    // effect keyed on the id alone never re-fires and projectsLoading strands
+    // true - the project picker and Buckets screen stick in skeleton until a
+    // reload. A selection nonce forces the reload.
+    await choosePickerOption('#tenant-organization', 'acme')
+    await until('the organisation to hold its selection', async () =>
+      (await pickerValue('#tenant-organization')) === 'acme')
+    // The project recovers to the org's only project rather than staying blank,
+    // and the buckets listing renders rather than sticking in skeleton.
+    await until('the project to reload, not wedge', async () =>
+      (await pickerValue('#tenant-project')) === 'widgets')
+    await clickByText('a', 'Buckets')
+    await waitForText('smoke-images')
+    assert.equal(
+      await page.$$eval('.pf-v6-c-skeleton', (nodes) => nodes.length), 0,
+      'the buckets screen stuck in skeleton after re-selecting the organisation',
+    )
+    // Restore the selection the previous subtest left, so the sequence that
+    // follows finds the bucket detail it expects.
+    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await until('the bucket picker to navigate back', () =>
+      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
+    await waitForText('Bucket details')
+  })
+
   await t.test('a privileged session pins and unpins from the bucket detail header', async () => {
     await clickByText('button', 'Pin bucket')
     await waitForText('Unpin bucket')
