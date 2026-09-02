@@ -417,7 +417,9 @@ async function assertScanPipeline(mintRootToken, mintPrincipalToken, registryBas
   }
 
   for (const { build } of builds) {
-    assert.match(build.id, /^[0-9a-f-]{36}$/, `unsafe build id returned by registry: ${build.id}`)
+    // Build ids are ULIDs (26-char Crockford base32), not UUIDs - the guard
+    // exists so an id is safe to interpolate into the post-settle psql query.
+    assert.match(build.id, /^[0-9A-HJKMNP-TV-Z]{26}$/, `unsafe build id returned by registry: ${build.id}`)
   }
   const quotedBuildIDs = builds.map(({ build }) => `'${build.id}'`).join(',')
   const { stdout: pendingOutput } = await command(docker, [
