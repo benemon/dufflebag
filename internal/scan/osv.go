@@ -21,6 +21,12 @@ const (
 	osvDatabaseRevision  = "unreported"
 	osvRedHatEcosystem   = "Red Hat"
 	osvEnterpriseLinux   = "enterprise_linux"
+	// osvMaxResultPages bounds per-query pagination. OSV pages a single
+	// query's vulnerability list when it exceeds the service's page size;
+	// kernel-family source packages in whole-VM inventories legitimately
+	// paginate (duf-1aon), but a token that never terminates must fail the
+	// scan rather than loop.
+	osvMaxResultPages = 100
 )
 
 // osvMaxResponseBytes is a variable only so the oversize guard is testable
@@ -47,8 +53,9 @@ type osvPackage struct {
 }
 
 type osvQuery struct {
-	Package osvPackage `json:"package"`
-	Version string     `json:"version"`
+	Package   osvPackage `json:"package"`
+	Version   string     `json:"version"`
+	PageToken string     `json:"page_token,omitempty"`
 }
 
 type osvRef struct {
@@ -145,7 +152,7 @@ type scanState struct {
 	mu            sync.Mutex
 	chunks        [][]byte
 	details       map[string][]byte
-	confirmations map[confirmationKey][]byte
+	confirmations map[confirmationKey][][]byte
 }
 
 func (s *scanState) addDetail(id string, body []byte) {
@@ -176,7 +183,7 @@ func (s *scanState) transcript() Transcript {
 	}
 	sort.Slice(keys, func(i, j int) bool { return keys[i].less(keys[j]) })
 	for _, k := range keys {
-		t.Records = append(t.Records, s.confirmations[k])
+		t.Records = append(t.Records, s.confirmations[k]...)
 	}
 	return t
 }
@@ -190,7 +197,7 @@ func (o *OSV) Scan(ctx context.Context, inv Inventory) (Result, error) {
 	}}
 	state := &scanState{
 		details:       map[string][]byte{},
-		confirmations: map[confirmationKey][]byte{},
+		confirmations: map[confirmationKey][][]byte{},
 	}
 	findings, err := o.scan(ctx, inv, &res.Coverage, state)
 	res.Transcript = state.transcript()
@@ -269,15 +276,60 @@ func (o *OSV) querybatch(ctx context.Context, subs []submission, state *scanStat
 			if err := decodeStrict(raw, &r); err != nil {
 				return nil, fmt.Errorf("querybatch chunk %d result %d: %w", start/osvQuerybatchLimit, i, err)
 			}
-			if r.NextPageToken != "" {
-				return nil, fmt.Errorf("querybatch chunk %d result %d: unexpected next_page_token (pagination is unimplemented by decision)", start/osvQuerybatchLimit, i)
-			}
 			for _, v := range r.Vulns {
 				candidates[start+i] = append(candidates[start+i], v.ID)
+			}
+			if r.NextPageToken != "" {
+				more, err := o.querybatchPages(ctx, subs[start+i], r.NextPageToken, state)
+				if err != nil {
+					return nil, fmt.Errorf("querybatch chunk %d result %d: %w", start/osvQuerybatchLimit, i, err)
+				}
+				candidates[start+i] = append(candidates[start+i], more...)
 			}
 		}
 	}
 	return candidates, nil
+}
+
+// querybatchPages follows a result's pagination through single-query batch
+// requests. Whole-VM inventories carry packages whose vulnerability lists
+// exceed OSV's page size — kernel-family source packages paginate routinely —
+// so continuation is part of the contract, bounded so a token that never
+// terminates fails the scan instead of looping.
+func (o *OSV) querybatchPages(ctx context.Context, sub submission, token string, state *scanState) ([]string, error) {
+	var ids []string
+	for page := 1; token != ""; page++ {
+		if page > osvMaxResultPages {
+			return nil, fmt.Errorf("pagination exceeded %d pages", osvMaxResultPages)
+		}
+		body, err := o.post(ctx, "/v1/querybatch", map[string]any{"queries": []osvQuery{{
+			Package:   osvPackage{Name: sub.q.Name, Ecosystem: sub.q.Ecosystem},
+			Version:   sub.q.Version,
+			PageToken: token,
+		}}})
+		if len(body) > 0 {
+			state.chunks = append(state.chunks, body)
+		}
+		if err != nil {
+			return nil, fmt.Errorf("page %d: %w", page, err)
+		}
+		var decoded osvBatchResponse
+		if err := json.Unmarshal(body, &decoded); err != nil {
+			return nil, fmt.Errorf("page %d: decoding response: %w", page, err)
+		}
+		if len(decoded.Results) != 1 {
+			return nil, fmt.Errorf("page %d: %d results for 1 query", page, len(decoded.Results))
+		}
+		var r osvBatchResult
+		if err := decodeStrict(decoded.Results[0], &r); err != nil {
+			return nil, fmt.Errorf("page %d: %w", page, err)
+		}
+		for _, v := range r.Vulns {
+			ids = append(ids, v.ID)
+		}
+		token = r.NextPageToken
+	}
+	return ids, nil
 }
 
 // fetchDetails retrieves every distinct candidate advisory record through a
@@ -375,26 +427,36 @@ func (o *OSV) confirmRedHat(ctx context.Context, subs []submission, candidates [
 
 	confirmed := map[confirmationKey]map[string]bool{}
 	for _, k := range keys {
-		body, err := o.post(ctx, "/v1/query", osvQuery{
-			Package: osvPackage{Name: k.name, Ecosystem: k.ecosystem},
-			Version: k.version,
-		})
-		if len(body) > 0 {
-			state.confirmations[k] = body
-		}
-		if err != nil {
-			return nil, fmt.Errorf("confirmation query %s/%s: %w", k.ecosystem, k.name, err)
-		}
-		var decoded osvQueryResponse
-		if err := decodeStrict(body, &decoded); err != nil {
-			return nil, fmt.Errorf("confirmation query %s/%s: %w", k.ecosystem, k.name, err)
-		}
-		if decoded.NextPageToken != "" {
-			return nil, fmt.Errorf("confirmation query %s/%s: unexpected next_page_token (pagination is unimplemented by decision)", k.ecosystem, k.name)
-		}
 		ids := map[string]bool{}
-		for _, v := range decoded.Vulns {
-			ids[v.ID] = true
+		token := ""
+		// page 0 is the initial request; continuations count 1..osvMaxResultPages,
+		// matching querybatchPages' bound exactly.
+		for page := 0; ; page++ {
+			if page > osvMaxResultPages {
+				return nil, fmt.Errorf("confirmation query %s/%s: pagination exceeded %d pages", k.ecosystem, k.name, osvMaxResultPages)
+			}
+			body, err := o.post(ctx, "/v1/query", osvQuery{
+				Package:   osvPackage{Name: k.name, Ecosystem: k.ecosystem},
+				Version:   k.version,
+				PageToken: token,
+			})
+			if len(body) > 0 {
+				state.confirmations[k] = append(state.confirmations[k], body)
+			}
+			if err != nil {
+				return nil, fmt.Errorf("confirmation query %s/%s: %w", k.ecosystem, k.name, err)
+			}
+			var decoded osvQueryResponse
+			if err := decodeStrict(body, &decoded); err != nil {
+				return nil, fmt.Errorf("confirmation query %s/%s: %w", k.ecosystem, k.name, err)
+			}
+			for _, v := range decoded.Vulns {
+				ids[v.ID] = true
+			}
+			token = decoded.NextPageToken
+			if token == "" {
+				break
+			}
 		}
 		confirmed[k] = ids
 	}
