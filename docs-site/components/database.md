@@ -1,6 +1,6 @@
 # Database
 
-Dufflebag stores everything except SBOM payloads in PostgreSQL. Tenancy
+The dufflebag server stores everything except SBOM payloads in PostgreSQL. Tenancy
 isolation is enforced in the database itself with row-level security, which
 is why the role model below is a requirement, not a recommendation.
 

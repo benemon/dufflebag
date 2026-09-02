@@ -61,7 +61,7 @@ and a destination service principal's client ID and secret.
 
 1. Open the console's **Bag Drop** screen.
 
-![Dufflebag Bag Drop destination configuration screen](/screenshots/bag-drop.png)
+![dufflebag Bag Drop destination configuration screen](/screenshots/bag-drop.png)
 
 2. Select an adapter. The selection controls which fields appear.
 

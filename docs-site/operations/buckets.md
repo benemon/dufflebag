@@ -11,7 +11,7 @@ latest version, channels and state, with pinned buckets gathered above the
 list. Organisation- and project-scoped sessions land here. A bucket-scoped
 principal has exactly one bucket and lands straight in it instead.
 
-![Dufflebag Buckets screen showing the project registry](/screenshots/buckets.png)
+![dufflebag Buckets screen showing the project registry](/screenshots/buckets.png)
 
 Builders can pin buckets and unpin them from the pinned card or the bucket's
 own header. Publishers can delete a bucket from either place.
@@ -25,7 +25,7 @@ Typing filters the list. For a bucket-scoped session the picker is the
 orientation point - once the listing resolves it names the session's bucket,
 and the **Bucket** navigation entry leads back there from anywhere.
 
-![Dufflebag bucket picker open in the masthead, pinned buckets grouped first](/screenshots/bucket-picker.png)
+![dufflebag bucket picker open in the masthead, pinned buckets grouped first](/screenshots/bucket-picker.png)
 
 ::: warning
 When Bag Drop currently mirrors a bucket, the console warns that deleting the
@@ -38,7 +38,7 @@ bucket also deletes it from the destination. See
 A bucket opens onto its versions and channels. The versions table shows
 completion and revocation state.
 
-![Dufflebag bucket screen showing bucket details, ancestry, versions, and channels](/screenshots/bucket-facets.png)
+![dufflebag bucket screen showing bucket details, ancestry, versions, and channels](/screenshots/bucket-facets.png)
 
 The versions table is covered in [Versions](./versions.md); the channels tab
 in [Channels](./channels.md).

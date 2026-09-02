@@ -18,7 +18,7 @@ shown once and cannot be retrieved later.
 
 1. Open the console wizard.
 
-![Dufflebag first-run initialization screen](/screenshots/first-run.png)
+![dufflebag first-run initialization screen](/screenshots/first-run.png)
 
    For a headless setup, call the one-shot endpoint directly - both use the
    same endpoint, and it works exactly once:
@@ -54,7 +54,7 @@ initialization.
 
 1. Sign in to the console with the initial root client credentials.
 
-![Dufflebag service principal sign-in screen](/screenshots/login.png)
+![dufflebag service principal sign-in screen](/screenshots/login.png)
 
 2. Continue through the console wizard to create an organisation and a
    project. For a headless setup, use the organisation and project operations

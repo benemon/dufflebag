@@ -1,6 +1,6 @@
 # HCP Packer API compatibility reference
 
-Dufflebag serves the contract established by upstream client source, not the
+The dufflebag server serves the contract established by upstream client source, not the
 contract implied by published documentation. Each section links to its source
 so the behaviour can be checked when upstream moves. Findings marked with a
 probe date were verified against the live HCP Packer service. The numbered
@@ -8,7 +8,7 @@ probe transcripts are retained by the maintainers outside this repository.
 This document is authoritative. Where it and published documentation
 disagree, observed client behaviour wins.
 
-Dufflebag's [architecture](../components/architecture.md) separates this
+The dufflebag [architecture](../components/architecture.md) separates this
 compatibility surface from its own [platform API](/platform-api.html).
 
 Upstream source baseline: `hashicorp/packer@main`,
@@ -103,7 +103,7 @@ Setting both `HCP_ORGANIZATION_ID` and `HCP_PROJECT_ID` therefore skips:
 - `ProjectService_List` (same)
 - `ValidateRegistryForProject` → `PackerService_GetRegistry`
 
-This is the largest available scope reduction. Dufflebag still serves the
+This is the largest available scope reduction. The dufflebag server still serves the
 resource-manager endpoints, so all four resolution paths work as they do
 against real HCP (ADR-0003). Pinning is an optimisation, not a requirement.
 
@@ -155,10 +155,10 @@ The client performs **no validation of the token's contents** - it is attached
 as a bearer token by `oauth2.Transport` and nothing more, so an opaque random
 string would satisfy Packer.
 
-> Dufflebag nonetheless issues a **signed JWT with claims** (ADR-0004). The
+> Nonetheless, dufflebag issues a **signed JWT with claims** (ADR-0004). The
 > token is the contract, not the credential, so every consumer authorizes from
 > verified claims and a second issuer for workload-identity federation can be
-> added without changing them. What Packer accepts and what Dufflebag issues
+> added without changing them. What Packer accepts and what dufflebag issues
 > are different questions.
 
 ### Token endpoint responses
@@ -198,7 +198,7 @@ The workload-identity scheme is not merely "later". It reaches
 `POST {API}/2019-12-10/{wip-resource-name}/exchange-token`, which is in the
 compatibility surface per ADR-0001 and *is* the
 OIDC federation feature per ADR-0004. Its wire contract
-is fixed by HCP, not Dufflebag's to design.
+is fixed by HCP, not dufflebag's to design.
 
 Source: [config/tokensource.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/config/tokensource.go),
 [internal/hcp/env/env.go](https://github.com/hashicorp/packer/blob/main/internal/hcp/env/env.go)
@@ -245,7 +245,7 @@ The UI is a compatibility-plane client, so its read endpoints are part of the
 core contract (ADR-0006). `ListBuckets`, `ListVersions`, `ListChannels`,
 `ListChannelAssignmentHistory` and `ListBucketAncestry` are not optional.
 
-**Ancestry behaviour verified 2026-08-03.** Dufflebag persists Packer's
+**Ancestry behaviour verified 2026-08-03.** The dufflebag server persists Packer's
 terminal `UpdateBuild` `parent_version_id` and `parent_channel_id`, joins those
 identifiers across buckets inside the authorized tenant, and compares the
 recorded parent version with the channel's current assignment for
@@ -254,14 +254,14 @@ recorded parent version with the channel's current assignment for
 HCP response containing null parent fields does not establish that Packer
 omitted them from its request.
 
-Dufflebag does not serve enforced-block CRUD or any `runtasks` endpoint. It
+The dufflebag server does not serve enforced-block CRUD or any `runtasks` endpoint. It
 does serve the `packages` and `vulnerabilities` operations described under
 [Scope boundaries](#scope-boundaries), and has served external artifact search
 since 2026-08-16.
 
 ### Served beyond the build path
 
-Beyond the build path and list operations above, Dufflebag serves:
+Beyond the build path and list operations above, dufflebag serves:
 
 | Operation | Method | Path suffix | Authority |
 |---|---|---|---|
@@ -354,7 +354,7 @@ response definitions declare. A version currently assigned to any user
 channel is refused with HTTP 400 / code 9 and `Version is assigned by channels:
 &lt;name&gt;. Please, remove the channels assignment before deleting the version.`
 Multiple current user-channel names are sorted ascending and joined with `, `.
-That separator is Dufflebag's interpolation because the captured refusal had
+That separator is dufflebag's interpolation because the captured refusal had
 one channel. The managed `latest` channel is not a blocker. Deleting its target
 rolls it to the newest surviving complete, unrevoked version using the same
 newest-valid assignment-history selector as revocation rollback. Deleting the
@@ -390,7 +390,7 @@ operations. This client boundary was verified 2026-08-01.
 
 The deprecated Packer data sources use a separate `2021-04-30` client with the
 older image vocabulary. The specification and Appendix A capture remain
-reference evidence, but Dufflebag does not mount that API tree. Requests fall
+reference evidence, but dufflebag does not mount that API tree. Requests fall
 through the `/packer/` plane's parseable HTTP 501 / gRPC code 12 refusal.
 
 Source: [packer_service_client.go](https://github.com/hashicorp/hcp-sdk-go/blob/main/clients/cloud-packer-service/stable/2023-01-01/client/packer_service/packer_service_client.go)
@@ -422,7 +422,7 @@ observed upstream rejections to reproduce. Follow this asymmetry:
 > real HCP. Accepting one HCP would have rejected diverges only in a direction no
 > client exercises.
 
-Dufflebag requires non-empty values where structurally necessary, but does not
+The dufflebag API requires non-empty values where structurally necessary, but does not
 invent character classes, length caps or regular expressions. A constraint is
 added only when an observed contract requires it, with that observation
 recorded here.
@@ -431,7 +431,7 @@ recorded here.
 `UpdateBucket` with a bogus top-level
 field returned 200 and applied the known fields (Appendix A, probe 20). An
 `UpdateBuild` whose entire body was wrapped in an unknown `updates` object
-returned 200 as a no-op rather than 400 (probe 11). Dufflebag therefore
+returned 200 as a no-op rather than 400 (probe 11). The dufflebag server therefore
 ignores unknown fields rather than rejecting the same requests with
 `400 {"code":3}`, matching the probed behaviour since 2026-08-01.
 
@@ -448,7 +448,7 @@ The next coarse step, 5,244,663 compressed bytes / 6,992,942 request bytes,
 returned bare `HTTP 504` with body `Gateway Timeout` (Appendix A, probes 66–67).
 That is a gateway/transport-shaped refusal, not a `google.rpc.Status` body and
 not evidence of an exact numeric threshold. The honest observed ceiling is
-bracketed between those two requests. Dufflebag therefore defaults its entire
+bracketed between those two requests. The dufflebag server therefore defaults its entire
 2023 compatibility plane to a 4 MiB raw request-body limit: 2.99 times the
 accepted request, 40.0% below the first refusal, and enough for approximately
 3 MiB of compressed SBOM bytes after encoding overhead. The limit is
@@ -494,7 +494,7 @@ Appendix A has the verbatim pairs:
 | Managed-channel mutation refusals | **400** | `{"code":3}` / `{"code":9}` - see [the managed `latest` channel](#the-managed-latest-channel) |
 
 The mapping follows the grpc-gateway convention (3→400, 5→404, 6→409, 9→400,
-10→409). Dufflebag matches the observed pairing for codes 3, 5, 6 and
+10→409). The dufflebag server matches the observed pairing for codes 3, 5, 6 and
 10 **on the resource-not-found path**. Two deliberate paths sit outside the
 blanket claim. The ADR-0016 concealment refusals (denied or absent tenant,
 unresolvable principal) use HTTP **404** as the carrier with the route's
@@ -503,7 +503,7 @@ pairing not observed from live HCP, safe because Packer regexes only the
 code - and
 a missing **build** under a valid version answers 404/code-5 `build not
 found` on the SBOM and package sub-resources. Managed-channel refusals answer
-400/code-9 as captured. Before 2026-08-01, Dufflebag emitted code **9** with
+400/code-9 as captured. Before 2026-08-01, dufflebag emitted code **9** with
 HTTP 409 where live HCP pairs it with **400**. Packer matches only the code, so
 the earlier status was inert for it. Code 12's status has not been observed
 live.
@@ -525,7 +525,7 @@ var errCodeRegex = regexp.MustCompilePOSIX(`[Cc]ode"?:([0-9]+)`)
 with an upstream comment conceding that `status.FromError` "doesn't appear to
 work for all of the Cloud Packer Service response errors."
 
-Dufflebag must therefore:
+The dufflebag server must therefore:
 
 - A `GetVersion` for an unknown fingerprint must return an error body that
   serialises to text containing `"code":10`. A plain `404` makes Packer abort
@@ -557,7 +557,7 @@ version's stored template type differs from the current run's:
 > "This version was initially created with a %s template. Changing from %s to %s
 > is not supported"
 
-Dufflebag stores `HCL2` versus `JSON` per version and returns it faithfully.
+The dufflebag server stores `HCL2` versus `JSON` per version and returns it faithfully.
 
 ### Build heartbeats
 
@@ -570,7 +570,7 @@ status transition.
 **Client behaviour verified 2026-08-08.** `withOrgAndProjectIDs` is a client
 runtime option that fills the generated
 operations' organization and project **path parameters** - it is how the
-location-scoped URL is built, not a header injector. Dufflebag derives tenancy
+location-scoped URL is built, not a header injector. The dufflebag server derives tenancy
 exclusively from those path segments and authorizes them against the token's
 principal scope. Any org/project headers a client happens to send are ignored
 entirely, and no cross-check exists or is needed.
@@ -588,20 +588,20 @@ handshake. Three further facts, verified 2026-07-31 against v1.16.0:
 - **The response payload is ignored** - the client discards everything but the
   error, so only the status matters.
   ([internal/hcp/api/service_build.go](https://github.com/hashicorp/packer/blob/v1.16.0/internal/hcp/api/service_build.go))
-- **`Name` may arrive empty**, and defaulting it is then Dufflebag's
+- **`Name` may arrive empty**, and defaulting it is then dufflebag's
   responsibility.
   The provisioner documents "If omitted, HCP Packer uses the build fingerprint
   as the file name" and passes the empty string through
   ([provisioner/hcp-sbom/provisioner.go](https://github.com/hashicorp/packer/blob/v1.16.0/provisioner/hcp-sbom/provisioner.go)) -
   but a live probe (2026-08-08) showed real HCP defaulting the stored *name*
   to a freshly minted ULID, not the fingerprint the provisioner doc promises.
-  Dufflebag follows the provisioner documentation and defaults to the build
+  The dufflebag server follows the provisioner documentation and defaults to the build
   fingerprint - a recorded divergence from live HCP, visible only in listing
   names and download filenames for unnamed uploads. Nothing in the supported
   client surface parses the name.
 
 **The serving side, probed 2026-08-08.** `GetSbom` returns exactly
-`{download_url}`. Dufflebag synthesises a URL onto its own authenticated
+`{download_url}`. The dufflebag server synthesises a URL onto its own authenticated
 download route rather than presigning object storage, so the transfer is
 audited. The download serves the **decompressed** document as
 `Content-Type: application/json` with filename `<name>.json` whatever the
@@ -655,10 +655,10 @@ not contain either parent field, although both update request bodies do
 ([`hcp-sdk-go` Build model](https://github.com/hashicorp/hcp-sdk-go/blob/main/clients/cloud-packer-service/stable/2023-01-01/models/hashicorp_cloud_packer20230101_build.go),
 [`UpdateBuildBody` model](https://github.com/hashicorp/hcp-sdk-go/blob/main/clients/cloud-packer-service/stable/2023-01-01/models/hashicorp_cloud_packer20230101_update_build_body.go)).
 
-The same parent/child template run with stock Packer v1.16.0 against Dufflebag
+The same parent/child template run with stock Packer v1.16.0 against dufflebag
 persisted both the resolved parent version ID and `latest` channel ID from the
 terminal request, while its source external identifier equalled the published
-artifact as expected. Dufflebag's rendered Build carries
+artifact as expected. The Build rendered by dufflebag carries
 `source_external_identifier` but neither parent field, faithfully reproducing
 the response-model asymmetry above. This agrees with the client source and
 establishes that the documented HCL2 shape triggers the declared-pointer path.
@@ -666,13 +666,13 @@ The HCP nulls are therefore a response/storage quirk, or another server-side
 treatment of a pointer that was sent. They are not evidence that digest
 matching created the edge.
 
-**Dufflebag does not infer ancestry by digest.** `source_external_identifier` is
+**Ancestry is not inferred by digest.** `source_external_identifier` is
 client-supplied. Treating it as an ancestry join would let a builder name an
 identifier it never consumed and manufacture reported provenance. That may be
 an acceptable compatibility trade only if a request capture or another oracle
 establishes that HCP actually does it. The matching digest in this build is
 also the key Packer itself uses to choose the declared IDs, so equality alone
-cannot distinguish the two mechanisms. Until then Dufflebag records the
+cannot distinguish the two mechanisms. Until then dufflebag records the
 declared IDs verbatim and does not promote the source identifier from reported
 input to an ancestry claim.
 
@@ -794,7 +794,7 @@ The sketch omits three contract details:
   channels/assign` with `target_channel:"latest"` → `400 {"code":9,
   "message":"Cannot assign to managed channel 'latest'", "details":[]}`
   (probe 40). This is the vendored specification's direct analogue of
-  Dufflebag's assign route, not an inference from `UpdateChannel`.
+  dufflebag's assign route, not an inference from `UpdateChannel`.
 - **History attribution belongs to each row.** A manual `UpdateChannel`
   assignment records the calling principal (`"hcp-packer-spn"`, probe 41),
   while completion's automatic `latest` assignments record the service author
@@ -805,15 +805,15 @@ The sketch omits three contract details:
   18). Packer's channel step only updates pre-existing channels. Creation uses
   `CreateChannel`.
 
-Dufflebag auto-creates managed `latest` during `CreateBucket`, auto-assigns it
+The dufflebag server auto-creates managed `latest` during `CreateBucket`, auto-assigns it
 at completion in the same transaction, and refuses mutation with the captured
 400/code-9 and 400/code-3 shapes. Without auto-creation, the common
 `data "hcp_packer_version" { channel_name = "latest" }` consumption pattern
 would receive a 404 where it succeeds against HCP.
 
-One deliberate branding deviation prevents Dufflebag-originated content from
+One deliberate branding deviation prevents dufflebag-originated content from
 claiming HCP Packer authorship. `author_id` and the refusal prose say
-"Dufflebag" where live HCP says "HCP Packer". This is inert for supported
+"dufflebag" where live HCP says "HCP Packer". This is inert for supported
 clients. Packer v1.16.0 matches errors solely by numeric code through
 `errCodeRegex` and `CheckErrorCode`. The provider uses the `managed` boolean
 and typed numeric `payload.Code`, never the message or author text.
@@ -828,7 +828,7 @@ actor carries the explicit unknown `""`.
 
 ### Restricted channels
 
-Dufflebag enforces HCP's documented secure-channel-access semantics, calibrated
+The dufflebag server enforces HCP's documented secure-channel-access semantics, calibrated
 to its own role ladder. Every restricted channel, including the managed
 `latest`, is omitted from lists and cannot be resolved below `builder`.
 `builder` and above may consume it. Creating or managing a restricted user
@@ -841,8 +841,8 @@ HCP's unauthorized-consumption wire response was live-probed on 2026-08-15
 with a viewer-level service principal. HCP answers a viewer's resolution of a
 restricted channel with `403`/`code: 7` and a message that names the channel
 and its restriction - it discloses that the channel exists. Listing behaviour
-matches Dufflebag's. The restricted channel is filtered out. On the
-resolution path Dufflebag **deliberately diverges**. ADR-0017's disclosure
+matches dufflebag's. The restricted channel is filtered out. On the
+resolution path dufflebag **deliberately diverges**. ADR-0017's disclosure
 rule holds, so resolving a restricted channel below `builder` returns the
 route's byte-identical not-found/code-5 form rather than HCP's disclosing
 403. **Probe limit:** the managed `latest` was unassigned when probed, and only
@@ -874,7 +874,7 @@ original zstd bytes are stored verbatim in the object store (sealed at rest on
 [encrypted deployments](../components/encryption.md)). SPDX and CycloneDX JSON
 are both supported. Licences are retained in storage even though neither HCP's
 build-package response nor
-Dufflebag's exposes them. `vuln_details` is absent, not an
+dufflebag's exposes them. `vuln_details` is absent, not an
 empty array, until that build has a current successful scan. Once a current
 scan exists it is populated, including an empty findings list when the scan
 really found nothing.
@@ -900,7 +900,7 @@ The trust boundary does not change. Package names, versions, purls and licences
 are **client-reported**, not verified against the image. This matches the audit
 trail's `forwarded_for` wording (“unverified forwarded-for value”, ADR-0020)
 and ancestry's refusal to promote a client-supplied source digest into a
-provenance claim (see [Build ancestry](#build-ancestry)). Dufflebag records and
+provenance claim (see [Build ancestry](#build-ancestry)). The dufflebag server records and
 attributes the assertion without certifying it.
 
 ### Vulnerability reads from stored scan findings
@@ -990,7 +990,7 @@ only that layer therefore undercounts the surface. Its destroy path tolerates
 exactly one error - an HTTP 404 removes the resource from state. Anything else
 fails the destroy. (**Probe 2026-07-31:** live `DeleteBucket` on a missing
 bucket is literally HTTP 404 with `{"code":5, …}` - the provider's tolerance
-and HCP's answer line up, and Dufflebag's 404/code-5 matches both.) Its Read
+and HCP's answer line up, and dufflebag's 404/code-5 matches both.) Its Read
 also stores `Bucket.ResourceName` in Terraform state, so the field must carry
 the specification's documented shape
 `packer/project/<project-id>/bucket/<bucket-name>` - an empty value is
@@ -1012,9 +1012,9 @@ wire-visible. The supported baseline therefore pins the whole triple.
 > precision - milliseconds (`.442Z`), microseconds (`.575261Z`) and full
 > nanoseconds (`.443428576Z`) appear in the same response document, apparently
 > reflecting however each timestamp was stored. Every pinned client stack
-> accepts all of them, so the precision Dufflebag's strfmt happens to emit is
+> accepts all of them, so the precision dufflebag's strfmt happens to emit is
 > inside the envelope real clients already tolerate. The pin still matters for
-> what *Dufflebag parses*, not for an exact emitted form.
+> what *dufflebag parses*, not for an exact emitted form.
 
 | Packer | `hcp-sdk-go` | `go-openapi/runtime` | `go-openapi/strfmt` |
 |---|---|---|---|

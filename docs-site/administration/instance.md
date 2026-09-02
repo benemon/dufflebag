@@ -5,7 +5,7 @@ The **Instance** screen is available to every reader. It generates the
 points stock Packer and Terraform at the instance - and reports scanner and
 build information.
 
-![Dufflebag Instance screen showing health and the client environment block](/screenshots/instance.png)
+![dufflebag Instance screen showing health and the client environment block](/screenshots/instance.png)
 
 Export the generated block and use it as
 [Build an image with Packer](../quick-start/build-with-packer.md) and
@@ -20,7 +20,7 @@ a bucket. The credential is not bound to one. If the bucket cannot be
 resolved, the console says so above the block rather than emitting an
 incomplete one silently.
 
-![Dufflebag Instance screen in a bucket-scoped session showing the Bucket navigation entry and HCP_PACKER_BUCKET_NAME](/screenshots/instance-bucket-scoped.png)
+![dufflebag Instance screen in a bucket-scoped session showing the Bucket navigation entry and HCP_PACKER_BUCKET_NAME](/screenshots/instance-bucket-scoped.png)
 
 ::: warning
 The console warns if it is not served over HTTPS. Authentication requires an

@@ -18,12 +18,12 @@ variable files and variables, plus the copyable run UUID. Rows the build did
 not report are absent rather than blank, and a build that reported nothing
 shows no card.
 
-![Dufflebag build screen showing the package inventory from an uploaded SBOM](/screenshots/build.png)
+![dufflebag build screen showing the package inventory from an uploaded SBOM](/screenshots/build.png)
 
 ## SBOMs
 
 A build can carry one or more software bills of materials (SBOMs) uploaded
-while the build runs. Dufflebag stores the documents and projects a package
+while the build runs. The dufflebag server stores the documents and projects a package
 inventory from them.
 
 ::: warning
@@ -50,7 +50,7 @@ behavior, not a choice made by dufflebag.
 :::
 
 SPDX JSON and CycloneDX JSON are supported. The document is transported with
-zstd compression. Dufflebag stores the original bytes verbatim and seals
+zstd compression. The dufflebag server stores the original bytes verbatim and seals
 them at rest on encrypted deployments.
 
 The SBOM name is optional. An unnamed upload is stored under the build
@@ -80,7 +80,7 @@ status. The packages response reports that status instead of returning an
 empty list that could be mistaken for an SBOM with no packages.
 
 ::: info
-Package names, versions, and purls are reported by the client. Dufflebag
+Package names, versions, and purls are reported by the client. The dufflebag server
 records them. It does not verify the SBOM against the image.
 :::
 
@@ -100,7 +100,7 @@ Only a current successful scan produces findings, including an empty
 findings list when the scan found nothing. A newer failed scan does not
 erase the findings from the previous successful run.
 
-![Dufflebag build packages tab showing vulnerability findings](/screenshots/scanner-findings.png)
+![dufflebag build packages tab showing vulnerability findings](/screenshots/scanner-findings.png)
 
 With a scanner configured:
 

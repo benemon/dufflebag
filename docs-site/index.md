@@ -1,4 +1,4 @@
-# Dufflebag
+# dufflebag
 
 ## Track, promote and revoke your Packer-built images - from a registry you run.
 
@@ -18,14 +18,14 @@ HashiCorp built that workflow into
 [HCP Packer](https://developer.hashicorp.com/hcp/docs/packer), as a hosted
 service on their cloud platform.
 
-Dufflebag is an independent implementation of the
+The dufflebag registry is an independent implementation of the
 [HCP Packer APIs](https://developer.hashicorp.com/hcp/api-docs/packer) that
 you host yourself. The stock `packer` binary publishes to it and
 `terraform-provider-hcp` reads from it with nothing changed but environment
 variables. Your build metadata stays on infrastructure you run.
 
 ::: info
-Dufflebag is an independent community project. It is not maintained,
+As an independent community project, dufflebag is not maintained,
 supported or endorsed by IBM or HashiCorp.
 :::
 
@@ -49,7 +49,7 @@ What the workflow gives you:
   in the console - the CVE question answered from recorded inventory rather
   than by re-scanning every image.
 
-Dufflebag stores registry metadata, not the machine images themselves -
+The dufflebag registry stores metadata, not the machine images themselves -
 images stay wherever Packer put them. The server also includes a console for
 initialisation, tenancy and service-principal management, and registry
 browsing.

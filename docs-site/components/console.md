@@ -69,7 +69,7 @@ target path. Revoking a secret, rotating encryption keys, or rewrapping the
 keyring requires the action word itself.
 :::
 
-![Dufflebag typed confirmation modal for revoking a version](/screenshots/typed-confirm.png)
+![dufflebag typed confirmation modal for revoking a version](/screenshots/typed-confirm.png)
 
 Restoring a version uses a single-click recovery confirmation. For set
 actions, the modal lists every selected resource and any exclusions. It then

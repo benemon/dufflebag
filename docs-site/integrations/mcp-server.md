@@ -1,6 +1,6 @@
 # MCP server
 
-`dufflebag-mcp` exposes a Dufflebag instance to agentic clients as a set of
+`dufflebag-mcp` exposes a dufflebag instance to agentic clients as a set of
 typed tools over the [Model Context Protocol](https://modelcontextprotocol.io/).
 A client that speaks MCP can query registry state, check whether an artifact
 is safe to consume, drill into vulnerability findings, generate ready-to-paste
@@ -33,7 +33,7 @@ call.
 
 ## Requirements
 
-- A serving Dufflebag instance and its base URL.
+- A serving dufflebag instance and its base URL.
 - A [service principal](../administration/principals.md) with a role matching
   the tools you intend to use: `reader` covers every read, `publisher` adds
   channel promotion, and organization or project creation needs platform
