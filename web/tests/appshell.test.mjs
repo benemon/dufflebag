@@ -148,7 +148,10 @@ test('the landing routes by scope while bucket detail routes keep their paths', 
 })
 
 test('the masthead uses the PatternFly brand slot for the lowercase wordmark', () => {
-  assert.match(shellSource, /<MastheadLogo className="app-wordmark">dufflebag<\/MastheadLogo>/)
+  assert.match(shellSource, /<MastheadLogo className="app-wordmark">/)
+  // The wordmark is drawn letterforms: an SVG lockup with an accessible name,
+  // never a text node or a font rule (BRAND.md par.5).
+  assert.match(shellSource, /className="db-lockup--single"[\s\S]*?aria-label="dufflebag"/)
   assert.doesNotMatch(shellSource, /<span style=\{\{ fontSize:/)
 })
 

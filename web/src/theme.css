@@ -81,9 +81,9 @@
 .pf-v6-c-page.app-page {
   /* --Width is the one PatternFly's rules read; the other two are inputs it
      derives from and neither reaches the grid column or the element width. */
-  --pf-v6-c-page__sidebar--Width: 212px;
-  --pf-v6-c-page__sidebar--Width--base: 212px;
-  --pf-v6-c-page__sidebar--xl--Width: 212px;
+  --pf-v6-c-page__sidebar--Width: 240px; /* was 212: the brand column subgrids from this, and the lockup needs the room (BRAND.md par.5 min-width) */
+  --pf-v6-c-page__sidebar--Width--base: 240px;
+  --pf-v6-c-page__sidebar--xl--Width: 240px;
   --pf-v6-c-page__sidebar--BackgroundColor: var(--pf-t--global--background--color--floating--secondary--default);
   --pf-v6-c-page__sidebar--xl--BackgroundColor: var(--pf-t--global--background--color--floating--secondary--default);
   --pf-v6-c-page__sidebar--MarginInlineEnd: 0;
@@ -107,7 +107,7 @@
 }
 
 .pf-v6-c-page__sidebar.app-sidebar {
-  width: 212px;
+  width: 240px; /* aligned with the masthead brand column (par.8): the lockup widened both */
   padding-block-start: 8px;
 }
 
@@ -132,10 +132,6 @@
 
 .app-global-nav .pf-v6-c-nav__link.pf-m-current {
   font-weight: 500;
-}
-
-.app-wordmark {
-  font: 500 20px/1 "Red Hat Display", sans-serif;
 }
 
 .tenant-switcher-item,
@@ -178,4 +174,148 @@
   --pf-t--global--background--color--100: #1f1f1f;
   --pf-t--global--background--color--200: #292929;
   --pf-t--global--background--color--300: #383838;
+}
+
+/* dufflebag × PatternFly 6
+ *
+ * APPEND THIS TO web/src/theme.css. It is not a separate <link> — the console
+ * has no internet egress and one bundled stylesheet is the existing pattern.
+ *
+ * theme.css already sets the tokens this identity needs: Red Hat families,
+ * brand #0066cc, text #151515/#4d4d4d, borders #e0e0e0/#c7c7c7. Nothing here
+ * changes them.
+ *
+ * In particular --pf-t--global--color--brand--* is NOT overridden. That is the
+ * design decision, not an oversight: PatternFly carries all interactive
+ * meaning in one saturated colour, and a brand blue competing with it makes
+ * nothing look clickable. Duffle blue's whole footprint in the console is the
+ * masthead lockup, the empty-state mark, and the login/about screens.
+ */
+
+:root {
+  --db-navy-500: #0d2c56;   /* mark and wordmark. Also 11.9:1 text-safe. */
+  --db-seam:     #02a8ef;   /* the two seams only. Shape colour — 2.3:1. */
+  --db-paper-100:#faf8f4;   /* brand field: login, about. Never the frame. */
+}
+
+/* ── Lockup ───────────────────────────────────────────────────────────
+ * The mark sits at 28px, the drawn wordmark at 20px, and together they are
+ * the entire brand presence inside the console frame. Both are SVG using
+ * currentColor, so a single `color` drives the pair.
+ */
+.db-lockup {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.db-lockup__mark {
+  width: 28px;
+  height: 28px;
+  flex: none;
+  color: var(--db-navy-500);
+}
+
+/* The seams are the only part that takes the Packer blue. Give them their own
+   element or class inside the SVG — never recolour the whole mark. */
+.db-lockup__seams { color: var(--db-seam); }
+
+/* The wordmark is ARTWORK, not text. theme.css previously carried
+   .app-wordmark { font: 500 20px/1 "Red Hat Display" } — that rule goes, and
+   the element becomes an inline SVG or an <img> pointing at
+   dufflebag-wordmark.svg. Do not reintroduce a font rule for it. */
+.db-lockup__word {
+  height: 20px;          /* the lockup renders the mark at 28, wordmark at 20 */
+  width: auto;
+  flex: none;
+  color: var(--db-navy-500);
+}
+
+/* Whole-lockup SVG (mark + wordmark on one grid) — preferred over placing
+   two elements side by side, because the shared baseline is then guaranteed. */
+.db-lockup--single {
+  display: block;
+  /* Both dimensions pinned: height auto on an SVG in a flex row stretches to
+     the container in Safari, and width then follows the aspect ratio into the
+     toolbar. 144x29 keeps the mark at 28px on the 246x50 grid. */
+  width: 144px;
+  height: 24.9px;   /* true ink bounds incl. stroke; see the masthead SVG */
+  overflow: visible; /* never clip a round cap at a fractional edge */
+  flex: none;
+  min-width: 120px;
+  /* Clear space: the wordmark draws to its viewBox edge, so the breathing
+     room comes from here - the handle-height rule from BRAND.md par.3. */
+  margin-inline-end: 24px;
+}
+
+.db-lockup--lg .db-lockup__mark { width: 48px; height: 48px; }
+.db-lockup--lg .db-lockup__word { height: 34px; }
+
+/* ── Dark theme ───────────────────────────────────────────────────────
+ * The navy mark cannot survive #1f1f1f, so mark and wordmark both flip to
+ * white. The seams keep #02a8ef, which is where the blue reads loudest.
+ */
+:root.pf-v6-theme-dark .db-lockup__word {
+  color: #ffffff;
+}
+
+/* The mark flips with the text; the seams never change. */
+:root.pf-v6-theme-dark .db-lockup__mark { color: #ffffff; }
+
+/* ── Brand surfaces ───────────────────────────────────────────────────
+ * Login and the about modal are where PatternFly leaves room for product
+ * branding. Navy is allowed here and nowhere else in the app.
+ */
+.db-brand-surface {
+  background: var(--db-paper-100);
+  color: var(--db-navy-500);
+}
+
+.db-brand-surface a { color: var(--db-navy-500); }
+.db-brand-surface a:hover { color: #14407a; }
+
+:root.pf-v6-theme-dark .db-brand-surface {
+  background: #151515;
+  color: #ffffff;
+}
+:root.pf-v6-theme-dark .db-brand-surface a { color: #35bcf3; }
+
+/* Paper against white needs an edge; against PatternFly's #f2f2f2 page it is
+   nearly invisible without one. */
+.db-brand-surface--bordered {
+  box-shadow: inset 0 0 0 1px var(--db-navy-500);
+}
+
+/* ── Empty states ─────────────────────────────────────────────────────
+ * PatternFly empty states take a 56 or 96px icon. When the empty state is
+ * about the registry as a whole — "No buckets yet" — the bag may stand in
+ * for the stock icon. Muted, not blue: it is furniture, not a logo moment.
+ */
+.db-empty-state-mark {
+  width: 96px;
+  height: 96px;
+  color: var(--pf-t--global--border--color--200, #c7c7c7);
+}
+
+/* ── Inline mark ──────────────────────────────────────────────────────
+ * At 14 and 16px the mark matches PatternFly's icon scale and can sit in
+ * running text. Stroke thickens so the seams stay open — see BRAND.md §3.
+ */
+.db-mark-inline {
+  width: 14px;
+  height: 14px;
+  vertical-align: -2px;
+}
+
+/* Masthead lockup colour: the single-SVG lockup strokes currentColor, so the
+   wrapper carries the ink - navy on light, white on dark. The seams carry
+   their own stroke and never change. */
+.app-wordmark {
+  display: flex;
+  align-items: center;
+  color: var(--db-navy-500);
+}
+
+:root.pf-v6-theme-dark .app-wordmark {
+  color: #ffffff;
 }
