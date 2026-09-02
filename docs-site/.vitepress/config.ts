@@ -91,7 +91,13 @@ export default defineConfig({
     ['meta', { name: 'twitter:card', content: 'summary_large_image' }],
   ],
   themeConfig: {
-    logo: '/dufflebag-logo-horizontal.svg', // VitePress prepends the base; no /dufflebag/ prefix here (unlike the raw head links)
+    // VitePress prepends the base; no /dufflebag/ prefix here (unlike the raw
+    // head links). An <img> logo cannot follow the theme via CSS, so the dark
+    // variant is a separate white-ink lockup, matching the console masthead.
+    logo: {
+      light: '/dufflebag-logo-horizontal.svg',
+      dark: '/dufflebag-logo-horizontal-inverse.svg',
+    },
     // The lockup already carries the wordmark; a second title text would
     // render "dufflebag" twice.
     siteTitle: false,
@@ -101,13 +107,8 @@ export default defineConfig({
       { text: 'Compatibility', link: '/reference/compatibility' },
       { text: 'GitHub', link: 'https://github.com/benemon/dufflebag' },
     ],
-    sidebar: {
-      '/quick-start/': sidebar,
-      '/components/': sidebar,
-      '/administration/': sidebar,
-      '/operations/': sidebar,
-      '/integrations/': sidebar,
-      '/reference/': sidebar,
-    },
+    // One array, not per-section, so the sidebar is present on the landing
+    // page too rather than springing in on first navigation.
+    sidebar,
   },
 })
