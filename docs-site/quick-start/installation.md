@@ -188,7 +188,7 @@ component-specific variable groups live with their components:
 | `DFBG_METRICS_ADDR` | - | Prometheus metrics listener; unset means no metrics server; bind to an internal address - the endpoint is unauthenticated by design |
 | `DFBG_TLS_CERT_FILE` / `DFBG_TLS_KEY_FILE` | - | Built-in TLS certificate and key; set both or neither |
 | `DFBG_TRUSTED_PROXIES` | - | Trusted reverse-proxy CIDRs. When the peer is trusted, per-caller admission keys on the rightmost untrusted `X-Forwarded-For` entry; unset means every caller keys on its own peer address |
-| `DFBG_API_MAX_BODY_BYTES` | `4194304` | Maximum JSON request body on the 2023 compatibility surface |
+| `DFBG_API_MAX_BODY_BYTES` | `16777216` | Maximum JSON request body on the 2023 compatibility surface |
 | `DFBG_SHUTDOWN_GRACE_PERIOD` | `10s` | Shared deadline for HTTP and audit shutdown |
 | `DFBG_AUDIT_HMAC_KEY` / `DFBG_AUDIT_HMAC_KEY_VERSION` | - | Required together when an audit target is configured; must NOT be set when encryption at rest is configured |
 

@@ -3030,3 +3030,36 @@ func TestOversizedRequestBodyMatchesLiveHCPRefusal(t *testing.T) {
 		"outcome": "refused", "reason": "body_too_large",
 	}, "target_id")
 }
+
+// The default itself is calibrated against the live service (probe
+// 2026-09-03, reference/compatibility.md): a whole-VM SBOM fits under it,
+// and a body just past it gets the reproduced 504. Guards the constant, not
+// the mechanism - the shape test above already covers the refusal.
+func TestDefaultBodyLimitAdmitsVMScaleBodies(t *testing.T) {
+	if DefaultMaxRequestBodyBytes != 16<<20 {
+		t.Fatalf("DefaultMaxRequestBodyBytes = %d, want %d (recalibrate the probe before changing)",
+			DefaultMaxRequestBodyBytes, 16<<20)
+	}
+	server := newHandlerWithMaxBody(
+		newFakeRepository(), testPrincipals(), testAuthenticator{}, testLogger(),
+		func() time.Time { return testTime }, DefaultMaxRequestBodyBytes,
+	)
+	oversized := request(t, server, http.MethodPut, testBase+"/buckets", map[string]any{
+		"name":        "images",
+		"description": strings.Repeat("x", DefaultMaxRequestBodyBytes+1),
+	})
+	if oversized.Code != http.StatusGatewayTimeout || oversized.Body.String() != "Gateway Timeout" {
+		t.Fatalf("body past the default = %d %q, want 504 %q",
+			oversized.Code, oversized.Body.String(), "Gateway Timeout")
+	}
+	// 12 MiB sits where real whole-VM SBOM uploads land - over the old 4 MiB
+	// default, comfortably under the new one. Reaching the application's
+	// validation (400, not 504) proves the size gate admitted it.
+	underLimit := request(t, server, http.MethodPut, testBase+"/buckets", map[string]any{
+		"name":        "images",
+		"description": strings.Repeat("x", 12<<20),
+	})
+	if underLimit.Code == http.StatusGatewayTimeout {
+		t.Fatalf("12MiB body refused by the size gate, want it admitted")
+	}
+}
