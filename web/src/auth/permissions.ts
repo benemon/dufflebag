@@ -1,3 +1,10 @@
+/**
+ * The five nested roles (ADR-0019), ordered least to most authority.
+ *
+ * Authority is resolved from storage on every request so revocation is
+ * immediate; carrying it in the token would delay revocation by up to a full
+ * token lifetime.
+ */
 export const ROLES = ['reader', 'builder', 'publisher', 'maintainer', 'root'] as const
 export type Role = (typeof ROLES)[number]
 
