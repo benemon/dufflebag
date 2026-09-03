@@ -319,3 +319,26 @@
 :root.pf-v6-theme-dark .app-wordmark {
   color: #ffffff;
 }
+
+/* ---- Login (dfbg-login): the OpenShift-style two-column login ---- */
+
+.dfbg-login .pf-v6-c-login__header {
+  color: var(--db-navy-500);
+}
+
+/* The brand field behind the light login (--db-paper-100's stated purpose),
+   so the white card reads as a card. Dark keeps PatternFly's field. */
+:root:not(.pf-v6-theme-dark) .dfbg-login {
+  background: var(--db-paper-100);
+}
+
+/* The lockup reads as the page identity; the tagline sits under it the way
+   OpenShift places its welcome line. */
+.dfbg-login .dfbg-login__lockup {
+  display: block;
+  margin-bottom: 1.5rem;
+}
+
+:root.pf-v6-theme-dark .dfbg-login .pf-v6-c-login__header {
+  color: #ffffff;
+}

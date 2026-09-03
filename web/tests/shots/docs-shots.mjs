@@ -367,15 +367,13 @@ async function initializeInstance() {
   await waitForText('Administrative credentials')
   const credentials = await until('the minted credentials to be readable', () =>
     page.evaluate(() => {
-      const text = document.body.innerText
-      const values = [...document.querySelectorAll('input')].map((input) => input.value)
-      const uuid = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i
-      const clientID = values.find((value) => uuid.test(value)) ?? (text.match(uuid) ?? [])[0]
-      const clientSecret = values.find(
-        (value) =>
-          value && value.length >= 40 && !uuid.test(value) && !value.startsWith('dfbg-recovery-'),
-      )
-      return clientID && clientSecret ? { clientID, clientSecret } : null
+      // Inline-copy chips render text, not inputs; read by the field ids the
+      // wizard sets (same fix as the smoke reader).
+      const read = (id) => document.getElementById(id)?.textContent?.trim()
+      const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+      const clientID = read('init-client-id')
+      const clientSecret = read('init-client-secret')
+      return clientID && uuid.test(clientID) && clientSecret ? { clientID, clientSecret } : null
     }),
   )
   await page.click('#init-stored')

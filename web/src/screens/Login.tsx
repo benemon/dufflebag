@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import {
   ActionGroup,
-  Checkbox, Alert, Button, Content, Form, FormGroup, LoginPage,
+  Checkbox, Alert, Button, Content, Form, FormGroup,
+  Login as LoginLayout, LoginHeader, LoginMainBody, LoginMainHeader,
   Spinner, Tab, Tabs, TabTitleText, TextInput,
 } from '@patternfly/react-core'
 
@@ -9,8 +10,27 @@ import { useAuth } from '../auth/AuthContext'
 import { useHumanMethods } from '../auth/methods'
 import { instanceHealth, type InstanceHealth } from '../api/client'
 import { Initialize } from './Initialize'
+import { BrandLockup } from '../components/BrandLockup'
 
-const loginTitle = 'dufflebag'
+// The layout OpenShift uses: the form card carries the action, the header
+// column beside it carries the identity.
+function LoginShell({ subtitle, children }: { subtitle: string; children: ReactNode }) {
+  return (
+    <LoginLayout
+      className="dfbg-login"
+      header={(
+        <LoginHeader
+          headerBrand={<BrandLockup className="dfbg-login__lockup" width={246} height={42.6} />}
+        >
+          <Content component="p">A self-hosted registry for Packer builds.</Content>
+        </LoginHeader>
+      )}
+    >
+      <LoginMainHeader title="Log in" subtitle={subtitle} />
+      <LoginMainBody>{children}</LoginMainBody>
+    </LoginLayout>
+  )
+}
 
 /**
  * Sign in.
@@ -44,15 +64,15 @@ export function Login() {
   if (health === null) {
     // A blank page and a broken one are indistinguishable; say what is happening.
     return (
-      <LoginPage loginTitle={loginTitle} loginSubtitle="Checking this instance…">
+      <LoginShell subtitle="Checking this instance…">
         <Spinner aria-label="Checking this instance…" />
-      </LoginPage>
+      </LoginShell>
     )
   }
 
   if (health === 'unreachable') {
     return (
-      <LoginPage loginTitle={loginTitle} loginSubtitle={window.location.host}>
+      <LoginShell subtitle={window.location.host}>
         <Alert variant="danger" isInline title="This instance could not be reached">
           <Content component="p">
             The status probe at /sys/health did not answer, so the console cannot tell
@@ -62,7 +82,7 @@ export function Login() {
             Try again
           </Button>
         </Alert>
-      </LoginPage>
+      </LoginShell>
     )
   }
 
@@ -70,7 +90,7 @@ export function Login() {
 
   if (destination === 'database-failure') {
     return (
-      <LoginPage loginTitle={loginTitle} loginSubtitle={window.location.host}>
+      <LoginShell subtitle={window.location.host}>
         <Alert variant="danger" isInline title="The instance database is unavailable">
           <Content component="p">
             The status endpoint answered, but its database check failed. The console cannot safely
@@ -80,7 +100,7 @@ export function Login() {
             Try again
           </Button>
         </Alert>
-      </LoginPage>
+      </LoginShell>
     )
   }
 
@@ -107,10 +127,7 @@ export function Login() {
   }
 
   return (
-    <LoginPage
-      loginTitle={loginTitle}
-      loginSubtitle={window.location.host}
-    >
+    <LoginShell subtitle={window.location.host}>
       {health.audit === 'degraded' ? (
         <Alert variant="warning" isInline title="Audit recording is degraded" style={{ marginBottom: 16 }}>
           <Content component="p">
@@ -156,7 +173,7 @@ export function Login() {
           />
         </Tab>
       </Tabs>
-    </LoginPage>
+    </LoginShell>
   )
 }
 
