@@ -75,6 +75,6 @@ test('whole-page waits pair a spinner with visible loading copy', () => {
   }
 
   const login = source('screens/Login.tsx')
-  assert.ok(login.includes('loginSubtitle="Checking this instance…"'))
+  assert.ok(login.includes('subtitle="Checking this instance…"'))
   assert.ok(login.includes('<Spinner aria-label="Checking this instance…" />'))
 })

@@ -2651,6 +2651,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   await t.test('a tenancy-scoped sign-in lands in its own tenancy', async () => {
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
+    // The probing state shares the 'Log in' title, so wait for the form
+    // itself before typing.
+    await page.waitForSelector('#client-id')
     await page.type('#client-id', seeded.principal.client_id)
     await page.type('#client-secret', seeded.principal.secret)
     await clickByText('button', 'Log in')
@@ -2672,6 +2675,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // operator's, so it signs in as root first.
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
+    // The probing state shares the 'Log in' title, so wait for the form
+    // itself before typing.
+    await page.waitForSelector('#client-id')
     await page.type('#client-id', credentials.clientID)
     await page.type('#client-secret', credentials.secret)
     await clickByText('button', 'Log in')
@@ -2714,6 +2720,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The minted credential signs in and lands in its bucket: never a list.
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
+    // The probing state shares the 'Log in' title, so wait for the form
+    // itself before typing.
+    await page.waitForSelector('#client-id')
     await page.type('#client-id', scopedID)
     await page.type('#client-secret', scopedSecret)
     await clickByText('button', 'Log in')
@@ -2751,6 +2760,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.doesNotMatch(await bodyText(), /All buckets/)
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
+    // The probing state shares the 'Log in' title, so wait for the form
+    // itself before typing.
+    await page.waitForSelector('#client-id')
     await page.type('#client-id', credentials.clientID)
     await page.type('#client-secret', credentials.secret)
     await clickByText('button', 'Log in')
@@ -2813,6 +2825,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.ok(consoleBuilder, 'the create-through-the-form step must have captured a credential')
     await clickByText('button', 'Sign out')
     await waitForText('Log in')
+    // The probing state shares the 'Log in' title, so wait for the form
+    // itself before typing.
+    await page.waitForSelector('#client-id')
     await page.type('#client-id', consoleBuilder.clientID)
     await page.type('#client-secret', consoleBuilder.secret)
     await clickByText('button', 'Log in')

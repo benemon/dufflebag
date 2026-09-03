@@ -137,7 +137,9 @@ test('sign-in and bootstrap use the lowercase wordmark', () => {
     host: 'dufflebag.test',
     onDone: () => {},
   }))
-  assert.match(signIn, />dufflebag</)
+  // Sign-in carries the wordmark as the SVG lockup's accessible name; the
+  // wizard still titles with the text wordmark.
+  assert.match(signIn, /aria-label="dufflebag"/)
   assert.match(bootstrap, />dufflebag</)
   assert.doesNotMatch(`${signIn}${bootstrap}`, />Dufflebag</)
 })
