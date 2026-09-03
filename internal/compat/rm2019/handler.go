@@ -126,15 +126,13 @@ func NewHandler(
 //
 // Returning exactly one satisfies a CLI contract for free: loadOrganizationID
 // fails with "unexpected number of organizations: expected 1, actual: N" unless
-// the list has a single entry. A principal is bound to one organization, so the
-// security model produces the compatible answer rather than a special case
-// producing it (ADR-0016).
+// the list has a single entry. A principal is bound to one organization (ADR-0016).
 func (h *handler) listOrganizations(
 	w http.ResponseWriter, r *http.Request, principal *identity.Principal,
 ) {
 	// Scoped by the RESOLVED principal, not by the token's claims. The repository
 	// decides what a scope may see, so both planes answer the same question the
-	// same way and a platform-scoped caller is no longer a special case here.
+	// same way.
 	organizations, err := h.repository.ListOrganizationsForPrincipal(r.Context(), principal)
 	if err != nil {
 		if errors.Is(err, registry.ErrNotFound) {
@@ -290,12 +288,7 @@ func trimBearer(header string) (string, bool) {
 }
 
 // authorized resolves the caller and enforces the route table's required role.
-//
-// These endpoints carry no tenancy in the path — discovering which tenancies
-// the caller may see is the whole call — so there is no tenancy to check
-// against. The role is still checked: a principal below reader has no business
-// enumerating tenancies at all, and "authenticated" is not "authorized"
-// (ADR-0019).
+// A principal below reader may not enumerate tenancies (ADR-0019).
 func (h *handler) authorized(
 	route route,
 	next func(http.ResponseWriter, *http.Request, *identity.Principal),

@@ -41,10 +41,9 @@ export function useTenant() {
     project: projectNames[projectID] ?? projectID,
   }))
   // The deliberate step up to organisation level (duf-4qr): a session not
-  // bound to a project may stand at none. Rendered as a dash — a minimal
-  // marker, not a wordy label — because the data screens' gap states do the
-  // explaining. The empty projectID survives the oldest-project auto-select
-  // ('' is not nullish), so choosing it is not silently undone.
+  // bound to a project may stand at none. The empty projectID survives the
+  // oldest-project auto-select ('' is not nullish), so choosing it is not
+  // silently undone.
   const aboveProjects = state !== null && state.claims.projectID === null
   const tenants = aboveProjects && organization !== ''
     ? [
@@ -76,14 +75,9 @@ export function selectTenantProject(tenant: Tenant, selectProject: (projectID: s
 }
 
 /**
- * The rows a PLATFORM session's organisation select offers: the deliberate
- * step back up to platform standing — ADR-0014's "nothing selected", where
- * platform principals are listed and created — ahead of the real
- * organisations. Its explicit label distinguishes it from the blank project
- * row's dash while it still stores '', which the sole-organisation auto-select cannot undo ('' is
- * not nullish), so a root that stepped up stays up. Only a platform session
- * renders an organisation select at all; a tenancy session's organisation is
- * the token's and is never a choice, so it never sees this row.
+ * The rows a PLATFORM session's organisation select offers: the
+ * platform-standing row (ADR-0014) ahead of the real organisations, storing
+ * '', which the sole-organisation auto-select cannot undo ('' is not nullish).
  */
 export function organizationRows(organizations: ApiOrganization[]): ApiOrganization[] {
   return [{ id: '', name: 'All organisations (platform)', created_at: '' }, ...organizations]
@@ -102,9 +96,8 @@ export type TenancyGap = {
  * channels can be scoped, once the listings have settled. Null means fully
  * scoped.
  *
- * A closed set of honest states rather than a silent empty table: until the
- * picker names a whole tenancy there is genuinely nothing to fetch — and
- * fetching with fabricated identifiers is the alternative this replaces.
+ * A closed set of states: until the
+ * picker names a whole tenancy there is genuinely nothing to fetch.
  *
  * `platform` gates the organisation half: only a platform session chooses its
  * organisation. An organisation-scoped session standing at the blank project

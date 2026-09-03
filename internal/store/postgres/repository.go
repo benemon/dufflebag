@@ -212,8 +212,7 @@ func (r *Repository) CreateBucket(ctx context.Context, tenant Tenant, bucket Buc
 	// exists: live CreateBucket auto-creates it with managed:true,
 	// restricted:true, unassigned, in the same instant (dossier §7, Appendix A
 	// probes 04-06). Same transaction, so no client can observe a channel-less
-	// bucket. Pre-0.1.0 databases are rebuildable, so the baseline needs no
-	// historical backfill for buckets that predate this invariant.
+	// bucket.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO channels (
 			organization_id, project_id, id, bucket_id, name, restricted, managed, created_at, updated_at
@@ -690,7 +689,6 @@ func (r *Repository) GetVersion(
 
 // ListVersions returns a bucket's versions, newest first.
 //
-// Ordered by sequence descending so the most recent complete version leads.
 // Incomplete versions carry no sequence, so created_at breaks the tie and keeps
 // them in a stable order rather than whatever the planner returns.
 func (r *Repository) ListVersions(
@@ -1156,7 +1154,7 @@ type RevocationRequest struct {
 // descendant revoked as inherited from it — one transaction, so a reader can
 // never see a revoked ancestor with unrevoked descendants.
 //
-// versionName renders a version's wire name. It is passed in because the v0/vN
+// versionName is passed in because the v0/vN
 // collapse is the compat plane's rule and the denormalized ancestor identity
 // stores the wire name (ADR-0002: the domain never sees the sentinel).
 func (r *Repository) RevokeVersion(

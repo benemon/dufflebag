@@ -131,9 +131,7 @@ func unauthenticated(w http.ResponseWriter) {
 	writeError(w, http.StatusUnauthorized, Error{Message: "a bearer token is required"})
 }
 
-// authorize reports whether the caller may perform an action on a tenancy.
-//
-// Returns the two refusals separately because they are answered differently: a
+// refusal distinguishes the two ways an authorization is answered: a
 // tenancy the caller may not see is not-found, since confirming a tenancy
 // exists is a disclosure; a role it lacks within a tenancy it can see is
 // forbidden, since there is nothing left to conceal (ADR-0017).
@@ -175,7 +173,6 @@ func callerFrom(ctx context.Context) (*identity.Principal, bool) {
 // and skipped the tenancy check whenever the organisation was empty, so a
 // handler that meant "this is instance-scoped" and one that forgot to pass a
 // tenancy were indistinguishable — and the second silently authorized nothing.
-// Two functions make the caller say which it means.
 func authorizePlatform(ctx context.Context, required identity.Role) (*identity.Principal, refusal) {
 	principal, ok := callerFrom(ctx)
 	if !ok {
@@ -274,20 +271,12 @@ func authorizeOrganizationVisibility(
 
 // authorizeScope authorizes an operation on a tenancy that may be the PLATFORM.
 //
-// A platform-scoped subject belongs to no tenancy, so there is no tenancy check
-// that could constrain access to it — which is exactly how a maintainer of any
-// organisation could read a root principal's record, including its client id
-// (review finding 9).
-//
-// Two questions in ADR-0017's order, not one. STANDING: is the caller at
-// platform scope at all? A tenancy-bound caller is not, and is refused as a
-// tenancy failure, so it cannot tell a platform subject from an identifier that
-// names nothing. AUTHORITY: does it hold root, the only role that may be held
-// there (ADR-0019)? Only a platform-scoped caller is asked, and by then
-// existence is no longer a secret from it.
-//
-// Collapsing these into the role question alone was the first fix, and it left
-// a 403-versus-404 oracle behind the closed disclosure.
+// A platform-scoped subject belongs to no tenancy, so no tenancy check
+// constrains access to it (review finding 9). A tenancy-bound caller is
+// refused as a tenancy failure — not-found, indistinguishable from an
+// identifier that names nothing — before the role question is asked, so
+// existence is disclosed only to a caller with platform standing (ADR-0017,
+// ADR-0019).
 func authorizeScope(
 	ctx context.Context, required identity.Role, scope identity.Scope,
 ) (*identity.Principal, refusal) {
@@ -299,14 +288,6 @@ func authorizeScope(
 		if !ok {
 			return nil, refusedTenancy
 		}
-		// Standing before authority, which is ADR-0017's ordering and the reason
-		// it exists. A caller bound to a tenancy has no standing at platform
-		// scope AT ALL, so its failure is a tenancy failure and answers
-		// not-found — indistinguishable from an identifier that names nothing.
-		//
-		// Asking the role question first answered 403 here, and a nonexistent
-		// identifier answers 404, so the pair confirmed the subject exists.
-		// Finding 9 closed the contents; this closes the shape.
 		if !caller.Scope.PlatformScoped() {
 			return nil, refusedTenancy
 		}
@@ -491,19 +472,13 @@ func (response refusalResponse) VisitDeletePrincipalSecretResponse(w http.Respon
 // lifecycleAudit accumulates one response refinement and applies it exactly
 // once, on return, however the handler exits.
 //
-// Deliberately NOT a call at each interesting branch. The first version of this
-// emitted from seven chosen points and missed eleven others — every
-// authorizeScope refusal, self-deletion, and all three conflicts — so the
-// finding-9 attack itself, a maintainer probing a root principal's identifier,
-// left no entry at all. Choosing which branches to audit means being right about
-// every branch, including the ones added later.
+// Deliberately NOT a call at each interesting branch: choosing which branches
+// to audit means being right about every branch, including the ones added
+// later (review finding 9).
 //
 // Defaulting to REFUSED matters as much as the defer. A path that returns
 // without setting an outcome records a refusal rather than nothing, so the
 // failure mode of forgetting is an over-recorded entry, not a missing one.
-//
-// Same shape as the token endpoint (internal/compat/hcpauth): refine at the
-// boundary of the operation, not at each decision inside it.
 type lifecycleAudit struct {
 	event audit.Enrichment
 }
@@ -594,12 +569,7 @@ func auditMalformedRequest(r *http.Request) {
 // established — a missing or invalid token, a principal that no longer
 // resolves, a credential since revoked.
 //
-// These were free-form logger.Warn calls, which the compatibility planes had
-// already outgrown: both now refine the ordinary response record for the
-// identical failure. A trail that records the same event two different ways on
-// two planes cannot be queried as one thing (duf-i2u).
-//
-// # This surface is anonymous, and that is deliberate
+// The trail records the same event the same way on both planes (duf-i2u).
 //
 // ADR-0020 fails closed when an entry cannot be written, and applying that to a
 // surface an anonymous caller can drive means the rate at which audit must

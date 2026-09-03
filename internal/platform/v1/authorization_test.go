@@ -497,12 +497,7 @@ func TestMaintainerCannotCreateRootPrincipal(t *testing.T) {
 }
 
 // Creation mints no credential, so it must record no issuance (duf-4ac).
-//
-// This closes an audit gap rather than merely preserving one: before the split,
-// CreatePrincipal minted a real, usable secret and the trail recorded only
-// principal.create — no secret.issue entry existed for it, so a credential
-// entered the system unaccounted for. Every credential is now minted by
-// CreatePrincipalSecret, which audits.
+// Every credential is minted by CreatePrincipalSecret, which audits.
 func TestCreatingAPrincipalRecordsNoIssuance(t *testing.T) {
 	handler := newHandler(
 		&fakeTenancyRepository{}, &fakeInstanceRepository{},
@@ -807,8 +802,7 @@ func TestListPrincipalsRefusesAForeignSelection(t *testing.T) {
 // re-credential a PLATFORM-scoped root principal.
 //
 // The cause was that a platform-scoped subject has no organisation, so the
-// tenancy check had nothing to compare and waved the request through — the same
-// shape as finding 1, in a different place. Reaching a platform-scoped subject
+// tenancy check had nothing to compare and waved the request through. Reaching a platform-scoped subject
 // requires root, which is the only role that may be held there (ADR-0019).
 func TestAPlatformScopedPrincipalIsReachableOnlyByRoot(t *testing.T) {
 	root := &identity.Principal{
@@ -837,10 +831,9 @@ func TestAPlatformScopedPrincipalIsReachableOnlyByRoot(t *testing.T) {
 			server := platformServerWithRepository(maintainer, repository)
 
 			w := call(t, server, c.method, c.path, nil, testToken)
-			// EXACTLY not-found, not "either refusal". The original wrote
-			// `!= 404 && != 403`, which accepts both and so cannot pin the
-			// convention it exists to protect — 403 here confirms the subject
-			// exists, since an identifier naming nothing answers 404 (duf-pln).
+			// EXACTLY not-found, not "either refusal": 403 here confirms the
+			// subject exists, since an identifier naming nothing answers 404
+			// (duf-pln).
 			if w.Code != http.StatusNotFound {
 				t.Fatalf(
 					"a maintainer probing a platform-scoped root principal got %d, want 404; body %s",
@@ -876,14 +869,7 @@ func TestRootReachesAPlatformScopedPrincipal(t *testing.T) {
 
 // Review finding 12, and duf-6xd which found the first fix for it half-done.
 //
-// The original test had two subtests and BOTH exercised the success path: the
-// one named "a refused creation" posted role:root as a ROOT caller, so MayGrant
-// succeeded. Deleting the refusal emission passed. So did deleting either secret
-// emission, which had no test at all. The mutation that appeared to verify the
-// fix deleted all seven emissions at once, which only proves that some emission
-// is covered — not that each is.
-//
-// So this drives every operation and every outcome, and each case is checked
+// This drives every operation and every outcome, and each case is checked
 // against the specific entry it should produce rather than against "an entry
 // appeared".
 func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
@@ -924,8 +910,7 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 		return principal
 	}
 	// The secret count matters per case: issuing needs fewer than two, or it
-	// hits the cap. A single fixture silently exercised the cap for one case or
-	// the other. Revoking a builder's last secret is no longer refused
+	// hits the cap. Revoking a builder's last secret is no longer refused
 	// (ADR-0004, amended 2026-08-02) — only root's is, which soleSecretRoot
 	// above covers — so the count is about the issue cap, not the revoke rule.
 	tenantBuilder := func(t *testing.T, secretCount int) *identity.Principal {
@@ -973,13 +958,11 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 		operation string
 		outcome   string
 		reason    string
-		// Who the entry names. "unknown" where the request was refused before
-		// the caller was resolved — the honest answer, and one worth asserting:
-		// an entry that names nobody cannot answer who did it.
+		// Who the entry names. The runner resolves "unknown" to the caller
+		// this table authenticates as, so every case asserts a named actor.
 		actor string
 		// fault makes storage fail, so the entries a broken database produces
-		// are covered too. Those are the entries that matter most during an
-		// incident and the ones a happy-path table never reaches.
+		// are covered too.
 		fault func(*fakeTenancyRepository)
 	}{
 		{
@@ -991,8 +974,7 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 			operation: "principal.create", outcome: "success", reason: "builder", actor: testPrincID,
 		},
 		{
-			// A GENUINE refusal: a maintainer cannot grant root. The original
-			// test used a root caller here and so never reached this branch.
+			// A maintainer cannot grant root, so this reaches the refusal branch.
 			name:      "creation refused because the role exceeds the grantor",
 			roles:     maintainer,
 			method:    http.MethodPost,
@@ -1339,9 +1321,7 @@ func TestEveryLifecycleOutcomeIsAudited(t *testing.T) {
 // An issued secret's plaintext must never reach the trail.
 //
 // ADR-0020 requires sensitive values to be HMAC'd rather than written, and
-// ADR-0012 returns credentials in the response body and nowhere else. Emission
-// was correct already — it records the secret's identifier — but nothing
-// asserted it, so nothing would notice if that changed.
+// ADR-0012 returns credentials in the response body and nowhere else.
 func TestAnIssuedSecretNeverReachesTheAuditTrail(t *testing.T) {
 	repository := &fakeTenancyRepository{principals: []*identity.Principal{{
 		ID: "target", Name: "ci", ClientID: "client-ci", Role: identity.RoleBuilder,
@@ -1382,7 +1362,7 @@ func TestAnIssuedSecretNeverReachesTheAuditTrail(t *testing.T) {
 //
 // That commit took the whole handler file from an unreviewed branch predating
 // the fix, so the raw error detail came back with it and no gate noticed —
-// because the redaction had no test on this plane (duf-9fh). This is that test.
+// because the redaction had no test on this plane (duf-9fh).
 func TestPlatformInternalFailuresKeepTheirDetailServerSide(t *testing.T) {
 	// Shaped like what pgx returns: table, column and constraint names.
 	const leak = `ERROR: insert or update on table "principals" violates ` +
@@ -1454,12 +1434,6 @@ func (w *responseCorrelationWriter) Write(encoded []byte) error {
 
 // Deleting an organisation is a PLATFORM operation, and this pins which
 // refusal shape that produces.
-//
-// 037fd8f swapped this from authorizeTenancy to authorizePlatform by taking a
-// whole file from a branch predating 4f3281e — the same mechanism that reverted
-// finding 16 in that commit, and equally unannounced. Ratified as the intended
-// form (2026-07-31); the point of this test is that changing it again fails a
-// gate rather than passing unnoticed.
 //
 // Both forms are safe. Neither is an existence oracle: the platform check
 // refuses before any lookup, so no non-root caller learns whether the
@@ -1567,18 +1541,11 @@ func TestAProbedPlatformPrincipalIsIndistinguishableFromNothing(t *testing.T) {
 	}
 }
 
-// The surfaces outside the deferred-event pattern also leave a trail.
-//
-// duf-i2u. c998aba covered the five principal operations completely, and three
-// surfaces sat outside it: a refused ENUMERATION of principals left nothing
-// though reading one was recorded; a body the server could not decode never
-// reached the handler that would have opened an event; and authentication
-// refusals were free-form logger.Warn while both compatibility planes already
-// emitted structured events for the identical failure.
-//
-// The last of those is anonymous, and auditing it under ADR-0020's fail-closed
-// rule is only survivable because the token endpoint is rate-limited. That
-// coupling is recorded in the ADR; this test only pins that the entries exist.
+// The surfaces outside the deferred-event pattern also leave a trail
+// (duf-i2u): a refused ENUMERATION of principals, a body the server could not
+// decode, and authentication refusals. The anonymous rate-limit coupling is
+// recorded on auditUnauthenticated; this test only pins that the entries
+// exist.
 func TestSurfacesOutsideTheHandlerAreAudited(t *testing.T) {
 	for _, c := range []struct {
 		name      string

@@ -2,8 +2,7 @@
  * Service principal management, against the platform plane.
  *
  * The one surface the console reaches that Packer does not (ADR-0012's
- * 2026-07-31 amendment). Everything here can mint or destroy a credential, which
- * is why the shapes below are deliberate rather than convenient.
+ * 2026-07-31 amendment). Everything here can mint or destroy a credential.
  *
  * # A plaintext secret exists in exactly one place
  *
@@ -12,8 +11,7 @@
  * principal mints nothing and returns a plain `Principal` (duf-4ac), so issuance
  * is the single call that can hand one over. `IssuedCredential` is a SEPARATE
  * type from `Principal`, returned only by that call, and it never appears on the
- * type used to render a list. A screen cannot accidentally show a secret it was
- * not explicitly handed, and a refetch cannot bring one back.
+ * type used to render a list.
  */
 
 import { useCallback, useEffect, useState } from 'react'
@@ -24,14 +22,6 @@ import { ROLES, type Role } from '../auth/permissions'
 
 export type { Role } from '../auth/permissions'
 
-/**
- * The five nested roles (ADR-0019), ordered least to most authority.
- *
- * NOT the scope claims the design mockups model. Authority is resolved from
- * storage on every request so revocation is immediate; carrying it in the token
- * would delay revocation by up to a full token lifetime, which is the thing that
- * decision exists to prevent.
- */
 /** What each role adds, for the create form. Wording follows ADR-0019's table. */
 export const ROLE_DESCRIPTIONS: Record<Role, string> = {
   reader: 'Read buckets, versions, builds and channels.',
@@ -57,9 +47,6 @@ export const ROLE_DESCRIPTIONS: Record<Role, string> = {
  * (ADR-0019). A maintainer creating a principal cannot make it root, and the
  * form should not imply otherwise by showing an option that will be refused.
  *
- * Mirroring is for the operator's sake, not the server's. The API refuses these
- * regardless — this only stops the console offering a choice it knows is a dead
- * end.
  */
 export function grantableRoles(
   standing: Standing,
@@ -95,12 +82,7 @@ export type Principal = {
   secrets: SecretMetadata[]
 }
 
-/**
- * A credential, returned once and never again.
- *
- * Separate from Principal on purpose: a list can never carry one, so no screen
- * can render a secret by accident.
- */
+/** A credential, returned once and never again. */
 export type IssuedCredential = {
   secretID: string
   secret: string
@@ -116,16 +98,16 @@ export type ScopeSelection = {
   bucketID?: string | null
 }
 
+/**
+ * Lists the principals at EXACTLY the named scope, never a subtree —
+ * see-where-you-stand and create-where-you-stand are the same rule (duf-4qr).
+ * Nothing selected means the platform, which the server reads from an
+ * unqualified request as the caller's own standing.
+ */
 export async function loadPrincipals(
   token: string,
   selection: ScopeSelection,
 ): Promise<Principal[]> {
-  // The listing names the selection and the server answers EXACTLY that scope,
-  // never a subtree — see-where-you-stand and create-where-you-stand are the
-  // same rule (duf-4qr). Nothing selected means the platform, which the server
-  // reads from an unqualified request as the caller's own standing. The filter
-  // is authorization-checked server-side; naming it here is scoping, not
-  // authority.
   const params = new URLSearchParams()
   if (selection.organizationID) params.set('organization_id', selection.organizationID)
   if (selection.projectID) params.set('project_id', selection.projectID)
@@ -151,8 +133,7 @@ export type CreateRequest = {
  * credential (duf-4ac).
  *
  * Issuing is a separate, explicit action the operator takes afterwards, through
- * the same issueSecret call used for rotation. The return type carries that:
- * there is no credential here to leak, forget to display, or accidentally log.
+ * the same issueSecret call used for rotation.
  */
 export async function createPrincipal(
   token: string,
@@ -175,9 +156,7 @@ export async function createPrincipal(
  *
  * One call for both since duf-4ac: a principal is created holding none, so this
  * is how every credential the console hands out comes into existence. Two may be
- * active at once (ADR-0004), which is what makes rotation gapless: deploy the
- * new one, wait until it has authenticated, then revoke the old. The API refuses
- * a third.
+ * active at once (ADR-0004); the API refuses a third.
  */
 export async function issueSecret(
   token: string,
@@ -194,12 +173,7 @@ export async function issueSecret(
 
 /**
  * Revokes one secret. Only a ROOT principal's last secret is refused
- * (ADR-0004, amended 2026-08-02).
- *
- * Which means a compromised credential can be revoked immediately and replaced
- * afterwards, rather than the other way round: any principal below root may be
- * left with no secrets, because a maintainer whose scope covers it can issue a
- * fresh one. Root is the exception — nothing sits above it to re-issue.
+ * (ADR-0004, amended 2026-08-02) — nothing sits above root to re-issue.
  */
 export async function revokeSecret(
   token: string,
@@ -250,10 +224,7 @@ export function everUsed(secret: SecretMetadata): boolean {
  *
  * The selection, not the token claims, scopes both the listing and the create
  * form: create-where-you-stand and see-where-you-stand are the same rule
- * (duf-4qr). For a tenancy session the selection is initialised from the
- * claims, so nothing widens; for a root session it is how browsing works at
- * all. The server authorizes the named scope — the console's filter carries no
- * authority.
+ * (duf-4qr).
  *
  * The token deliberately carries no role (ADR-0019). AuthContext obtains the
  * current server-resolved principal from GET /api/v1/self, independently of
