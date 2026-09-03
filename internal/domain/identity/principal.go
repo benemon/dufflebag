@@ -30,18 +30,7 @@ const maxActiveSecrets = 2
 // every organisation and every principal on the instance. That is a deny-by-
 // default inversion, so it carries a rule — never construct a Scope literally
 // and hand it to anything that authorizes. Pass a scope that came from a
-// restored Principal, whose construction enforced the binding below.
-//
-// What makes it safe is that coupling: validBinding permits platform scope
-// ONLY with root, at both construction and restore, pinned by
-// TestPlatformScopeIsReachableOnlyWithRoot. The store's privileged listings
-// also refuse the mistake structurally — they take a *Principal rather than a
-// bare Scope, so a forgotten zero value cannot select the everything branch,
-// and they re-assert root inside it (duf-ueq).
-//
-// An earlier version of this comment said "Organization is always set". It
-// stopped being true when platform scope arrived (ADR-0019) and nobody noticed,
-// which is its own small argument for the rule above.
+// restored Principal, whose construction enforced the binding (duf-ueq).
 type Scope struct {
 	OrganizationID uuid.UUID
 	ProjectID      uuid.UUID
@@ -104,10 +93,6 @@ func (s Scope) WithinOrganization(organizationID uuid.UUID) bool {
 // requires one. An operation like "create a project in this organisation" has
 // no project yet, so Permits would refuse it for want of an argument that
 // cannot exist.
-//
-// A project-scoped principal is refused: it holds authority over one project,
-// not over the organisation that contains it, and creating a sibling project is
-// outside what it was granted.
 func (s Scope) PermitsOrganization(organizationID uuid.UUID) bool {
 	if s.OrganizationID == uuid.Nil || organizationID == uuid.Nil {
 		return false
@@ -136,9 +121,8 @@ type Principal struct {
 // AuthorizationVerdict answers the whole authorization question while
 // preserving why it was refused.
 //
-// Authority and tenancy must never be checkable separately: a caller that
-// checks one and forgets the other has the shape of most authorization bugs.
-// Honest refusals still need to distinguish a tenancy denial, which conceals
+// Authority and tenancy must never be checkable separately. Refusals still
+// need to distinguish a tenancy denial, which conceals
 // existence, from a role denial within a tenancy the caller may see. The
 // verdict carries both truths without separating the checks.
 type AuthorizationVerdict int
@@ -158,8 +142,7 @@ const (
 // but cannot yet authenticate is an ordinary state, reached deliberately from
 // the console and left behind whenever a non-root principal's last secret is
 // revoked (ADR-0004, amended 2026-08-02). Call IssueSecret to give it a
-// credential — the same path used for a second secret and for rotation, so
-// there is one issuance path rather than a create-time special case.
+// credential.
 func NewPrincipal(
 	id, name, clientID string, scope Scope, role Role, at time.Time,
 ) (*Principal, error) {
@@ -252,9 +235,6 @@ func RestorePrincipal(
 
 // Authorize reports whether this principal may perform an action requiring a
 // role on a project or organization tenancy.
-//
-// A zero project asks the organization-level question; a non-zero project asks
-// whether the scope permits that exact project.
 func (p *Principal) Authorize(
 	required Role, organizationID, projectID uuid.UUID,
 ) AuthorizationVerdict {
@@ -363,20 +343,16 @@ func (p *Principal) IssueSecret(secretID string, expiresAt *time.Time, at time.T
 // A principal with no secrets cannot authenticate and cannot mint a replacement
 // FOR ITSELF — but it does not have to. A maintainer issues a replacement for
 // any tenancy-scoped principal, so leaving one secretless is an ordinary,
-// recoverable state and there are good reasons to reach it: revoking a leaked
-// credential immediately rather than after minting its successor, or parking a
-// principal without deleting it.
+// recoverable state.
 //
-// Root is the exception, and the only one. Nothing sits above it to re-issue on
-// its behalf, so a root left secretless can only be recovered by direct
-// database access — the same failure the first-run wizard warns about. The rule
-// was originally written for every principal; narrowing it to root is Ben's
-// decision of 2026-08-02, recorded as an amendment to ADR-0004.
+// Root is the exception, and the only one (ADR-0004, amended 2026-08-02).
+// Nothing sits above it to re-issue on its behalf, so a root left secretless
+// can only be recovered by direct database access — the same failure the
+// first-run wizard warns about.
 //
 // Expiry extends the same rule (duf-2rw): a root left holding only EXPIRING
-// secrets is the same lockout on a timer, most likely firing while nobody is
-// watching — so a root must always keep at least one usable, never-expiring
-// secret.
+// secrets is the same lockout on a timer, so a root must always keep at least
+// one usable, never-expiring secret.
 func (p *Principal) RevokeSecret(secretID string, now time.Time) error {
 	if p.Role == RoleRoot {
 		survivorNeverExpires := false
@@ -412,10 +388,6 @@ func (p *Principal) RevokeSecret(secretID string, now time.Time) error {
 // Returns WHICH secret matched, so a token can name the credential that minted
 // it and stop working when that credential is revoked (review finding 14).
 //
-// Still no early exit. Returning as soon as a secret matches would make a
-// first-secret hit measurably faster than a second-secret hit, which leaks
-// which of a rotating pair is in use.
-//
 // Expired secrets are skipped entirely rather than checked-then-rejected, then
 // their missing usable slots are padded. Presenting a correct-but-expired
 // secret therefore takes the same verification path as garbage. Exactly
@@ -443,9 +415,7 @@ func (p *Principal) Authenticate(plaintext string, now time.Time) (string, bool)
 
 // HasActiveSecret reports whether a secret is still current on this principal.
 //
-// The question a token asks at verification: the credential that minted me —
-// does it still exist, and is it still usable? ADR-0019 resolves authority per
-// request so revocation is immediate; expiry gets the same immediacy — a token
+// ADR-0019 resolves authority per request so revocation is immediate; expiry gets the same immediacy — a token
 // minted from a secret that has since expired stops working now, not at the
 // token's own expiry.
 func (p *Principal) HasActiveSecret(id string, now time.Time) bool {

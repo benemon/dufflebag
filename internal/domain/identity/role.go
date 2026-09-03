@@ -2,11 +2,7 @@ package identity
 
 import "fmt"
 
-// Role is what an identity may do within a scope it is entitled to.
-//
-// Scope answers whether a caller may act on a tenancy; Role answers what they
-// may do there. Keeping them separate stops one concept carrying two questions
-// (ADR-0019).
+// Role is what an identity may do within a scope it is entitled to (ADR-0019).
 //
 // The tiers are strictly nested, which is what lets "no role more permissive
 // than your own" be an ordering rather than a comparison of capability sets.
@@ -20,8 +16,7 @@ const (
 	// smallest role that completes a build.
 	RoleBuilder Role = "builder"
 	// RolePublisher additionally assigns channels. Separate from builder because
-	// declaring a channel is asking to promote, and a CI credential that can
-	// promote straight to production is fine until it is not.
+	// declaring a channel is asking to promote.
 	RolePublisher Role = "publisher"
 	// RoleMaintainer additionally manages restricted channels, principals and role
 	// bindings within its scope. Named to avoid OpenShift's meaning of "operator".
@@ -74,7 +69,7 @@ func (r Role) PlatformOnly() bool { return r == RoleRoot }
 //
 // No identity may grant a role more permissive than its own — the ordinary
 // escalation defence. Equality is permitted: a maintainer may appoint another
-// maintainer, which is how delegation works everywhere.
+// maintainer.
 //
 // This answers the LEVEL question only. The caller must separately establish
 // that the grantor holds this role IN THE SCOPE being granted, because holding

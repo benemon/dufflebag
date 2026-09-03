@@ -32,18 +32,13 @@ var (
 	ErrIntegrity = errors.New("identity integrity verification failed")
 )
 
-// argon2id parameters. Deliberately named rather than inlined so a future
-// change is a visible edit, and so the encoded hash can be read back against
-// what produced it.
-// RFC 9106's SECOND recommended profile. The first (m=2 GiB) is for offline
+// argon2id parameters: RFC 9106's SECOND recommended profile. The first (m=2 GiB) is for offline
 // key derivation; the second is the one intended for memory-constrained
 // servers, and it is what a request-path verification should cost.
 //
 // Previously m=64 MiB, t=1, p=4. That is roughly equivalent strength for 3.5x
 // the memory, and the memory is what an unauthenticated caller can spend on
-// the token endpoint (duf-39p). Stored hashes carry the parameters they were
-// written with and are verified against those, so hashes written before this
-// change keep verifying.
+// the token endpoint (duf-39p).
 const (
 	argonTime    = 2
 	argonMemory  = 19 * 1024 // 19 MiB
@@ -90,10 +85,9 @@ type Secret struct {
 // Encoded exposes the stored hash for persistence.
 func (s Secret) Encoded() string { return s.encoded }
 
-// Usable reports whether this credential still grants anything: an expired
-// secret stays stored and visible — 'expired on the 4th' beats
-// 'authentication failed' — but it authenticates nothing and does not count
-// against the cap.
+// Usable reports whether this credential still grants anything. An expired
+// secret stays stored and visible, but it authenticates nothing and does not
+// count against the cap.
 func (s Secret) Usable(now time.Time) bool {
 	return s.ExpiresAt == nil || s.ExpiresAt.After(now)
 }
@@ -169,8 +163,7 @@ type storedHash struct {
 	threads    uint8
 }
 
-// decodeHash reads the parameters back out of the PHC string, so a hash written
-// with different settings still verifies after those settings change.
+// decodeHash reads the parameters back out of the PHC string.
 func decodeHash(encoded string) (storedHash, error) {
 	parts := strings.Split(encoded, "$")
 	if len(parts) != 6 || parts[1] != "argon2id" {
