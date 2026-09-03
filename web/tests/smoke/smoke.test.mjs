@@ -97,8 +97,7 @@ async function until(what, condition, timeoutMs = 30000, intervalMs = 100) {
 /**
  * Explains a Ceph that never reported healthy. It needs real disk to bring its
  * OSDs up, so a full Docker VM starves it into a crash loop that looks exactly
- * like an ordinary timeout — an hour of the duf-egk2 audit went into
- * rediscovering that. The container is still running when this fires, so its
+ * like an ordinary timeout. The container is still running when this fires, so its
  * own healthcheck output and free space are both reachable.
  */
 async function objectStorageDiagnosis(container) {
@@ -617,8 +616,7 @@ before(async () => {
 
   // Ceph, because the console shows SBOM packages and SBOMs live in object
   // storage. Without it every upload here answers 503 and the package
-  // assertions fail — which is what happened when object storage landed and
-  // this suite was not given a bucket.
+  // assertions fail.
   await execFile('docker', [
     'run', '-d', '--rm', '--name', objectContainer,
     '-p', '127.0.0.1::8000',
@@ -1066,8 +1064,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.doesNotMatch(await bodyText(), /smoke-builder/)
     // The bootstrap root holds exactly one secret, which is the state where
     // revoking it is refused — so the notice is present and the control is
-    // genuinely disabled in a real browser, not merely marked so in markup
-    // (Ben, 2026-08-02).
+    // genuinely disabled in a real browser, not merely marked so in markup.
     await waitForText('A root principal must keep one secret that never expires')
     await page.click('tbody button[aria-label], tbody .pf-v6-c-table__toggle button')
     // Since duf-bd2, minting a token records the secret's last use — and this
@@ -1116,10 +1113,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await addTarget(auditGoodTwo)
     await addTarget(auditFull)
 
-    // The existing 16 MiB HFS+ ENOSPC fixture is also the storage oracle. Wait
-    // for activation, then compare the browser's descriptor-backed raw values
-    // with the real open file and mounted filesystem. The response audit record
-    // lands after measurement, so allow one small record/allocation of drift.
+    // The existing 16 MiB HFS+ ENOSPC fixture is also the storage oracle. The
+    // response audit record lands after measurement, so allow one small
+    // record/allocation of drift.
     const measuredStorage = await until('the HFS+ audit target storage measurement', async () => {
       const current = await rowCellBytes(auditFull, 'Current file')
       const remaining = await rowCellBytes(auditFull, 'Space remaining')
@@ -1173,9 +1169,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Freeing the isolated filesystem makes the next ordinary audited request
     // recover it. The current streak resets, while lifetime history stays.
     rmSync(auditVolumeFiller)
-    // Reload only while the browser is on the Audit route. Besides supplying
-    // the later audited request, a document reload discards the table's local
-    // expanded-row state before another refresh can begin. This root was
+    // Reload only while the browser is on the Audit route. This root was
     // deliberately already at platform standing, so restoring its session
     // preserves the expected unselected organisation.
     const healthyRow = await until('the full audit target to recover', async () => {
@@ -1254,10 +1248,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.doesNotMatch(await bodyText(), /instance database is unavailable/i)
     assert.match(await bodyText(), /database answered/)
 
-    // Freeing space does not itself clear sink health. Drive an unauthenticated
-    // but audited API request through the sole target, then observe the later
-    // successful write through the exempt health endpoint. Static console
-    // assets remain exempt and the browser stays on its usable sign-in screen.
+    // Freeing space does not itself clear sink health. Static console assets
+    // remain exempt and the browser stays on its usable sign-in screen.
     rmSync(auditVolumeFiller)
     await until('the sole target to recover after a later audited write', async () => {
       const trigger = await fetch(`${base}/api/v1/audit/targets`)
@@ -1481,8 +1473,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         fontWeight: '500', fontSize: '14px', lineHeight: '19.6px',
       },
     })
-    // Bucket choice is route state: type into the masthead picker, choose the
-    // exact option, and the detail route becomes the selection.
+    // Bucket choice is route state.
     // The typeahead filter states no-match rather than an empty menu, and
     // clearing restores the listing — the list screen's filter contract, kept.
     await page.click('#tenant-bucket-input')
@@ -1729,12 +1720,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       versionsLayout.cardLeft,
       versionsLayout.contentLeft + versionsLayout.contentPaddingLeft,
     )
-    // The card fills the content column inside a SYMMETRIC 24px inset: 7a2222f
-    // widened the well's padding-left-only to padding all round, and this
-    // assertion previously demanded the pre-reframe geometry (card to the
-    // border edge), which failed by exactly the new right padding — the
-    // 1412 !== 1436 that red-flagged every branch while the Actions outage
-    // hid 7a2222f's own run (duf-fyku).
+    // The card fills the content column inside a SYMMETRIC 24px inset
+    // (duf-fyku).
     assert.equal(versionsLayout.contentPaddingRight, versionsLayout.contentPaddingLeft)
     assert.equal(
       versionsLayout.cardRight,
@@ -1870,10 +1857,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // read refuses and the console says so rather than fabricating or
     // emptying the history (ADR-0024: database write access is not
     // administration). The row stays — assignment history is append-only by
-    // trigger, tampered or not — and nothing later reads this channel again.
-    // The unknown-author rendering this fixture used to exercise lives in the
-    // SSR unit lane: a baseline encrypted instance cannot naturally create an
-    // unknown-author row.
+    // trigger, tampered or not.
     assert.match(productionChannel.id, /^[0-9A-HJKMNP-TV-Z]{26}$/)
     await execFile('docker', [
       'exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'dufflebag',
@@ -2145,9 +2129,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
         { waitUntil: 'domcontentloaded' },
       )
       // A hard load costs the platform session its in-memory tenancy
-      // selection; the deep link honestly asks rather than guessing. Wait for
-      // the page to settle into either the content or the gap, then choose
-      // the seeded tenancy the way a user would and the route re-resolves.
+      // selection; the deep link asks rather than guessing.
       const settled = await until('the deep link to settle', async () => {
         const text = await bodyText()
         if (/Security/.test(text)) return 'content'
@@ -2291,8 +2273,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // dead destination, succeeds against a stub mirror, the seeded bucket is
     // associated, and the destructive direction — un-associating, which
     // deletes the destination copy — acts only through its confirmation
-    // (duf-mq17's severity ruling). This subtest is the named smoke gate for
-    // that confirmation: without the warning step, the waits below never see it.
+    // (duf-mq17's severity ruling).
     const clickDeepByText = (selector, text) =>
       until(`deep-clickable "${text}"`, () =>
         page.$$eval(
@@ -2574,10 +2555,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('a revoked secret and a deleted principal stop working at the wire', async () => {
-    // The console's destructive controls were the one console surface no lane
-    // clicked in anger: the disabled Revoke above proves the guard, nothing
-    // proved the live paths (duf-egk2.4). A disposable principal keeps the
-    // fixtures the later sign-in subtests depend on intact.
+    // A disposable principal keeps the fixtures the later sign-in subtests
+    // depend on intact (duf-egk2.4).
     const tokenStatus = async ({ clientID, secret }) => {
       const response = await fetch(`${base}/oauth2/token`, {
         method: 'POST',
@@ -2687,9 +2666,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the picker carries the bucket to Principals, and the minted principal lands in it', async () => {
-    // Ben's workflow, end to end: pick the bucket, move to Principals, and the
-    // screen honours the selection — creation is bucket-scoped from context,
-    // the form itself never asks (duf-4qr extended to buckets).
+    // Creation is bucket-scoped from context, the form itself never asks
+    // (duf-4qr extended to buckets).
     // The preceding subtest leaves a builder session; this workflow is an
     // operator's, so it signs in as root first.
     await clickByText('button', 'Sign out')
@@ -2783,8 +2761,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The create modal opens from the Select's footer, and the first click
     // into the modal closes the Select — which unmounts the footer. When the
     // footer owned the modal, that click made the whole flow vanish
-    // mid-submit and swallowed every failure (duf-3p03). This walks the exact
-    // sequence: open picker, open modal, click into the field, submit.
+    // mid-submit and swallowed every failure (duf-3p03).
     await choosePickerOption('#tenant-organization', seeded.organization.name)
     await until('the project to follow', async () =>
       (await pickerValue('#tenant-project')) !== '')
