@@ -16,12 +16,6 @@ import (
 // buys tens of megabytes of heap from a caller holding no credential, and the
 // registry has no degraded mode to fall back to (ADR-0005), so exhausting it
 // fails every build (duf-39p).
-//
-// Two bounds, because they answer different questions. The SEMAPHORE bounds
-// what can be spent at once, which is what turns an out-of-memory kill into a
-// 503 that the pod survives. The PER-CALLER BUCKET bounds how fast one source
-// may ask, which is what stops a single caller occupying the whole budget and
-// starving everyone else through it.
 const (
 	// verificationMemoryBudget is the heap the endpoint may spend on concurrent
 	// verifications. Sized for a 1 GiB pod: a quarter for authentication leaves
@@ -39,8 +33,7 @@ const (
 	// The unpaced Terraform v1.14.7/provider v0.112.0 lane issued 30 tokens
 	// from one loopback address on 2026-08-01. A burst of 64 admits two whole
 	// measured lanes (60 requests) plus four requests of margin for CI workers
-	// sharing an address. The 2/s refill still damps a sustained queue, while
-	// the separate six-permit semaphore remains the Argon2 memory bound.
+	// sharing an address.
 	callerRate  = rate.Limit(2)
 	callerBurst = 64
 
@@ -63,12 +56,6 @@ const (
 // full it walked every entry under the lock on every new address — 50,000
 // addresses cost 22.9 seconds of locked CPU, paid before any verification and
 // therefore not backstopped by the semaphore (duf-t0s).
-//
-// Rotating instead makes both properties structural. Dropping a generation
-// discards a whole map at once, so no request ever walks the table, and the
-// live set cannot exceed two generations however many addresses appear. An
-// active caller keeps its bucket by being promoted on the way through, so
-// rotation does not hand anyone a fresh burst.
 type throttle struct {
 	permits chan struct{}
 
@@ -148,8 +135,7 @@ func (t *throttle) release() { <-t.permits }
 
 // writeRetry refuses a request that was not admitted.
 //
-// Retry-After is set because both refusals are transient by construction, and a
-// client that backs off is the behaviour that lets the endpoint recover.
+// Retry-After is set because both refusals are transient by construction.
 func writeRetry(w http.ResponseWriter, status int, description string) {
 	w.Header().Set("Retry-After", "1")
 	writeError(w, status, "temporarily_unavailable", description)

@@ -22,10 +22,7 @@ func (h *handler) getRegistry(w http.ResponseWriter, r *http.Request) {
 	// is rendered rather than looked up, and cannot be missing for a tenant the
 	// caller has already been authorized for.
 	organization, project := tenant.OrganizationID.String(), tenant.ProjectID.String()
-	// PLUS rather than STANDARD: the tier gates features upstream, and a
-	// self-hosted registry withholding its own capabilities from its own users
-	// would be a limit copied for the sake of resemblance rather than because it
-	// means anything here.
+	// PLUS rather than STANDARD: the tier gates features upstream.
 	tier := models.HashicorpCloudPacker20230101RegistryConfigTierPLUS
 
 	writeJSON(w, http.StatusOK, models.HashicorpCloudPacker20230101GetRegistryResponse{
@@ -48,9 +45,7 @@ func (h *handler) getRegistry(w http.ResponseWriter, r *http.Request) {
 // getEnforcedBlocksByBucket answers the enforced blocks applying to a bucket.
 //
 // Packer calls this from Bucket.FetchEnforcedBlocks early in every build, so it
-// sits on the build path whatever we think of the feature. An empty list is a
-// truthful answer — dufflebag enforces no blocks — and a well-formed empty
-// response is all the CLI needs to continue.
+// sits on the build path whatever we think of the feature.
 //
 // The list is non-nil deliberately: the field has no omitempty, so a nil slice
 // marshals to null, and a client ranging over it without a nil check would fail

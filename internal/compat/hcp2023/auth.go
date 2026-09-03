@@ -80,14 +80,9 @@ type requesterRoleKey struct{}
 // scoped authorizes the tenant in the path against the authenticated principal,
 // and refuses the request if it does not match.
 //
-// This is the fix for the hole ADR-0017 names. The tenant is no longer whatever
-// the path claims; it is the path CHECKED AGAINST the caller. Row-level security
-// proves isolation BETWEEN tenants and says nothing about entitlement TO one, so
-// without this the caller simply chose which tenant they were inside.
-//
-// It runs per-route rather than as middleware because the tenant lives in path
-// parameters, and http.ServeMux only populates those once it has matched a
-// route — middleware wrapping the mux genuinely cannot see them.
+// The tenant is the path CHECKED AGAINST the caller (ADR-0017): row-level
+// security proves isolation BETWEEN tenants and says nothing about entitlement
+// TO one.
 //
 // The refusal is not-found rather than forbidden, and carries the code that
 // endpoint uses for its own missing resource, so a tenant the caller may not see
@@ -110,9 +105,7 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 		principal, err := h.principals.GetPrincipalByID(r.Context(), verified.PrincipalID)
 		// The same reasoning applied to the CREDENTIAL, not just the role: a
 		// token minted from a secret that has since been revoked is refused now
-		// rather than at expiry. Revoking a leaked credential and having it keep
-		// working for a full TTL is the case ADR-0019 rejects, and it was
-		// exactly what revocation did (review finding 14).
+		// rather than at expiry (review finding 14).
 		if err == nil && !principal.HasActiveSecret(verified.SecretID, h.now().UTC()) {
 			err = identity.ErrNotFound
 		}
@@ -151,9 +144,7 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 		case identity.AuthorizationDeniedRole:
 			// ROLE SECOND, and it answers forbidden. The caller is bound to this
 			// tenancy and may already read it, so there is no existence left to
-			// conceal — and answering not-found would send someone hunting for a typo
-			// in a name that is correct. Hiding a reason only helps when the reason is
-			// a secret.
+			// conceal.
 			writeInsufficientRole(w, r, "insufficient_role")
 			return
 		}
@@ -185,12 +176,8 @@ func (h *handler) scoped(route route, next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
-// tenant returns the already-authorized tenant.
-//
-// A handler cannot reach a usable tenant without having passed scoped, so a
-// route added later is authorized by construction rather than by someone
-// remembering to authorize it. If the value is absent the answer is a denied
-// tenant, which every repository operation refuses.
+// tenant returns the already-authorized tenant. If the value is absent the
+// answer is a denied tenant, which every repository operation refuses.
 func tenant(r *http.Request) store.Tenant {
 	authorized, ok := r.Context().Value(tenantKey{}).(store.Tenant)
 	if !ok {
@@ -215,7 +202,7 @@ func principalName(r *http.Request) string {
 	return name
 }
 
-// requesterRole returns the authority scoped already resolved from storage.
+// requesterRole returns the caller's role, as scoped resolved it from storage.
 // Handlers use it only for target-dependent escalation beyond a route's
 // unrestricted minimum.
 func requesterRole(r *http.Request) identity.Role {
