@@ -264,11 +264,6 @@ func newHandlerWithServices(
 	// correlation id. Raw errors carry table, column and constraint names from
 	// pgx, and an internal error should not be chattier than a deliberate
 	// refusal (ADR-0017).
-	//
-	// Restored after 037fd8f reverted it: that commit took the whole handler file
-	// from an unreviewed branch predating the finding-16 fix, so the raw detail
-	// came back with it. Nothing failed, because the redaction had no test on
-	// this plane.
 	errorHandler := func(w http.ResponseWriter, r *http.Request, err error) {
 		correlation := audit.CorrelationID(r.Context())
 		logger.Error("platform request failed",
@@ -406,12 +401,6 @@ func (s *server) DeleteOrganization(
 	// form — so the platform check says what is actually true. Reading an
 	// organisation stays tenancy-scoped (GetOrganization); creating and deleting
 	// one do not.
-	//
-	// Ratified deliberately: 037fd8f changed this from authorizeTenancy by
-	// taking a whole file from a branch that predated 4f3281e, announcing it
-	// nowhere. Same mechanism as the finding-16 revert in the same commit. The
-	// form below is the intended one, and TestDeleteOrganizationIsAPlatform-
-	// Operation pins it so the next silent swap fails a gate.
 	if _, refused := authorizePlatform(ctx, identity.RoleRoot); refused != permitted {
 		return newRefusal(refused), nil
 	}
@@ -1055,8 +1044,7 @@ func (s *server) RevokePrincipalSecret(
 	}
 	audit.actor(caller)
 
-	// Audited symmetrically with the issue path. It was not, and the asymmetry
-	// was invisible because neither path had a test.
+	// Audited symmetrically with the issue path.
 	if !caller.Role.MayModifyHolderOf(target.Role) {
 		audit.refused("target_role_exceeds_caller")
 		return newRefusal(refusedRole), nil
@@ -1132,8 +1120,7 @@ func renderPrincipal(principal *identity.Principal) Principal {
 // The single bootstrap mechanism: the first-run wizard and unattended setup
 // use this call, then the ordinary authenticated platform endpoints. A
 // privileged side door would be another way in and therefore another thing to
-// secure, and its absence is what lets an end-to-end test bootstrap a server
-// without a browser.
+// secure.
 //
 // Rejected alternatives, recorded because both look easier: a mounted secret
 // forces a runtime assumption, when this must deploy equally on Kubernetes, a
@@ -1188,10 +1175,6 @@ func (s *server) Initialize(
 	// above every tenancy rather than inside the first one: it must be able to
 	// create further organizations, and an identity confined to the organization
 	// it happens to have created first could not (ADR-0019).
-	//
-	// Root outranks the tenancy question rather than satisfying it. The wizard
-	// uses this credential to create the first organization and project through
-	// the ordinary authenticated platform endpoints.
 	clientID := uuid.NewString()
 	principal, err := identity.NewPrincipal(
 		uuid.NewString(), "initial administrator", clientID,
