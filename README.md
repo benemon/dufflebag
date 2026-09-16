@@ -1,5 +1,11 @@
 # dufflebag
 
+[![CI](https://github.com/benemon/dufflebag/actions/workflows/ci.yml/badge.svg)](https://github.com/benemon/dufflebag/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/benemon/dufflebag/actions/workflows/codeql.yml/badge.svg)](https://github.com/benemon/dufflebag/actions/workflows/codeql.yml)
+[![Scorecard](https://github.com/benemon/dufflebag/actions/workflows/scorecard.yml/badge.svg)](https://github.com/benemon/dufflebag/actions/workflows/scorecard.yml)
+[![govulncheck](https://github.com/benemon/dufflebag/actions/workflows/govulncheck.yml/badge.svg)](https://github.com/benemon/dufflebag/actions/workflows/govulncheck.yml)
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/benemon/dufflebag/badge)](https://securityscorecards.dev/viewer/?uri=github.com/benemon/dufflebag)
+
 > **Independent community project.** dufflebag is not maintained, supported or
 > endorsed by IBM or HashiCorp. HCP and Packer are their products; dufflebag
 > implements a client-observed API contract and is not affiliated with either
