@@ -32,7 +32,12 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      # continue-on-error: the free OSSKB endpoint rate-limits (503) and would
+      # otherwise flake this job. No policies are enabled here, so provenance
+      # matches arrive as PR comments regardless — only the infrastructure
+      # failure is tolerated, never a real finding.
       - name: Scan for open-source matches
+        continue-on-error: true
         uses: scanoss/gha-code-scan@d3c8f659544885761c8e3b96743ea14b830474aa # v1
         with:
           # Cost split (see ci.yml): pull requests scan only their changed
