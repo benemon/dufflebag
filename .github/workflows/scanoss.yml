@@ -14,9 +14,14 @@ name: scanoss
 # human reads the comment and decides.
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  # Full-tree sweep runs weekly, not on every push: a full scan fires a burst
+  # of fingerprint requests that trips the free OSSKB per-IP rate limit, and
+  # scanning on every push kept the endpoint in an extending multi-day
+  # cooldown. Pull requests scan only changed files (delta) and stay under it.
+  schedule:
+    - cron: '37 4 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,6 +45,6 @@ jobs:
         continue-on-error: true
         uses: scanoss/gha-code-scan@d3c8f659544885761c8e3b96743ea14b830474aa # v1
         with:
-          # Cost split (see ci.yml): pull requests scan only their changed
-          # files; the push to main scans the full tree.
+          # Pull requests scan only their changed files (delta); the weekly
+          # scheduled sweep and manual dispatch scan the full tree.
           scanMode: ${{ github.event_name == 'pull_request' && 'delta' || 'full' }}
