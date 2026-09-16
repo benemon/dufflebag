@@ -133,3 +133,16 @@ jobs:
         with:
           subject-name: quay.io/benjamin_holmes/dufflebag
           subject-digest: ${{ steps.digest.outputs.digest }}
+      - name: Install cosign
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      # Keyless signature over the release image digest (the same digest the
+      # provenance attestation binds to). Verify with:
+      #   cosign verify quay.io/benjamin_holmes/dufflebag:<tag> \
+      #     --certificate-identity-regexp '^https://github.com/benemon/dufflebag/\.github/workflows/release\.yml@' \
+      #     --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - name: Sign the release image
+        if: ${{ !contains(github.ref_name, '-rc') }}
+        env:
+          DIGEST: ${{ steps.digest.outputs.digest }}
+        run: cosign sign --yes "quay.io/benjamin_holmes/dufflebag@${DIGEST}"
