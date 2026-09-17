@@ -163,6 +163,14 @@ generate-check: ## Fail if generated code is stale relative to its inputs
 			exit 1; \
 		fi
 
+.PHONY: contract-mod-check
+# The contract module pins its own copies of the root module's dependencies
+# behind a replace directive, so a root go.mod bump leaves it inconsistent and
+# `go test` refuses to build. test-contract only runs on main, so the drift
+# has to be caught on the pull-request lane instead.
+contract-mod-check: ## Fail if contract/go.mod is out of step with the root module
+	cd contract && go mod tidy -diff
+
 .PHONY: build-ui
 build-ui: ## Build the web console when npm is available
 	@if command -v npm >/dev/null 2>&1; then \
