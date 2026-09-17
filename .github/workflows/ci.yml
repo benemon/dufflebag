@@ -264,6 +264,8 @@ jobs:
           cache: true
       - name: Check generated code
         run: make generate-check
+      - name: Check contract module is tidy
+        run: make contract-mod-check
 
   # The continuous head-of-main image. release.yml is deliberate — a tag is the
   # release act — whereas this moves automatically with main: every green push
