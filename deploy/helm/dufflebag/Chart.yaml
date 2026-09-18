@@ -5,5 +5,5 @@ type: application
 # The patch is replaced by the CI run number when the chart is published;
 # bump major.minor here when the chart itself changes incompatibly.
 version: 0.4.0
-appVersion: v0.4.0
+appVersion: v0.4.1
 
