@@ -36,8 +36,13 @@ jobs:
       - name: Install documentation dependencies
         run: npm ci
         working-directory: docs-site
+      # The chart series (major.minor) lives in Chart.yaml; the run number is
+      # the patch, so every publish is an upgrade to helm clients.
       - name: Build documentation
-        run: make docs CHART_VERSION="0.2.${{ github.run_number }}"
+        run: |
+          series=$(sed -n "s/^version: *\([0-9]*\.[0-9]*\)\..*/\1/p" deploy/helm/dufflebag/Chart.yaml)
+          [ -n "$series" ]
+          make docs CHART_VERSION="$series.${{ github.run_number }}"
       - name: Configure GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
       - name: Upload GitHub Pages artifact
