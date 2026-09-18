@@ -87,3 +87,22 @@ The browser smoke test (`make test-smoke`) and the real-client lanes
 (`make test-e2e-terraform`, `make test-packer`) are load-bearing, not
 optional extras — unit and contract suites agree with themselves, and only a
 real client catches a seam where both sides are internally consistent.
+
+## Releasing
+
+A tag is the release act. Pushing `vX.Y.Z` runs `release.yml`, which refuses
+a tag whose commit has no green `ci` run on `main`, then pushes the image
+with the tag baked in as its version, creates the GitHub release with the
+SBOM attached, and attests and signs the image. Tags containing `-rc` push
+an expiring image and attach the SBOM to the workflow run instead.
+
+```sh
+git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z
+```
+
+The Helm chart follows the release rather than leading it, because the chart
+cannot reference an image tag that does not exist yet: after the release run
+is green, set `appVersion` in `deploy/helm/dufflebag/Chart.yaml` and
+`dufflebag.image.tag` in its `values.yaml` to the new tag, regenerate the
+golden render with `HELM_UPDATE_GOLDEN=1 make helm-lint`, and merge. The
+Pages workflow republishes the chart from `main`.

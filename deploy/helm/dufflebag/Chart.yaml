@@ -2,6 +2,8 @@ apiVersion: v2
 name: dufflebag
 description: Self-contained single-replica dufflebag stack
 type: application
-version: 0.4.1
+# The patch is replaced by the CI run number when the chart is published;
+# bump major.minor here when the chart itself changes incompatibly.
+version: 0.4.0
 appVersion: v0.4.0
 
