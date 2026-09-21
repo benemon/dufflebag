@@ -2169,6 +2169,16 @@ test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', ()
     consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'us-east-1' }]),
   ])), ['terraform', 'aws'])
   assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'us-east-1' }]),
+    consumptionBuild('azure', [{
+      externalIdentifier: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/image',
+      region: 'uksouth',
+    }]),
+  ])), ['terraform', 'aws', 'azure'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
+    consumptionBuild('azure', []),
+  ])), ['terraform'])
+  assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild('vsphere', [{ externalIdentifier: 'template-1', region: 'dc1' }]),
   ])), ['terraform'])
   assert.deepEqual(availableConsumers(consumptionVersion([
@@ -2191,6 +2201,7 @@ test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', ()
   assert.doesNotMatch(vsphereMarkup, /id="consume-docker"/)
   assert.doesNotMatch(vsphereMarkup, /id="consume-podman"/)
   assert.doesNotMatch(vsphereMarkup, /id="consume-aws"/)
+  assert.doesNotMatch(vsphereMarkup, /id="consume-azure"/)
 })
 
 test('MUTATION_TERRAFORM_DEFAULT initially selects and renders the unchanged Terraform pane', () => {
@@ -2322,6 +2333,80 @@ test('MUTATION_AWS_ALL_REGIONS includes every regional artifact in the AWS pane'
   assert.doesNotMatch(snippet, /amazon\.aws|ec2_instance|image_id:/)
 })
 
+test('an Azure managed image uses its resource id in native commands', () => {
+  const id = '/subscriptions/sub/resourceGroups/rg-dufflebag-ci/providers/' +
+    'Microsoft.Compute/images/dufflebag-ci-local-azure-solo'
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: id, region: 'uksouth' }]),
+  ])
+
+  assert.equal(
+    platformConsumeSnippet('azure', 'images', version),
+    '# images v3\n\n' +
+      `az image show --ids ${id}\n` +
+      'az vm create --resource-group <resource-group> --name <vm-name> ' +
+      `--image ${id} --location uksouth`,
+  )
+})
+
+test('an Azure Compute Gallery image version uses the gallery show command', () => {
+  const id = '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/' +
+    'galleries/gallery/images/ubuntu/versions/1.0.0'
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: id, region: 'uksouth' }]),
+  ])
+
+  assert.equal(
+    platformConsumeSnippet('azure', 'images', version),
+    '# images v3\n\n' +
+      `az sig image-version show --ids ${id}\n` +
+      'az vm create --resource-group <resource-group> --name <vm-name> ' +
+      `--image ${id} --location uksouth`,
+  )
+})
+
+test('an Azure VHD renders only the VM create command', () => {
+  const id = 'https://acct.blob.core.windows.net/system/Microsoft.Compute/Images/x/packer-osDisk.vhd'
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: id, region: 'uksouth' }]),
+  ])
+
+  assert.equal(
+    platformConsumeSnippet('azure', 'images', version),
+    '# images v3\n\n' +
+      'az vm create --resource-group <resource-group> --name <vm-name> ' +
+      `--image ${id} --location uksouth`,
+  )
+})
+
+test('the Azure consumer uses its explicit label', () => {
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{
+      externalIdentifier: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/image',
+      region: 'uksouth',
+    }]),
+  ])
+  const markup = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'azure',
+  }))
+
+  assert.match(markup, />Azure</)
+  assert.doesNotMatch(markup, />azure</)
+})
+
+test('Terraform carries an Azure artifact platform and region unchanged', () => {
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{
+      externalIdentifier: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/image',
+      region: 'uksouth',
+    }]),
+  ])
+  const snippet = terraformConsumeSnippet('images', version)
+
+  assert.match(snippet, /platform            = "azure"/)
+  assert.match(snippet, /region              = "uksouth"/)
+})
+
 test('version card order and breakpoint grid stay fixed for every consumer', () => {
   const version = consumptionVersion([
     consumptionBuild(
@@ -2332,9 +2417,13 @@ test('version card order and breakpoint grid stay fixed for every consumer', () 
     consumptionBuild('aws', [
       { externalIdentifier: 'ami-0b6873e6a9ffc49be', region: 'eu-west-2' },
     ]),
+    consumptionBuild('azure', [{
+      externalIdentifier: '/subscriptions/sub/resourceGroups/rg/providers/Microsoft.Compute/images/image',
+      region: 'uksouth',
+    }]),
   ])
   const detail = { version, channels: [channelFixture()] }
-  const orders = ['terraform', 'docker', 'podman', 'aws'].map((initialConsumer) => {
+  const orders = ['terraform', 'docker', 'podman', 'aws', 'azure'].map((initialConsumer) => {
     const markup = renderToStaticMarkup(React.createElement(VersionOverview, {
       bucket: 'images', version, detail, findings: [], callerRole: 'publisher',
       onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
@@ -2347,6 +2436,8 @@ test('version card order and breakpoint grid stay fixed for every consumer', () 
     // rendered 'Aws'.
     assert.match(markup, />AWS</)
     assert.doesNotMatch(markup, />Aws</)
+    assert.match(markup, />Azure</)
+    assert.doesNotMatch(markup, />azure</)
     return [...markup.matchAll(/pf-v6-c-card__title-text[^>]*>([^<]+)/g)]
       .map((match) => match[1])
   })

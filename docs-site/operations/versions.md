@@ -46,6 +46,10 @@ selected by default.
 - **AWS** builds are fully tethered - the artifact records the AMI id and
   region - so the tab renders runnable `aws ec2 describe-images` and
   `aws ec2 run-instances` commands.
+- **Azure** builds are fully tethered - the artifact records the image resource
+  id and location - so the tab renders `az image show` (or
+  `az sig image-version show` for a Compute Gallery version) and `az vm create`
+  commands with resource group and VM name left as placeholders.
 - **Docker** and **Podman** render `pull` commands for every tag carried by
   the build labels, followed by a digest `image inspect` line. Both tabs
   appear only when a `docker-tag` post-processor tagged the build. An
