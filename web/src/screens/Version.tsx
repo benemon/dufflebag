@@ -758,11 +758,11 @@ function LineageSide({
   )
 }
 
-export type Consumer = 'terraform' | 'docker' | 'podman' | 'aws'
+export type Consumer = 'terraform' | 'docker' | 'podman' | 'aws' | 'azure'
 
 // Explicit labels: deriving them by capitalising the key rendered 'Aws'.
 const CONSUMER_LABELS: Record<Consumer, string> = {
-  terraform: 'Terraform', docker: 'Docker', podman: 'Podman', aws: 'AWS',
+  terraform: 'Terraform', docker: 'Docker', podman: 'Podman', aws: 'AWS', azure: 'Azure',
 }
 
 export function ConsumeCard({
@@ -833,6 +833,7 @@ export function availableConsumers(version: VersionData): Consumer[] {
     'terraform',
     ...(taggedDocker ? ['docker' as const, 'podman' as const] : []),
     ...(builtPlatforms.has('aws') ? ['aws' as const] : []),
+    ...(builtPlatforms.has('azure') ? ['azure' as const] : []),
   ]
 }
 
@@ -866,6 +867,25 @@ export function platformConsumeSnippet(
       `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n` +
       `aws ec2 run-instances --image-id ${artifact.externalIdentifier} --region ${artifact.region}`,
     )].join('\n\n')
+  }
+  if (platform === 'azure') {
+    const artifacts = version.builds
+      .filter((build) => build.platform === platform)
+      .flatMap((build) => build.artifacts)
+    if (artifacts.length === 0) return null
+    return [heading, ...artifacts.map((artifact) => {
+      // packer-plugin-azure artifact.go reports managed image, gallery version, or VHD ids.
+      const show = artifact.externalIdentifier.includes('/providers/Microsoft.Compute/galleries/')
+        ? `az sig image-version show --ids ${artifact.externalIdentifier}`
+        : artifact.externalIdentifier.startsWith('/subscriptions/')
+          ? `az image show --ids ${artifact.externalIdentifier}`
+          : null
+      return [
+        show,
+        `az vm create --resource-group <resource-group> --name <vm-name> ` +
+          `--image ${artifact.externalIdentifier} --location ${artifact.region}`,
+      ].filter(Boolean).join('\n')
+    })].join('\n\n')
   }
   return null
 }
