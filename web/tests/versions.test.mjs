@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { after, before, test } from 'node:test'
+import { after, before, beforeEach, test } from 'node:test'
 
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -40,6 +40,7 @@ let loadBuildDetail
 let loadVersionFindings
 let packageInventoryFromFindings
 let createReloadGate
+let clearInventoryCache
 let listBuildPackages
 let terraformConsumeSnippet
 let platformConsumeSnippet
@@ -93,6 +94,7 @@ before(async () => {
     loadVersionDetail, loadBuildDetail, loadVersionFindings, packageInventoryFromFindings } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ createReloadGate } = await vite.ssrLoadModule('/src/data/reloadGate.ts'))
+  ;({ clearInventoryCache } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
@@ -102,6 +104,9 @@ before(async () => {
   ;({ CopyableIdentifier } =
     await vite.ssrLoadModule('/src/components/CopyableIdentifier.tsx'))
 })
+
+// The inventory cache outlives components by design; tests must not inherit each other's reads.
+beforeEach(() => { clearInventoryCache() })
 
 after(async () => {
   await vite.close()
@@ -1500,6 +1505,8 @@ test('an unparseable SBOM is not rendered as a zero package inventory', async ()
   assert.match(unparseableMarkup, /SBOM unparseable/)
   assert.doesNotMatch(unparseableMarkup, /0 packages/)
 
+  // Two server answers for one build: the second must not be the cached first.
+  clearInventoryCache()
   const empty = await load(() => json({ packages: [], pagination: {} }))
   const emptyMarkup = renderToStaticMarkup(React.createElement(BuildView, {
     bucket: 'images', detail: empty, loading: false, failure: null,
@@ -1593,6 +1600,44 @@ test('package paging reports cumulative progress after every page', async () => 
     { packages: 3 },
     { packages: 6 },
   ])
+})
+
+test('a second inventory read for the same build is served from the session cache until a refresh', async () => {
+  const requests = []
+  const routes = {
+    '/builds/cached/packages?pagination.page_size=100': () => json({
+      packages: [{ name: 'openssl' }], pagination: {},
+    }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'cached', platform: 'aws', component: 'amazon-ebs.image' }]
+  const read = (overrides = {}) => withFetch(
+    routes,
+    () => loadVersionFindings(
+      'token', overrides.tenant ?? tenant, 'images', 'fp-complete', builds, undefined,
+      overrides.options ?? {},
+    ),
+    (path) => requests.push(path),
+  )
+  const first = await read()
+  const second = await read()
+  assert.equal(requests.length, 1, 'the second read issues no request')
+  assert.deepEqual(second, first)
+  await read({ tenant: { organizationID: 'org', projectID: 'other' } })
+  assert.equal(requests.length, 2, 'another project never sees a cached inventory')
+  await read({ options: { force: true } })
+  assert.equal(requests.length, 3, 'an explicit refresh bypasses the cache')
+  clearInventoryCache()
+  await read()
+  assert.equal(requests.length, 4, 'a cleared cache reads again')
+})
+
+test('sign-out clears the inventory cache and the hook refresh bypasses it', () => {
+  const auth = readFileSync(new URL('../src/auth/AuthContext.tsx', import.meta.url), 'utf8')
+  assert.match(auth, /const signOut = useCallback\([\s\S]*?clearInventoryCache\(\)[\s\S]*?setState\(null\)/)
+  assert.match(versionDataSource, /bypassCache\.current = true\s+reload\(\)/)
+  assert.match(versionDataSource, /const force = bypassCache\.current\s+bypassCache\.current = false/)
+  assert.match(versionDataSource, /\{ force \},\s+\)/)
 })
 
 test('one unparseable build does not discard another build inventory', async () => {

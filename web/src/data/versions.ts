@@ -8,6 +8,7 @@ import {
   type ApiChannel, type ApiPackage, type ApiVersion, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { inventoryCacheKey, readCachedInventory, writeCachedInventory } from './inventoryCache'
 import { createReloadGate } from './reloadGate'
 import { platformTenancyGap, type TenancyGap } from './tenant'
 import { scanAttribution, type BuildFindings, type ScanAttribution } from './findings'
@@ -842,7 +843,7 @@ function buildState(status?: string): BuildState {
  * build and has no per-version aggregate, so this is the honest cost of a
  * version-level answer.
  */
-type LoadedBuildFindings = Omit<BuildFindings, 'packages'> & { packages: Package[] }
+export type LoadedBuildFindings = Omit<BuildFindings, 'packages'> & { packages: Package[] }
 
 export function packageInventoryFromFindings(
   findings?: LoadedBuildFindings,
@@ -866,9 +867,14 @@ export function useVersionFindings(
   const [inventoryFailure, setInventoryFailure] = useState<string | null>(null)
   const progressIdentity = useRef(identity)
   progressIdentity.current = identity
+  // Set by an explicit refresh and consumed by the load it triggers, so a
+  // refresh queued behind an in-flight read still bypasses the cache when it runs.
+  const bypassCache = useRef(false)
   const result = useVersionData<LoadedBuildFindings[]>(
     [],
     async (token, tenant) => {
+      const force = bypassCache.current
+      bypassCache.current = false
       if (progressIdentity.current === identity) {
         setProgress({ packages: 0 })
         setInventoryFailure(null)
@@ -879,6 +885,7 @@ export function useVersionFindings(
           (next) => {
             if (progressIdentity.current === identity) setProgress(next)
           },
+          { force },
         )
       } catch (err: unknown) {
         if (progressIdentity.current === identity && !(err instanceof ApiError && err.status === 401)) {
@@ -889,11 +896,16 @@ export function useVersionFindings(
     },
     identity,
   )
+  const { reload } = result
+  const refresh = useCallback(() => {
+    bypassCache.current = true
+    reload()
+  }, [reload])
   return {
     data: result.data,
     loading: result.loading || result.refreshing,
     failure: inventoryFailure ?? result.failure,
-    reload: result.reload,
+    reload: refresh,
     progress,
   }
 }
@@ -905,9 +917,15 @@ export async function loadVersionFindings(
   fingerprint: string,
   builds: { id: string; platform: string; component: string }[],
   onProgress?: (progress: InventoryProgress) => void,
+  options: { force?: boolean } = {},
 ): Promise<LoadedBuildFindings[]> {
   const progress = { packages: 0 }
   return Promise.all(builds.map(async (build) => {
+    const cacheKey = inventoryCacheKey(tenant, bucket, fingerprint, build.id)
+    if (!options.force) {
+      const cached = readCachedInventory(cacheKey)
+      if (cached) return cached
+    }
     let received = 0
     let loaded: LoadedBuildFindings
     try {
@@ -939,6 +957,7 @@ export async function loadVersionFindings(
         unparseable: true,
       }
     }
+    writeCachedInventory(cacheKey, loaded)
     return loaded
   }))
 }
