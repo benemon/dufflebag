@@ -73,7 +73,10 @@ regardless of the format used at upload.
 Each SBOM is parsed during upload in the transaction that stores it. The
 build packages response contains one row per `(name, version, purl)` and
 identifies the SBOMs that supplied the row. The console shows the same
-inventory on the build screen's **Packages** tab.
+inventory on the build screen's **Packages** tab. It reads the inventory once
+per visit and again when you select **Refresh**. Large images can take a minute
+or more, so the card reports how many packages it has read while the request is
+in progress.
 
 A document that cannot be parsed remains stored with an explicit unparseable
 status. The packages response reports that status instead of returning an

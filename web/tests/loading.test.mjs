@@ -57,7 +57,7 @@ test('skeleton rows hold four lines and expose their exact loading sentence once
 test('every settled listing wait uses skeleton rows with its exact screen-reader copy', () => {
   for (const [path, sentences] of skeletonSites) {
     const contents = source(path)
-    assert.doesNotMatch(contents, /<Content component="p">Loading /, path)
+    assert.doesNotMatch(contents, /<Content component="p"[^>]*>\s*Loading /, path)
     for (const sentence of sentences) {
       assert.ok(
         contents.includes(`<SkeletonRows screenreaderText="${sentence}" />`),

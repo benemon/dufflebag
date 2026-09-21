@@ -7,6 +7,7 @@ import {
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction } from '../auth/permissions'
+import { createReloadGate } from './reloadGate'
 import { platformTenancyGap } from './tenant'
 import { isComplete, versionState, type Version } from './versions'
 
@@ -70,7 +71,7 @@ export type Bucket = {
  * client (docs/architecture.md: wire models are never domain models).
  */
 
-export function useBuckets(identityKey = '', revision = 0) {
+export function useBuckets(identityKey = '') {
   const {
     state, self, selectedOrganization, selectedProject, signOut,
     organizations, organizationsLoading, organizationFailure,
@@ -86,6 +87,14 @@ export function useBuckets(identityKey = '', revision = 0) {
   const [pinsFailure, setPinsFailure] = useState<string | null>(null)
   const previousBucketsIdentity = useRef<string | undefined>(undefined)
   const previousPinsIdentity = useRef<string | undefined>(undefined)
+  const [revision, setRevision] = useState(0)
+  const bucketsGate = useRef(createReloadGate())
+  const pinsGate = useRef(createReloadGate())
+  const reload = useCallback(() => {
+    const buckets = bucketsGate.current.request()
+    const pins = pinsGate.current.request()
+    if (buckets || pins) setRevision((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     // The organisation comes from the session's selection — for a platform
@@ -97,6 +106,7 @@ export function useBuckets(identityKey = '', revision = 0) {
       setBucketsRefreshing(false)
       setFailure(null)
       previousBucketsIdentity.current = undefined
+      bucketsGate.current = createReloadGate()
       return
     }
     let cancelled = false
@@ -104,6 +114,13 @@ export function useBuckets(identityKey = '', revision = 0) {
     const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
     const identityChanged = previousBucketsIdentity.current !== identity
     previousBucketsIdentity.current = identity
+    if (identityChanged) bucketsGate.current = createReloadGate()
+    const gate = bucketsGate.current
+    const run = gate.begin()
+    if (run === null) {
+      gate.request()
+      return
+    }
     if (identityChanged) {
       setBuckets([])
       setLoading(true)
@@ -134,10 +151,12 @@ export function useBuckets(identityKey = '', revision = 0) {
       })
       .finally(() => {
         settled = true
+        const followUp = gate.settle(run)
         if (!cancelled) {
           if (identityChanged) setLoading(false)
           else setBucketsRefreshing(false)
         }
+        if (followUp && bucketsGate.current === gate) setRevision((current) => current + 1)
       })
     return () => {
       cancelled = true
@@ -156,6 +175,7 @@ export function useBuckets(identityKey = '', revision = 0) {
       setPinsRefreshing(false)
       setPinsFailure(null)
       previousPinsIdentity.current = undefined
+      pinsGate.current = createReloadGate()
       return
     }
     let cancelled = false
@@ -163,6 +183,13 @@ export function useBuckets(identityKey = '', revision = 0) {
     const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
     const identityChanged = previousPinsIdentity.current !== identity
     previousPinsIdentity.current = identity
+    if (identityChanged) pinsGate.current = createReloadGate()
+    const gate = pinsGate.current
+    const run = gate.begin()
+    if (run === null) {
+      gate.request()
+      return
+    }
     if (identityChanged) {
       setPins([])
       setPinsLoading(true)
@@ -189,10 +216,12 @@ export function useBuckets(identityKey = '', revision = 0) {
       })
       .finally(() => {
         settled = true
+        const followUp = gate.settle(run)
         if (!cancelled) {
           if (identityChanged) setPinsLoading(false)
           else setPinsRefreshing(false)
         }
+        if (followUp && pinsGate.current === gate) setRevision((current) => current + 1)
       })
     return () => {
       cancelled = true
@@ -243,6 +272,7 @@ export function useBuckets(identityKey = '', revision = 0) {
     pinsFailure,
     canPin: permitsAction(self?.role ?? null, 'pinBuckets'),
     togglePin,
+    reload,
     gap:
       aboveProjects && !discovering && !discoveryFailure
         ? platformTenancyGap({

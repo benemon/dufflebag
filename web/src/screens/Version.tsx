@@ -4,7 +4,7 @@ import {
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Grid, GridItem, Label, Modal,
-  ModalBody, ModalFooter, ModalHeader, PageSection, Title, ToggleGroup, ToggleGroupItem,
+  ModalBody, ModalFooter, ModalHeader, PageSection, Spinner, Title, ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -27,7 +27,7 @@ import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import {
   buildIsInProgress, useVersion, useVersionFindings, type AncestryChild, type BucketChannel, type Build,
-  type BuildState, type Version as VersionData, type VersionDetail,
+  type BuildState, type InventoryProgress, type Version as VersionData, type VersionDetail,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
 import { VersionSecurityCard } from '../components/VersionSecurity'
@@ -47,7 +47,7 @@ import { FacetRail, knownCount } from './RegistryFacets'
 export function Version() {
   const { bucket = '', fingerprint = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, refreshing, failure, gap, reload } = useVersion(bucket, fingerprint)
+  const { data, loading, refreshing: detailRefreshing, failure, gap, reload } = useVersion(bucket, fingerprint)
   const hot = data?.version.state === 'incomplete' ||
     (data?.version.builds.some(buildIsInProgress) ?? false)
   useAutoRefresh({ hot, onRefresh: reload })
@@ -55,23 +55,34 @@ export function Version() {
   const tenant = state && selectedOrganization && selectedProject
     ? { organizationID: selectedOrganization, projectID: selectedProject }
     : null
-  const { data: findings } = useVersionFindings(
+  const inventory = useVersionFindings(
     bucket,
     fingerprint,
     (data?.version.builds ?? []).map((build) => ({
       id: build.id, platform: build.platform, component: build.component,
     })),
   )
+  // The header's refresh is disabled while either read is in flight: a second
+  // click mid-inventory would only queue a second full drain behind the first.
+  const refreshing = detailRefreshing || inventory.loading
   return (
     <VersionView
       bucket={bucket}
       detail={data}
-      findings={findings}
+      findings={inventory.data}
+      inventoryLoading={inventory.loading}
+      inventoryFailure={inventory.failure}
+      inventoryProgress={inventory.progress}
       loading={loading}
       refreshing={refreshing}
       failure={failure}
       gap={gap}
-      onRefresh={reload}
+      // An inventory read pages through every package, so it happens on entry
+      // and on explicit refresh only; the timer above refreshes detail (duf-vs3f).
+      onRefresh={() => {
+        reload()
+        inventory.reload()
+      }}
       onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onOpenBuild={(build) => navigate(
@@ -131,6 +142,9 @@ export function VersionView({
   detail,
   version: suppliedVersion,
   findings = [],
+  inventoryLoading = false,
+  inventoryFailure = null,
+  inventoryProgress = { packages: 0 },
   loading,
   refreshing = false,
   failure,
@@ -152,6 +166,9 @@ export function VersionView({
   version?: VersionData | null
   /** Per-build inventories, fetched by the container like every other read. */
   findings?: BuildFindings[]
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  inventoryProgress?: InventoryProgress
   loading: boolean
   refreshing?: boolean
   failure: string | null
@@ -286,6 +303,9 @@ export function VersionView({
                     version={version}
                     detail={detail ?? null}
                     findings={findings}
+                    inventoryLoading={inventoryLoading}
+                    inventoryFailure={inventoryFailure}
+                    inventoryProgress={inventoryProgress}
                     callerRole={callerRole}
                     onOpenBuild={onOpenBuild}
                     onOpenVersion={onOpenVersion}
@@ -302,7 +322,13 @@ export function VersionView({
                       {version.builds.length === 0 ? (
                         <Content component="p">No builds have been reported for this version.</Content>
                       ) : (
-                        <BuildTable builds={version.builds} onOpenBuild={onOpenBuild} />
+                        <BuildTable
+                          builds={version.builds}
+                          findings={findings}
+                          inventoryLoading={inventoryLoading}
+                          inventoryFailure={inventoryFailure}
+                          onOpenBuild={onOpenBuild}
+                        />
                       )}
                     </CardBody>
                   </Card>
@@ -605,6 +631,9 @@ export function VersionOverview({
   version,
   detail,
   findings,
+  inventoryLoading = false,
+  inventoryFailure = null,
+  inventoryProgress = { packages: 0 },
   callerRole,
   onOpenBuild,
   onOpenVersion,
@@ -615,6 +644,9 @@ export function VersionOverview({
   version: VersionData
   detail: VersionDetail | null
   findings: BuildFindings[]
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  inventoryProgress?: InventoryProgress
   callerRole: Role | null
   onOpenBuild: (build: string) => void
   onOpenVersion: (bucket: string, fingerprint: string) => void
@@ -625,7 +657,29 @@ export function VersionOverview({
     <Grid hasGutter>
       <GridItem span={12} lg={7} style={{ minWidth: 0 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-          {detail && findings.length > 0 && (
+          {detail && version.builds.length > 0 && (inventoryLoading ? (
+            <Card>
+              <CardTitle>Security</CardTitle>
+              <CardBody>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <Spinner isInline aria-label="Reading package inventory…" />
+                  <Content component="p" aria-live="polite" style={{ margin: 0 }}>
+                    Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
+                    Large images can take a minute or more.
+                  </Content>
+                </div>
+              </CardBody>
+            </Card>
+          ) : inventoryFailure ? (
+            <Card>
+              <CardTitle>Security</CardTitle>
+              <CardBody>
+                <Alert variant="danger" isInline title="Package inventory could not be loaded">
+                  <Content component="p">{inventoryFailure}</Content>
+                </Alert>
+              </CardBody>
+            </Card>
+          ) : findings.length > 0 ? (
             <VersionSecurityCard
               builds={findings}
               onOpenBuild={onOpenBuild}
@@ -633,7 +687,7 @@ export function VersionOverview({
               // channel selects is never reported as unmaintained.
               outOfScanSet={version.channels.length === 0}
             />
-          )}
+          ) : null)}
           {detail && <LineageCard version={version} onOpenVersion={onOpenVersion} />}
         </div>
       </GridItem>
@@ -967,7 +1021,15 @@ function terraformLabel(value: string): string {
   return /^[0-9]/.test(label) ? `v_${label}` : label
 }
 
-export function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBuild: (id: string) => void }) {
+export function BuildTable({
+  builds, findings, inventoryLoading = false, inventoryFailure = null, onOpenBuild,
+}: {
+  builds: Build[]
+  findings?: BuildFindings[]
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  onOpenBuild: (id: string) => void
+}) {
   const [expanded, setExpanded] = useState<string | null>(null)
   return (
     <Table aria-label="Builds" variant="compact">
@@ -1023,7 +1085,14 @@ export function BuildTable({ builds, onOpenBuild }: { builds: Build[]; onOpenBui
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>Packages</DescriptionListTerm>
-                    <DescriptionListDescription>{packageSummary(build)}</DescriptionListDescription>
+                    <DescriptionListDescription>
+                      {packageSummary(
+                        build,
+                        findings?.find((candidate) => candidate.buildID === build.id),
+                        inventoryLoading,
+                        inventoryFailure,
+                      )}
+                    </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
                     <DescriptionListTerm>Run UUID</DescriptionListTerm>
@@ -1069,7 +1138,16 @@ export function pluginSummary(build: Build): string {
     .join(', ') || '—'
 }
 
-export function packageSummary(build: Build): string {
+export function packageSummary(
+  build: Build,
+  findings?: BuildFindings,
+  inventoryLoading = false,
+  inventoryFailure: string | null = null,
+): string {
+  if (inventoryLoading) return 'Reading inventory…'
+  if (inventoryFailure) return '—'
+  if (findings?.unparseable) return 'SBOM unparseable'
+  if (findings) return countLabel(findings.packages.length, 'package')
   switch (build.packageInventory.status) {
     case 'parsed':
       return countLabel(build.packageInventory.packages.length, 'package')
