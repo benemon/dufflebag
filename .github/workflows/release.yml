@@ -80,14 +80,14 @@ jobs:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
-          make image-push-rc IMAGE_TAG="$RELEASE_TAG"
+          make image-push-rc IMAGE_TAG="$RELEASE_TAG" VERSION="$RELEASE_TAG"
       - name: Push release image
         if: ${{ !contains(github.ref_name, '-rc') }}
         env:
           RELEASE_TAG: ${{ github.ref_name }}
         run: |
           case "$RELEASE_TAG" in (*[!A-Za-z0-9._-]*) echo "refusing tag: $RELEASE_TAG"; exit 1;; esac
-          make image-push-release IMAGE_TAG="$RELEASE_TAG"
+          make image-push-release IMAGE_TAG="$RELEASE_TAG" VERSION="$RELEASE_TAG"
       # An RC expires, so its SBOM rides the workflow run rather than a
       # permanent release.
       - name: Attach the SBOM to the run (release candidate)

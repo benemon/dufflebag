@@ -180,8 +180,9 @@ build-ui: ## Build the web console when npm is available
 	fi
 
 .PHONY: docs
-# CHART_VERSION is stamped by CI (0.1.<run number>) so helm clients see
-# upgrades; local builds carry an obvious development version.
+# CHART_VERSION is stamped by pages.yml (Chart.yaml major.minor plus the run
+# number) so helm clients see upgrades; local builds carry an obvious
+# development version.
 CHART_VERSION ?= 0.0.0-dev
 DOCS_SITE_URL ?= https://benemon.github.io/dufflebag
 
