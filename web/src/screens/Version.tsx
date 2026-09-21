@@ -882,8 +882,10 @@ export function platformConsumeSnippet(
           : null
       return [
         show,
+        // az vm create refuses to run without a key or password (verified live).
         `az vm create --resource-group <resource-group> --name <vm-name> ` +
-          `--image ${artifact.externalIdentifier} --location ${artifact.region}`,
+          `--image ${artifact.externalIdentifier} --location ${artifact.region} ` +
+          '--ssh-key-values <ssh-public-key>',
       ].filter(Boolean).join('\n')
     })].join('\n\n')
   }
