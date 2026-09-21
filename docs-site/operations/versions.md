@@ -49,7 +49,8 @@ selected by default.
 - **Azure** builds are fully tethered - the artifact records the image resource
   id and location - so the tab renders `az image show` (or
   `az sig image-version show` for a Compute Gallery version) and `az vm create`
-  commands with resource group and VM name left as placeholders.
+  commands with resource group, VM name and SSH public key left as placeholders;
+  `az vm create` refuses to run without a key or password.
 - **Docker** and **Podman** render `pull` commands for every tag carried by
   the build labels, followed by a digest `image inspect` line. Both tabs
   appear only when a `docker-tag` post-processor tagged the build. An

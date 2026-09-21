@@ -2345,7 +2345,7 @@ test('an Azure managed image uses its resource id in native commands', () => {
     '# images v3\n\n' +
       `az image show --ids ${id}\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
-      `--image ${id} --location uksouth`,
+      `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
 })
 
@@ -2361,7 +2361,7 @@ test('an Azure Compute Gallery image version uses the gallery show command', () 
     '# images v3\n\n' +
       `az sig image-version show --ids ${id}\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
-      `--image ${id} --location uksouth`,
+      `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
 })
 
@@ -2375,7 +2375,7 @@ test('an Azure VHD renders only the VM create command', () => {
     platformConsumeSnippet('azure', 'images', version),
     '# images v3\n\n' +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
-      `--image ${id} --location uksouth`,
+      `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
 })
 
