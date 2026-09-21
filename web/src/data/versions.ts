@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
   ApiError, getBucket, getVersion, listBucketAncestry, listBuildPackages,
@@ -8,6 +8,8 @@ import {
   type ApiChannel, type ApiPackage, type ApiVersion, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { inventoryCacheKey, readCachedInventory, writeCachedInventory } from './inventoryCache'
+import { createReloadGate } from './reloadGate'
 import { platformTenancyGap, type TenancyGap } from './tenant'
 import { scanAttribution, type BuildFindings, type ScanAttribution } from './findings'
 
@@ -191,6 +193,10 @@ export type BuildDetail = {
   sboms: SbomRef[]
 }
 
+export type InventoryProgress = {
+  packages: number
+}
+
 /**
  * Versions of one bucket, projected from the compatibility-plane API.
  *
@@ -198,14 +204,11 @@ export type BuildDetail = {
  * client (docs/architecture.md: wire models are never domain models).
  */
 export function useVersions(bucket: string) {
-  const [revision, setRevision] = useState(0)
-  const result = useVersionData<BucketPage | null>(
+  return useVersionData<BucketPage | null>(
     null,
     (token, tenant) => loadBucketPage(token, tenant, bucket),
     bucket,
-    revision,
   )
-  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** Enforced provisioners are independent so their failure stays local to the Overview row. */
@@ -219,26 +222,20 @@ export function useEnforcedProvisioners(bucket: string) {
 
 /** One version by fingerprint, for the drill-down page. */
 export function useVersion(bucket: string, fingerprint: string) {
-  const [revision, setRevision] = useState(0)
-  const result = useVersionData<VersionDetail | null>(
+  return useVersionData<VersionDetail | null>(
     null,
     (token, tenant) => loadVersionDetail(token, tenant, bucket, fingerprint),
     bucket + '/' + fingerprint,
-    revision,
   )
-  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** One build by id, including its package-inventory status. */
 export function useBuild(bucket: string, fingerprint: string, build: string) {
-  const [revision, setRevision] = useState(0)
-  const result = useVersionData<BuildDetail | null>(
+  return useVersionData<BuildDetail | null>(
     null,
     (token, tenant) => loadBuildDetail(token, tenant, bucket, fingerprint, build),
     bucket + '/' + fingerprint + '/' + build,
-    revision,
   )
-  return { ...result, reload: () => setRevision((current) => current + 1) }
 }
 
 /** Assignment history is fetched only while its channel row is expanded. */
@@ -261,13 +258,13 @@ function useVersionData<T>(
   empty: T,
   load: (token: string, tenant: ApiTenant) => Promise<T>,
   identityKey: string,
-  revision = 0,
 ): {
   data: T
   loading: boolean
   refreshing: boolean
   failure: string | null
   gap: TenancyGap | null
+  reload: () => void
 } {
   const {
     state, selectedOrganization, selectedProject, signOut,
@@ -278,7 +275,12 @@ function useVersionData<T>(
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [failure, setFailure] = useState<string | null>(null)
+  const [revision, setRevision] = useState(0)
   const previousIdentity = useRef<string | undefined>(undefined)
+  const reloadGate = useRef(createReloadGate())
+  const reload = useCallback(() => {
+    if (reloadGate.current.request()) setRevision((current) => current + 1)
+  }, [])
 
   useEffect(() => {
     // Same gate as useBuckets: for a platform session there is no organisation
@@ -290,6 +292,7 @@ function useVersionData<T>(
       setRefreshing(false)
       setFailure(null)
       previousIdentity.current = undefined
+      reloadGate.current = createReloadGate()
       return
     }
     let cancelled = false
@@ -297,6 +300,13 @@ function useVersionData<T>(
     const identity = `${state.token}\u0000${selectedOrganization}\u0000${selectedProject}\u0000${identityKey}`
     const identityChanged = previousIdentity.current !== identity
     previousIdentity.current = identity
+    if (identityChanged) reloadGate.current = createReloadGate()
+    const gate = reloadGate.current
+    const run = gate.begin()
+    if (run === null) {
+      gate.request()
+      return
+    }
     if (identityChanged) {
       setData(empty)
       setLoading(true)
@@ -324,10 +334,14 @@ function useVersionData<T>(
       })
       .finally(() => {
         settled = true
+        const followUp = gate.settle(run)
         if (!cancelled) {
           if (identityChanged) setLoading(false)
           else setRefreshing(false)
         }
+        // A cancelled run still owes its queued follow-up, or a reload requested
+        // while it was in flight would be lost with it.
+        if (followUp && reloadGate.current === gate) setRevision((current) => current + 1)
       })
     return () => {
       cancelled = true
@@ -348,6 +362,7 @@ function useVersionData<T>(
     loading: loading || discovering,
     refreshing,
     failure: failure ?? discoveryFailure,
+    reload,
     gap:
       aboveProjects && !discovering && !discoveryFailure
         ? platformTenancyGap({
@@ -493,10 +508,6 @@ export async function loadVersionDetail(
   const projected = toVersion(version, channels)
   projected.parents = relations.parents.map((parent) => withRelationChannels(parent, related))
   projected.children = relations.children.map((child) => withRelationChannels(child, related))
-  projected.builds = await Promise.all(projected.builds.map(async (build) => ({
-    ...build,
-    packageInventory: await loadPackageInventory(token, tenant, bucket, fingerprint, build.id),
-  })))
   return {
     version: projected,
     channels: channels.map(toBucketChannel),
@@ -568,10 +579,7 @@ export async function loadBuildDetail(
   fingerprint: string,
   buildID: string,
 ): Promise<BuildDetail> {
-  const [version, packageInventory] = await Promise.all([
-    getVersion(token, tenant, bucket, fingerprint),
-    loadPackageInventory(token, tenant, bucket, fingerprint, buildID),
-  ])
+  const version = await getVersion(token, tenant, bucket, fingerprint)
   const projected = toVersion(version, [])
   const build = projected.builds.find((candidate) => candidate.id === buildID)
   if (!build) throw new Error('Build not found.')
@@ -584,30 +592,10 @@ export async function loadBuildDetail(
     : await listSboms(token, tenant, bucket, fingerprint, buildID)
   return {
     version: projected,
-    build: { ...build, packageInventory },
+    build,
     sboms: sboms.map((sbom) => ({
       id: sbom.id ?? '', name: sbom.name ?? '', format: sbom.format ?? '',
     })),
-  }
-}
-
-async function loadPackageInventory(
-  token: string,
-  tenant: ApiTenant,
-  bucket: string,
-  fingerprint: string,
-  build: string,
-): Promise<Build['packageInventory']> {
-  try {
-    const { packages, headers } = await listBuildPackages(token, tenant, bucket, fingerprint, build)
-    const scan = scanAttribution(headers)
-    return { status: 'parsed', packages: packages.map(toPackage), ...(scan ? { scan } : {}) }
-  } catch (err: unknown) {
-    // This is the endpoint's deliberate distinction: 422 means at least one
-    // client-supplied SBOM could not be parsed. Calling that zero packages
-    // would turn an unknown inventory into an inspected-and-empty one.
-    if (err instanceof ApiError && err.status === 422) return { status: 'unparseable' }
-    throw err
   }
 }
 
@@ -855,30 +843,121 @@ function buildState(status?: string): BuildState {
  * build and has no per-version aggregate, so this is the honest cost of a
  * version-level answer.
  */
+export type LoadedBuildFindings = Omit<BuildFindings, 'packages'> & { packages: Package[] }
+
+export function packageInventoryFromFindings(
+  findings?: LoadedBuildFindings,
+): Build['packageInventory'] {
+  if (!findings) return { status: 'not-loaded' }
+  if (findings.unparseable) return { status: 'unparseable' }
+  return {
+    status: 'parsed',
+    packages: findings.packages,
+    ...(findings.scan ? { scan: findings.scan } : {}),
+  }
+}
+
 export function useVersionFindings(
   bucket: string, fingerprint: string,
   builds: { id: string; platform: string; component: string }[],
 ) {
   const key = builds.map((build) => build.id).join(',')
-  return useVersionData<BuildFindings[]>(
+  const identity = `${bucket}/${fingerprint}/${key}`
+  const [progress, setProgress] = useState<InventoryProgress>({ packages: 0 })
+  const [inventoryFailure, setInventoryFailure] = useState<string | null>(null)
+  const progressIdentity = useRef(identity)
+  progressIdentity.current = identity
+  // Set by an explicit refresh and consumed by the load it triggers, so a
+  // refresh queued behind an in-flight read still bypasses the cache when it runs.
+  const bypassCache = useRef(false)
+  const result = useVersionData<LoadedBuildFindings[]>(
     [],
-    async (token, tenant) =>
-      Promise.all(
-        builds.map(async (build) => {
-          const { packages, headers } = await listBuildPackages(
-            token, tenant, bucket, fingerprint, build.id,
-          )
-          const scan = scanAttribution(headers)
-          return {
-            buildID: build.id,
-            platform: build.platform || 'unknown',
-            component: build.component,
-            packages: packages.map(toPackage),
-            scanned: packages.length,
-            ...(scan ? { scan } : {}),
-          }
-        }),
-      ),
-    `${bucket}/${fingerprint}/${key}`,
+    async (token, tenant) => {
+      const force = bypassCache.current
+      bypassCache.current = false
+      if (progressIdentity.current === identity) {
+        setProgress({ packages: 0 })
+        setInventoryFailure(null)
+      }
+      try {
+        return await loadVersionFindings(
+          token, tenant, bucket, fingerprint, builds,
+          (next) => {
+            if (progressIdentity.current === identity) setProgress(next)
+          },
+          { force },
+        )
+      } catch (err: unknown) {
+        if (progressIdentity.current === identity && !(err instanceof ApiError && err.status === 401)) {
+          setInventoryFailure(err instanceof Error ? err.message : 'Could not load package inventory.')
+        }
+        throw err
+      }
+    },
+    identity,
   )
+  const { reload } = result
+  const refresh = useCallback(() => {
+    bypassCache.current = true
+    reload()
+  }, [reload])
+  return {
+    data: result.data,
+    loading: result.loading || result.refreshing,
+    failure: inventoryFailure ?? result.failure,
+    reload: refresh,
+    progress,
+  }
+}
+
+export async function loadVersionFindings(
+  token: string,
+  tenant: ApiTenant,
+  bucket: string,
+  fingerprint: string,
+  builds: { id: string; platform: string; component: string }[],
+  onProgress?: (progress: InventoryProgress) => void,
+  options: { force?: boolean } = {},
+): Promise<LoadedBuildFindings[]> {
+  const progress = { packages: 0 }
+  return Promise.all(builds.map(async (build) => {
+    const cacheKey = inventoryCacheKey(tenant, bucket, fingerprint, build.id)
+    if (!options.force) {
+      const cached = readCachedInventory(cacheKey)
+      if (cached) return cached
+    }
+    let received = 0
+    let loaded: LoadedBuildFindings
+    try {
+      const { packages, headers } = await listBuildPackages(
+        token, tenant, bucket, fingerprint, build.id,
+        (next) => {
+          progress.packages += next.packages - received
+          received = next.packages
+          onProgress?.({ ...progress })
+        },
+      )
+      const scan = scanAttribution(headers)
+      loaded = {
+        buildID: build.id,
+        platform: build.platform || 'unknown',
+        component: build.component,
+        packages: packages.map(toPackage),
+        scanned: packages.length,
+        ...(scan ? { scan } : {}),
+      }
+    } catch (err: unknown) {
+      if (!(err instanceof ApiError) || err.status !== 422) throw err
+      loaded = {
+        buildID: build.id,
+        platform: build.platform || 'unknown',
+        component: build.component,
+        packages: [],
+        scanned: 0,
+        unparseable: true,
+      }
+    }
+    writeCachedInventory(cacheKey, loaded)
+    return loaded
+  }))
 }

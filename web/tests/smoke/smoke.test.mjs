@@ -1593,6 +1593,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     const { build: brokenBuild } = await api(builderToken, 'POST', completedBuildsPath, {
       component_type: 'docker.broken', packer_run_uuid: 'smoke-run-broken', artifacts: [],
     })
+    const { build: azureBuild } = await api(builderToken, 'POST', completedBuildsPath, {
+      component_type: 'azure.smoke', packer_run_uuid: 'smoke-run-azure', artifacts: [],
+    })
 
     const packerMetadata = {
       packer: {
@@ -1635,6 +1638,15 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
     await api(builderToken, 'PATCH', `${completedBuildsPath}/${brokenBuild.id}`, {
       status: 'BUILD_DONE', platform: 'docker', artifacts: [], metadata: packerMetadata,
+    })
+    await api(builderToken, 'PATCH', `${completedBuildsPath}/${azureBuild.id}`, {
+      status: 'BUILD_DONE', platform: 'azure',
+      artifacts: [{
+        external_identifier: '/subscriptions/00000000-0000-0000-0000-000000000000/' +
+          'resourceGroups/rg-smoke/providers/Microsoft.Compute/images/smoke-azure',
+        region: 'uksouth',
+      }],
+      metadata: packerMetadata,
     })
 
     // A second version left exactly as Packer leaves an unfinished run.
@@ -1734,7 +1746,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('v1')
     await toggleRow('v1')
     await waitForText('smoke-done')
-    await waitForText('3 builds · 1 artifact')
+    await waitForText('4 builds · 2 artifacts')
     await waitForText('Parent status')
     await waitForText('smoke-base v1')
     await waitForText('newest')
@@ -1749,7 +1761,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(await facetHeading('Version facets'), 'This version')
     assert.deepEqual(await facetItems('Version facets'), [
       { label: 'Overview', count: '' },
-      { label: 'Builds', count: '3' },
+      { label: 'Builds', count: '4' },
     ])
     // The lineage card links the parent as "bucket vN" (duf-dus4); the
     // childless side is stated as "None." rather than omitted.
@@ -1758,10 +1770,15 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Consume this version')
     await waitForText('data "hcp_packer_version" "smoke_images"')
     await waitForText('version_fingerprint = "smoke-done"')
+    await waitForText('By build')
+    await waitForText('azure.smoke')
+    await clickByText('button', 'Azure')
+    await waitForText('az image show --ids /subscriptions/00000000')
     await waitForText('Operations')
     await waitForText('resource "hcp_packer_channel_assignment" "production"')
     await clickFacet('Version facets', 'Builds')
     await waitForText('docker.smoke')
+    await waitForText('azure.smoke')
     await waitForText('Packer runner OS')
     await waitForText('linux')
     await waitForText('amd64')
@@ -1796,6 +1813,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // masking, and the Artifacts facet's corrected first-column label.
     await clickByText('button', 'docker.smoke')
     assert.equal(await facetHeading('Build facets'), 'This build')
+    // The build renders before its inventory is read (duf-vs3f); the Packages
+    // count is unknown until that read lands.
+    await until('the package count to land in the build rail', async () =>
+      (await facetItems('Build facets')).some((facet) => facet.label === 'Packages' && facet.count === '1'))
     assert.deepEqual(await facetItems('Build facets'), [
       { label: 'Overview', count: '' },
       { label: 'Artifacts', count: '1' },

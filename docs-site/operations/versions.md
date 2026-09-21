@@ -24,6 +24,12 @@ A version shows its builds, artifacts, findings and ancestry. Its operations
 card can promote the version to a channel, revoke it immediately or on a
 schedule, restore it, or delete it.
 
+The Security card reads the package inventory once per sign-in and keeps it
+for the session: opening a build and returning, or revisiting the version,
+reuses the read. **Refresh** re-reads it, which is how a rescan's findings
+appear. Large images can take a minute or more; the card reports the number of
+packages read while the version details, lineage and builds remain available.
+
 ![dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
 
 ## Consume this version
@@ -40,6 +46,11 @@ selected by default.
 - **AWS** builds are fully tethered - the artifact records the AMI id and
   region - so the tab renders runnable `aws ec2 describe-images` and
   `aws ec2 run-instances` commands.
+- **Azure** builds are fully tethered - the artifact records the image resource
+  id and location - so the tab renders `az image show` (or
+  `az sig image-version show` for a Compute Gallery version) and `az vm create`
+  commands with resource group, VM name and SSH public key left as placeholders;
+  `az vm create` refuses to run without a key or password.
 - **Docker** and **Podman** render `pull` commands for every tag carried by
   the build labels, followed by a digest `image inspect` line. Both tabs
   appear only when a `docker-tag` post-processor tagged the build. An

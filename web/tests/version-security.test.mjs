@@ -101,6 +101,22 @@ test('an unscanned version says so rather than reporting zero', () => {
   assert.doesNotMatch(html, /No known findings/)
 })
 
+test('an unparseable build is named and excluded from the version rollup', () => {
+  const html = render({
+    builds: [
+      withLibcurl('parsed', 'docker'),
+      {
+        buildID: 'broken', platform: 'azure', component: 'azure.image',
+        scanned: 0, packages: [], unparseable: true,
+      },
+    ],
+  })
+  assert.match(html, /1 finding across 1 package/)
+  assert.match(html, /azure/)
+  assert.match(html, /SBOM unparseable/)
+  assert.doesNotMatch(html, /2 findings/)
+})
+
 // The bug this card was moved to fix: a version carrying a channel was
 // reported as no longer maintained because the Build screen's projection did
 // not populate channels.

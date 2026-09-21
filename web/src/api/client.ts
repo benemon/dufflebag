@@ -381,6 +381,7 @@ export async function listBuildPackages(
   bucket: string,
   fingerprint: string,
   build: string,
+  onPage?: (received: { packages: number }) => void,
 ): Promise<{ packages: ApiPackage[]; headers: Headers }> {
   const packages: ApiPackage[] = []
   let headers = new Headers()
@@ -402,6 +403,7 @@ export async function listBuildPackages(
     // so the first page's headers stand for the inventory.
     if (!next) headers = response.headers
     packages.push(...(response.body?.packages ?? []))
+    onPage?.({ packages: packages.length })
     next = response.body?.pagination?.next_page_token ?? ''
   } while (next)
   return { packages, headers }
