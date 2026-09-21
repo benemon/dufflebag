@@ -48,9 +48,8 @@ const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions wi
 export function Buckets() {
   const location = useLocation()
   const navigate = useNavigate()
-  const [refresh, setRefresh] = useState(0)
-  const bucketData = useBuckets(location.key, refresh)
-  const reload = () => setRefresh((current) => current + 1)
+  const bucketData = useBuckets(location.key)
+  const { reload } = bucketData
   // An empty registry is the awaiting-change state: the first publish must
   // appear without a reload, exactly as on the masthead picker.
   const hot = (!bucketData.loading && !bucketData.failure && bucketData.buckets.length === 0) ||
@@ -82,7 +81,7 @@ export function Buckets() {
           // The carried selection must not outlive its bucket, whichever
           // surface deleted it.
           if (selectedBucket?.name === bucket) selectBucket(null)
-          setRefresh((current) => current + 1)
+          reload()
         } catch (err: unknown) {
           signOutIfUnauthorized(err, signOut)
           throw err

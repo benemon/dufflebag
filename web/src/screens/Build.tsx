@@ -4,7 +4,7 @@ import {
   CodeBlockCode, Content, DataList, DataListCell, DataListItem, DataListItemCells,
   DataListItemRow, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, FormSelect, FormSelectOption, Label, PageSection, Pagination,
-  TextInput, Toolbar, ToolbarContent, ToolbarItem, Truncate,
+  Spinner, TextInput, Toolbar, ToolbarContent, ToolbarItem, Truncate,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
@@ -18,7 +18,8 @@ import { downloadSbom, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
 import {
-  buildIsInProgress, useBuild, type Build, type BuildDetail, type Package, type SbomRef,
+  buildIsInProgress, packageInventoryFromFindings, useBuild, useVersionFindings,
+  type Build, type BuildDetail, type InventoryProgress, type Package, type SbomRef,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
@@ -37,8 +38,22 @@ const darkCodeStyle: CSSProperties = {
 export function Build() {
   const { bucket = '', fingerprint = '', build = '' } = useParams()
   const navigate = useNavigate()
-  const { data, loading, refreshing, failure, gap, reload } = useBuild(bucket, fingerprint, build)
-  useAutoRefresh({ hot: data ? buildIsInProgress(data.build) : false, onRefresh: reload })
+  const { data, loading, refreshing: detailRefreshing, failure, gap, reload } =
+    useBuild(bucket, fingerprint, build)
+  const buildInProgress = data ? buildIsInProgress(data.build) : false
+  useAutoRefresh({ hot: buildInProgress, onRefresh: reload })
+  const inventoryBuilds = data
+    ? (buildInProgress ? [] : [data.build])
+    : []
+  const inventory = useVersionFindings(bucket, fingerprint, inventoryBuilds)
+  const detail = data ? {
+    ...data,
+    build: {
+      ...data.build,
+      packageInventory: packageInventoryFromFindings(inventory.data[0]),
+    },
+  } : null
+  const refreshing = detailRefreshing || inventory.loading
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const fetchSbom = async (sbom: SbomRef): Promise<ArrayBuffer> => {
     if (!state || !selectedOrganization || !selectedProject) {
@@ -62,7 +77,10 @@ export function Build() {
   return (
     <BuildView
       bucket={bucket}
-      detail={data}
+      detail={detail}
+      inventoryLoading={inventory.loading}
+      inventoryFailure={inventory.failure}
+      inventoryProgress={inventory.progress}
       loading={loading}
       refreshing={refreshing}
       failure={failure}
@@ -71,7 +89,10 @@ export function Build() {
       onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onBackToVersion={() => navigate(versionPath)}
-      onRefresh={reload}
+      onRefresh={() => {
+        reload()
+        inventory.reload()
+      }}
       fetchSbom={fetchSbom}
     />
   )
@@ -80,6 +101,9 @@ export function Build() {
 export function BuildView({
   bucket,
   detail,
+  inventoryLoading = false,
+  inventoryFailure = null,
+  inventoryProgress = { packages: 0 },
   loading,
   refreshing = false,
   failure,
@@ -93,6 +117,9 @@ export function BuildView({
 }: {
   bucket: string
   detail: BuildDetail | null
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  inventoryProgress?: InventoryProgress
   loading: boolean
   refreshing?: boolean
   failure: string | null
@@ -127,7 +154,11 @@ export function BuildView({
           </span>
         ) : null}
         description={build
-          ? `${countLabel(build.artifacts.length, 'artifact')} · ${packageSummary(build)}`
+          ? `${countLabel(build.artifacts.length, 'artifact')} · ${
+            inventoryLoading
+              ? 'reading packages…'
+              : inventoryFailure ? 'packages unavailable' : packageSummary(build)
+          }`
           : null}
       />
 
@@ -171,8 +202,15 @@ export function BuildView({
                 content: <ArtifactsCard build={build} />,
               },
               {
-                key: 'packages', label: 'Packages', count: packageFacetCount(build),
-                content: <PackagesCard build={build} />,
+                key: 'packages', label: 'Packages', count: packageFacetCount(build, inventoryLoading),
+                content: (
+                  <PackagesCard
+                    build={build}
+                    inventoryLoading={inventoryLoading}
+                    inventoryFailure={inventoryFailure}
+                    inventoryProgress={inventoryProgress}
+                  />
+                ),
               },
             ]}
           />
@@ -334,7 +372,17 @@ export function ArtifactsCard({ build }: { build: Build }) {
   )
 }
 
-export function PackagesCard({ build }: { build: Build }) {
+export function PackagesCard({
+  build,
+  inventoryLoading = false,
+  inventoryFailure = null,
+  inventoryProgress = { packages: 0 },
+}: {
+  build: Build
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  inventoryProgress?: InventoryProgress
+}) {
   const [query, setQuery] = useState('')
   // Keyed by purl: the identity the findings themselves are keyed by.
   const [expanded, setExpanded] = useState<string | null>(null)
@@ -342,6 +390,34 @@ export function PackagesCard({ build }: { build: Build }) {
   const [findingFilter, setFindingFilter] = useState('')
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
+  if (inventoryLoading) {
+    return (
+      <Card>
+        <CardTitle>Packages</CardTitle>
+        <CardBody>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner isInline aria-label="Reading package inventory…" />
+            <Content component="p" aria-live="polite" style={{ margin: 0 }}>
+              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
+              Large images can take a minute or more.
+            </Content>
+          </div>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (inventoryFailure) {
+    return (
+      <Card>
+        <CardTitle>Packages</CardTitle>
+        <CardBody>
+          <Alert variant="danger" isInline title="Package inventory could not be loaded">
+            <Content component="p">{inventoryFailure}</Content>
+          </Alert>
+        </CardBody>
+      </Card>
+    )
+  }
   if (build.packageInventory.status === 'unparseable') {
     return (
       <Card>
@@ -540,8 +616,8 @@ function sbomNames(pkg: Package): string {
   return pkg.sboms.map((sbom) => sbom.name || sbom.id || sbom.format).filter(Boolean).join(', ') || '—'
 }
 
-function packageFacetCount(build: Build): FacetCount {
-  return build.packageInventory.status === 'parsed'
+function packageFacetCount(build: Build, inventoryLoading = false): FacetCount {
+  return !inventoryLoading && build.packageInventory.status === 'parsed'
     ? knownCount(build.packageInventory.packages.length)
     : { status: 'unknown' }
 }
