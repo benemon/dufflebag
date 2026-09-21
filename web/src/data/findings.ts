@@ -201,6 +201,8 @@ export type BuildFindings = {
   scan?: ScanAttribution
   /** Packages examined, for a build that has findings-free coverage to report. */
   scanned: number
+  /** The build's SBOM could not be parsed, so its inventory is unknown. */
+  unparseable?: true
 }
 
 export type BuildRollup = {

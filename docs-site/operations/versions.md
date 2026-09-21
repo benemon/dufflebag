@@ -24,6 +24,12 @@ A version shows its builds, artifacts, findings and ancestry. Its operations
 card can promote the version to a channel, revoke it immediately or on a
 schedule, restore it, or delete it.
 
+The Security card reads the package inventory once per sign-in and keeps it
+for the session: opening a build and returning, or revisiting the version,
+reuses the read. **Refresh** re-reads it, which is how a rescan's findings
+appear. Large images can take a minute or more; the card reports the number of
+packages read while the version details, lineage and builds remain available.
+
 ![dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
 
 ## Consume this version

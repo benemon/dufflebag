@@ -1796,6 +1796,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // masking, and the Artifacts facet's corrected first-column label.
     await clickByText('button', 'docker.smoke')
     assert.equal(await facetHeading('Build facets'), 'This build')
+    // The build renders before its inventory is read (duf-vs3f); the Packages
+    // count is unknown until that read lands.
+    await until('the package count to land in the build rail', async () =>
+      (await facetItems('Build facets')).some((facet) => facet.label === 'Packages' && facet.count === '1'))
     assert.deepEqual(await facetItems('Build facets'), [
       { label: 'Overview', count: '' },
       { label: 'Artifacts', count: '1' },

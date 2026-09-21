@@ -72,12 +72,19 @@ test('registry refresh indicators never replace settled data with skeletons', ()
 
 test('MUTATION_BUILD_REFRESH_BINDING keeps Build wired to its live quiet reload', () => {
   const source = readFileSync(new URL('../src/screens/Build.tsx', import.meta.url), 'utf8')
-  assert.match(source, /const \{ data, loading, refreshing, failure, gap, reload \} = useBuild\(/)
-  assert.match(source, /<BuildView[\s\S]*?onRefresh=\{reload\}/)
+  assert.match(
+    source,
+    /const \{ data, loading, refreshing: detailRefreshing, failure, gap, reload \} =\s+useBuild\(/,
+  )
+  assert.match(source, /const refreshing = detailRefreshing \|\| inventory\.loading/)
+  assert.match(
+    source,
+    /<BuildView[\s\S]*?onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+  )
   assert.match(source, /<ScreenHeader[\s\S]*?onRefresh=\{onRefresh\}/)
 })
 
-test('MUTATION_MANUAL_QUIET keeps manual registry refreshes on revision reloads', () => {
+test('MUTATION_MANUAL_QUIET keeps manual registry refreshes on the shared reload gate', () => {
   const picker = readFileSync(new URL('../src/data/bucketPicker.ts', import.meta.url), 'utf8')
   const versions = readFileSync(new URL('../src/data/versions.ts', import.meta.url), 'utf8')
   assert.match(picker, /export function useBucketPicker\(/)
@@ -85,10 +92,15 @@ test('MUTATION_MANUAL_QUIET keeps manual registry refreshes on revision reloads'
   assert.match(picker, /listPins\(token, tenant\)/)
   assert.doesNotMatch(picker, /listVersions|listChannels/)
   for (const hook of ['useVersions', 'useVersion', 'useBuild']) {
+    const body = versions.match(new RegExp(`export function ${hook}\\([\\s\\S]*?\\n\\}`))?.[0] ?? ''
     assert.match(
-      versions,
-      new RegExp(`export function ${hook}\\([\\s\\S]*?setRevision\\(\\(current\\) => current \\+ 1\\)`),
-      `${hook}: revision reload`,
+      body,
+      /return useVersionData</,
+      `${hook}: returns useVersionData's gate-backed reload`,
     )
+    assert.doesNotMatch(body, /setRevision/, `${hook}: no ungated revision reload`)
   }
+  assert.match(versions, /const reloadGate = useRef\(createReloadGate\(\)\)/)
+  assert.match(versions, /if \(reloadGate\.current\.request\(\)\) setRevision/)
+  assert.match(versions, /failure: failure \?\? discoveryFailure,\s+reload,/)
 })

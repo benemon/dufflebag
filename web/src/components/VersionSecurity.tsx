@@ -32,8 +32,10 @@ export function VersionSecurityCard({
   /** No channel selects this version, so the figures are no longer maintained. */
   outOfScanSet: boolean
 }) {
-  const scanned = builds.filter((build) => build.scan)
-  if (scanned.length === 0) {
+  const parsed = builds.filter((build) => !build.unparseable)
+  const scanned = parsed.filter((build) => build.scan)
+  const unparseable = builds.some((build) => build.unparseable)
+  if (scanned.length === 0 && !unparseable) {
     return (
       <Card>
         <CardTitle>Security</CardTitle>
@@ -46,7 +48,7 @@ export function VersionSecurityCard({
     )
   }
 
-  const summary = versionRollup(builds)
+  const summary = versionRollup(parsed)
   const attribution = scanned[0]?.scan
   // Coverage appears ONLY when something was not examined. With full coverage
   // the counts are noise; with a gap they are the difference between "nothing
@@ -69,21 +71,27 @@ export function VersionSecurityCard({
         </span>
       </CardTitle>
       <CardBody>
-        <div
-          style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
-          data-state={summary.worst ? 'findings' : 'zero-findings'}
-        >
-          <Label color={summary.worst ? SEVERITY_COLOUR[summary.worst] ?? 'grey' : 'grey'}>
-            {summary.worst ?? 'No known findings'}
-          </Label>
-          {summary.worst && (
-            <Content component="p" style={{ margin: 0 }}>
-              {summary.findings} {summary.findings === 1 ? 'finding' : 'findings'} across{' '}
-              {summary.affectedPackages}{' '}
-              {summary.affectedPackages === 1 ? 'package' : 'packages'}
-            </Content>
-          )}
-        </div>
+        {scanned.length === 0 ? (
+          <Content component="p" data-state="never-scanned">
+            Not scanned. No vulnerability source is configured for this deployment.
+          </Content>
+        ) : (
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+            data-state={summary.worst ? 'findings' : 'zero-findings'}
+          >
+            <Label color={summary.worst ? SEVERITY_COLOUR[summary.worst] ?? 'grey' : 'grey'}>
+              {summary.worst ?? 'No known findings'}
+            </Label>
+            {summary.worst && (
+              <Content component="p" style={{ margin: 0 }}>
+                {summary.findings} {summary.findings === 1 ? 'finding' : 'findings'} across{' '}
+                {summary.affectedPackages}{' '}
+                {summary.affectedPackages === 1 ? 'package' : 'packages'}
+              </Content>
+            )}
+          </div>
+        )}
 
         {summary.counts.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', gap: 7, flexWrap: 'wrap' }}>
@@ -115,48 +123,51 @@ export function VersionSecurityCard({
             onSelectDataListItem={(_event, buildID) => onOpenBuild(buildID)}
             style={{ marginTop: 8 }}
           >
-            {summary.builds.map((build) => (
-              <DataListItem
-                key={build.buildID}
-                id={build.buildID}
-                aria-labelledby={`security-build-${build.buildID}`}
-                data-build-link={build.buildID}
-              >
-                <DataListItemRow>
-                  <DataListItemCells dataListCells={[
-                    <DataListCell key="build">
-                      <span id={`security-build-${build.buildID}`} style={{ display: 'block', fontWeight: 500 }}>
-                        {build.platform}
-                      </span>
-                      <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)' }}>
-                        <Truncate content={build.component || build.buildID} />
-                      </code>
-                    </DataListCell>,
-                    <DataListCell key="severity">
-                      <Label color={build.worst ? SEVERITY_COLOUR[build.worst] ?? 'grey' : 'grey'} isCompact>
-                        {/* Never "clean": a build with nothing found is reported as
-                            an absence of findings, not as a verdict of safety. */}
-                        {build.worst ?? 'no findings'}
-                      </Label>
-                    </DataListCell>,
-                    <DataListCell key="counts" alignRight>
-                      {build.counts.length > 0 ? (
-                        build.counts.map(({ severity, count }) => (
-                          <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
-                            {count} {severity}
-                          </Label>
-                        ))
-                      ) : (
-                        <Content component="small">{build.scanned} scanned</Content>
-                      )}
-                    </DataListCell>,
-                    <DataListCell key="open" isIcon alignRight>
-                      <AngleRightIcon aria-hidden />
-                    </DataListCell>,
-                  ]} />
-                </DataListItemRow>
-              </DataListItem>
-            ))}
+            {builds.map((build) => {
+              const rollup = summary.builds.find((candidate) => candidate.buildID === build.buildID)
+              return (
+                <DataListItem
+                  key={build.buildID}
+                  id={build.buildID}
+                  aria-labelledby={`security-build-${build.buildID}`}
+                  data-build-link={build.buildID}
+                >
+                  <DataListItemRow>
+                    <DataListItemCells dataListCells={[
+                      <DataListCell key="build">
+                        <span id={`security-build-${build.buildID}`} style={{ display: 'block', fontWeight: 500 }}>
+                          {build.platform}
+                        </span>
+                        <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                          <Truncate content={build.component || build.buildID} />
+                        </code>
+                      </DataListCell>,
+                      <DataListCell key="severity">
+                        <Label color={rollup?.worst ? SEVERITY_COLOUR[rollup.worst] ?? 'grey' : 'grey'} isCompact>
+                          {/* Never "clean": a build with nothing found is reported as
+                              an absence of findings, not as a verdict of safety. */}
+                          {build.unparseable ? 'SBOM unparseable' : rollup?.worst ?? 'no findings'}
+                        </Label>
+                      </DataListCell>,
+                      <DataListCell key="counts" alignRight>
+                        {rollup && rollup.counts.length > 0 ? (
+                          rollup.counts.map(({ severity, count }) => (
+                            <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
+                              {count} {severity}
+                            </Label>
+                          ))
+                        ) : build.unparseable ? null : (
+                          <Content component="small">{rollup?.scanned ?? 0} scanned</Content>
+                        )}
+                      </DataListCell>,
+                      <DataListCell key="open" isIcon alignRight>
+                        <AngleRightIcon aria-hidden />
+                      </DataListCell>,
+                    ]} />
+                  </DataListItemRow>
+                </DataListItem>
+              )
+            })}
           </DataList>
         </div>
       </CardBody>

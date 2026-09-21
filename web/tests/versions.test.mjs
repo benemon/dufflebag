@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { after, before, test } from 'node:test'
+import { after, before, beforeEach, test } from 'node:test'
 
 import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
@@ -37,6 +37,11 @@ let loadEnforcedProvisioners
 let loadChannelHistory
 let loadVersionDetail
 let loadBuildDetail
+let loadVersionFindings
+let packageInventoryFromFindings
+let createReloadGate
+let clearInventoryCache
+let listBuildPackages
 let terraformConsumeSnippet
 let platformConsumeSnippet
 let availableConsumers
@@ -86,17 +91,22 @@ before(async () => {
   ;({ BuildView, ArtifactsCard, PackagesCard, packerBuildCommand, sbomFileName } =
     await vite.ssrLoadModule('/src/screens/Build.tsx'))
   ;({ loadVersions, loadVersion, loadBucketPage, loadEnforcedProvisioners, loadChannelHistory,
-    loadVersionDetail, loadBuildDetail } =
+    loadVersionDetail, loadBuildDetail, loadVersionFindings, packageInventoryFromFindings } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
+  ;({ createReloadGate } = await vite.ssrLoadModule('/src/data/reloadGate.ts'))
+  ;({ clearInventoryCache } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
-    deleteChannel } = await vite.ssrLoadModule('/src/api/client.ts'))
+    deleteChannel, listBuildPackages } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ CopyableIdentifier } =
     await vite.ssrLoadModule('/src/components/CopyableIdentifier.tsx'))
 })
+
+// The inventory cache outlives components by design; tests must not inherit each other's reads.
+beforeEach(() => { clearInventoryCache() })
 
 after(async () => {
   await vite.close()
@@ -163,10 +173,11 @@ const incompleteVersion = {
   updated_at: '2026-07-31T11:00:00.000Z',
 }
 
-const withFetch = async (routes, run) => {
+const withFetch = async (routes, run, onRequest = () => {}) => {
   const originalFetch = globalThis.fetch
   globalThis.fetch = async (input) => {
     const path = String(input)
+    onRequest(path)
     for (const [suffix, respond] of Object.entries(routes)) {
       if (path.endsWith(suffix)) return respond()
     }
@@ -1216,14 +1227,29 @@ test('the build list renders metadata columns and expandable package detail', ()
   ]) assert.match(markup, new RegExp(expected))
 })
 
+test('the version build list derives package status from its inventory read', () => {
+  const build = {
+    id: 'build-list-id', component: 'docker.ubuntu', state: 'done',
+    runnerOS: 'linux', arch: 'amd64', updated: '', packerVersion: '', plugins: [], artifacts: [],
+    packerRunUUID: '', packageInventory: { status: 'not-loaded' },
+  }
+  const renderBuilds = (extra) => renderToStaticMarkup(React.createElement(BuildTable, {
+    builds: [build], onOpenBuild: () => {}, ...extra,
+  }))
+  assert.match(renderBuilds({
+    findings: [{ buildID: build.id, packages: [{}, {}], scanned: 2 }],
+  }), /2 packages/)
+  assert.match(renderBuilds({
+    findings: [{ buildID: build.id, packages: [], scanned: 0, unparseable: true }],
+  }), /SBOM unparseable/)
+  assert.match(renderBuilds({ inventoryLoading: true }), /Reading inventory…/)
+  assert.match(renderBuilds({ inventoryFailure: 'timed out' }), />—</)
+})
+
 test('build overview reconstructs masked options and the Artifacts facet names Platform', async () => {
   const detail = await withFetch(
     {
       '/versions/fp-complete': () => json({ version: completeVersion }),
-      '/packages?pagination.page_size=100': () => json({
-        packages: [{ name: 'openssl', version: '3.0.11' }],
-        pagination: {},
-      }),
       '/sboms': () => json({ sboms: [
         { id: 'sb-1', name: 'fp-complete', format: 'SPDX' },
       ] }),
@@ -1233,6 +1259,19 @@ test('build overview reconstructs masked options and the Artifacts facet names P
       'fp-complete', completeVersion.builds[0].id,
     ),
   )
+  const [findings] = await withFetch(
+    {
+      '/packages?pagination.page_size=100': () => json({
+        packages: [{ name: 'openssl', version: '3.0.11' }],
+        pagination: {},
+      }),
+    },
+    () => loadVersionFindings(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images',
+      'fp-complete', [detail.build],
+    ),
+  )
+  detail.build.packageInventory = packageInventoryFromFindings(findings)
   assert.equal(detail.build.packageInventory.packages.length, 1)
   assert.equal(
     packerBuildCommand(detail.build),
@@ -1311,6 +1350,66 @@ test('build overview reconstructs masked options and the Artifacts facet names P
   assert.doesNotMatch(bare, /pf-v6-c-card__title[^>]*>SBOM</)
 })
 
+test('build detail stays visible while package inventory reports progress', async () => {
+  const detail = await withFetch(
+    {
+      '/versions/fp-complete': () => json({ version: completeVersion }),
+      '/sboms': () => json({ sboms: [
+        { id: 'sb-1', name: 'fp-complete', format: 'SPDX' },
+      ] }),
+    },
+    () => loadBuildDetail(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images',
+      'fp-complete', completeVersion.builds[0].id,
+    ),
+  )
+  const viewMarkup = renderToStaticMarkup(React.createElement(BuildView, {
+    bucket: 'images', detail, loading: false, failure: null,
+    inventoryLoading: true,
+    inventoryProgress: { packages: 321 },
+    onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
+  }))
+  const packagesMarkup = renderToStaticMarkup(React.createElement(PackagesCard, {
+    build: detail.build,
+    inventoryLoading: true,
+    inventoryProgress: { packages: 321 },
+  }))
+  const markup = viewMarkup + packagesMarkup
+  assert.match(markup, /docker\.ubuntu/)
+  assert.match(markup, />SBOM</)
+  assert.match(markup, /reading packages…/)
+  assert.match(markup, /Reading package inventory… 321 packages read so far\./)
+  assert.match(markup, /Large images can take a minute or more\./)
+  assert.doesNotMatch(markup, /pf-v6-c-skeleton/)
+})
+
+test('build inventory failure keeps detail visible and renders the server message verbatim', async () => {
+  const detail = await withFetch(
+    {
+      '/versions/fp-complete': () => json({ version: completeVersion }),
+      '/sboms': () => json({ sboms: [] }),
+    },
+    () => loadBuildDetail(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images',
+      'fp-complete', completeVersion.builds[0].id,
+    ),
+  )
+  const viewMarkup = renderToStaticMarkup(React.createElement(BuildView, {
+    bucket: 'images', detail, loading: false, failure: null,
+    inventoryFailure: 'upstream inventory timed out',
+    onBackToRegistry: () => {}, onBackToBucket: () => {}, onBackToVersion: () => {},
+  }))
+  const packagesMarkup = renderToStaticMarkup(React.createElement(PackagesCard, {
+    build: detail.build,
+    inventoryFailure: 'upstream inventory timed out',
+  }))
+  const markup = viewMarkup + packagesMarkup
+  assert.match(markup, /docker\.ubuntu/)
+  assert.match(markup, /packages unavailable/)
+  assert.match(markup, /Package inventory could not be loaded/)
+  assert.match(markup, /upstream inventory timed out/)
+})
+
 test('Packer runner environment adds only reported option rows', async () => {
   const load = (metadata, over = {}) => {
     const wire = {
@@ -1373,17 +1472,29 @@ test('Packer runner environment adds only reported option rows', async () => {
 })
 
 test('an unparseable SBOM is not rendered as a zero package inventory', async () => {
-  const load = (packageResponse) => withFetch(
-    {
-      '/versions/fp-complete': () => json({ version: completeVersion }),
-      '/packages?pagination.page_size=100': packageResponse,
-      '/sboms': () => json({ sboms: [] }),
-    },
-    () => loadBuildDetail(
-      'token', { organizationID: 'org', projectID: 'project' }, 'images',
-      'fp-complete', completeVersion.builds[0].id,
-    ),
-  )
+  const load = async (packageResponse) => {
+    const detail = await withFetch(
+      {
+        '/versions/fp-complete': () => json({ version: completeVersion }),
+        '/sboms': () => json({ sboms: [] }),
+      },
+      () => loadBuildDetail(
+        'token', { organizationID: 'org', projectID: 'project' }, 'images',
+        'fp-complete', completeVersion.builds[0].id,
+      ),
+    )
+    const [findings] = await withFetch(
+      { '/packages?pagination.page_size=100': packageResponse },
+      () => loadVersionFindings(
+        'token', { organizationID: 'org', projectID: 'project' }, 'images',
+        'fp-complete', [detail.build],
+      ),
+    )
+    return {
+      ...detail,
+      build: { ...detail.build, packageInventory: packageInventoryFromFindings(findings) },
+    }
+  }
   const unparseable = await load(() => json({
     message: 'package inventory is unparseable for SBOMs ["broken-report"]',
   }, 422))
@@ -1394,6 +1505,8 @@ test('an unparseable SBOM is not rendered as a zero package inventory', async ()
   assert.match(unparseableMarkup, /SBOM unparseable/)
   assert.doesNotMatch(unparseableMarkup, /0 packages/)
 
+  // Two server answers for one build: the second must not be the cached first.
+  clearInventoryCache()
   const empty = await load(() => json({ packages: [], pagination: {} }))
   const emptyMarkup = renderToStaticMarkup(React.createElement(BuildView, {
     bucket: 'images', detail: empty, loading: false, failure: null,
@@ -1401,6 +1514,15 @@ test('an unparseable SBOM is not rendered as a zero package inventory', async ()
   }))
   assert.match(emptyMarkup, /0 packages/)
   assert.doesNotMatch(emptyMarkup, /SBOM unparseable/)
+})
+
+test('the Build inventory projection preserves an unparseable inventory', () => {
+  const findings = {
+    buildID: 'broken', platform: 'docker', component: 'docker.ubuntu',
+    packages: [], scanned: 0, unparseable: true,
+  }
+  assert.deepEqual(packageInventoryFromFindings(findings), { status: 'unparseable' })
+  assert.deepEqual(packageInventoryFromFindings(), { status: 'not-loaded' })
 })
 
 test('a build load failure renders as a failure rather than an empty overview', () => {
@@ -1413,15 +1535,11 @@ test('a build load failure renders as a failure rather than an empty overview', 
   assert.doesNotMatch(markup, /Build options/)
 })
 
-test('package count follows every page rather than treating the first page as the total', async () => {
+test('build detail defers inventory and its separate inventory read follows every page', async () => {
+  const detailRequests = []
   const detail = await withFetch(
     {
-      '/packages?pagination.page_size=100&pagination.next_page_token=next': () => json({
-        packages: [{ name: 'zlib' }], pagination: {},
-      }),
-      '/packages?pagination.page_size=100': () => json({
-        packages: [{ name: 'openssl' }], pagination: { next_page_token: 'next' },
-      }),
+      '/packages?pagination.page_size=100': () => json({ packages: [], pagination: {} }),
       '/versions/fp-complete': () => json({ version: completeVersion }),
       '/sboms': () => json({ sboms: [] }),
     },
@@ -1429,9 +1547,121 @@ test('package count follows every page rather than treating the first page as th
       'token', { organizationID: 'org', projectID: 'project' }, 'images',
       'fp-complete', completeVersion.builds[0].id,
     ),
+    (path) => detailRequests.push(path),
   )
-  assert.equal(detail.build.packageInventory.status, 'parsed')
-  assert.deepEqual(detail.build.packageInventory.packages.map(({ name }) => name), ['openssl', 'zlib'])
+  assert.equal(
+    detailRequests.filter((path) => path.includes('/packages')).length,
+    0,
+    'loadBuildDetail must not request package inventory',
+  )
+  assert.deepEqual(detail.build.packageInventory, { status: 'not-loaded' })
+
+  const [findings] = await withFetch(
+    {
+      '/packages?pagination.page_size=100&pagination.next_page_token=next': () => json({
+        packages: [{ name: 'zlib' }], pagination: {},
+      }),
+      '/packages?pagination.page_size=100': () => json({
+        packages: [{ name: 'openssl' }], pagination: { next_page_token: 'next' },
+      }),
+    },
+    () => loadVersionFindings(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images',
+      'fp-complete', [detail.build],
+    ),
+  )
+  const inventory = packageInventoryFromFindings(findings)
+  assert.equal(inventory.status, 'parsed')
+  assert.deepEqual(inventory.packages.map(({ name }) => name), ['openssl', 'zlib'])
+})
+
+test('package paging reports cumulative progress after every page', async () => {
+  const progress = []
+  const result = await withFetch(
+    {
+      '/packages?pagination.page_size=100&pagination.next_page_token=third': () => json({
+        packages: [{ name: 'd' }, { name: 'e' }, { name: 'f' }], pagination: {},
+      }),
+      '/packages?pagination.page_size=100&pagination.next_page_token=second': () => json({
+        packages: [{ name: 'c' }], pagination: { next_page_token: 'third' },
+      }),
+      '/packages?pagination.page_size=100': () => json({
+        packages: [{ name: 'a' }, { name: 'b' }], pagination: { next_page_token: 'second' },
+      }),
+    },
+    () => listBuildPackages(
+      'token', { organizationID: 'org', projectID: 'project' },
+      'images', 'fp-complete', 'build', (received) => progress.push(received),
+    ),
+  )
+  assert.equal(result.packages.length, 6)
+  assert.deepEqual(progress, [
+    { packages: 2 },
+    { packages: 3 },
+    { packages: 6 },
+  ])
+})
+
+test('a second inventory read for the same build is served from the session cache until a refresh', async () => {
+  const requests = []
+  const routes = {
+    '/builds/cached/packages?pagination.page_size=100': () => json({
+      packages: [{ name: 'openssl' }], pagination: {},
+    }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'cached', platform: 'aws', component: 'amazon-ebs.image' }]
+  const read = (overrides = {}) => withFetch(
+    routes,
+    () => loadVersionFindings(
+      'token', overrides.tenant ?? tenant, 'images', 'fp-complete', builds, undefined,
+      overrides.options ?? {},
+    ),
+    (path) => requests.push(path),
+  )
+  const first = await read()
+  const second = await read()
+  assert.equal(requests.length, 1, 'the second read issues no request')
+  assert.deepEqual(second, first)
+  await read({ tenant: { organizationID: 'org', projectID: 'other' } })
+  assert.equal(requests.length, 2, 'another project never sees a cached inventory')
+  await read({ options: { force: true } })
+  assert.equal(requests.length, 3, 'an explicit refresh bypasses the cache')
+  clearInventoryCache()
+  await read()
+  assert.equal(requests.length, 4, 'a cleared cache reads again')
+})
+
+test('sign-out clears the inventory cache and the hook refresh bypasses it', () => {
+  const auth = readFileSync(new URL('../src/auth/AuthContext.tsx', import.meta.url), 'utf8')
+  assert.match(auth, /const signOut = useCallback\([\s\S]*?clearInventoryCache\(\)[\s\S]*?setState\(null\)/)
+  assert.match(versionDataSource, /bypassCache\.current = true\s+reload\(\)/)
+  assert.match(versionDataSource, /const force = bypassCache\.current\s+bypassCache\.current = false/)
+  assert.match(versionDataSource, /\{ force \},\s+\)/)
+})
+
+test('one unparseable build does not discard another build inventory', async () => {
+  const findings = await withFetch(
+    {
+      '/builds/bad/packages?pagination.page_size=100': () => json({ message: 'broken SBOM' }, 422),
+      '/builds/good/packages?pagination.page_size=100': () => json({
+        packages: [{ name: 'openssl' }], pagination: {},
+      }),
+    },
+    () => loadVersionFindings(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images', 'fp-complete',
+      [
+        { id: 'bad', platform: 'azure', component: 'azure.image' },
+        { id: 'good', platform: 'aws', component: 'amazon-ebs.image' },
+      ],
+    ),
+  )
+  assert.deepEqual(findings.map(({ buildID, packages, unparseable }) => ({
+    buildID, packages: packages.map(({ name }) => name), unparseable,
+  })), [
+    { buildID: 'bad', packages: [], unparseable: true },
+    { buildID: 'good', packages: ['openssl'], unparseable: undefined },
+  ])
 })
 
 test('Versions, Version, and Build declare their auto-refresh hotness', () => {
@@ -1445,19 +1675,41 @@ test('Versions, Version, and Build declare their auto-refresh hotness', () => {
   )
   assert.match(
     buildScreenSource,
-    /useAutoRefresh\(\{ hot: data \? buildIsInProgress\(data\.build\) : false, onRefresh: reload \}\)/,
+    /const buildInProgress = data \? buildIsInProgress\(data\.build\) : false[\s\S]*?useAutoRefresh\(\{ hot: buildInProgress, onRefresh: reload \}\)/,
   )
 })
 
-test('MUTATION_QUIET_REVISION separates identity resets from revision refreshes', () => {
+test('the Build inventory waits for the build to settle', () => {
   assert.match(
-    versionDataSource,
-    /useVersions\([\s\S]*?useVersionData<BucketPage \| null>\([\s\S]*?bucket,\s+revision,/,
+    buildScreenSource,
+    /const inventoryBuilds = data\s+\? \(buildInProgress \? \[\] : \[data\.build\]\)\s+: \[\]/,
   )
   assert.match(
-    versionDataSource,
-    /useBuild\([\s\S]*?const \[revision, setRevision\][\s\S]*?reload:/,
+    buildScreenSource,
+    /useVersionFindings\(bucket, fingerprint, inventoryBuilds\)/,
   )
+})
+
+test('a reload during an in-flight load does not restart it, and runs once after settle', () => {
+  const gate = createReloadGate()
+  const first = gate.begin()
+  assert.equal(typeof first, 'number')
+  assert.equal(gate.request(), false, 'an active load queues rather than starts a reload')
+  assert.equal(gate.request(), false, 'repeated reloads coalesce')
+  assert.equal(gate.begin(), null, 'a second load cannot begin while the first is active')
+  assert.equal(gate.settle(first), true, 'settling reports exactly one queued follow-up')
+  const second = gate.begin()
+  assert.equal(typeof second, 'number')
+  assert.notEqual(second, first)
+  assert.equal(gate.settle(first), false, 'an old run cannot settle the newer load')
+  assert.equal(gate.settle(second), false, 'the follow-up has no duplicate queued run')
+})
+
+test('MUTATION_QUIET_REVISION separates identity resets from gated revision refreshes', () => {
+  assert.match(versionDataSource, /const \[revision, setRevision\] = useState\(0\)/)
+  assert.match(versionDataSource, /const reloadGate = useRef\(createReloadGate\(\)\)/)
+  assert.match(versionDataSource, /const followUp = gate\.settle\(run\)/)
+  assert.match(versionDataSource, /if \(followUp && reloadGate\.current === gate\) setRevision/)
   const quietBranch = versionDataSource.match(
     /if \(identityChanged\) \{[\s\S]*?\} else \{([\s\S]*?)\n    \}/,
   )
@@ -1466,6 +1718,24 @@ test('MUTATION_QUIET_REVISION separates identity resets from revision refreshes'
   assert.doesNotMatch(quietBranch[1], /setData\(/)
   assert.doesNotMatch(quietBranch[1], /setLoading\(/)
   assert.doesNotMatch(versionDataSource, /reloadWhile|setTimeout\(refresh, 500\)/)
+})
+
+test('the Version timer refreshes detail without re-reading inventory', () => {
+  assert.match(versionScreenSource, /useAutoRefresh\(\{ hot, onRefresh: reload \}\)/)
+  assert.doesNotMatch(versionScreenSource, /useAutoRefresh\(\{[^}]*inventory\.reload/)
+  assert.match(
+    versionScreenSource,
+    /onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+  )
+})
+
+test('the Build timer refreshes detail without re-reading inventory', () => {
+  assert.match(buildScreenSource, /useAutoRefresh\(\{ hot: buildInProgress, onRefresh: reload \}\)/)
+  assert.doesNotMatch(buildScreenSource, /useAutoRefresh\(\{[^}]*inventory\.reload/)
+  assert.match(
+    buildScreenSource,
+    /onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+  )
 })
 
 test('an incomplete version page states the absence of builds plainly', async () => {
@@ -1695,6 +1965,7 @@ test('channel gap names the newest comparison and says current plainly', () => {
 })
 
 test('version detail renders persisted parent links and Terraform from real identifiers', async () => {
+  let packageRequests = 0
   const detail = await withFetch(
     {
       '/versions/fp-complete': () => json({ version: completeVersion }),
@@ -1746,7 +2017,11 @@ test('version detail renders persisted parent links and Terraform from real iden
     () => loadVersionDetail(
       'token', { organizationID: 'org', projectID: 'project' }, 'images', 'fp-complete',
     ),
+    (path) => {
+      if (path.includes('/packages?')) packageRequests++
+    },
   )
+  assert.equal(packageRequests, 0, 'loadVersionDetail issues zero package requests')
 
   const markup = renderToStaticMarkup(React.createElement(VersionView, {
     bucket: 'images', detail, loading: false, failure: null,
@@ -1807,6 +2082,76 @@ test('version detail renders persisted parent links and Terraform from real iden
   assert.match(promotion, /channel_name        = "production"/)
   assert.match(promotion, /version_fingerprint = "fp-complete"/)
   assert.doesNotMatch(promotion, /latest/)
+})
+
+const inventoryBuild = {
+  id: 'inventory-build', component: 'docker.ubuntu', platform: 'docker', state: 'done',
+  runnerOS: 'linux', arch: 'amd64', updated: '', packerVersion: '', plugins: [], artifacts: [],
+  packerRunUUID: '', sourceExternalIdentifier: '', labels: {}, packageInventory: { status: 'not-loaded' },
+  options: { path: '', variables: [], variableFiles: [], only: [], except: [], debug: false, force: false },
+}
+const withInventoryBuild = () => ({ ...actionVersion(), builds: [inventoryBuild] })
+
+test('version detail stays visible while package inventory reports progress', () => {
+  const markup = renderToStaticMarkup(React.createElement(VersionView, {
+    bucket: 'images',
+    detail: { version: withInventoryBuild(), channels: [] },
+    findings: [],
+    inventoryLoading: true,
+    inventoryProgress: { packages: 321 },
+    loading: false,
+    failure: null,
+    onBackToRegistry: () => {},
+    onBackToBucket: () => {},
+  }))
+  assert.match(markup, />v7</)
+  assert.match(markup, /Lineage/)
+  assert.match(markup, /Reading package inventory… 321 packages read so far\./)
+  assert.match(markup, /Large images can take a minute or more\./)
+  assert.doesNotMatch(markup, /pf-v6-c-skeleton/)
+})
+
+test('a version without builds or inventory shows no Security card, so it cannot claim "Not scanned"', () => {
+  const noBuilds = renderToStaticMarkup(React.createElement(VersionOverview, {
+    bucket: 'images', version: { ...actionVersion(), builds: [] },
+    detail: { version: { ...actionVersion(), builds: [] }, channels: [] },
+    findings: [], callerRole: 'reader',
+    onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
+  }))
+  assert.doesNotMatch(noBuilds, /Not scanned|Security|Reading package inventory/)
+  // The inventory hook still runs for an empty build set; its brief in-flight
+  // state must not flash a progress card for a version with nothing to read.
+  const noBuildsLoading = renderToStaticMarkup(React.createElement(VersionOverview, {
+    bucket: 'images', version: { ...actionVersion(), builds: [] },
+    detail: { version: { ...actionVersion(), builds: [] }, channels: [] },
+    findings: [], inventoryLoading: true, callerRole: 'reader',
+    onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
+  }))
+  assert.doesNotMatch(noBuildsLoading, /Security|Reading package inventory/)
+  // Builds known but the inventory read not yet begun: nothing, not a verdict.
+  const preload = renderToStaticMarkup(React.createElement(VersionOverview, {
+    bucket: 'images', version: withInventoryBuild(),
+    detail: { version: withInventoryBuild(), channels: [] },
+    findings: [], callerRole: 'reader',
+    onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
+  }))
+  assert.doesNotMatch(preload, /Not scanned|No known findings/)
+})
+
+test('version inventory failure keeps detail visible and renders the server message verbatim', () => {
+  const markup = renderToStaticMarkup(React.createElement(VersionView, {
+    bucket: 'images',
+    detail: { version: withInventoryBuild(), channels: [] },
+    inventoryFailure: 'upstream inventory timed out',
+    loading: false,
+    failure: null,
+    onBackToRegistry: () => {},
+    onBackToBucket: () => {},
+  }))
+  assert.match(markup, />v7</)
+  assert.match(markup, /Lineage/)
+  assert.match(markup, /Package inventory could not be loaded/)
+  assert.match(markup, /upstream inventory timed out/)
 })
 
 test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', () => {

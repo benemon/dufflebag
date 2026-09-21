@@ -658,3 +658,23 @@ test('a created bucket is selected only after the refreshed listing contains it'
     /listing could not be refreshed/,
   )
 })
+
+test('MUTATION_REGISTRY_RELOAD_GATE keeps both registry reads behind the reload gate', () => {
+  const hook = readFileSync(new URL('../src/data/buckets.ts', import.meta.url), 'utf8')
+  const screen = readFileSync(new URL('../src/screens/Buckets.tsx', import.meta.url), 'utf8')
+  for (const gate of ['bucketsGate', 'pinsGate']) {
+    assert.match(hook, new RegExp(`const ${gate} = useRef\\(createReloadGate\\(\\)\\)`), `${gate} exists`)
+    assert.match(
+      hook,
+      new RegExp(`const gate = ${gate}\\.current\\s+const run = gate\\.begin\\(\\)\\s+if \\(run === null\\) \\{\\s+gate\\.request\\(\\)\\s+return\\s+\\}`),
+      `${gate} refuses to start over an active load`,
+    )
+    assert.match(hook, new RegExp(`if \\(followUp && ${gate}\\.current === gate\\) setRevision`), `${gate} owes its follow-up`)
+  }
+  assert.match(hook, /if \(buckets \|\| pins\) setRevision\(\(current\) => current \+ 1\)/)
+  assert.equal((hook.match(/setRevision\(\(current\) => current \+ 1\)/g) ?? []).length, 3)
+  // The screen owns no ungated revision of its own any more.
+  assert.match(screen, /const bucketData = useBuckets\(location\.key\)/)
+  assert.match(screen, /const \{ reload \} = bucketData/)
+  assert.doesNotMatch(screen, /setRefresh|useBuckets\(location\.key, /)
+})
