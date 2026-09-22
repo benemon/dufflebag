@@ -327,7 +327,7 @@ test-rls-sabotage: ## Prove tenant isolation tests fail under RLS sabotage
 	done; \
 	for table in versions channels builds artifacts channel_assignments \
 		sboms sbom_packages scan_runs scan_findings scan_transcripts \
-		build_scan_state pending_scans pins; do \
+		build_scan_state build_findings_summary version_findings_summary pending_scans pins; do \
 		if out=$$(env DUFFLEBAG_TEST_DROP_BUCKET_POLICY=$$table go test -tags=integration ./internal/store/postgres \
 			-run '^TestTenantIsolation$$$$' -count=1 2>&1); then \
 			echo "$$out"; \

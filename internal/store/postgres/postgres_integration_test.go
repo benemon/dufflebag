@@ -122,7 +122,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 		"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
-		"build_scan_state", "pending_scans",
+		"build_scan_state", "build_findings_summary", "version_findings_summary", "pending_scans",
 	}
 	if os.Getenv("DUFFLEBAG_TEST_DROP_RLS") == "1" {
 		for _, table := range rlsTables {
@@ -147,7 +147,8 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 			"versions": true, "channels": true, "builds": true, "artifacts": true,
 			"channel_assignments": true, "sboms": true, "sbom_packages": true,
 			"scan_runs": true, "scan_findings": true, "scan_transcripts": true,
-			"build_scan_state": true, "pending_scans": true, "pins": true,
+			"build_scan_state": true, "build_findings_summary": true,
+			"version_findings_summary": true, "pending_scans": true, "pins": true,
 		}
 		if !bucketTables[table] {
 			_ = admin.Close()
@@ -224,7 +225,8 @@ func TestTenantIsolation(t *testing.T) {
 	bucketTables := []string{
 		"versions", "channels", "builds", "artifacts", "channel_assignments",
 		"sboms", "sbom_packages", "scan_runs", "scan_findings",
-		"scan_transcripts", "build_scan_state", "pending_scans", "pins",
+		"scan_transcripts", "build_scan_state", "build_findings_summary",
+		"version_findings_summary", "pending_scans", "pins",
 	}
 	t.Run("buckets", func(t *testing.T) {
 		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "bucket-a")
@@ -304,6 +306,7 @@ func TestTenantIsolation(t *testing.T) {
 			"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 			"webhooks", "webhook_outbox", "webhook_deliveries",
 			"scan_runs", "scan_findings", "scan_transcripts", "build_scan_state",
+			"build_findings_summary", "version_findings_summary",
 			"scan_run_counters", "pending_scans",
 		} {
 			var count int
@@ -678,6 +681,19 @@ func insertBucketAggregate(t *testing.T, ctx context.Context, db *sql.DB, org, p
 			(organization_id, project_id, bucket_id, build_id, current_findings_run_id, latest_attempt_run_id)
 			VALUES ($1,$2,$3,$4,$5,$5)`,
 			[]any{org, project, "bucket-" + suffix, "build-" + suffix, "scan-run-" + suffix}},
+		{`INSERT INTO build_findings_summary
+			(organization_id, project_id, bucket_id, build_id, run_id, scanned, findings,
+			 affected_packages, worst, counts, computed_at)
+			VALUES ($1,$2,$3,$4,$5,1,1,1,'critical',$6,$7)`,
+			[]any{org, project, "bucket-" + suffix, "build-" + suffix, "scan-run-" + suffix,
+				`{"unknown":0,"negligible":0,"low":0,"medium":0,"high":0,"critical":1}`, now}},
+		{`INSERT INTO version_findings_summary
+			(organization_id, project_id, bucket_id, version_id, findings, affected_packages,
+			 worst, counts, builds_summarised, source_run_ids, computed_at)
+			VALUES ($1,$2,$3,$4,1,1,'critical',$5,1,$6,$7)`,
+			[]any{org, project, "bucket-" + suffix, "version-" + suffix,
+				`{"unknown":0,"negligible":0,"low":0,"medium":0,"high":0,"critical":1}`,
+				`["scan-run-` + suffix + `"]`, now}},
 		{`INSERT INTO pending_scans
 			(organization_id, project_id, bucket_id, build_id, enqueued_at, reason)
 			VALUES ($1,$2,$3,$4,$5,'channel_assignment')`,

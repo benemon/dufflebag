@@ -457,6 +457,7 @@ type fakeTenancyRepository struct {
 	organizations         []store.Organization
 	projects              []store.Project
 	pins                  []store.Pin
+	findingsSummary       *store.VersionFindingsSummaryResult
 	principals            []*identity.Principal
 	listOrganizationsErr  error
 	createOrganizationErr error
@@ -469,6 +470,7 @@ type fakeTenancyRepository struct {
 	listPinsErr           error
 	setPinErr             error
 	deletePinErr          error
+	findingsSummaryErr    error
 	listPrincipalsErr     error
 	createPrincipalErr    error
 	deletePrincipalErr    error
@@ -622,6 +624,18 @@ func (r *fakeTenancyRepository) DeletePin(
 		}
 	}
 	return nil
+}
+
+func (r *fakeTenancyRepository) GetVersionFindingsSummary(
+	context.Context, store.Tenant, string, string,
+) (*store.VersionFindingsSummaryResult, error) {
+	if r.findingsSummaryErr != nil {
+		return nil, r.findingsSummaryErr
+	}
+	if r.findingsSummary == nil {
+		return nil, registry.ErrNotFound
+	}
+	return r.findingsSummary, nil
 }
 
 // ListPrincipals filters exactly like the real repository: principals bound to

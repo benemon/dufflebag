@@ -38,6 +38,7 @@ type PlatformRepository interface {
 	ListPins(context.Context, store.Tenant) ([]store.Pin, error)
 	SetPin(context.Context, store.Tenant, string, string, time.Time) (*store.Pin, error)
 	DeletePin(context.Context, store.Tenant, string) error
+	GetVersionFindingsSummary(context.Context, store.Tenant, string, string) (*store.VersionFindingsSummaryResult, error)
 	// ListPrincipals lists the principals bound to EXACTLY the selected scope.
 	// The caller authorizes, the selection filters; the store re-asserts the
 	// caller may see the selection rather than trusting it (duf-4qr).
@@ -629,6 +630,100 @@ func (s *server) ListPins(
 		response.Pins = append(response.Pins, renderPin(pin))
 	}
 	return response, nil
+}
+
+func (s *server) GetVersionFindingsSummary(
+	ctx context.Context,
+	request GetVersionFindingsSummaryRequestObject,
+) (GetVersionFindingsSummaryResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	audited.event.TargetID = request.Fingerprint
+	defer func() { audited.log(ctx) }()
+
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleReader, request.OrganizationId.String(), request.ProjectId.String(),
+	)
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
+	summary, err := s.repository.GetVersionFindingsSummary(
+		ctx, tenant, request.BucketName, request.Fingerprint,
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		audited.refused("not_found")
+		return GetVersionFindingsSummary404JSONResponse{
+			NotFoundJSONResponse: NotFoundJSONResponse{Message: "version not found"},
+		}, nil
+	}
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(request.Fingerprint, "")
+	_, scannerConfig := s.scannerStates()
+	response := GetVersionFindingsSummary200JSONResponse{
+		ScannerConfigured: scannerConfig.Configured,
+		Builds:            make([]BuildFindingsSummary, 0, len(summary.Builds)),
+	}
+	if summary.Version != nil {
+		response.Version = renderVersionFindingsSummary(*summary.Version)
+	}
+	for _, build := range summary.Builds {
+		response.Builds = append(response.Builds, renderBuildFindingsSummary(build))
+	}
+	return response, nil
+}
+
+func renderVersionFindingsSummary(summary store.VersionFindingsSummary) *VersionFindingsSummary {
+	response := &VersionFindingsSummary{
+		Counts: renderSeverityCounts(summary.Counts), Findings: summary.Findings,
+		AffectedPackages: summary.AffectedPackages, BuildsSummarised: summary.BuildsSummarised,
+		ComputedAt: summary.ComputedAt,
+	}
+	if summary.Worst != "" {
+		worst := Severity(summary.Worst)
+		response.Worst = &worst
+	}
+	return response
+}
+
+func renderBuildFindingsSummary(build store.VersionBuildFindingsSummary) BuildFindingsSummary {
+	response := BuildFindingsSummary{
+		BuildId: build.BuildID, Component: build.ComponentType, Platform: build.Platform,
+		Inventory: BuildFindingsSummaryInventory(build.Inventory), Packages: build.Packages,
+	}
+	if build.Summary == nil {
+		return response
+	}
+	summary := build.Summary
+	rendered := &BuildScanSummary{
+		RunId: summary.RunID, Counts: renderSeverityCounts(summary.Counts),
+		Findings: summary.Findings, AffectedPackages: summary.AffectedPackages,
+		Scanned: summary.Scanned, ComputedAt: summary.ComputedAt,
+		ObservedAt: summary.ObservedAt, Adapter: summary.Adapter, Engine: summary.Engine,
+		DatabaseRevision: summary.DatabaseRevision,
+	}
+	rendered.Coverage.Submitted = summary.Coverage.Submitted
+	rendered.Coverage.Invalid = summary.Coverage.Invalid
+	rendered.Coverage.Unversioned = summary.Coverage.Unversioned
+	rendered.Coverage.Unsupported = summary.Coverage.Unsupported
+	if summary.Worst != "" {
+		worst := Severity(summary.Worst)
+		rendered.Worst = &worst
+	}
+	response.Summary = rendered
+	return response
+}
+
+func renderSeverityCounts(counts store.SeverityCounts) SeverityCounts {
+	return SeverityCounts{
+		Unknown: counts.Unknown, Negligible: counts.Negligible, Low: counts.Low,
+		Medium: counts.Medium, High: counts.High, Critical: counts.Critical,
+	}
 }
 
 func (s *server) DeletePin(

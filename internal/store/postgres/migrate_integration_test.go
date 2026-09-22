@@ -33,8 +33,8 @@ func TestMigrationsRoundTrip(t *testing.T) {
 	if err := admin.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 || dirty {
-		t.Fatalf("migration state = version %d dirty %v, want version 2 clean", version, dirty)
+	if version != 3 || dirty {
+		t.Fatalf("migration state = version %d dirty %v, want version 3 clean", version, dirty)
 	}
 
 	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})
@@ -69,10 +69,11 @@ func TestMigrationsRoundTrip(t *testing.T) {
 		"sbom_packages_bucket_sbom_fkey", "scan_runs_bucket_build_fkey",
 		"scan_findings_bucket_run_fkey", "scan_transcripts_bucket_run_fkey",
 		"build_scan_state_bucket_build_fkey", "pending_scans_bucket_build_fkey",
+		"build_findings_summary_bucket_build_fkey", "version_findings_summary_bucket_version_fkey",
 	}).Scan(&constraints); err != nil {
 		t.Fatal(err)
 	}
-	if constraints != 10 {
-		t.Fatalf("validated bucket parent constraints = %d, want 10", constraints)
+	if constraints != 12 {
+		t.Fatalf("validated bucket parent constraints = %d, want 12", constraints)
 	}
 }

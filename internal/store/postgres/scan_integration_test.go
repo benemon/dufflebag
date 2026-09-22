@@ -82,6 +82,225 @@ func scanRunFixture(id, buildID string, sequence int64, status string, at time.T
 	}
 }
 
+func seedScanSiblingBuild(t *testing.T, db *sql.DB, suffix, buildID, sbomID string) {
+	t.Helper()
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	now := time.Now().UTC()
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO builds (organization_id, project_id, id, bucket_id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,'scanbucket-'||$4,'scanversion-'||$4,'docker.sibling','done','linux',true,$5,$5)`, []any{orgA, projectA, buildID, suffix, now}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at, parse_status)
+			VALUES ($1,$2,$3,'scanbucket-'||$5,$4,'sbom.spdx.json','SPDX','scan-key-'||$5,$6,'parsed')`, []any{orgA, projectA, sbomID, buildID, suffix, now}},
+		{`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,'scanbucket-'||$4,$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{orgA, projectA, sbomID, suffix}},
+	} {
+		if _, err := tx.ExecContext(context.Background(), statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestFindingsSummaries(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	repository.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 22, 9, 0, 0, 0, time.UTC)
+	buildA, sbomA := seedScanParents(t, db, orgA, projectA, "summaries")
+	buildB, sbomB := "scanbuild-summaries-b", "scansbom-summaries-b"
+	seedScanSiblingBuild(t, db, "summaries", buildB, sbomB)
+	transcript := []byte("findings-summary-fixture")
+	allocate := func() int64 {
+		t.Helper()
+		sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+
+	runA := scanRunFixture("summary-run-a", buildA, allocate(), store.ScanRunSucceeded, base, transcript)
+	findingsA := []scan.Finding{
+		scanFindingFixture(sbomA, "ALPINE-CVE-2022-48174", base),
+		scanFindingFixture(sbomA, "ALPINE-CVE-2023-42363", base),
+	}
+	if err := repository.RecordScanRun(ctx, tenant, runA, findingsA, transcript); err != nil {
+		t.Fatal(err)
+	}
+	summary, err := repository.GetVersionFindingsSummary(ctx, tenant, "scan-summaries", "fp-scan-summaries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Builds) != 2 {
+		t.Fatalf("build summaries = %#v, want two builds", summary.Builds)
+	}
+	var buildSummary *store.BuildFindingsSummary
+	for _, build := range summary.Builds {
+		if build.BuildID == buildA {
+			buildSummary = build.Summary
+		}
+		if build.BuildID == buildB && build.Summary != nil {
+			t.Fatalf("unscanned build summary = %#v, want absent", build.Summary)
+		}
+	}
+	if buildSummary == nil {
+		t.Fatal("scanned build summary is absent")
+	}
+	if buildSummary.Findings != 2 || buildSummary.AffectedPackages != 1 || buildSummary.Scanned != 1 {
+		t.Fatalf("build summary = %#v, want findings=2 affected=1 scanned=1", buildSummary)
+	}
+
+	runB := scanRunFixture("summary-run-b", buildB, allocate(), store.ScanRunSucceeded, base.Add(time.Minute), transcript)
+	if err := repository.RecordScanRun(ctx, tenant, runB,
+		[]scan.Finding{scanFindingFixture(sbomB, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = repository.GetVersionFindingsSummary(ctx, tenant, "scan-summaries", "fp-scan-summaries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.Version == nil || summary.Version.Findings != 2 ||
+		summary.Version.AffectedPackages != 1 || summary.Version.BuildsSummarised != 2 {
+		t.Fatalf("version summary = %#v, want two cross-build-deduplicated findings on one package across two builds", summary.Version)
+	}
+
+	staleSequence, newerSequence := allocate(), allocate()
+	newer := scanRunFixture("summary-run-newer", buildA, newerSequence, store.ScanRunSucceeded, base.Add(3*time.Minute), transcript)
+	if err := repository.RecordScanRun(ctx, tenant, newer, findingsA, transcript); err != nil {
+		t.Fatal(err)
+	}
+	stale := scanRunFixture("summary-run-stale", buildA, staleSequence, store.ScanRunSucceeded, base.Add(2*time.Minute), transcript)
+	if err := repository.RecordScanRun(ctx, tenant, stale, nil, transcript); err != nil {
+		t.Fatal(err)
+	}
+	summary, err = repository.GetVersionFindingsSummary(ctx, tenant, "scan-summaries", "fp-scan-summaries")
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundBuildA := false
+	for _, build := range summary.Builds {
+		if build.BuildID == buildA && (build.Summary == nil || build.Summary.RunID != newer.ID || build.Summary.Findings != 2) {
+			t.Fatalf("stale completion rewrote build summary = %#v, want current run %s with two findings", build.Summary, newer.ID)
+		}
+		foundBuildA = foundBuildA || build.BuildID == buildA
+	}
+	if !foundBuildA {
+		t.Fatal("current build missing from version summary")
+	}
+
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE build_findings_summary
+		SET counts = jsonb_set(counts, '{critical}', '3')
+		WHERE build_id = $1`, buildA); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.GetVersionFindingsSummary(ctx, tenant, "scan-summaries", "fp-scan-summaries"); err == nil || !strings.Contains(err.Error(), "build findings summary") {
+		t.Fatalf("tampered summary read error = %v, want fail-closed build findings summary MAC error", err)
+	}
+}
+
+func TestFindingsSummaryBackfill(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	repository.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
+	buildA, sbomA := seedScanParents(t, db, orgA, projectA, "backfill")
+	buildB, sbomB := "scanbuild-backfill-b", "scansbom-backfill-b"
+	seedScanSiblingBuild(t, db, "backfill", buildB, sbomB)
+	transcript := []byte("findings-summary-backfill")
+	for index, fixture := range []struct{ buildID, sbomID string }{{buildA, sbomA}, {buildB, sbomB}} {
+		sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		run := scanRunFixture(fmt.Sprintf("backfill-run-%d", index), fixture.buildID, sequence, store.ScanRunSucceeded, base.Add(time.Duration(index)*time.Minute), transcript)
+		if err := repository.RecordScanRun(ctx, tenant, run,
+			[]scan.Finding{scanFindingFixture(fixture.sbomID, "ALPINE-CVE-2022-48174", run.ObservedAt)}, transcript); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var beforeRun string
+	var beforeCounts, beforeMAC []byte
+	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
+		Scan(&beforeRun, &beforeCounts, &beforeMAC); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM build_findings_summary WHERE build_id = $1`, buildB); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := repository.BackfillFindingsSummaries(ctx, tenant)
+	if err != nil || created != 1 {
+		t.Fatalf("backfill = %d, %v; want one missing build", created, err)
+	}
+	if created, err := repository.BackfillFindingsSummaries(ctx, tenant); err != nil || created != 0 {
+		t.Fatalf("idempotent backfill = %d, %v; want zero", created, err)
+	}
+	tx, err = store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var afterRun string
+	var afterCounts, afterMAC []byte
+	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
+		Scan(&afterRun, &afterCounts, &afterMAC); err != nil {
+		t.Fatal(err)
+	}
+	if beforeRun != afterRun || string(beforeCounts) != string(afterCounts) || string(beforeMAC) != string(afterMAC) {
+		t.Fatalf("existing build summary changed during backfill: before=(%q,%s,%x) after=(%q,%s,%x)",
+			beforeRun, beforeCounts, beforeMAC, afterRun, afterCounts, afterMAC)
+	}
+	var buildCount, versionCount int
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM build_findings_summary WHERE build_id IN ($1,$2)`, buildA, buildB).Scan(&buildCount); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`).Scan(&versionCount); err != nil {
+		t.Fatal(err)
+	}
+	if buildCount != 2 || versionCount != 1 {
+		t.Fatalf("backfill rows = builds %d version %d, want 2 and 1", buildCount, versionCount)
+	}
+}
+
 func TestScanStore(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()

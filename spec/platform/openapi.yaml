@@ -37,6 +37,8 @@ tags:
     description: Service principals and their secrets.
   - name: pins
     description: Per-project pinned buckets.
+  - name: findings
+    description: Stored vulnerability finding summaries.
   - name: bagdrop
     description: Per-project outbound registry destination configuration.
   - name: webhooks
@@ -958,6 +960,39 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - name: bucketName
+        in: path
+        required: true
+        schema: { type: string }
+      - name: fingerprint
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [findings]
+      operationId: getVersionFindingsSummary
+      summary: Get stored findings summaries for a version
+      description: |
+        Returns the version rollup and every build without downloading package
+        inventories or individual findings. An absent version or build summary
+        means no current successful scan; it is never rendered as an empty scan.
+
+        Requires the reader role on this project. A tenancy the caller may
+        not see answers 404, indistinguishable from one that does not exist.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/VersionFindingsSummaryResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/v1/organizations/{organizationId}/projects/{projectId}/pins:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -1535,6 +1570,100 @@ components:
         message: { type: string }
         detail: { type: string }
       required: [message]
+
+    Severity:
+      type: string
+      enum: [unknown, negligible, low, medium, high, critical]
+
+    SeverityCounts:
+      type: object
+      description: Every severity band is present, including bands with a zero count.
+      properties:
+        unknown: { type: integer, minimum: 0 }
+        negligible: { type: integer, minimum: 0 }
+        low: { type: integer, minimum: 0 }
+        medium: { type: integer, minimum: 0 }
+        high: { type: integer, minimum: 0 }
+        critical: { type: integer, minimum: 0 }
+      required: [unknown, negligible, low, medium, high, critical]
+
+    VersionFindingsSummaryResponse:
+      type: object
+      properties:
+        scanner_configured: { type: boolean }
+        version:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/VersionFindingsSummary"
+        builds:
+          type: array
+          items: { $ref: "#/components/schemas/BuildFindingsSummary" }
+      required: [scanner_configured, version, builds]
+
+    VersionFindingsSummary:
+      type: object
+      properties:
+        worst: { $ref: "#/components/schemas/Severity" }
+        counts: { $ref: "#/components/schemas/SeverityCounts" }
+        findings: { type: integer, minimum: 0 }
+        affected_packages: { type: integer, minimum: 0 }
+        builds_summarised: { type: integer, minimum: 0 }
+        computed_at:
+          type: string
+          format: date-time
+          description: Latest observed_at among the current runs included in this rollup.
+      required: [counts, findings, affected_packages, builds_summarised, computed_at]
+
+    BuildFindingsSummary:
+      type: object
+      properties:
+        build_id: { type: string }
+        component: { type: string }
+        platform: { type: string }
+        inventory:
+          type: string
+          enum: [parsed, unparseable]
+        packages: { type: integer, minimum: 0 }
+        summary: { $ref: "#/components/schemas/BuildScanSummary" }
+      required: [build_id, component, platform, inventory, packages]
+
+    BuildScanSummary:
+      type: object
+      properties:
+        run_id: { type: string }
+        worst: { $ref: "#/components/schemas/Severity" }
+        counts: { $ref: "#/components/schemas/SeverityCounts" }
+        findings: { type: integer, minimum: 0 }
+        affected_packages: { type: integer, minimum: 0 }
+        scanned: { type: integer, minimum: 0 }
+        computed_at:
+          type: string
+          format: date-time
+          description: The current run's observed_at used when this summary was computed.
+        observed_at: { type: string, format: date-time }
+        adapter: { type: string }
+        engine: { type: string }
+        database_revision: { type: string }
+        coverage:
+          type: object
+          properties:
+            submitted: { type: integer, minimum: 0 }
+            invalid: { type: integer, minimum: 0 }
+            unversioned: { type: integer, minimum: 0 }
+            unsupported: { type: integer, minimum: 0 }
+          required: [submitted, invalid, unversioned, unsupported]
+      required:
+        - run_id
+        - counts
+        - findings
+        - affected_packages
+        - scanned
+        - computed_at
+        - observed_at
+        - adapter
+        - engine
+        - database_revision
+        - coverage
 
     InitRequest:
       type: object
