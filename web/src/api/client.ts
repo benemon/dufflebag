@@ -702,6 +702,76 @@ export async function platformGet<T>(token: string, path: string): Promise<T> {
   return (await request<T>(token, 'GET', `${PLATFORM_BASE}${path}`)) as T
 }
 
+export type ApiSeverityCounts = {
+  unknown: number
+  negligible: number
+  low: number
+  medium: number
+  high: number
+  critical: number
+}
+
+export type ApiBuildScanSummary = {
+  run_id: string
+  worst?: string
+  counts: ApiSeverityCounts
+  findings: number
+  affected_packages: number
+  scanned: number
+  computed_at: string
+  observed_at: string
+  adapter: string
+  engine: string
+  database_revision: string
+  coverage: {
+    submitted: number
+    invalid: number
+    unversioned: number
+    unsupported: number
+  }
+}
+
+export type ApiBuildFindingsSummary = {
+  build_id: string
+  component: string
+  platform: string
+  inventory: 'parsed' | 'unparseable'
+  packages: number
+  summary?: ApiBuildScanSummary
+}
+
+export type ApiVersionFindingsSummary = {
+  worst?: string
+  counts: ApiSeverityCounts
+  findings: number
+  affected_packages: number
+  builds_summarised: number
+  computed_at: string
+}
+
+export type ApiVersionFindingsSummaryResponse = {
+  scanner_configured: boolean
+  version: ApiVersionFindingsSummary | null
+  builds: ApiBuildFindingsSummary[]
+}
+
+function versionFindingsSummaryPath(
+  tenant: Tenant, bucket: string, fingerprint: string,
+): string {
+  return `/organizations/${encodeURIComponent(tenant.organizationID)}` +
+    `/projects/${encodeURIComponent(tenant.projectID)}` +
+    `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
+    '/findings-summary'
+}
+
+export async function getVersionFindingsSummary(
+  token: string, tenant: Tenant, bucket: string, fingerprint: string,
+): Promise<ApiVersionFindingsSummaryResponse> {
+  return platformGet<ApiVersionFindingsSummaryResponse>(
+    token, versionFindingsSummaryPath(tenant, bucket, fingerprint),
+  )
+}
+
 export type ApiPin = {
   bucket_name: string
   pinned_at: string

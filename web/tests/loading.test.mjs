@@ -28,7 +28,7 @@ const source = (path) => readFileSync(new URL(`../src/${path}`, import.meta.url)
 
 const skeletonSites = new Map([
   ['screens/Versions.tsx', ['Loading versions…', 'Loading assignment history…']],
-  ['screens/Version.tsx', ['Loading version…']],
+  ['screens/Version.tsx', ['Loading version…', 'Loading security summary…']],
   ['screens/Build.tsx', ['Loading build…']],
   ['screens/Principals.tsx', ['Loading principals…']],
   ['screens/Audit.tsx', ['Loading audit targets…']],

@@ -191,7 +191,7 @@ export function scanAttribution(headers: Headers): ScanAttribution | undefined {
   }
 }
 
-/** One build's contribution to a version's rollup. */
+/** One build's loaded package inventory and scan attribution. */
 export type BuildFindings = {
   buildID: string
   platform: string
@@ -203,89 +203,6 @@ export type BuildFindings = {
   scanned: number
   /** The build's SBOM could not be parsed, so its inventory is unknown. */
   unparseable?: true
-}
-
-export type BuildRollup = {
-  buildID: string
-  platform: string
-  component: string
-  scanned: number
-  worst?: Severity
-  counts: SeverityCount[]
-}
-
-export type VersionRollup = {
-  worst?: Severity
-  /** Distinct (advisory, package) pairs, deduplicated ACROSS builds. */
-  counts: SeverityCount[]
-  findings: number
-  affectedPackages: number
-  builds: BuildRollup[]
-}
-
-/**
- * A version's findings, counted once each.
- *
- * Summing the builds would double-count everything present on every platform:
- * one flaw in libcurl shipped on docker, aws and azure is ONE problem in three
- * places, not three problems. The version headline therefore deduplicates by
- * (advisory, package) and the per-build breakdown says where each one lives.
- */
-export function versionRollup(builds: BuildFindings[]): VersionRollup {
-  const worstByFinding = new Map<string, Severity>()
-  const affected = new Set<string>()
-
-  for (const build of builds) {
-    for (const pkg of build.packages) {
-      for (const finding of pkg.findings ?? []) {
-        const band = (finding.criticality ?? 'unknown').toLowerCase() as Severity
-        // Deliberately NOT keyed by build: that is the deduplication.
-        const key = [pkg.name ?? '', pkg.version ?? '', pkg.purl ?? '', finding.identifier ?? ''].join(' ')
-        const existing = worstByFinding.get(key)
-        if (!existing || rank(band) > rank(existing)) worstByFinding.set(key, band)
-        affected.add([pkg.name ?? '', pkg.version ?? '', pkg.purl ?? ''].join(' '))
-      }
-    }
-  }
-
-  return {
-    worst: worstOf([...worstByFinding.values()]),
-    counts: tally([...worstByFinding.values()]),
-    findings: worstByFinding.size,
-    affectedPackages: affected.size,
-    builds: builds.map((build) => {
-      const bands: Severity[] = []
-      for (const pkg of build.packages) {
-        for (const finding of pkg.findings ?? []) {
-          bands.push((finding.criticality ?? 'unknown').toLowerCase() as Severity)
-        }
-      }
-      return {
-        buildID: build.buildID,
-        platform: build.platform,
-        component: build.component,
-        scanned: build.scanned,
-        worst: worstOf(bands),
-        counts: tally(bands),
-      }
-    }),
-  }
-}
-
-function worstOf(bands: Severity[]): Severity | undefined {
-  let worst: Severity | undefined
-  for (const band of bands) {
-    if (!worst || rank(band) > rank(worst)) worst = band
-  }
-  return worst
-}
-
-function tally(bands: Severity[]): SeverityCount[] {
-  const counts = new Map<Severity, number>()
-  for (const band of bands) counts.set(band, (counts.get(band) ?? 0) + 1)
-  return [...SEVERITY_ORDER].reverse()
-    .filter((band) => counts.has(band))
-    .map((band) => ({ severity: band, count: counts.get(band) as number }))
 }
 
 /** A finding identified per package, used to key deduplication. */

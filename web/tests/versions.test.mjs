@@ -37,6 +37,7 @@ let loadEnforcedProvisioners
 let loadChannelHistory
 let loadVersionDetail
 let loadBuildDetail
+let loadVersionSecuritySummary
 let loadVersionFindings
 let packageInventoryFromFindings
 let createReloadGate
@@ -67,6 +68,12 @@ const versionDataSource = readFileSync(new URL('../src/data/versions.ts', import
 const versionScreenSource = readFileSync(new URL('../src/screens/Version.tsx', import.meta.url), 'utf8')
 const versionsScreenSource = readFileSync(new URL('../src/screens/Versions.tsx', import.meta.url), 'utf8')
 const buildScreenSource = readFileSync(new URL('../src/screens/Build.tsx', import.meta.url), 'utf8')
+// generatedClient and absentScans transcribe the responses constructed by
+// internal/platform/v1/findings_summary_test.go:71 and :32. mixedBuilds and
+// scannerNotConfigured are spec-derived from spec/platform/openapi.yaml:1590-1664.
+const findingsSummaryFixtures = JSON.parse(readFileSync(
+  new URL('./fixtures/findings-summary.json', import.meta.url), 'utf8',
+))
 let VersionStateLabel
 let BuildStateLabel
 
@@ -92,7 +99,8 @@ before(async () => {
   ;({ BuildView, ArtifactsCard, PackagesCard, packerBuildCommand, sbomFileName } =
     await vite.ssrLoadModule('/src/screens/Build.tsx'))
   ;({ loadVersions, loadVersion, loadBucketPage, loadEnforcedProvisioners, loadChannelHistory,
-    loadVersionDetail, loadBuildDetail, loadVersionFindings, packageInventoryFromFindings } =
+    loadVersionDetail, loadBuildDetail, loadVersionSecuritySummary,
+    loadVersionFindings, packageInventoryFromFindings } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ createReloadGate } = await vite.ssrLoadModule('/src/data/reloadGate.ts'))
   ;({ clearInventoryCache, INVENTORY_CACHE_LIMIT } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
@@ -1135,6 +1143,39 @@ test('build and artifact details come through to the version page', async () => 
   assert.match(markup, /<time[^>]*dateTime="2026-07-31T10:05:00.000Z"/)
 })
 
+test('the version security summary projects the producer fixture into display shapes', async () => {
+  const requests = []
+  const summary = await withFetch(
+    { '/findings-summary': () => json(findingsSummaryFixtures.generatedClient) },
+    () => loadVersionSecuritySummary(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images', 'fp-complete',
+    ),
+    (path) => requests.push(path),
+  )
+  assert.deepEqual(requests, [
+    '/api/v1/organizations/org/projects/project/buckets/images/versions/fp-complete/findings-summary',
+  ])
+  assert.deepEqual(summary.version, {
+    worst: 'critical', counts: [{ severity: 'critical', count: 1 }],
+    findings: 1, affectedPackages: 1, buildsSummarised: 1,
+    computedAt: '2026-09-22T08:00:00Z',
+  })
+  assert.deepEqual(summary.builds[0], {
+    buildID: 'build-a', component: 'docker', platform: 'linux',
+    inventory: 'parsed', packages: 2,
+    summary: {
+      worst: 'critical', counts: [{ severity: 'critical', count: 1 }],
+      findings: 1, affectedPackages: 1, scanned: 2,
+      observedAt: '2026-09-22T08:00:00Z',
+      scan: {
+        adapter: 'osv', engine: 'osv.example', databaseRevision: 'unreported',
+        observedAt: '2026-09-22T08:00:00Z', submitted: 2,
+        invalid: 0, unversioned: 0, unsupported: 0,
+      },
+    },
+  })
+})
+
 test('consumption labels and artifact identities survive the build wire projection', async () => {
   // These builds mirror the live docker-tag, untagged Docker, and AMI wire
   // specimens: Docker external_identifier is always the bare digest and its
@@ -1218,7 +1259,15 @@ test('the build list renders metadata columns and expandable package detail', ()
     }],
   }
   const markup = renderToStaticMarkup(React.createElement(BuildTable, {
-    builds: version.builds, onOpenBuild: () => {},
+    builds: version.builds,
+    securitySummary: {
+      scannerConfigured: true, version: null,
+      builds: [{
+        buildID: 'build-list-id', component: 'docker.ubuntu', platform: 'docker',
+        inventory: 'parsed', packages: 3,
+      }],
+    },
+    onOpenBuild: () => {},
   }))
   assert.match(markup, />Packer runner OS</)
   for (const expected of [
@@ -1228,7 +1277,7 @@ test('the build list renders metadata columns and expandable package detail', ()
   ]) assert.match(markup, new RegExp(expected))
 })
 
-test('the version build list derives package status from its inventory read', () => {
+test('the version build list uses package status from the findings summary', () => {
   const build = {
     id: 'build-list-id', component: 'docker.ubuntu', state: 'done',
     runnerOS: 'linux', arch: 'amd64', updated: '', packerVersion: '', plugins: [], artifacts: [],
@@ -1238,13 +1287,25 @@ test('the version build list derives package status from its inventory read', ()
     builds: [build], onOpenBuild: () => {}, ...extra,
   }))
   assert.match(renderBuilds({
-    findings: [{ buildID: build.id, packages: [{}, {}], scanned: 2 }],
+    securitySummary: {
+      scannerConfigured: true, version: null,
+      builds: [{
+        buildID: build.id, component: build.component, platform: 'docker',
+        inventory: 'parsed', packages: 2,
+      }],
+    },
   }), /2 packages/)
   assert.match(renderBuilds({
-    findings: [{ buildID: build.id, packages: [], scanned: 0, unparseable: true }],
+    securitySummary: {
+      scannerConfigured: true, version: null,
+      builds: [{
+        buildID: build.id, component: build.component, platform: 'docker',
+        inventory: 'unparseable', packages: 0,
+      }],
+    },
   }), /SBOM unparseable/)
-  assert.match(renderBuilds({ inventoryLoading: true }), /Reading inventory…/)
-  assert.match(renderBuilds({ inventoryFailure: 'timed out' }), />—</)
+  assert.match(renderBuilds({}), />—</)
+  assert.doesNotMatch(renderBuilds({}), /Reading inventory/)
 })
 
 test('build overview reconstructs masked options and the Artifacts facet names Platform', async () => {
@@ -1728,7 +1789,7 @@ test('Versions, Version, and Build declare their auto-refresh hotness', () => {
   )
   assert.match(
     versionScreenSource,
-    /const hot = data\?\.version\.state === 'incomplete'[\s\S]*?some\(buildIsInProgress\)[\s\S]*?useAutoRefresh\(\{ hot, onRefresh: reload \}\)/,
+    /const hot = data\?\.version\.state === 'incomplete'[\s\S]*?some\(buildIsInProgress\)[\s\S]*?useAutoRefresh\(\{ hot, onRefresh: refresh \}\)/,
   )
   assert.match(
     buildScreenSource,
@@ -1777,13 +1838,18 @@ test('MUTATION_QUIET_REVISION separates identity resets from gated revision refr
   assert.doesNotMatch(versionDataSource, /reloadWhile|setTimeout\(refresh, 500\)/)
 })
 
-test('the Version timer refreshes detail without re-reading inventory', () => {
-  assert.match(versionScreenSource, /useAutoRefresh\(\{ hot, onRefresh: reload \}\)/)
-  assert.doesNotMatch(versionScreenSource, /useAutoRefresh\(\{[^}]*inventory\.reload/)
+test('the Version timer and header refresh both detail and the security summary', () => {
   assert.match(
     versionScreenSource,
-    /onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+    /const refresh = \(\) => \{\s+reload\(\)\s+security\.reload\(\)\s+\}/,
   )
+  assert.match(versionScreenSource, /useAutoRefresh\(\{ hot, onRefresh: refresh \}\)/)
+  assert.match(versionScreenSource, /onRefresh=\{refresh\}/)
+})
+
+test('the Version screen never starts a package inventory read', () => {
+  assert.doesNotMatch(versionScreenSource, /listBuildPackages|useVersionFindings/)
+  assert.doesNotMatch(versionScreenSource, /Reading package inventory/)
 })
 
 test('the Build timer refreshes detail without re-reading inventory', () => {
@@ -2149,13 +2215,12 @@ const inventoryBuild = {
 }
 const withInventoryBuild = () => ({ ...actionVersion(), builds: [inventoryBuild] })
 
-test('version detail stays visible while package inventory reports progress', () => {
+test('version detail stays visible while the security summary shows skeleton rows', () => {
   const markup = renderToStaticMarkup(React.createElement(VersionView, {
     bucket: 'images',
     detail: { version: withInventoryBuild(), channels: [] },
-    findings: [],
-    inventoryLoading: true,
-    inventoryProgress: { packages: 321 },
+    securitySummary: null,
+    securityLoading: true,
     loading: false,
     failure: null,
     onBackToRegistry: () => {},
@@ -2163,43 +2228,42 @@ test('version detail stays visible while package inventory reports progress', ()
   }))
   assert.match(markup, />v7</)
   assert.match(markup, /Lineage/)
-  assert.match(markup, /Reading package inventory… 321 packages read so far\./)
-  assert.match(markup, /Large images can take a minute or more\./)
-  assert.doesNotMatch(markup, /pf-v6-c-skeleton/)
+  assert.match(markup, /Loading security summary…/)
+  assert.match(markup, /pf-v6-c-skeleton/)
+  assert.doesNotMatch(markup, /Reading package inventory/)
 })
 
 test('a version without builds or inventory shows no Security card, so it cannot claim "Not scanned"', () => {
   const noBuilds = renderToStaticMarkup(React.createElement(VersionOverview, {
     bucket: 'images', version: { ...actionVersion(), builds: [] },
     detail: { version: { ...actionVersion(), builds: [] }, channels: [] },
-    findings: [], callerRole: 'reader',
+    securitySummary: null, callerRole: 'reader',
     onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
   }))
   assert.doesNotMatch(noBuilds, /Not scanned|Security|Reading package inventory/)
-  // The inventory hook still runs for an empty build set; its brief in-flight
-  // state must not flash a progress card for a version with nothing to read.
+  // The independent summary read must not flash a card for a version with no builds.
   const noBuildsLoading = renderToStaticMarkup(React.createElement(VersionOverview, {
     bucket: 'images', version: { ...actionVersion(), builds: [] },
     detail: { version: { ...actionVersion(), builds: [] }, channels: [] },
-    findings: [], inventoryLoading: true, callerRole: 'reader',
+    securitySummary: null, securityLoading: true, callerRole: 'reader',
     onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
   }))
   assert.doesNotMatch(noBuildsLoading, /Security|Reading package inventory/)
-  // Builds known but the inventory read not yet begun: nothing, not a verdict.
+  // Builds known but the summary read not yet begun: nothing, not a verdict.
   const preload = renderToStaticMarkup(React.createElement(VersionOverview, {
     bucket: 'images', version: withInventoryBuild(),
     detail: { version: withInventoryBuild(), channels: [] },
-    findings: [], callerRole: 'reader',
+    securitySummary: null, callerRole: 'reader',
     onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
   }))
   assert.doesNotMatch(preload, /Not scanned|No known findings/)
 })
 
-test('version inventory failure keeps detail visible and renders the server message verbatim', () => {
+test('version security-summary failure keeps detail visible and renders the server message verbatim', () => {
   const markup = renderToStaticMarkup(React.createElement(VersionView, {
     bucket: 'images',
     detail: { version: withInventoryBuild(), channels: [] },
-    inventoryFailure: 'upstream inventory timed out',
+    securityFailure: 'upstream summary timed out',
     loading: false,
     failure: null,
     onBackToRegistry: () => {},
@@ -2207,8 +2271,8 @@ test('version inventory failure keeps detail visible and renders the server mess
   }))
   assert.match(markup, />v7</)
   assert.match(markup, /Lineage/)
-  assert.match(markup, /Package inventory could not be loaded/)
-  assert.match(markup, /upstream inventory timed out/)
+  assert.match(markup, /Security summary could not be loaded/)
+  assert.match(markup, /upstream summary timed out/)
 })
 
 test('native consume snippets separate each command with a blank line', () => {
@@ -2507,7 +2571,7 @@ test('version card order and breakpoint grid stay fixed for every consumer', () 
   const detail = { version, channels: [channelFixture()] }
   const orders = ['terraform', 'docker', 'podman', 'aws', 'azure'].map((initialConsumer) => {
     const markup = renderToStaticMarkup(React.createElement(VersionOverview, {
-      bucket: 'images', version, detail, findings: [], callerRole: 'publisher',
+      bucket: 'images', version, detail, securitySummary: null, callerRole: 'publisher',
       onOpenBuild: () => {}, onOpenVersion: () => {}, onPromote: async () => {},
       initialConsumer,
     }))

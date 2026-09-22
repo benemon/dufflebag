@@ -1,0 +1,213 @@
+{
+  "generatedClient": {
+    "builds": [
+      {
+        "build_id": "build-a",
+        "component": "docker",
+        "inventory": "parsed",
+        "packages": 2,
+        "platform": "linux",
+        "summary": {
+          "adapter": "osv",
+          "affected_packages": 1,
+          "computed_at": "2026-09-22T08:00:00Z",
+          "counts": {
+            "critical": 1,
+            "high": 0,
+            "low": 0,
+            "medium": 0,
+            "negligible": 0,
+            "unknown": 0
+          },
+          "coverage": {
+            "invalid": 0,
+            "submitted": 2,
+            "unsupported": 0,
+            "unversioned": 0
+          },
+          "database_revision": "unreported",
+          "engine": "osv.example",
+          "findings": 1,
+          "observed_at": "2026-09-22T08:00:00Z",
+          "run_id": "run-a",
+          "scanned": 2,
+          "worst": "critical"
+        }
+      }
+    ],
+    "scanner_configured": true,
+    "version": {
+      "affected_packages": 1,
+      "builds_summarised": 1,
+      "computed_at": "2026-09-22T08:00:00Z",
+      "counts": {
+        "critical": 1,
+        "high": 0,
+        "low": 0,
+        "medium": 0,
+        "negligible": 0,
+        "unknown": 0
+      },
+      "findings": 1,
+      "worst": "critical"
+    }
+  },
+  "absentScans": {
+    "builds": [
+      {
+        "build_id": "build-a",
+        "component": "amazon-ebs",
+        "inventory": "unparseable",
+        "packages": 0,
+        "platform": "aws"
+      }
+    ],
+    "scanner_configured": true,
+    "version": null
+  },
+  "mixedBuilds": {
+    "builds": [
+      {
+        "build_id": "docker-build",
+        "component": "docker.distro",
+        "inventory": "parsed",
+        "packages": 205,
+        "platform": "docker",
+        "summary": {
+          "adapter": "osv",
+          "affected_packages": 1,
+          "computed_at": "2026-09-22T08:00:00Z",
+          "counts": {
+            "critical": 1,
+            "high": 0,
+            "low": 0,
+            "medium": 0,
+            "negligible": 0,
+            "unknown": 0
+          },
+          "coverage": {
+            "invalid": 0,
+            "submitted": 205,
+            "unsupported": 0,
+            "unversioned": 0
+          },
+          "database_revision": "unreported",
+          "engine": "osv.example",
+          "findings": 1,
+          "observed_at": "2026-09-22T08:00:00Z",
+          "run_id": "run-docker",
+          "scanned": 205,
+          "worst": "critical"
+        }
+      },
+      {
+        "build_id": "aws-build",
+        "component": "amazon-ebs.distro",
+        "inventory": "parsed",
+        "packages": 180,
+        "platform": "aws",
+        "summary": {
+          "adapter": "osv",
+          "affected_packages": 1,
+          "computed_at": "2026-09-22T09:00:00Z",
+          "counts": {
+            "critical": 1,
+            "high": 0,
+            "low": 0,
+            "medium": 0,
+            "negligible": 0,
+            "unknown": 0
+          },
+          "coverage": {
+            "invalid": 0,
+            "submitted": 180,
+            "unsupported": 0,
+            "unversioned": 0
+          },
+          "database_revision": "unreported",
+          "engine": "osv.example",
+          "findings": 1,
+          "observed_at": "2026-09-22T09:00:00Z",
+          "run_id": "run-aws",
+          "scanned": 180,
+          "worst": "critical"
+        }
+      },
+      {
+        "build_id": "empty-build",
+        "component": "azure-arm.empty",
+        "inventory": "parsed",
+        "packages": 12,
+        "platform": "azure",
+        "summary": {
+          "adapter": "osv",
+          "affected_packages": 0,
+          "computed_at": "2026-09-22T10:00:00Z",
+          "counts": {
+            "critical": 0,
+            "high": 0,
+            "low": 0,
+            "medium": 0,
+            "negligible": 0,
+            "unknown": 0
+          },
+          "coverage": {
+            "invalid": 0,
+            "submitted": 12,
+            "unsupported": 0,
+            "unversioned": 0
+          },
+          "database_revision": "unreported",
+          "engine": "osv.example",
+          "findings": 0,
+          "observed_at": "2026-09-22T10:00:00Z",
+          "run_id": "run-empty",
+          "scanned": 12
+        }
+      },
+      {
+        "build_id": "broken-build",
+        "component": "azure-arm.broken",
+        "inventory": "unparseable",
+        "packages": 0,
+        "platform": "azure"
+      },
+      {
+        "build_id": "pending-build",
+        "component": "googlecompute.pending",
+        "inventory": "parsed",
+        "packages": 4,
+        "platform": "gce"
+      }
+    ],
+    "scanner_configured": true,
+    "version": {
+      "affected_packages": 1,
+      "builds_summarised": 3,
+      "computed_at": "2026-09-22T10:00:00Z",
+      "counts": {
+        "critical": 1,
+        "high": 0,
+        "low": 0,
+        "medium": 0,
+        "negligible": 0,
+        "unknown": 0
+      },
+      "findings": 1,
+      "worst": "critical"
+    }
+  },
+  "scannerNotConfigured": {
+    "builds": [
+      {
+        "build_id": "build-a",
+        "component": "docker",
+        "inventory": "parsed",
+        "packages": 2,
+        "platform": "linux"
+      }
+    ],
+    "scanner_configured": false,
+    "version": null
+  }
+}
