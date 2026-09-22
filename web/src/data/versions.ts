@@ -8,7 +8,7 @@ import {
   type ApiChannel, type ApiPackage, type ApiVersion, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { inventoryCacheKey, readCachedInventory, writeCachedInventory } from './inventoryCache'
+import { inventoryCacheKey, readInventoryOnce } from './inventoryCache'
 import { createReloadGate } from './reloadGate'
 import { platformTenancyGap, type TenancyGap } from './tenant'
 import { scanAttribution, type BuildFindings, type ScanAttribution } from './findings'
@@ -920,44 +920,44 @@ export async function loadVersionFindings(
   options: { force?: boolean } = {},
 ): Promise<LoadedBuildFindings[]> {
   const progress = { packages: 0 }
-  return Promise.all(builds.map(async (build) => {
+  return Promise.all(builds.map((build) => {
     const cacheKey = inventoryCacheKey(tenant, bucket, fingerprint, build.id)
-    if (!options.force) {
-      const cached = readCachedInventory(cacheKey)
-      if (cached) return cached
-    }
     let received = 0
-    let loaded: LoadedBuildFindings
-    try {
-      const { packages, headers } = await listBuildPackages(
-        token, tenant, bucket, fingerprint, build.id,
-        (next) => {
-          progress.packages += next.packages - received
-          received = next.packages
-          onProgress?.({ ...progress })
-        },
-      )
-      const scan = scanAttribution(headers)
-      loaded = {
-        buildID: build.id,
-        platform: build.platform || 'unknown',
-        component: build.component,
-        packages: packages.map(toPackage),
-        scanned: packages.length,
-        ...(scan ? { scan } : {}),
-      }
-    } catch (err: unknown) {
-      if (!(err instanceof ApiError) || err.status !== 422) throw err
-      loaded = {
-        buildID: build.id,
-        platform: build.platform || 'unknown',
-        component: build.component,
-        packages: [],
-        scanned: 0,
-        unparseable: true,
-      }
-    }
-    writeCachedInventory(cacheKey, loaded)
-    return loaded
+    return readInventoryOnce(
+      cacheKey,
+      Boolean(options.force),
+      async (onPage) => {
+        try {
+          const { packages, headers } = await listBuildPackages(
+            token, tenant, bucket, fingerprint, build.id,
+            (next) => onPage(next.packages),
+          )
+          const scan = scanAttribution(headers)
+          return {
+            buildID: build.id,
+            platform: build.platform || 'unknown',
+            component: build.component,
+            packages: packages.map(toPackage),
+            scanned: packages.length,
+            ...(scan ? { scan } : {}),
+          }
+        } catch (err: unknown) {
+          if (!(err instanceof ApiError) || err.status !== 422) throw err
+          return {
+            buildID: build.id,
+            platform: build.platform || 'unknown',
+            component: build.component,
+            packages: [],
+            scanned: 0,
+            unparseable: true,
+          }
+        }
+      },
+      (packages) => {
+        progress.packages += packages - received
+        received = packages
+        onProgress?.({ ...progress })
+      },
+    )
   }))
 }

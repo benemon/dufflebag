@@ -41,6 +41,7 @@ let loadVersionFindings
 let packageInventoryFromFindings
 let createReloadGate
 let clearInventoryCache
+let INVENTORY_CACHE_LIMIT
 let listBuildPackages
 let terraformConsumeSnippet
 let platformConsumeSnippet
@@ -94,7 +95,7 @@ before(async () => {
     loadVersionDetail, loadBuildDetail, loadVersionFindings, packageInventoryFromFindings } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ createReloadGate } = await vite.ssrLoadModule('/src/data/reloadGate.ts'))
-  ;({ clearInventoryCache } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
+  ;({ clearInventoryCache, INVENTORY_CACHE_LIMIT } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
@@ -1632,6 +1633,62 @@ test('a second inventory read for the same build is served from the session cach
   assert.equal(requests.length, 4, 'a cleared cache reads again')
 })
 
+test('screens mounting mid-read join one in-flight inventory read instead of starting another', async () => {
+  const requests = []
+  const routes = {
+    '/builds/shared/packages?pagination.page_size=100&pagination.next_page_token=p2': () => json({
+      packages: [{ name: 'zlib' }], pagination: {},
+    }),
+    '/builds/shared/packages?pagination.page_size=100': () => json({
+      packages: [{ name: 'openssl' }], pagination: { next_page_token: 'p2' },
+    }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'shared', platform: 'aws', component: 'amazon-ebs.image' }]
+  const joinerProgress = []
+  const [first, second] = await withFetch(routes, () => Promise.all([
+    loadVersionFindings('token', tenant, 'images', 'fp-complete', builds),
+    loadVersionFindings('token', tenant, 'images', 'fp-complete', builds, (p) => joinerProgress.push(p.packages)),
+  ]), (path) => requests.push(path))
+  assert.equal(requests.length, 2, 'two pages fetched once, not once per mount')
+  assert.deepEqual(second, first)
+  assert.deepEqual(joinerProgress.at(-1), 2, 'the joining mount saw the shared read complete')
+})
+
+test('a read that outlives sign-out cannot seed the next session\'s cache', async () => {
+  const requests = []
+  const routes = {
+    '/builds/orphan/packages?pagination.page_size=100': () => json({ packages: [{ name: 'a' }], pagination: {} }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'orphan', platform: 'aws', component: 'amazon-ebs.image' }]
+  await withFetch(routes, async () => {
+    const pending = loadVersionFindings('token', tenant, 'images', 'fp-complete', builds)
+    clearInventoryCache()
+    await pending
+    await loadVersionFindings('token', tenant, 'images', 'fp-complete', builds)
+  }, (path) => requests.push(path))
+  assert.equal(requests.length, 2, 'the post-sign-out read did not reuse the orphaned result')
+})
+
+test('the inventory cache keeps only the most recently read builds', async () => {
+  const requests = []
+  const routes = { '/packages?pagination.page_size=100': () => json({ packages: [{ name: 'a' }], pagination: {} }) }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const read = (id) => loadVersionFindings('token', tenant, 'images', 'fp-complete',
+    [{ id, platform: 'aws', component: 'amazon-ebs.image' }])
+  await withFetch(routes, async () => {
+    for (let i = 0; i < INVENTORY_CACHE_LIMIT; i++) await read(`b${i}`)
+    await read('b0')                                   // touch the oldest so it is recent again
+    await read(`b${INVENTORY_CACHE_LIMIT}`)             // one over the limit evicts the least recent: b1
+    const before = requests.length
+    await read('b0')
+    assert.equal(requests.length, before, 'the recently touched build is still cached')
+    await read('b1')
+    assert.equal(requests.length, before + 1, 'the least recently read build was evicted')
+  }, (path) => requests.push(path))
+})
+
 test('sign-out clears the inventory cache and the hook refresh bypasses it', () => {
   const auth = readFileSync(new URL('../src/auth/AuthContext.tsx', import.meta.url), 'utf8')
   assert.match(auth, /const signOut = useCallback\([\s\S]*?clearInventoryCache\(\)[\s\S]*?setState\(null\)/)
@@ -2154,6 +2211,31 @@ test('version inventory failure keeps detail visible and renders the server mess
   assert.match(markup, /upstream inventory timed out/)
 })
 
+test('native consume snippets separate each command with a blank line', () => {
+  const aws = platformConsumeSnippet('aws', 'images', consumptionVersion([
+    consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'eu-west-2' }]),
+  ]))
+  assert.match(aws, /describe-images [^\n]*\n\naws ec2 run-instances/)
+  const azure = platformConsumeSnippet('azure', 'images', consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: '/subscriptions/s/resourceGroups/r/providers/Microsoft.Compute/images/i', region: 'uksouth' }]),
+  ]))
+  assert.match(azure, /az image show [^\n]*\n\naz vm create/)
+})
+
+test('the Terraform lookup caption appears only under the Terraform tab', () => {
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: '/subscriptions/s/resourceGroups/r/providers/Microsoft.Compute/images/i', region: 'uksouth' }]),
+  ], ['latest'])
+  const terraform = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'terraform',
+  }))
+  const azure = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'azure',
+  }))
+  assert.match(terraform, /The version lookup follows latest/)
+  assert.doesNotMatch(azure, /version lookup follows/)
+})
+
 test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', () => {
   assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
@@ -2343,7 +2425,7 @@ test('an Azure managed image uses its resource id in native commands', () => {
   assert.equal(
     platformConsumeSnippet('azure', 'images', version),
     '# images v3\n\n' +
-      `az image show --ids ${id}\n` +
+      `az image show --ids ${id}\n\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
       `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
@@ -2359,7 +2441,7 @@ test('an Azure Compute Gallery image version uses the gallery show command', () 
   assert.equal(
     platformConsumeSnippet('azure', 'images', version),
     '# images v3\n\n' +
-      `az sig image-version show --ids ${id}\n` +
+      `az sig image-version show --ids ${id}\n\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
       `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
