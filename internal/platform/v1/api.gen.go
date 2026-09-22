@@ -216,6 +216,24 @@ func (e BagDropVerificationReason) Valid() bool {
 	}
 }
 
+// Defines values for BuildFindingsSummaryInventory.
+const (
+	Parsed      BuildFindingsSummaryInventory = "parsed"
+	Unparseable BuildFindingsSummaryInventory = "unparseable"
+)
+
+// Valid indicates whether the value is a known member of the BuildFindingsSummaryInventory enum.
+func (e BuildFindingsSummaryInventory) Valid() bool {
+	switch e {
+	case Parsed:
+		return true
+	case Unparseable:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for EncryptionState.
 const (
 	EncryptionStateDegraded     EncryptionState = "degraded"
@@ -456,6 +474,36 @@ func (e ScannerHealthState) Valid() bool {
 	case ScannerHealthStateDisabled:
 		return true
 	case ScannerHealthStateOk:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for Severity.
+const (
+	Critical   Severity = "critical"
+	High       Severity = "high"
+	Low        Severity = "low"
+	Medium     Severity = "medium"
+	Negligible Severity = "negligible"
+	Unknown    Severity = "unknown"
+)
+
+// Valid indicates whether the value is a known member of the Severity enum.
+func (e Severity) Valid() bool {
+	switch e {
+	case Critical:
+		return true
+	case High:
+		return true
+	case Low:
+		return true
+	case Medium:
+		return true
+	case Negligible:
+		return true
+	case Unknown:
 		return true
 	default:
 		return false
@@ -762,6 +810,44 @@ type BagDropVerificationResult struct {
 	Message *string                    `json:"message,omitempty"`
 	Outcome BagDropVerificationOutcome `json:"outcome"`
 	Reason  *BagDropVerificationReason `json:"reason,omitempty"`
+}
+
+// BuildFindingsSummary defines model for BuildFindingsSummary.
+type BuildFindingsSummary struct {
+	BuildId   string                        `json:"build_id"`
+	Component string                        `json:"component"`
+	Inventory BuildFindingsSummaryInventory `json:"inventory"`
+	Packages  int                           `json:"packages"`
+	Platform  string                        `json:"platform"`
+	Summary   *BuildScanSummary             `json:"summary,omitempty"`
+}
+
+// BuildFindingsSummaryInventory defines model for BuildFindingsSummary.Inventory.
+type BuildFindingsSummaryInventory string
+
+// BuildScanSummary defines model for BuildScanSummary.
+type BuildScanSummary struct {
+	Adapter          string `json:"adapter"`
+	AffectedPackages int    `json:"affected_packages"`
+
+	// ComputedAt The current run's observed_at used when this summary was computed.
+	ComputedAt time.Time `json:"computed_at"`
+
+	// Counts Every severity band is present, including bands with a zero count.
+	Counts   SeverityCounts `json:"counts"`
+	Coverage struct {
+		Invalid     int `json:"invalid"`
+		Submitted   int `json:"submitted"`
+		Unsupported int `json:"unsupported"`
+		Unversioned int `json:"unversioned"`
+	} `json:"coverage"`
+	DatabaseRevision string    `json:"database_revision"`
+	Engine           string    `json:"engine"`
+	Findings         int       `json:"findings"`
+	ObservedAt       time.Time `json:"observed_at"`
+	RunId            string    `json:"run_id"`
+	Scanned          int       `json:"scanned"`
+	Worst            *Severity `json:"worst,omitempty"`
 }
 
 // Encryption defines model for Encryption.
@@ -1150,6 +1236,40 @@ type Self struct {
 type SessionResponse struct {
 	// AccessToken The token the cookie was holding
 	AccessToken string `json:"access_token"`
+}
+
+// Severity defines model for Severity.
+type Severity string
+
+// SeverityCounts Every severity band is present, including bands with a zero count.
+type SeverityCounts struct {
+	Critical   int `json:"critical"`
+	High       int `json:"high"`
+	Low        int `json:"low"`
+	Medium     int `json:"medium"`
+	Negligible int `json:"negligible"`
+	Unknown    int `json:"unknown"`
+}
+
+// VersionFindingsSummary defines model for VersionFindingsSummary.
+type VersionFindingsSummary struct {
+	AffectedPackages int `json:"affected_packages"`
+	BuildsSummarised int `json:"builds_summarised"`
+
+	// ComputedAt Latest observed_at among the current runs included in this rollup.
+	ComputedAt time.Time `json:"computed_at"`
+
+	// Counts Every severity band is present, including bands with a zero count.
+	Counts   SeverityCounts `json:"counts"`
+	Findings int            `json:"findings"`
+	Worst    *Severity      `json:"worst,omitempty"`
+}
+
+// VersionFindingsSummaryResponse defines model for VersionFindingsSummaryResponse.
+type VersionFindingsSummaryResponse struct {
+	Builds            []BuildFindingsSummary  `json:"builds"`
+	ScannerConfigured bool                    `json:"scanner_configured"`
+	Version           *VersionFindingsSummary `json:"version"`
 }
 
 // Webhook defines model for Webhook.
@@ -1829,6 +1949,18 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
 	VerifyBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetVersionFindingsSummary Get stored findings summaries for a version
+	//
+	// Returns the version rollup and every build without downloading package
+	// inventories or individual findings. An absent version or build summary
+	// means no current successful scan; it is never rendered as an empty scan.
+	//
+	// Requires the reader role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary (the `GetVersionFindingsSummary` operationId).
+	GetVersionFindingsSummary(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// RescanBuild Queue a build for rescanning
 	//
@@ -2853,6 +2985,28 @@ func (c *Client) GetBagDropStatus(ctx context.Context, organizationId Organizati
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
 func (c *Client) VerifyBagDrop(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewVerifyBagDropRequest(c.Server, organizationId, projectId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetVersionFindingsSummary Get stored findings summaries for a version
+//
+// Returns the version rollup and every build without downloading package
+// inventories or individual findings. An absent version or build summary
+// means no current successful scan; it is never rendered as an empty scan.
+//
+// Requires the reader role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary (the `GetVersionFindingsSummary` operationId).
+func (c *Client) GetVersionFindingsSummary(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetVersionFindingsSummaryRequest(c.Server, organizationId, projectId, bucketName, fingerprint)
 	if err != nil {
 		return nil, err
 	}
@@ -4593,6 +4747,61 @@ func NewVerifyBagDropRequest(server string, organizationId OrganizationId, proje
 	return req, nil
 }
 
+// NewGetVersionFindingsSummaryRequest constructs an http.Request for the GetVersionFindingsSummary method
+func NewGetVersionFindingsSummaryRequest(server string, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "projectId", projectId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "bucketName", bucketName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam3 string
+
+	pathParam3, err = runtime.StyleParamWithOptions("simple", false, "fingerprint", fingerprint, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/projects/%s/buckets/%s/versions/%s/findings-summary", pathParam0, pathParam1, pathParam2, pathParam3)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewRescanBuildRequest constructs an http.Request for the RescanBuild method
 func NewRescanBuildRequest(server string, organizationId OrganizationId, projectId ProjectId, buildId string) (*http.Request, error) {
 	var err error
@@ -5993,6 +6202,20 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify (the `VerifyBagDrop` operationId).
 	VerifyBagDropWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, reqEditors ...RequestEditorFn) (*VerifyBagDropResponse, error)
+
+	// GetVersionFindingsSummaryWithResponse Get stored findings summaries for a version
+	//
+	// Returns the version rollup and every build without downloading package
+	// inventories or individual findings. An absent version or build summary
+	// means no current successful scan; it is never rendered as an empty scan.
+	//
+	// Requires the reader role on this project. A tenancy the caller may
+	// not see answers 404, indistinguishable from one that does not exist.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary (the `GetVersionFindingsSummary` operationId).
+	GetVersionFindingsSummaryWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string, reqEditors ...RequestEditorFn) (*GetVersionFindingsSummaryResponse, error)
 
 	// RescanBuildWithResponse Queue a build for rescanning
 	//
@@ -8079,6 +8302,68 @@ func (r VerifyBagDropResponse) ContentType() string {
 	return ""
 }
 
+type GetVersionFindingsSummaryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *VersionFindingsSummaryResponse
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetVersionFindingsSummaryResponse) GetJSON200() *VersionFindingsSummaryResponse {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetVersionFindingsSummaryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetVersionFindingsSummaryResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetVersionFindingsSummaryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetVersionFindingsSummaryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetVersionFindingsSummaryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetVersionFindingsSummaryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetVersionFindingsSummaryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type RescanBuildResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10064,6 +10349,26 @@ func (c *ClientWithResponses) VerifyBagDropWithResponse(ctx context.Context, org
 	return ParseVerifyBagDropResponse(rsp)
 }
 
+// GetVersionFindingsSummaryWithResponse Get stored findings summaries for a version
+//
+// Returns the version rollup and every build without downloading package
+// inventories or individual findings. An absent version or build summary
+// means no current successful scan; it is never rendered as an empty scan.
+//
+// Requires the reader role on this project. A tenancy the caller may
+// not see answers 404, indistinguishable from one that does not exist.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary (the `GetVersionFindingsSummary` operationId).
+func (c *ClientWithResponses) GetVersionFindingsSummaryWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string, reqEditors ...RequestEditorFn) (*GetVersionFindingsSummaryResponse, error) {
+	rsp, err := c.GetVersionFindingsSummary(ctx, organizationId, projectId, bucketName, fingerprint, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetVersionFindingsSummaryResponse(rsp)
+}
+
 // RescanBuildWithResponse Queue a build for rescanning
 //
 // Queues this build through the SAME queue, locks and worker limits as
@@ -11964,6 +12269,53 @@ func ParseVerifyBagDropResponse(rsp *http.Response) (*VerifyBagDropResponse, err
 	return response, nil
 }
 
+// ParseGetVersionFindingsSummaryResponse parses an HTTP response from a GetVersionFindingsSummaryWithResponse call
+func ParseGetVersionFindingsSummaryResponse(rsp *http.Response) (*GetVersionFindingsSummaryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetVersionFindingsSummaryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest VersionFindingsSummaryResponse
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseRescanBuildResponse parses an HTTP response from a RescanBuildWithResponse call
 func ParseRescanBuildResponse(rsp *http.Response) (*RescanBuildResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13179,6 +13531,9 @@ type ServerInterface interface {
 	// VerifyBagDrop Resolve the configured destination and record the result
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
 	VerifyBagDrop(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId)
+	// GetVersionFindingsSummary Get stored findings summaries for a version
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary)
+	GetVersionFindingsSummary(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string)
 	// RescanBuild Queue a build for rescanning
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan)
 	RescanBuild(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, buildId string)
@@ -13936,6 +14291,59 @@ func (siw *ServerInterfaceWrapper) VerifyBagDrop(w http.ResponseWriter, r *http.
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.VerifyBagDrop(w, r, organizationId, projectId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetVersionFindingsSummary operation middleware
+func (siw *ServerInterfaceWrapper) GetVersionFindingsSummary(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "projectId" -------------
+	var projectId ProjectId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "projectId", r.PathValue("projectId"), &projectId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "projectId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "bucketName" -------------
+	var bucketName string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "bucketName", r.PathValue("bucketName"), &bucketName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "bucketName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "fingerprint" -------------
+	var fingerprint string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "fingerprint", r.PathValue("fingerprint"), &fingerprint, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "fingerprint", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetVersionFindingsSummary(w, r, organizationId, projectId, bucketName, fingerprint)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -14850,6 +15258,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/principals/{principalId}/secrets/{secretId}", wrapper.RevokePrincipalSecret)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/scanner/health", wrapper.GetScannerHealth)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan", wrapper.RescanBuild)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary", wrapper.GetVersionFindingsSummary)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins", wrapper.ListPins)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", wrapper.DeletePin)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/pins/{bucketName}", wrapper.SetPin)
@@ -16544,6 +16953,73 @@ func (response VerifyBagDrop409JSONResponse) VisitVerifyBagDropResponse(w http.R
 	return err
 }
 
+type GetVersionFindingsSummaryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	ProjectId      ProjectId      `json:"projectId"`
+	BucketName     string         `json:"bucketName"`
+	Fingerprint    string         `json:"fingerprint"`
+}
+
+type GetVersionFindingsSummaryResponseObject interface {
+	VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error
+}
+
+type GetVersionFindingsSummary200JSONResponse VersionFindingsSummaryResponse
+
+func (response GetVersionFindingsSummary200JSONResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVersionFindingsSummary401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetVersionFindingsSummary401JSONResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVersionFindingsSummary403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetVersionFindingsSummary403JSONResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetVersionFindingsSummary404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetVersionFindingsSummary404JSONResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type RescanBuildRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	ProjectId      ProjectId      `json:"projectId"`
@@ -18184,6 +18660,9 @@ type StrictServerInterface interface {
 	// VerifyBagDrop Resolve the configured destination and record the result
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/bagdrop/verify)
 	VerifyBagDrop(ctx context.Context, request VerifyBagDropRequestObject) (VerifyBagDropResponseObject, error)
+	// GetVersionFindingsSummary Get stored findings summaries for a version
+	// (GET /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/findings-summary)
+	GetVersionFindingsSummary(ctx context.Context, request GetVersionFindingsSummaryRequestObject) (GetVersionFindingsSummaryResponseObject, error)
 	// RescanBuild Queue a build for rescanning
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/builds/{buildId}/rescan)
 	RescanBuild(ctx context.Context, request RescanBuildRequestObject) (RescanBuildResponseObject, error)
@@ -18972,6 +19451,35 @@ func (sh *strictHandler) VerifyBagDrop(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyBagDropResponseObject); ok {
 		if err := validResponse.VisitVerifyBagDropResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetVersionFindingsSummary operation middleware
+func (sh *strictHandler) GetVersionFindingsSummary(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, bucketName string, fingerprint string) {
+	var request GetVersionFindingsSummaryRequestObject
+
+	request.OrganizationId = organizationId
+	request.ProjectId = projectId
+	request.BucketName = bucketName
+	request.Fingerprint = fingerprint
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetVersionFindingsSummary(ctx, request.(GetVersionFindingsSummaryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetVersionFindingsSummary")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetVersionFindingsSummaryResponseObject); ok {
+		if err := validResponse.VisitGetVersionFindingsSummaryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -387,6 +387,9 @@ func (response refusalResponse) VisitDeleteProjectResponse(w http.ResponseWriter
 func (response refusalResponse) VisitListPinsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitSetPinResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

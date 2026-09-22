@@ -210,8 +210,14 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 		}
 	}
 
-	if err := advanceBuildScanState(ctx, tx, r, tenant, run, state); err != nil {
+	advanced, err := advanceBuildScanState(ctx, tx, r, tenant, run, state)
+	if err != nil {
 		return err
+	}
+	if advanced {
+		if err := r.recomputeFindingsSummaries(ctx, tx, tenant, run.BuildID, run.ID, run.ObservedAt); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -338,7 +344,7 @@ func readScanFinding(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tena
 	return &rows[0], nil
 }
 
-func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, run ScanRun, state *BuildScanState) error {
+func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, run ScanRun, state *BuildScanState) (bool, error) {
 	sequenceOf := func(runID string) (int64, error) {
 		return verifiedRunSequence(ctx, tx, r, tenant, runID)
 	}
@@ -349,7 +355,7 @@ func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenan
 	}
 	latestSequence, err := sequenceOf(latest)
 	if err != nil {
-		return err
+		return false, err
 	}
 	if run.RunSequence > latestSequence {
 		latest = run.ID
@@ -357,7 +363,7 @@ func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenan
 	if run.Status == ScanRunSucceeded {
 		currentSequence, err := sequenceOf(current)
 		if err != nil {
-			return err
+			return false, err
 		}
 		// The ordering guard: an older completion arriving late can never
 		// overwrite newer current findings.
@@ -365,6 +371,7 @@ func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenan
 			current = run.ID
 		}
 	}
+	advanced := current == run.ID
 
 	mac := r.rowMAC(buildScanStateMACMessage(tenant, run.BuildID, current, latest))
 	if _, err := tx.ExecContext(ctx, `
@@ -378,9 +385,9 @@ func advanceBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenan
 			integrity_mac = $6`,
 		tenant.OrganizationID, tenant.ProjectID, run.BuildID, current, latest, mac,
 	); err != nil {
-		return fmt.Errorf("advance build scan state: %w", err)
+		return false, fmt.Errorf("advance build scan state: %w", err)
 	}
-	return nil
+	return advanced, nil
 }
 
 // GetBuildScanState returns the verified pointer row, or nil when the build

@@ -226,3 +226,22 @@ func buildScanStateMACMessage(tenant Tenant, buildID, currentRunID, latestAttemp
 		"build_scan_state", buildID, currentRunID, latestAttemptRunID,
 	)
 }
+
+func buildFindingsSummaryMACMessage(tenant Tenant, row buildFindingsSummaryRow) []byte {
+	return scanMACMessage(
+		tenant.OrganizationID.String(), tenant.ProjectID.String(), "build_findings_summary",
+		row.BucketID, row.BuildID, row.RunID, strconv.Itoa(row.Scanned),
+		strconv.Itoa(row.Findings), strconv.Itoa(row.AffectedPackages), string(row.Worst),
+		canonicalJSONDigest(row.Counts), row.ComputedAt.Format(time.RFC3339Nano),
+	)
+}
+
+func versionFindingsSummaryMACMessage(tenant Tenant, row versionFindingsSummaryRow) []byte {
+	return scanMACMessage(
+		tenant.OrganizationID.String(), tenant.ProjectID.String(), "version_findings_summary",
+		row.BucketID, row.VersionID, strconv.Itoa(row.Findings),
+		strconv.Itoa(row.AffectedPackages), string(row.Worst), canonicalJSONDigest(row.Counts),
+		strconv.Itoa(row.BuildsSummarised), canonicalJSONDigest(row.SourceRunIDs),
+		row.ComputedAt.Format(time.RFC3339Nano),
+	)
+}
