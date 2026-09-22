@@ -41,6 +41,7 @@ let loadVersionFindings
 let packageInventoryFromFindings
 let createReloadGate
 let clearInventoryCache
+let INVENTORY_CACHE_LIMIT
 let listBuildPackages
 let terraformConsumeSnippet
 let platformConsumeSnippet
@@ -94,7 +95,7 @@ before(async () => {
     loadVersionDetail, loadBuildDetail, loadVersionFindings, packageInventoryFromFindings } =
     await vite.ssrLoadModule('/src/data/versions.ts'))
   ;({ createReloadGate } = await vite.ssrLoadModule('/src/data/reloadGate.ts'))
-  ;({ clearInventoryCache } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
+  ;({ clearInventoryCache, INVENTORY_CACHE_LIMIT } = await vite.ssrLoadModule('/src/data/inventoryCache.ts'))
   ;({ platformTenancyGap } = await vite.ssrLoadModule('/src/data/tenant.ts'))
   ;({ FacetRail } = await vite.ssrLoadModule('/src/screens/RegistryFacets.tsx'))
   ;({ ApiError, revokeVersion, restoreVersion, deleteVersion, createChannel, assignChannelVersion,
@@ -1630,6 +1631,62 @@ test('a second inventory read for the same build is served from the session cach
   clearInventoryCache()
   await read()
   assert.equal(requests.length, 4, 'a cleared cache reads again')
+})
+
+test('screens mounting mid-read join one in-flight inventory read instead of starting another', async () => {
+  const requests = []
+  const routes = {
+    '/builds/shared/packages?pagination.page_size=100&pagination.next_page_token=p2': () => json({
+      packages: [{ name: 'zlib' }], pagination: {},
+    }),
+    '/builds/shared/packages?pagination.page_size=100': () => json({
+      packages: [{ name: 'openssl' }], pagination: { next_page_token: 'p2' },
+    }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'shared', platform: 'aws', component: 'amazon-ebs.image' }]
+  const joinerProgress = []
+  const [first, second] = await withFetch(routes, () => Promise.all([
+    loadVersionFindings('token', tenant, 'images', 'fp-complete', builds),
+    loadVersionFindings('token', tenant, 'images', 'fp-complete', builds, (p) => joinerProgress.push(p.packages)),
+  ]), (path) => requests.push(path))
+  assert.equal(requests.length, 2, 'two pages fetched once, not once per mount')
+  assert.deepEqual(second, first)
+  assert.deepEqual(joinerProgress.at(-1), 2, 'the joining mount saw the shared read complete')
+})
+
+test('a read that outlives sign-out cannot seed the next session\'s cache', async () => {
+  const requests = []
+  const routes = {
+    '/builds/orphan/packages?pagination.page_size=100': () => json({ packages: [{ name: 'a' }], pagination: {} }),
+  }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const builds = [{ id: 'orphan', platform: 'aws', component: 'amazon-ebs.image' }]
+  await withFetch(routes, async () => {
+    const pending = loadVersionFindings('token', tenant, 'images', 'fp-complete', builds)
+    clearInventoryCache()
+    await pending
+    await loadVersionFindings('token', tenant, 'images', 'fp-complete', builds)
+  }, (path) => requests.push(path))
+  assert.equal(requests.length, 2, 'the post-sign-out read did not reuse the orphaned result')
+})
+
+test('the inventory cache keeps only the most recently read builds', async () => {
+  const requests = []
+  const routes = { '/packages?pagination.page_size=100': () => json({ packages: [{ name: 'a' }], pagination: {} }) }
+  const tenant = { organizationID: 'org', projectID: 'project' }
+  const read = (id) => loadVersionFindings('token', tenant, 'images', 'fp-complete',
+    [{ id, platform: 'aws', component: 'amazon-ebs.image' }])
+  await withFetch(routes, async () => {
+    for (let i = 0; i < INVENTORY_CACHE_LIMIT; i++) await read(`b${i}`)
+    await read('b0')                                   // touch the oldest so it is recent again
+    await read(`b${INVENTORY_CACHE_LIMIT}`)             // one over the limit evicts the least recent: b1
+    const before = requests.length
+    await read('b0')
+    assert.equal(requests.length, before, 'the recently touched build is still cached')
+    await read('b1')
+    assert.equal(requests.length, before + 1, 'the least recently read build was evicted')
+  }, (path) => requests.push(path))
 })
 
 test('sign-out clears the inventory cache and the hook refresh bypasses it', () => {
