@@ -4,9 +4,8 @@ import {
 } from '@patternfly/react-core'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
 
-import {
-  coverageSummary, hasCoverageGap, versionRollup, type BuildFindings,
-} from '../data/findings'
+import { coverageSummary, hasCoverageGap } from '../data/findings'
+import type { VersionSecuritySummary } from '../data/versions'
 import { OUT_OF_SCAN_SET_CLASS } from './Findings'
 import { When } from './When'
 
@@ -24,38 +23,43 @@ const SEVERITY_COLOUR: Record<string, 'red' | 'orange' | 'yellow' | 'blue' | 'gr
  * flaw shipped on three platforms as three problems.
  */
 export function VersionSecurityCard({
-  builds, onOpenBuild, outOfScanSet,
+  summary, onOpenBuild, outOfScanSet,
 }: {
-  builds: BuildFindings[]
+  summary: VersionSecuritySummary
   /** Each build tile opens that build on this version. */
   onOpenBuild: (buildID: string) => void
   /** No channel selects this version, so the figures are no longer maintained. */
   outOfScanSet: boolean
 }) {
-  const parsed = builds.filter((build) => !build.unparseable)
-  const scanned = parsed.filter((build) => build.scan)
-  const unparseable = builds.some((build) => build.unparseable)
-  if (scanned.length === 0 && !unparseable) {
+  if (!summary.version) {
+    const scannerConfigured = summary.scannerConfigured
     return (
       <Card>
         <CardTitle>Security</CardTitle>
         <CardBody>
-          <Content component="p" data-state="never-scanned">
-            Not scanned. No vulnerability source is configured for this deployment.
+          <Content component="p" data-state={scannerConfigured ? 'not-yet-scanned' : 'never-scanned'}>
+            {scannerConfigured
+              ? 'Not yet scanned. Findings appear once the scanner has examined a build of this version.'
+              : 'Not scanned. No vulnerability source is configured for this deployment.'}
           </Content>
         </CardBody>
       </Card>
     )
   }
 
-  const summary = versionRollup(parsed)
-  const attribution = scanned[0]?.scan
+  const version = summary.version
+  const attribution = summary.builds.find((build) => build.summary)?.summary?.scan
   // Coverage appears ONLY when something was not examined. With full coverage
   // the counts are noise; with a gap they are the difference between "nothing
   // found" and "not looked at", which is the distinction the console exists to
   // preserve.
   const coverage = hasCoverageGap(attribution) ? coverageSummary(attribution) : []
-  const lastScanned = attribution?.observedAt
+  // Compared as instants: RFC 3339 strings with and without fractional seconds
+  // do not sort lexically.
+  const lastScanned = summary.builds.reduce<string | undefined>((latest, build) => {
+    const observed = build.summary?.observedAt
+    return observed && (!latest || Date.parse(observed) > Date.parse(latest)) ? observed : latest
+  }, undefined)
 
   return (
     <Card className={outOfScanSet ? OUT_OF_SCAN_SET_CLASS : undefined}>
@@ -71,31 +75,25 @@ export function VersionSecurityCard({
         </span>
       </CardTitle>
       <CardBody>
-        {scanned.length === 0 ? (
-          <Content component="p" data-state="never-scanned">
-            Not scanned. No vulnerability source is configured for this deployment.
-          </Content>
-        ) : (
-          <div
-            style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
-            data-state={summary.worst ? 'findings' : 'zero-findings'}
-          >
-            <Label color={summary.worst ? SEVERITY_COLOUR[summary.worst] ?? 'grey' : 'grey'}>
-              {summary.worst ?? 'No known findings'}
-            </Label>
-            {summary.worst && (
-              <Content component="p" style={{ margin: 0 }}>
-                {summary.findings} {summary.findings === 1 ? 'finding' : 'findings'} across{' '}
-                {summary.affectedPackages}{' '}
-                {summary.affectedPackages === 1 ? 'package' : 'packages'}
-              </Content>
-            )}
-          </div>
-        )}
+        <div
+          style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}
+          data-state={version.worst ? 'findings' : 'zero-findings'}
+        >
+          <Label color={version.worst ? SEVERITY_COLOUR[version.worst] ?? 'grey' : 'grey'}>
+            {version.worst ?? 'No known findings'}
+          </Label>
+          {version.worst && (
+            <Content component="p" style={{ margin: 0 }}>
+              {version.findings} {version.findings === 1 ? 'finding' : 'findings'} across{' '}
+              {version.affectedPackages}{' '}
+              {version.affectedPackages === 1 ? 'package' : 'packages'}
+            </Content>
+          )}
+        </div>
 
-        {summary.counts.length > 0 && (
+        {version.counts.length > 0 && (
           <div style={{ marginTop: 12, display: 'flex', gap: 7, flexWrap: 'wrap' }}>
-            {summary.counts.map(({ severity, count }) => (
+            {version.counts.map(({ severity, count }) => (
               <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact>
                 {count} {severity}
               </Label>
@@ -103,6 +101,11 @@ export function VersionSecurityCard({
           </div>
         )}
 
+        {version.buildsSummarised < summary.builds.length && (
+          <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage-builds="true">
+            Covers {version.buildsSummarised} of {summary.builds.length} builds; the rest are not yet scanned.
+          </Content>
+        )}
         {outOfScanSet && (
           <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }}>
             No channel selects this version, so these figures are not being updated.
@@ -123,8 +126,8 @@ export function VersionSecurityCard({
             onSelectDataListItem={(_event, buildID) => onOpenBuild(buildID)}
             style={{ marginTop: 8 }}
           >
-            {builds.map((build) => {
-              const rollup = summary.builds.find((candidate) => candidate.buildID === build.buildID)
+            {summary.builds.map((build) => {
+              const buildSummary = build.summary
               return (
                 <DataListItem
                   key={build.buildID}
@@ -143,21 +146,21 @@ export function VersionSecurityCard({
                         </code>
                       </DataListCell>,
                       <DataListCell key="severity">
-                        <Label color={rollup?.worst ? SEVERITY_COLOUR[rollup.worst] ?? 'grey' : 'grey'} isCompact>
-                          {/* Never "clean": a build with nothing found is reported as
-                              an absence of findings, not as a verdict of safety. */}
-                          {build.unparseable ? 'SBOM unparseable' : rollup?.worst ?? 'no findings'}
+                        <Label color={buildSummary?.worst ? SEVERITY_COLOUR[buildSummary.worst] ?? 'grey' : 'grey'} isCompact>
+                          {build.inventory === 'unparseable'
+                            ? 'SBOM unparseable'
+                            : buildSummary?.worst ?? (buildSummary ? 'no findings' : 'not scanned')}
                         </Label>
                       </DataListCell>,
                       <DataListCell key="counts" alignRight>
-                        {rollup && rollup.counts.length > 0 ? (
-                          rollup.counts.map(({ severity, count }) => (
+                        {buildSummary && buildSummary.counts.length > 0 ? (
+                          buildSummary.counts.map(({ severity, count }) => (
                             <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
                               {count} {severity}
                             </Label>
                           ))
-                        ) : build.unparseable ? null : (
-                          <Content component="small">{rollup?.scanned ?? 0} scanned</Content>
+                        ) : build.inventory === 'unparseable' || !buildSummary ? null : (
+                          <Content component="small">{buildSummary.scanned} scanned</Content>
                         )}
                       </DataListCell>,
                       <DataListCell key="open" isIcon alignRight>

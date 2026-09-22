@@ -1,17 +1,21 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
-  ApiError, getBucket, getVersion, listBucketAncestry, listBuildPackages,
+  ApiError, getBucket, getVersion, getVersionFindingsSummary, listBucketAncestry, listBuildPackages,
   listChannelAssignmentHistory, listChannels, listEnforcedBlocksByBucket, listSboms, listVersions,
   signOutIfUnauthorized,
   type ApiAncestryStatus, type ApiBucket, type ApiBucketAncestry, type ApiBuild,
-  type ApiChannel, type ApiPackage, type ApiVersion, type Tenant as ApiTenant,
+  type ApiChannel, type ApiPackage, type ApiSeverityCounts, type ApiVersion,
+  type ApiVersionFindingsSummaryResponse, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { inventoryCacheKey, readInventoryOnce } from './inventoryCache'
 import { createReloadGate } from './reloadGate'
 import { platformTenancyGap, type TenancyGap } from './tenant'
-import { scanAttribution, type BuildFindings, type ScanAttribution } from './findings'
+import {
+  scanAttribution, SEVERITY_ORDER, type BuildFindings, type ScanAttribution,
+  type Severity, type SeverityCount,
+} from './findings'
 
 export type Artifact = {
   id: string
@@ -197,6 +201,34 @@ export type InventoryProgress = {
   packages: number
 }
 
+export type VersionSecuritySummary = {
+  scannerConfigured: boolean
+  version: {
+    worst?: Severity
+    counts: SeverityCount[]
+    findings: number
+    affectedPackages: number
+    buildsSummarised: number
+    computedAt: string
+  } | null
+  builds: {
+    buildID: string
+    component: string
+    platform: string
+    inventory: 'parsed' | 'unparseable'
+    packages: number
+    summary?: {
+      worst?: Severity
+      counts: SeverityCount[]
+      findings: number
+      affectedPackages: number
+      scanned: number
+      observedAt: string
+      scan: ScanAttribution
+    }
+  }[]
+}
+
 /**
  * Versions of one bucket, projected from the compatibility-plane API.
  *
@@ -226,6 +258,14 @@ export function useVersion(bucket: string, fingerprint: string) {
     null,
     (token, tenant) => loadVersionDetail(token, tenant, bucket, fingerprint),
     bucket + '/' + fingerprint,
+  )
+}
+
+export function useVersionSecuritySummary(bucket: string, fingerprint: string) {
+  return useVersionData<VersionSecuritySummary | null>(
+    null,
+    (token, tenant) => loadVersionSecuritySummary(token, tenant, bucket, fingerprint),
+    `${bucket}/${fingerprint}/security`,
   )
 }
 
@@ -491,6 +531,63 @@ export async function loadVersion(
     listChannels(token, tenant, bucket),
   ])
   return toVersion(version, channels)
+}
+
+export async function loadVersionSecuritySummary(
+  token: string,
+  tenant: ApiTenant,
+  bucket: string,
+  fingerprint: string,
+): Promise<VersionSecuritySummary> {
+  const response = await getVersionFindingsSummary(token, tenant, bucket, fingerprint)
+  return projectVersionSecuritySummary(response)
+}
+
+function projectSeverityCounts(counts: ApiSeverityCounts): SeverityCount[] {
+  return [...SEVERITY_ORDER].reverse()
+    .filter((severity) => counts[severity] > 0)
+    .map((severity) => ({ severity, count: counts[severity] }))
+}
+
+export function projectVersionSecuritySummary(
+  response: ApiVersionFindingsSummaryResponse,
+): VersionSecuritySummary {
+  return {
+    scannerConfigured: response.scanner_configured,
+    version: response.version ? {
+      ...(response.version.worst ? { worst: response.version.worst as Severity } : {}),
+      counts: projectSeverityCounts(response.version.counts),
+      findings: response.version.findings,
+      affectedPackages: response.version.affected_packages,
+      buildsSummarised: response.version.builds_summarised,
+      computedAt: response.version.computed_at,
+    } : null,
+    builds: response.builds.map((build) => ({
+      buildID: build.build_id,
+      component: build.component,
+      platform: build.platform,
+      inventory: build.inventory,
+      packages: build.packages,
+      ...(build.summary ? { summary: {
+        ...(build.summary.worst ? { worst: build.summary.worst as Severity } : {}),
+        counts: projectSeverityCounts(build.summary.counts),
+        findings: build.summary.findings,
+        affectedPackages: build.summary.affected_packages,
+        scanned: build.summary.scanned,
+        observedAt: build.summary.observed_at,
+        scan: {
+          adapter: build.summary.adapter,
+          engine: build.summary.engine,
+          databaseRevision: build.summary.database_revision,
+          observedAt: build.summary.observed_at,
+          submitted: build.summary.coverage.submitted,
+          invalid: build.summary.coverage.invalid,
+          unversioned: build.summary.coverage.unversioned,
+          unsupported: build.summary.coverage.unsupported,
+        },
+      } } : {}),
+    })),
+  }
 }
 
 export async function loadVersionDetail(
@@ -835,14 +932,7 @@ function buildState(status?: string): BuildState {
   }
 }
 
-/**
- * Package inventories for every build of a version, so the version can report
- * findings once rather than per build.
- *
- * One request set per build: the compatibility plane exposes packages per
- * build and has no per-version aggregate, so this is the honest cost of a
- * version-level answer.
- */
+/** Package inventories for the supplied builds. */
 export type LoadedBuildFindings = Omit<BuildFindings, 'packages'> & { packages: Package[] }
 
 export function packageInventoryFromFindings(

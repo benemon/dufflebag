@@ -110,6 +110,9 @@ With a scanner configured:
 - Build packages include their findings. Responses include
   `Dufflebag-Scan-*` headers with the adapter, engine, database revision,
   and coverage counts.
+- The version screen and the platform API serve per-build and per-version
+  findings summaries computed at scan completion. An unscanned build has no
+  summary and an unscanned version answers `null`.
 - Bucket-level `reader` operations aggregate across builds. They return a
   vulnerability summary, packages with vulnerabilities, and a flat
   vulnerability list.

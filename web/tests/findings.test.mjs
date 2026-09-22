@@ -4,7 +4,7 @@ import { after, before, test } from 'node:test'
 import { createServer } from 'vite'
 
 let vite
-let rollup, rollupVersion, coverageSummary, hasCoverageGap, scanAttribution
+let rollup, coverageSummary, hasCoverageGap, scanAttribution
 
 before(async () => {
   vite = await createServer({
@@ -13,7 +13,7 @@ before(async () => {
     server: { middlewareMode: true },
     appType: 'custom',
   })
-  ;({ rollup, versionRollup: rollupVersion, coverageSummary, hasCoverageGap, scanAttribution } =
+  ;({ rollup, coverageSummary, hasCoverageGap, scanAttribution } =
     await vite.ssrLoadModule('/src/data/findings.ts'))
 })
 
@@ -158,50 +158,4 @@ test('attribution is parsed from the scan headers', () => {
   assert.equal(attribution.databaseRevision, 'unreported')
   assert.equal(attribution.submitted, 40)
   assert.equal(attribution.unsupported, 12)
-})
-
-// The rule the design corrected: summing builds double-counts anything shipped
-// on every platform. One flaw in libcurl on three builds is ONE problem.
-test('a finding on every build counts once for the version', () => {
-  const libcurl = (build) => ({
-    buildID: build, platform: build, scanned: 200,
-    packages: [{
-      name: 'libcurl', version: '7.61.1', purl: 'pkg:rpm/libcurl@7.61.1',
-      findings: [{ identifier: 'CVE-2023-38545', criticality: 'critical' }],
-    }],
-  })
-  const result = rollupVersion([libcurl('docker'), libcurl('aws'), libcurl('azure')])
-  assert.equal(result.worst, 'critical')
-  assert.equal(result.findings, 1, 'three builds, one problem')
-  assert.equal(result.affectedPackages, 1)
-  assert.deepEqual(result.counts, [{ severity: 'critical', count: 1 }])
-  // The per-build view is what says where it lives.
-  assert.equal(result.builds.length, 3)
-  for (const build of result.builds) {
-    assert.equal(build.worst, 'critical', `${build.platform} carries it`)
-  }
-})
-
-test('the same advisory on different packages counts separately', () => {
-  const result = rollupVersion([{
-    buildID: 'b', platform: 'docker', scanned: 10,
-    packages: [
-      { name: 'libcurl', version: '1', purl: 'pkg:a/libcurl@1',
-        findings: [{ identifier: 'CVE-1', criticality: 'high' }] },
-      { name: 'libssl', version: '1', purl: 'pkg:a/libssl@1',
-        findings: [{ identifier: 'CVE-1', criticality: 'high' }] },
-    ],
-  }])
-  assert.equal(result.findings, 2, 'one advisory, two packages, two problems')
-  assert.equal(result.affectedPackages, 2)
-})
-
-test('a build with no findings still reports what it scanned', () => {
-  const result = rollupVersion([
-    { buildID: 'a', platform: 'docker', scanned: 205,
-      packages: [{ name: 'zlib', version: '1', purl: 'pkg:a/zlib@1' }] },
-  ])
-  assert.equal(result.worst, undefined)
-  assert.equal(result.findings, 0)
-  assert.equal(result.builds[0].scanned, 205, 'coverage is reported even with nothing found')
 })

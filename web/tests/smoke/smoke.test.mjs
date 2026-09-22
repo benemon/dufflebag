@@ -2164,6 +2164,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     }
     const securityText = () => page.$$eval('.pf-v6-c-card', (cards) =>
       cards.find((card) => card.innerText.trim().startsWith('Security'))?.innerText ?? '')
+    const findingsSummary = (state) => api(
+      rootToken,
+      'GET',
+      `/api/v1/organizations/${seeded.organization.id}/projects/${seeded.project.id}` +
+      `/buckets/${encodeURIComponent(state.bucket)}/versions/` +
+      `${encodeURIComponent(state.fingerprint)}/findings-summary`,
+    )
     // The scan date renders formatted (duf-fcg6.6); the card's time element
     // keeps the real observation date for exact assertion.
     const securityScanDate = () => page.$$eval('.pf-v6-c-card', (cards) => {
@@ -2178,10 +2185,17 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // 1. Never scanned: a running build is ineligible by construction, so
     // this state cannot race the background worker.
+    const neverSummary = await findingsSummary(never)
+    assert.equal(neverSummary.version, null)
+    assert.equal(neverSummary.scanner_configured, true)
+    // The OSV stub keeps scanner_configured true; this lane cannot exercise the no-source state.
     await openVersion(never)
     await until('the never-scanned state', async () =>
-      (await securityText()).includes('Not scanned.'))
-    assert.match(await securityText(), /Not scanned/)
+      (await securityText()).includes('Not yet scanned.'))
+    assert.match(
+      await securityText(),
+      /Not yet scanned\. Findings appear once the scanner has examined a build of this version\./,
+    )
     assert.doesNotMatch(await securityText(), /No known findings|Last scanned/)
     await assertNoVerdicts()
 
@@ -2215,6 +2229,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await assertNoVerdicts()
 
     // 4. The recorded Go fixture yields exactly two advisories on one package.
+    const summary = await findingsSummary(findings)
+    assert.equal(summary.version.findings, 2)
+    assert.equal(summary.version.affected_packages, 1)
     await openVersion(findings)
     const findingsDate = new Date(findingsScan.observedAt).toISOString().slice(0, 10)
     await until('the findings figures', async () =>
