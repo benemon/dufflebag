@@ -2211,6 +2211,31 @@ test('version inventory failure keeps detail visible and renders the server mess
   assert.match(markup, /upstream inventory timed out/)
 })
 
+test('native consume snippets separate each command with a blank line', () => {
+  const aws = platformConsumeSnippet('aws', 'images', consumptionVersion([
+    consumptionBuild('aws', [{ externalIdentifier: 'ami-123', region: 'eu-west-2' }]),
+  ]))
+  assert.match(aws, /describe-images [^\n]*\n\naws ec2 run-instances/)
+  const azure = platformConsumeSnippet('azure', 'images', consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: '/subscriptions/s/resourceGroups/r/providers/Microsoft.Compute/images/i', region: 'uksouth' }]),
+  ]))
+  assert.match(azure, /az image show [^\n]*\n\naz vm create/)
+})
+
+test('the Terraform lookup caption appears only under the Terraform tab', () => {
+  const version = consumptionVersion([
+    consumptionBuild('azure', [{ externalIdentifier: '/subscriptions/s/resourceGroups/r/providers/Microsoft.Compute/images/i', region: 'uksouth' }]),
+  ], ['latest'])
+  const terraform = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'terraform',
+  }))
+  const azure = renderToStaticMarkup(React.createElement(ConsumeCard, {
+    bucket: 'images', version, initialConsumer: 'azure',
+  }))
+  assert.match(terraform, /The version lookup follows latest/)
+  assert.doesNotMatch(azure, /version lookup follows/)
+})
+
 test('MUTATION_CONSUMER_FALLBACK keeps toggles to confident built platforms', () => {
   assert.deepEqual(availableConsumers(consumptionVersion([
     consumptionBuild('docker', [{ externalIdentifier: 'sha256:abc', region: 'docker' }]),
@@ -2400,7 +2425,7 @@ test('an Azure managed image uses its resource id in native commands', () => {
   assert.equal(
     platformConsumeSnippet('azure', 'images', version),
     '# images v3\n\n' +
-      `az image show --ids ${id}\n` +
+      `az image show --ids ${id}\n\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
       `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )
@@ -2416,7 +2441,7 @@ test('an Azure Compute Gallery image version uses the gallery show command', () 
   assert.equal(
     platformConsumeSnippet('azure', 'images', version),
     '# images v3\n\n' +
-      `az sig image-version show --ids ${id}\n` +
+      `az sig image-version show --ids ${id}\n\n` +
       'az vm create --resource-group <resource-group> --name <vm-name> ' +
       `--image ${id} --location uksouth --ssh-key-values <ssh-public-key>`,
   )

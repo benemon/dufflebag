@@ -810,7 +810,7 @@ export function ConsumeCard({
             </Content>
           </Alert>
         )}
-        {version.channels.length > 0 && (
+        {consumer === 'terraform' && version.channels.length > 0 && (
           <Content component="p">
             The version lookup follows {version.channels[0]}. The artifact lookup pins the exact
             fingerprint shown above.
@@ -864,7 +864,7 @@ export function platformConsumeSnippet(
       .flatMap((build) => build.artifacts)
     if (artifacts.length === 0) return null
     return [heading, ...artifacts.map((artifact) =>
-      `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n` +
+      `aws ec2 describe-images --image-ids ${artifact.externalIdentifier} --region ${artifact.region}\n\n` +
       `aws ec2 run-instances --image-id ${artifact.externalIdentifier} --region ${artifact.region}`,
     )].join('\n\n')
   }
@@ -886,7 +886,7 @@ export function platformConsumeSnippet(
         `az vm create --resource-group <resource-group> --name <vm-name> ` +
           `--image ${artifact.externalIdentifier} --location ${artifact.region} ` +
           '--ssh-key-values <ssh-public-key>',
-      ].filter(Boolean).join('\n')
+      ].filter(Boolean).join('\n\n')
     })].join('\n\n')
   }
   return null
