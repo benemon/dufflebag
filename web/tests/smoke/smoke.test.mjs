@@ -1754,6 +1754,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('incomplete')
     await toggleRow('v0')
     await waitForText('smoke-wip')
+    // The Security card reads the stored summary on entry and again on the
+    // page's 30s poll, so the scans must have landed before the version opens
+    // or the card waits a whole poll for them.
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    await until('the four builds to be summarised', async () => {
+      const summary = await api(rootToken, 'GET',
+        `/api/v1/organizations/${seeded.organization.id}/projects/${seeded.project.id}` +
+        '/buckets/smoke-images/versions/smoke-done/findings-summary')
+      return summary.version?.builds_summarised === 4
+    })
     // The version defaults to Overview; descend through its Builds facet.
     // package state proved in a real browser against the real package route.
     await clickByText('button', 'v1')
