@@ -87,11 +87,6 @@ func NewScannerService(
 
 // Run drains promptly, schedules bounded retention, and returns on cancellation.
 func (s *ScannerService) Run(ctx context.Context) {
-	backfilled, err := s.backfillFindingsSummaries(ctx)
-	if err != nil && ctx.Err() == nil {
-		s.config.Logger.Warn("scanner findings summary backfill failed", "error", err)
-	}
-	s.config.Logger.Info("scanner findings summary backfill completed", "builds", backfilled)
 	queueTimer := time.NewTimer(0)
 	defer queueTimer.Stop()
 	retentionTimer := time.NewTimer(0)
@@ -126,22 +121,6 @@ func (s *ScannerService) Run(ctx context.Context) {
 			sweepTimer.Reset(s.nextSweepDelay(false))
 		}
 	}
-}
-
-func (s *ScannerService) backfillFindingsSummaries(ctx context.Context) (int, error) {
-	tenants, err := s.repository.scannerTenants(ctx)
-	if err != nil {
-		return 0, err
-	}
-	total := 0
-	for _, tenant := range tenants {
-		created, err := s.repository.BackfillFindingsSummaries(ctx, tenant)
-		total += created
-		if err != nil {
-			return total, err
-		}
-	}
-	return total, nil
 }
 
 // DrainOnce drains all work currently claimable with bounded concurrency.
