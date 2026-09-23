@@ -239,11 +239,6 @@ func main() {
 	}
 	scannerCtx, cancelScanner := context.WithCancel(context.Background())
 	defer cancelScanner()
-	if backfilled, err := repository.BackfillAllFindingsSummaries(scannerCtx); err != nil {
-		logger.Warn("findings summary backfill failed", "error", err)
-	} else {
-		logger.Info("findings summary backfill completed", "builds", backfilled)
-	}
 	if scannerService != nil {
 		go scannerService.Run(scannerCtx)
 	}

@@ -221,87 +221,6 @@ func TestFindingsSummaries(t *testing.T) {
 	}
 }
 
-func TestFindingsSummaryBackfill(t *testing.T) {
-	db, _, cleanup := openTestDatabase(t)
-	defer cleanup()
-	_, objects := openTestObjectStore(t)
-	repository := store.NewRepositoryWithObjectStore(db, objects)
-	repository.SetKeyring(testRing(t))
-	tenant := store.ParseTenant(orgA, projectA)
-	ctx := context.Background()
-	base := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
-	buildA, sbomA := seedScanParents(t, db, orgA, projectA, "backfill")
-	buildB, sbomB := "scanbuild-backfill-b", "scansbom-backfill-b"
-	seedScanSiblingBuild(t, db, "backfill", buildB, sbomB)
-	transcript := []byte("findings-summary-backfill")
-	for index, fixture := range []struct{ buildID, sbomID string }{{buildA, sbomA}, {buildB, sbomB}} {
-		sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
-		if err != nil {
-			t.Fatal(err)
-		}
-		run := scanRunFixture(fmt.Sprintf("backfill-run-%d", index), fixture.buildID, sequence, store.ScanRunSucceeded, base.Add(time.Duration(index)*time.Minute), transcript)
-		if err := repository.RecordScanRun(ctx, tenant, run,
-			[]scan.Finding{scanFindingFixture(fixture.sbomID, "ALPINE-CVE-2022-48174", run.ObservedAt)}, transcript); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var beforeRun string
-	var beforeCounts, beforeMAC []byte
-	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
-		Scan(&beforeRun, &beforeCounts, &beforeMAC); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM build_findings_summary WHERE build_id = $1`, buildB); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-
-	created, err := repository.BackfillFindingsSummaries(ctx, tenant)
-	if err != nil || created != 1 {
-		t.Fatalf("backfill = %d, %v; want one missing build", created, err)
-	}
-	if created, err := repository.BackfillFindingsSummaries(ctx, tenant); err != nil || created != 0 {
-		t.Fatalf("idempotent backfill = %d, %v; want zero", created, err)
-	}
-	tx, err = store.BeginTenant(ctx, db, orgA, projectA, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	var afterRun string
-	var afterCounts, afterMAC []byte
-	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
-		Scan(&afterRun, &afterCounts, &afterMAC); err != nil {
-		t.Fatal(err)
-	}
-	if beforeRun != afterRun || string(beforeCounts) != string(afterCounts) || string(beforeMAC) != string(afterMAC) {
-		t.Fatalf("existing build summary changed during backfill: before=(%q,%s,%x) after=(%q,%s,%x)",
-			beforeRun, beforeCounts, beforeMAC, afterRun, afterCounts, afterMAC)
-	}
-	var buildCount, versionCount int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM build_findings_summary WHERE build_id IN ($1,$2)`, buildA, buildB).Scan(&buildCount); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`).Scan(&versionCount); err != nil {
-		t.Fatal(err)
-	}
-	if buildCount != 2 || versionCount != 1 {
-		t.Fatalf("backfill rows = builds %d version %d, want 2 and 1", buildCount, versionCount)
-	}
-}
-
 func TestScanStore(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -927,10 +846,9 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 		}
 	}
 	reuploaded := upload(reopened, 3*time.Minute+time.Second)
-	if created, err := repository.BackfillAllFindingsSummaries(ctx); err != nil || created != 0 {
-		t.Fatalf("backfill after withdrawal = %d, %v; want nothing restored", created, err)
+	if state, err := repository.GetBuildScanState(ctx, tenant, reopened.ID.String()); err != nil || state == nil || state.CurrentFindingsRunID != "" {
+		t.Fatalf("scan state after withdrawal = %#v, %v; want the current run cleared", state, err)
 	}
-	wantVersion("after backfill", 1, 1)
 
 	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
 	if err != nil {
