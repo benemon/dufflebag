@@ -487,16 +487,19 @@ func (r *Repository) DeleteBuild(
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	var persistedID string
+	var persistedID, versionID, bucketID string
 	err = tx.QueryRowContext(ctx, `
-		SELECT builds.id
+		SELECT builds.id, builds.version_id, builds.bucket_id
 		FROM builds
 		JOIN versions ON versions.id = builds.version_id
 		JOIN buckets ON buckets.id = versions.bucket_id
 		WHERE buckets.name = $1 AND versions.fingerprint = $2 AND builds.id = $3
-	`, bucketName, fingerprint, buildID).Scan(&persistedID)
+	`, bucketName, fingerprint, buildID).Scan(&persistedID, &versionID, &bucketID)
 	if err != nil {
 		return mapNotFound("delete build", err)
+	}
+	if err := lockBuildScan(ctx, tx, tenant, persistedID); err != nil {
+		return err
 	}
 	rows, err := tx.QueryContext(ctx, `SELECT object_key FROM sboms WHERE build_id = $1`, persistedID)
 	if err != nil {
@@ -508,6 +511,10 @@ func (r *Repository) DeleteBuild(
 	}
 	if _, err := tx.ExecContext(ctx, `DELETE FROM builds WHERE id = $1`, persistedID); err != nil {
 		return fmt.Errorf("delete build: %w", err)
+	}
+	// The build's own summary cascaded; the version's still counted it.
+	if err := r.recomputeVersionFindingsSummaryLocked(ctx, tx, tenant, bucketID, versionID); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit delete build: %w", err)
@@ -925,6 +932,12 @@ func (r *Repository) UpdateBuild(
 	if err != nil {
 		return nil, fmt.Errorf("marshal build labels: %w", err)
 	}
+	previous, err := q.GetBuild(ctx, postgresdb.GetBuildParams{
+		Name: bucketName, Fingerprint: fingerprint, ID: build.ID.String(),
+	})
+	if err != nil {
+		return nil, mapNotFound("update build", err)
+	}
 	metadata := build.Metadata
 	if r.ring != nil && len(metadata) > 0 {
 		sealed, err := r.ring.Encrypt(metadata, payloadAAD(tenant, "build", build.ID.String()))
@@ -1056,6 +1069,43 @@ func (r *Repository) UpdateBuild(
 			); err != nil {
 				return nil, err
 			}
+		}
+	}
+
+	done := string(registry.BuildDone)
+	if previous.Status == done && row.Status != done {
+		// Leaving done reopens SBOM uploads, so the scanned inventory is no
+		// longer the build's inventory.
+		if err := r.withdrawBuildFindingsSummary(ctx, tx, tenant, row.ID); err != nil {
+			return nil, err
+		}
+	}
+	if row.Status == done && previous.Status != done {
+		// A build finishing into a version some channel selects is scanned
+		// now rather than at the next sweep; the same eligibility rule as
+		// channel assignment (channel_repository.go) and the sweep.
+		if _, err := tx.ExecContext(ctx, `
+			INSERT INTO pending_scans (
+				organization_id, project_id, bucket_id, build_id, enqueued_at, reason
+			)
+			SELECT builds.organization_id, builds.project_id, builds.bucket_id, builds.id, $4, 'build_completed'
+			FROM builds
+			JOIN versions ON versions.organization_id = builds.organization_id
+			 AND versions.project_id = builds.project_id AND versions.id = builds.version_id
+			WHERE builds.organization_id = $1 AND builds.project_id = $2 AND builds.id = $3
+			  AND builds.status = 'done' AND versions.complete
+			  AND EXISTS (
+				SELECT 1 FROM channels
+				JOIN LATERAL (
+					SELECT version_id FROM channel_assignments
+					WHERE channel_id = channels.id
+					ORDER BY assigned_at DESC, id DESC LIMIT 1
+				) assignment ON assignment.version_id = builds.version_id
+			  )
+			ON CONFLICT (organization_id, project_id, build_id) DO NOTHING`,
+			tenant.OrganizationID, tenant.ProjectID, row.ID, at,
+		); err != nil {
+			return nil, fmt.Errorf("enqueue completed build scan: %w", err)
 		}
 	}
 
@@ -1558,6 +1608,9 @@ func (r *Repository) UploadSbom(
 		return nil, mapNotFound("upload sbom", err)
 	}
 	if err := replaceSbomProjection(ctx, tx, tenant, row.ID, packages, parseErr); err != nil {
+		return nil, err
+	}
+	if err := r.withdrawBuildFindingsSummary(ctx, tx, tenant, buildID); err != nil {
 		return nil, err
 	}
 	row.ParseStatus = "parsed"

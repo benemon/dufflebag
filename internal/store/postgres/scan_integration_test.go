@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -217,87 +218,6 @@ func TestFindingsSummaries(t *testing.T) {
 	}
 	if _, err := repository.GetVersionFindingsSummary(ctx, tenant, "scan-summaries", "fp-scan-summaries"); err == nil || !strings.Contains(err.Error(), "build findings summary") {
 		t.Fatalf("tampered summary read error = %v, want fail-closed build findings summary MAC error", err)
-	}
-}
-
-func TestFindingsSummaryBackfill(t *testing.T) {
-	db, _, cleanup := openTestDatabase(t)
-	defer cleanup()
-	_, objects := openTestObjectStore(t)
-	repository := store.NewRepositoryWithObjectStore(db, objects)
-	repository.SetKeyring(testRing(t))
-	tenant := store.ParseTenant(orgA, projectA)
-	ctx := context.Background()
-	base := time.Date(2026, 9, 22, 10, 0, 0, 0, time.UTC)
-	buildA, sbomA := seedScanParents(t, db, orgA, projectA, "backfill")
-	buildB, sbomB := "scanbuild-backfill-b", "scansbom-backfill-b"
-	seedScanSiblingBuild(t, db, "backfill", buildB, sbomB)
-	transcript := []byte("findings-summary-backfill")
-	for index, fixture := range []struct{ buildID, sbomID string }{{buildA, sbomA}, {buildB, sbomB}} {
-		sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
-		if err != nil {
-			t.Fatal(err)
-		}
-		run := scanRunFixture(fmt.Sprintf("backfill-run-%d", index), fixture.buildID, sequence, store.ScanRunSucceeded, base.Add(time.Duration(index)*time.Minute), transcript)
-		if err := repository.RecordScanRun(ctx, tenant, run,
-			[]scan.Finding{scanFindingFixture(fixture.sbomID, "ALPINE-CVE-2022-48174", run.ObservedAt)}, transcript); err != nil {
-			t.Fatal(err)
-		}
-	}
-	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var beforeRun string
-	var beforeCounts, beforeMAC []byte
-	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
-		Scan(&beforeRun, &beforeCounts, &beforeMAC); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM build_findings_summary WHERE build_id = $1`, buildB); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`); err != nil {
-		_ = tx.Rollback()
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-
-	created, err := repository.BackfillFindingsSummaries(ctx, tenant)
-	if err != nil || created != 1 {
-		t.Fatalf("backfill = %d, %v; want one missing build", created, err)
-	}
-	if created, err := repository.BackfillFindingsSummaries(ctx, tenant); err != nil || created != 0 {
-		t.Fatalf("idempotent backfill = %d, %v; want zero", created, err)
-	}
-	tx, err = store.BeginTenant(ctx, db, orgA, projectA, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = tx.Rollback() }()
-	var afterRun string
-	var afterCounts, afterMAC []byte
-	if err := tx.QueryRowContext(ctx, `SELECT run_id, counts::text::bytea, integrity_mac FROM build_findings_summary WHERE build_id = $1`, buildA).
-		Scan(&afterRun, &afterCounts, &afterMAC); err != nil {
-		t.Fatal(err)
-	}
-	if beforeRun != afterRun || string(beforeCounts) != string(afterCounts) || string(beforeMAC) != string(afterMAC) {
-		t.Fatalf("existing build summary changed during backfill: before=(%q,%s,%x) after=(%q,%s,%x)",
-			beforeRun, beforeCounts, beforeMAC, afterRun, afterCounts, afterMAC)
-	}
-	var buildCount, versionCount int
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM build_findings_summary WHERE build_id IN ($1,$2)`, buildA, buildB).Scan(&buildCount); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.QueryRowContext(ctx, `SELECT count(*) FROM version_findings_summary WHERE version_id = 'scanversion-backfill'`).Scan(&versionCount); err != nil {
-		t.Fatal(err)
-	}
-	if buildCount != 2 || versionCount != 1 {
-		t.Fatalf("backfill rows = builds %d version %d, want 2 and 1", buildCount, versionCount)
 	}
 }
 
@@ -783,5 +703,190 @@ func TestScanRowTamperingFailsClosed(t *testing.T) {
 	tamper(`UPDATE build_scan_state SET current_findings_run_id = NULL WHERE build_id = ` + fmt.Sprintf("'%s'", buildID))
 	if _, err := repo.GetBuildScanState(ctx, tenant, buildID); err == nil {
 		t.Fatal("tampered build scan state loaded")
+	}
+}
+
+// Anything that changes a build or its package list leaves its summary
+// recomputed or withdrawn, never describing an inventory it no longer has.
+func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	repository.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 22, 11, 0, 0, 0, time.UTC)
+	const bucket, fingerprint = "lifecycle", "fp-lifecycle"
+
+	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: bucket, Labels: map[string]string{}, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	version, err := registry.NewVersion(registry.NewID(at.Add(time.Second)), bucket, fingerprint, registry.TemplateHCL2, at)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
+		t.Fatal(err)
+	}
+	upload := func(build *store.StoredBuild, offset time.Duration) string {
+		t.Helper()
+		sbom, err := repository.UploadSbom(ctx, tenant, bucket, fingerprint, build.ID.String(), store.Sbom{
+			ID: registry.NewID(at.Add(offset)), Name: "manifest", Format: "CYCLONEDX",
+			CompressedData: compressIntegrationSBOM(t, `{"bomFormat":"CycloneDX","specVersion":"1.6","components":[
+				{"name":"openssl","version":"3.0.11","purl":"pkg:rpm/openssl@3.0.11"}]}`),
+			CreatedAt: at.Add(offset),
+		})
+		if err != nil {
+			t.Fatalf("UploadSbom: %v", err)
+		}
+		return sbom.ID.String()
+	}
+	setStatus := func(build *store.StoredBuild, status registry.BuildStatus, offset time.Duration) {
+		t.Helper()
+		build.Status = status
+		build.MetadataSeen = true
+		if _, err := repository.UpdateBuild(ctx, tenant, bucket, fingerprint, *build, testVersionName, at.Add(offset)); err != nil {
+			t.Fatalf("UpdateBuild %s: %v", status, err)
+		}
+	}
+	pendingReasons := func() []string {
+		t.Helper()
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		rows, err := tx.QueryContext(ctx, `SELECT reason FROM pending_scans ORDER BY reason`)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rows.Close() }()
+		var reasons []string
+		for rows.Next() {
+			var reason string
+			if err := rows.Scan(&reason); err != nil {
+				t.Fatal(err)
+			}
+			reasons = append(reasons, reason)
+		}
+		return reasons
+	}
+
+	type fixture struct {
+		build  *store.StoredBuild
+		sbomID string
+	}
+	var builds []fixture
+	for index, component := range []string{"docker.one", "docker.two", "docker.three"} {
+		offset := time.Duration(10*(index+1)) * time.Second
+		build, err := repository.CreateBuild(ctx, tenant, bucket, fingerprint, registry.TemplateHCL2, store.StoredBuild{
+			Build: registry.Build{
+				ID: registry.NewID(at.Add(offset)), ComponentType: component,
+				Status: registry.BuildRunning, Platform: "linux",
+			},
+			Labels: map[string]string{}, CreatedAt: at.Add(offset),
+		}, testVersionName)
+		if err != nil {
+			t.Fatalf("CreateBuild %s: %v", component, err)
+		}
+		builds = append(builds, fixture{build, upload(build, offset+time.Second)})
+	}
+	setStatus(builds[0].build, registry.BuildDone, 40*time.Second)
+	if reasons := pendingReasons(); len(reasons) != 0 {
+		t.Fatalf("completion into an incomplete version queued scans %v, want none", reasons)
+	}
+	setStatus(builds[1].build, registry.BuildDone, 41*time.Second)
+	setStatus(builds[2].build, registry.BuildDone, 42*time.Second)
+
+	transcript := []byte("findings-summary-lifecycle")
+	for index, advisory := range []string{"CVE-2026-0001", "CVE-2026-0002", "CVE-2026-0003"} {
+		sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		finding := scanFindingFixture(builds[index].sbomID, advisory, at)
+		finding.Package = scan.Package{SBOMID: builds[index].sbomID, Name: "openssl", Version: "3.0.11", Purl: "pkg:rpm/openssl@3.0.11"}
+		run := scanRunFixture(fmt.Sprintf("lifecycle-run-%d", index), builds[index].build.ID.String(), sequence,
+			store.ScanRunSucceeded, at.Add(2*time.Minute), transcript)
+		if err := repository.RecordScanRun(ctx, tenant, run, []scan.Finding{finding}, transcript); err != nil {
+			t.Fatal(err)
+		}
+	}
+	summary := func() *store.VersionFindingsSummaryResult {
+		t.Helper()
+		result, err := repository.GetVersionFindingsSummary(ctx, tenant, bucket, fingerprint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return result
+	}
+	wantVersion := func(step string, findings, summarised int) {
+		t.Helper()
+		got := summary().Version
+		if got == nil || got.Findings != findings || got.BuildsSummarised != summarised {
+			t.Fatalf("%s: version summary = %#v, want findings=%d builds_summarised=%d", step, got, findings, summarised)
+		}
+	}
+	wantVersion("all scanned", 3, 3)
+
+	if err := repository.DeleteBuild(ctx, tenant, bucket, fingerprint, builds[2].build.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	wantVersion("build deleted", 2, 2)
+
+	reopened := builds[0].build
+	setStatus(reopened, registry.BuildRunning, 3*time.Minute)
+	wantVersion("build reopened", 1, 1)
+	for _, build := range summary().Builds {
+		if build.BuildID == reopened.ID.String() && build.Summary != nil {
+			t.Fatalf("reopened build summary = %#v, want absent", build.Summary)
+		}
+	}
+	reuploaded := upload(reopened, 3*time.Minute+time.Second)
+	if state, err := repository.GetBuildScanState(ctx, tenant, reopened.ID.String()); err != nil || state == nil || state.CurrentFindingsRunID != "" {
+		t.Fatalf("scan state after withdrawal = %#v, %v; want the current run cleared", state, err)
+	}
+
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM pending_scans`); err != nil {
+		_ = tx.Rollback()
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	setStatus(reopened, registry.BuildDone, 4*time.Minute)
+	if reasons := pendingReasons(); len(reasons) != 1 || reasons[0] != "build_completed" {
+		t.Fatalf("pending scans after an eligible build completed = %v, want [build_completed]", reasons)
+	}
+
+	sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rescan := scanFindingFixture(reuploaded, "CVE-2026-0001", at)
+	rescan.Package = scan.Package{SBOMID: reuploaded, Name: "openssl", Version: "3.0.11", Purl: "pkg:rpm/openssl@3.0.11"}
+	if err := repository.RecordScanRun(ctx, tenant,
+		scanRunFixture("lifecycle-rescan", reopened.ID.String(), sequence, store.ScanRunSucceeded, at.Add(5*time.Minute), transcript),
+		[]scan.Finding{rescan}, transcript); err != nil {
+		t.Fatal(err)
+	}
+	wantVersion("rescanned", 2, 2)
+	// Bag drop writes SBOMs through the repository without the HCP plane's
+	// running-only rule, so a done build's inventory can change in place.
+	upload(reopened, 6*time.Minute)
+	wantVersion("sbom replaced on a done build", 1, 1)
+
+	if err := repository.DeleteBuild(ctx, tenant, bucket, fingerprint, builds[1].build.ID.String()); err != nil {
+		t.Fatal(err)
+	}
+	if got := summary().Version; got != nil {
+		t.Fatalf("version summary with no scanned build left = %#v, want absent", got)
 	}
 }

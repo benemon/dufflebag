@@ -134,11 +134,8 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 
 	// Completion is serialized per build so two replicas racing on the same
 	// event cannot interleave their pointer reads and writes.
-	if _, err := tx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		tenant.OrganizationID.String()+"|"+tenant.ProjectID.String()+"|"+run.BuildID,
-	); err != nil {
-		return fmt.Errorf("acquire build scan lock: %w", err)
+	if err := lockBuildScan(ctx, tx, tenant, run.BuildID); err != nil {
+		return err
 	}
 
 	coverage, err := json.Marshal(run.Coverage)

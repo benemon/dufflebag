@@ -226,6 +226,24 @@ func (r *Repository) recomputeFindingsSummaries(
 		return err
 	}
 
+	return r.recomputeVersionFindingsSummaryLocked(ctx, tx, tenant, bucketID, versionID)
+}
+
+// Lock order everywhere is build, then version; a completion, a deletion and an
+// inventory change all take them in that order so they cannot deadlock.
+func lockBuildScan(ctx context.Context, tx *sql.Tx, tenant Tenant, buildID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		tenant.OrganizationID.String()+"|"+tenant.ProjectID.String()+"|"+buildID,
+	); err != nil {
+		return fmt.Errorf("acquire build scan lock: %w", err)
+	}
+	return nil
+}
+
+func (r *Repository) recomputeVersionFindingsSummaryLocked(
+	ctx context.Context, tx *sql.Tx, tenant Tenant, bucketID, versionID string,
+) error {
 	if _, err := tx.ExecContext(ctx,
 		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 		tenant.OrganizationID.String()+"|"+tenant.ProjectID.String()+"|"+versionID,
@@ -233,6 +251,49 @@ func (r *Repository) recomputeFindingsSummaries(
 		return fmt.Errorf("acquire version findings lock: %w", err)
 	}
 	return r.recomputeVersionFindingsSummary(ctx, tx, tenant, bucketID, versionID)
+}
+
+// withdrawBuildFindingsSummary returns a scanned build to unscanned. The
+// version recompute and the backfill both read current_findings_run_id, so
+// deleting the summary row alone would leave the old findings readable.
+func (r *Repository) withdrawBuildFindingsSummary(ctx context.Context, tx *sql.Tx, tenant Tenant, buildID string) error {
+	var versionID, bucketID string
+	if err := tx.QueryRowContext(ctx, `
+		SELECT version_id, bucket_id FROM builds
+		WHERE organization_id = $1 AND project_id = $2 AND id = $3`,
+		tenant.OrganizationID, tenant.ProjectID, buildID,
+	).Scan(&versionID, &bucketID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		return fmt.Errorf("read build for summary withdrawal: %w", err)
+	}
+	if err := lockBuildScan(ctx, tx, tenant, buildID); err != nil {
+		return err
+	}
+	state, err := lockBuildScanState(ctx, tx, r, tenant, buildID)
+	if err != nil {
+		return err
+	}
+	if state == nil || state.CurrentFindingsRunID == "" {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE build_scan_state SET current_findings_run_id = NULL, integrity_mac = $4
+		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`,
+		tenant.OrganizationID, tenant.ProjectID, buildID,
+		r.rowMAC(buildScanStateMACMessage(tenant, buildID, "", state.LatestAttemptRunID)),
+	); err != nil {
+		return fmt.Errorf("withdraw build current findings: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		DELETE FROM build_findings_summary
+		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`,
+		tenant.OrganizationID, tenant.ProjectID, buildID,
+	); err != nil {
+		return fmt.Errorf("withdraw build findings summary: %w", err)
+	}
+	return r.recomputeVersionFindingsSummaryLocked(ctx, tx, tenant, bucketID, versionID)
 }
 
 func (r *Repository) upsertBuildFindingsSummary(
@@ -294,6 +355,18 @@ func (r *Repository) recomputeVersionFindingsSummary(
 		return fmt.Errorf("list version findings sources: %w", err)
 	}
 
+	if len(ids) == 0 {
+		// No build with current findings remains: absence, never a zero row,
+		// or the console would call an unexamined version clean.
+		if _, err := tx.ExecContext(ctx, `
+			DELETE FROM version_findings_summary
+			WHERE organization_id = $1 AND project_id = $2 AND version_id = $3`,
+			tenant.OrganizationID, tenant.ProjectID, versionID,
+		); err != nil {
+			return fmt.Errorf("withdraw version findings summary: %w", err)
+		}
+		return nil
+	}
 	buildFindings := make([][]StoredFinding, 0, len(ids))
 	row := versionFindingsSummaryRow{
 		BucketID: bucketID, VersionID: versionID,
@@ -344,97 +417,6 @@ func (r *Repository) recomputeVersionFindingsSummary(
 		return fmt.Errorf("upsert version findings summary: %w", err)
 	}
 	return nil
-}
-
-// BackfillFindingsSummaries fills summary rows missing for current scan state.
-func (r *Repository) BackfillFindingsSummaries(ctx context.Context, tenant Tenant) (int, error) {
-	tx, _, err := r.begin(ctx, tenant)
-	if err != nil {
-		return 0, err
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT state.build_id
-		FROM build_scan_state state
-		LEFT JOIN build_findings_summary summary
-			ON summary.organization_id = state.organization_id
-			AND summary.project_id = state.project_id AND summary.build_id = state.build_id
-		WHERE state.current_findings_run_id IS NOT NULL AND summary.build_id IS NULL
-		ORDER BY state.build_id`)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, fmt.Errorf("list findings summary backfill: %w", err)
-	}
-	var buildIDs []string
-	for rows.Next() {
-		var buildID string
-		if err := rows.Scan(&buildID); err != nil {
-			_ = rows.Close()
-			_ = tx.Rollback()
-			return 0, fmt.Errorf("scan findings summary backfill: %w", err)
-		}
-		buildIDs = append(buildIDs, buildID)
-	}
-	if err := rows.Close(); err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if err := rows.Err(); err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-
-	created := 0
-	for _, buildID := range buildIDs {
-		wrote, err := r.backfillBuildFindingsSummary(ctx, tenant, buildID)
-		if err != nil {
-			return created, err
-		}
-		if wrote {
-			created++
-		}
-	}
-	return created, nil
-}
-
-func (r *Repository) backfillBuildFindingsSummary(ctx context.Context, tenant Tenant, buildID string) (bool, error) {
-	tx, _, err := r.begin(ctx, tenant)
-	if err != nil {
-		return false, err
-	}
-	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		tenant.OrganizationID.String()+"|"+tenant.ProjectID.String()+"|"+buildID,
-	); err != nil {
-		return false, fmt.Errorf("acquire build scan lock: %w", err)
-	}
-	state, err := lockBuildScanState(ctx, tx, r, tenant, buildID)
-	if err != nil {
-		return false, err
-	}
-	if state == nil || state.CurrentFindingsRunID == "" {
-		return false, tx.Commit()
-	}
-	var exists bool
-	if err := tx.QueryRowContext(ctx, `
-		SELECT EXISTS (SELECT 1 FROM build_findings_summary WHERE build_id = $1)`, buildID,
-	).Scan(&exists); err != nil {
-		return false, fmt.Errorf("check build findings summary: %w", err)
-	}
-	if exists {
-		return false, tx.Commit()
-	}
-	run, err := readScanRun(ctx, tx, r, tenant, state.CurrentFindingsRunID)
-	if err != nil {
-		return false, err
-	}
-	if err := r.recomputeFindingsSummaries(ctx, tx, tenant, buildID, run.ID, run.ObservedAt); err != nil {
-		return false, err
-	}
-	return true, tx.Commit()
 }
 
 // GetVersionFindingsSummary returns verified stored summaries for one version.
