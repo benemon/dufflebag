@@ -21,6 +21,8 @@ const (
 	osvDatabaseRevision  = "unreported"
 	osvRedHatEcosystem   = "Red Hat"
 	osvEnterpriseLinux   = "enterprise_linux"
+	osvMaxAttempts       = 5
+	osvRetryBase         = time.Second
 	// osvMaxResultPages bounds per-query pagination. OSV pages a single
 	// query's vulnerability list when it exceeds the service's page size;
 	// kernel-family source packages in whole-VM inventories legitimately
@@ -35,15 +37,30 @@ var osvMaxResponseBytes = 32 << 20
 
 // OSV queries api.osv.dev (or a stand-in) for vulnerability findings. All
 // HTTP goes through the configured client; the clock stamps attribution and
-// probe observations so tests inject a fake.
+// probe observations and resolves Retry-After dates so tests inject a fake.
 type OSV struct {
 	base   string
 	client *http.Client
 	clock  func() time.Time
+	sleep  func(context.Context, time.Duration) error
 }
 
 func NewOSV(base string, client *http.Client, clock func() time.Time) *OSV {
-	return &OSV{base: strings.TrimRight(base, "/"), client: client, clock: clock}
+	return &OSV{
+		base:   strings.TrimRight(base, "/"),
+		client: client,
+		clock:  clock,
+		sleep: func(ctx context.Context, d time.Duration) error {
+			timer := time.NewTimer(d)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+				return nil
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	}
 }
 
 // Wire shapes. Only purl-derived Query fields ever enter these.
@@ -651,7 +668,12 @@ func buildFinding(pkg Package, record *osvRecord, matching []osvAffected) Findin
 // querybatch exercises the real POST path at minimal cost.
 func (o *OSV) Probe(ctx context.Context) (Health, error) {
 	started := o.clock()
-	_, err := o.post(ctx, "/v1/querybatch", map[string]any{"queries": []osvQuery{}})
+	// A probe reports one observation; only scan traffic retries.
+	body, _ := json.Marshal(map[string]any{"queries": []osvQuery{}})
+	req, err := o.postRequest(ctx, "/v1/querybatch", body)
+	if err == nil {
+		_, _, _, err = o.do(req)
+	}
 	health := Health{
 		OK:         err == nil,
 		Latency:    o.clock().Sub(started),
@@ -669,43 +691,104 @@ func (o *OSV) post(ctx context.Context, path string, payload any) ([]byte, error
 	if err != nil {
 		return nil, fmt.Errorf("encoding request: %w", err)
 	}
+	return o.retry(ctx, func() (*http.Request, error) { return o.postRequest(ctx, path, body) })
+}
+
+func (o *OSV) postRequest(ctx context.Context, path string, body []byte) (*http.Request, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, o.base+path, bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	return o.do(req)
+	return req, nil
 }
 
 func (o *OSV) get(ctx context.Context, path string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, o.base+path, nil)
-	if err != nil {
-		return nil, err
-	}
-	return o.do(req)
+	return o.retry(ctx, func() (*http.Request, error) {
+		return http.NewRequestWithContext(ctx, http.MethodGet, o.base+path, nil)
+	})
 }
 
-// do returns the response body alongside any error: a failed request's body
-// was still received, and the transcript contract wants it retained.
-func (o *OSV) do(req *http.Request) ([]byte, error) {
+// retry builds a fresh request per attempt: a consumed POST body cannot be
+// replayed. The final attempt's body is what callers record, so a recovered
+// run transcribes identically to a clean one.
+func (o *OSV) retry(ctx context.Context, build func() (*http.Request, error)) ([]byte, error) {
+	var body []byte
+	var err error
+	for attempt := 1; attempt <= osvMaxAttempts; attempt++ {
+		var req *http.Request
+		req, err = build()
+		if err != nil {
+			return nil, err
+		}
+		var transient bool
+		var retryAfter string
+		body, transient, retryAfter, err = o.do(req)
+		if err == nil || !transient {
+			return body, err
+		}
+		if attempt == osvMaxAttempts {
+			return body, fmt.Errorf("after %d attempts: %w", osvMaxAttempts, err)
+		}
+		delay := osvRetryBase << (attempt - 1)
+		if d := o.retryAfter(retryAfter); d > delay {
+			delay = d
+		}
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < delay {
+			return body, err
+		}
+		if waitErr := o.sleep(ctx, delay); waitErr != nil {
+			return body, waitErr
+		}
+	}
+	return body, err
+}
+
+func (o *OSV) retryAfter(value string) time.Duration {
+	if value == "" {
+		return 0
+	}
+	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil && seconds >= 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	when, err := http.ParseTime(value)
+	if err != nil {
+		return 0
+	}
+	return max(when.Sub(o.clock()), 0)
+}
+
+// do returns the response body alongside any error, whether the failure is
+// transient, and any Retry-After: a failed request's body was still received,
+// and the transcript contract wants it retained.
+func (o *OSV) do(req *http.Request) ([]byte, bool, string, error) {
 	resp, err := o.client.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, req.Context().Err() == nil, "", err
 	}
 	defer func() { _ = resp.Body.Close() }()
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(osvMaxResponseBytes)+1))
 	if err != nil {
-		return body, err
+		return body, req.Context().Err() == nil, "", err
 	}
 	if len(body) > osvMaxResponseBytes {
 		// A truncated transcript record would misrepresent what the provider
 		// sent; oversize is a hard failure, not a silent cut.
-		return body[:osvMaxResponseBytes], fmt.Errorf("%s %s: response exceeds %d bytes", req.Method, req.URL.Path, osvMaxResponseBytes)
+		return body[:osvMaxResponseBytes], false, "", fmt.Errorf("%s %s: response exceeds %d bytes", req.Method, req.URL.Path, osvMaxResponseBytes)
 	}
 	if resp.StatusCode != http.StatusOK {
-		return body, fmt.Errorf("%s %s: status %d: %s", req.Method, req.URL.Path, resp.StatusCode, truncate(body, 200))
+		transient := req.Context().Err() == nil && (resp.StatusCode == http.StatusTooManyRequests ||
+			resp.StatusCode == http.StatusInternalServerError ||
+			resp.StatusCode == http.StatusBadGateway ||
+			resp.StatusCode == http.StatusServiceUnavailable ||
+			resp.StatusCode == http.StatusGatewayTimeout)
+		retryAfter := ""
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode == http.StatusServiceUnavailable {
+			retryAfter = resp.Header.Get("Retry-After")
+		}
+		return body, transient, retryAfter, fmt.Errorf("%s %s: status %d: %s", req.Method, req.URL.Path, resp.StatusCode, truncate(body, 200))
 	}
-	return body, nil
+	return body, false, "", nil
 }
 
 // decodeStrict rejects JSON null bodies and entries: encoding/json leaves the
