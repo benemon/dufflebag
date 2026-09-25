@@ -7,14 +7,17 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -96,6 +99,8 @@ type stubOSV struct {
 	batches []stubResponse
 	// details maps advisory id to its response; status 0 means 200.
 	details map[string]stubResponse
+	// detailPages, when set for an id, is consumed one response per call.
+	detailPages map[string][]stubResponse
 	// queries maps "ecosystem|name|version" to a phase-2 response.
 	queries map[string]stubResponse
 	// queryPages, when set for a key, is consumed one response per call
@@ -105,13 +110,21 @@ type stubOSV struct {
 	delay      time.Duration
 
 	batchBodies [][]byte
+	detailIDs   []string
 	queryKeys   []string
 	queryTokens []string
 }
 
 type stubResponse struct {
-	status int
-	body   []byte
+	status     int
+	body       []byte
+	retryAfter string
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return f(req)
 }
 
 func fixtureResponse(body []byte) stubResponse { return stubResponse{body: body} }
@@ -138,6 +151,12 @@ func (s *stubOSV) server() *httptest.Server {
 			s.write(w, s.batches[len(s.batchBodies)-1])
 		case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/vulns/"):
 			id := strings.TrimPrefix(r.URL.Path, "/v1/vulns/")
+			s.detailIDs = append(s.detailIDs, id)
+			if pages, ok := s.detailPages[id]; ok && len(pages) > 0 {
+				s.detailPages[id] = pages[1:]
+				s.write(w, pages[0])
+				return
+			}
 			resp, ok := s.details[id]
 			if !ok {
 				s.t.Errorf("unexpected detail fetch %q", id)
@@ -173,6 +192,9 @@ func (s *stubOSV) server() *httptest.Server {
 }
 
 func (s *stubOSV) write(w http.ResponseWriter, resp stubResponse) {
+	if resp.retryAfter != "" {
+		w.Header().Set("Retry-After", resp.retryAfter)
+	}
 	if resp.status != 0 {
 		w.WriteHeader(resp.status)
 	}
@@ -187,8 +209,18 @@ func scanOne(t *testing.T, stub *stubOSV, packages ...Package) (Result, error) {
 	t.Helper()
 	srv := stub.server()
 	defer srv.Close()
-	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o := newTestOSV(srv)
 	return o.Scan(context.Background(), Inventory{Packages: packages})
+}
+
+func newTestOSV(srv *httptest.Server) *OSV {
+	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o.sleep = noWaitSleep
+	return o
+}
+
+func noWaitSleep(ctx context.Context, _ time.Duration) error {
+	return ctx.Err()
 }
 
 const alpineVulnerablePurl = "pkg:apk/alpine/busybox@1.36.1-r0?arch=aarch64&distro=alpine-3.20.10"
@@ -260,6 +292,365 @@ func TestScanAlpinePatchedControl(t *testing.T) {
 	}
 	if len(res.Findings) != 0 || res.Coverage.Submitted != 1 {
 		t.Fatalf("patched control: findings=%d coverage=%+v, want zero findings from one submitted query", len(res.Findings), res.Coverage)
+	}
+}
+
+func TestOSVRetryT1NonTransientDetailStatus(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id))},
+		details: map[string]stubResponse{id: {status: http.StatusBadRequest, body: []byte("bad request")}},
+	}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	var sleeps []time.Duration
+	o.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return ctx.Err()
+	}
+	_, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
+	if err == nil {
+		t.Fatal("scan succeeded, want detail failure")
+	}
+	if got := len(stub.detailIDs); got != 1 {
+		t.Fatalf("detail requests = %d, want 1", got)
+	}
+	if len(sleeps) != 0 {
+		t.Fatalf("sleeps = %v, want none", sleeps)
+	}
+}
+
+func TestOSVRetryT2aDetail503Then200(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
+	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
+	control, err := scanOne(t, &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		details: map[string]stubResponse{id: fixtureResponse(detail)},
+	}, Package{Purl: alpineVulnerablePurl})
+	if err != nil {
+		t.Fatalf("control scan: %v", err)
+	}
+
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		detailPages: map[string][]stubResponse{id: {
+			{status: http.StatusServiceUnavailable, body: []byte("try again")},
+			fixtureResponse(detail),
+		}},
+	}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	var sleeps []time.Duration
+	o.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return ctx.Err()
+	}
+	res, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !reflect.DeepEqual(res.Findings, control.Findings) {
+		t.Fatalf("findings = %+v, want vulnerable control %+v", res.Findings, control.Findings)
+	}
+	if !reflect.DeepEqual(sleeps, []time.Duration{time.Second}) {
+		t.Fatalf("sleeps = %v, want [1s]", sleeps)
+	}
+}
+
+func TestOSVRetryT2bDetail503Exhaustion(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	failureBody := []byte(`{"code":14,"message":"unavailable"}`)
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id))},
+		details: map[string]stubResponse{id: {status: http.StatusServiceUnavailable, body: failureBody}},
+	}
+	res, err := scanOne(t, stub, Package{Purl: alpineVulnerablePurl})
+	if err == nil || !strings.Contains(err.Error(), "after 5 attempts") {
+		t.Fatalf("err = %v, want exhaustion after 5 attempts", err)
+	}
+	if got := len(stub.detailIDs); got != 5 {
+		t.Fatalf("detail requests = %d, want 5", got)
+	}
+	if len(res.Transcript.Records) != 2 || !bytes.Equal(res.Transcript.Records[1], failureBody) {
+		t.Fatalf("transcript = %q, want final 503 body retained", res.Transcript.Records)
+	}
+}
+
+func TestOSVRetryT3QuerybatchFreshPOSTBody(t *testing.T) {
+	success := readFixture(t, "querybatch-alpine-patched.json")
+	stub := &stubOSV{
+		t: t,
+		batches: []stubResponse{
+			{status: http.StatusBadGateway, body: []byte("bad gateway")},
+			fixtureResponse(success),
+		},
+		details: map[string]stubResponse{},
+	}
+	srv := stub.server()
+	defer srv.Close()
+	client := srv.Client()
+	transport := client.Transport
+	var requests []*http.Request
+	client.Transport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		requests = append(requests, req)
+		return transport.RoundTrip(req)
+	})
+	o := NewOSV(srv.URL, client, testClock())
+	o.sleep = noWaitSleep
+	if _, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: "pkg:apk/alpine/busybox@1.36.1-r31?distro=alpine-3.20.10"}}}); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if len(stub.batchBodies) != 2 {
+		t.Fatalf("querybatch requests = %d, want 2", len(stub.batchBodies))
+	}
+	if !bytes.Equal(stub.batchBodies[0], stub.batchBodies[1]) {
+		t.Fatalf("retried POST body = %q, want %q", stub.batchBodies[1], stub.batchBodies[0])
+	}
+	if len(requests) != 2 {
+		t.Fatalf("transport requests = %d, want 2", len(requests))
+	}
+	if requests[0] == requests[1] {
+		t.Fatalf("request pointers = %p, %p, want distinct requests", requests[0], requests[1])
+	}
+}
+
+func TestOSVRetryT4TranscriptDigestAfterRecovery(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
+	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
+	clean, err := scanOne(t, &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		details: map[string]stubResponse{id: fixtureResponse(detail)},
+	}, Package{Purl: alpineVulnerablePurl})
+	if err != nil {
+		t.Fatalf("clean scan: %v", err)
+	}
+	recovered, err := scanOne(t, &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		detailPages: map[string][]stubResponse{id: {
+			{status: http.StatusServiceUnavailable, body: []byte("transient failure")},
+			fixtureResponse(detail),
+		}},
+	}, Package{Purl: alpineVulnerablePurl})
+	if err != nil {
+		t.Fatalf("recovered scan: %v", err)
+	}
+	if got, want := recovered.Transcript.Digest(), clean.Transcript.Digest(); got != want {
+		t.Fatalf("recovered transcript digest = %s, want clean digest %s", got, want)
+	}
+}
+
+func TestOSVRetryT5RetryAfter(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
+	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
+	cases := []struct {
+		name       string
+		status     int
+		retryAfter string
+		clock      func() time.Time
+		want       time.Duration
+	}{
+		{name: "delay-seconds", status: http.StatusTooManyRequests, retryAfter: "2", clock: testClock(), want: 2 * time.Second},
+		{
+			name:       "HTTP-date",
+			status:     http.StatusServiceUnavailable,
+			retryAfter: time.Date(2026, 8, 6, 12, 0, 3, 0, time.UTC).Format(http.TimeFormat),
+			clock:      func() time.Time { return time.Date(2026, 8, 6, 12, 0, 0, 0, time.UTC) },
+			want:       3 * time.Second,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stub := &stubOSV{
+				t:       t,
+				batches: []stubResponse{fixtureResponse(batch)},
+				detailPages: map[string][]stubResponse{id: {
+					{status: tc.status, body: []byte("retry later"), retryAfter: tc.retryAfter},
+					fixtureResponse(detail),
+				}},
+			}
+			srv := stub.server()
+			defer srv.Close()
+			o := NewOSV(srv.URL, srv.Client(), tc.clock)
+			var sleeps []time.Duration
+			o.sleep = func(ctx context.Context, d time.Duration) error {
+				sleeps = append(sleeps, d)
+				return ctx.Err()
+			}
+			if _, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}}); err != nil {
+				t.Fatalf("scan: %v", err)
+			}
+			if !reflect.DeepEqual(sleeps, []time.Duration{tc.want}) {
+				t.Fatalf("sleeps = %v, want [%v]", sleeps, tc.want)
+			}
+		})
+	}
+}
+
+func TestOSVRetryT6CancelDuringBackoff(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id))},
+		details: map[string]stubResponse{id: {status: http.StatusServiceUnavailable, body: []byte("retry later")}},
+	}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	waiting := make(chan struct{})
+	o.sleep = func(ctx context.Context, _ time.Duration) error {
+		close(waiting)
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() {
+		_, err := o.Scan(ctx, Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
+		done <- err
+	}()
+	select {
+	case <-waiting:
+		cancel()
+	case <-time.After(250 * time.Millisecond):
+		cancel()
+		t.Fatal("retry did not enter backoff promptly")
+	}
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("err = %v, want context canceled", err)
+		}
+	case <-time.After(250 * time.Millisecond):
+		t.Fatal("scan did not return promptly after cancellation")
+	}
+}
+
+func TestOSVRetryT7ProbeDoesNotRetry(t *testing.T) {
+	stub := &stubOSV{t: t, batches: []stubResponse{{status: http.StatusServiceUnavailable}}}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	h, err := o.Probe(context.Background())
+	if err == nil || h.OK {
+		t.Fatalf("probe = %+v, want failure", h)
+	}
+	if got := len(stub.batchBodies); got != 1 {
+		t.Fatalf("probe requests = %d, want 1", got)
+	}
+}
+
+// T9 is the lab failure: one detail fetch stalls past the per-request client
+// timeout while the pass context is still live.
+func TestOSVRetryT9ClientTimeoutThenSuccess(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
+	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
+	control, err := scanOne(t, &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(batch)},
+		details: map[string]stubResponse{id: fixtureResponse(detail)},
+	}, Package{Purl: alpineVulnerablePurl})
+	if err != nil {
+		t.Fatalf("control scan: %v", err)
+	}
+
+	var detailCalls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/v1/querybatch" {
+			_, _ = w.Write(batch)
+			return
+		}
+		if atomic.AddInt32(&detailCalls, 1) == 1 {
+			time.Sleep(300 * time.Millisecond)
+		}
+		_, _ = w.Write(detail)
+	}))
+	defer srv.Close()
+	client := srv.Client()
+	client.Timeout = 50 * time.Millisecond
+	o := NewOSV(srv.URL, client, testClock())
+	var sleeps []time.Duration
+	o.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return ctx.Err()
+	}
+	res, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if !reflect.DeepEqual(res.Findings, control.Findings) {
+		t.Fatalf("findings = %+v, want vulnerable control %+v", res.Findings, control.Findings)
+	}
+	if got := atomic.LoadInt32(&detailCalls); got != 2 {
+		t.Fatalf("detail requests = %d, want 2", got)
+	}
+	if !reflect.DeepEqual(sleeps, []time.Duration{time.Second}) {
+		t.Fatalf("sleeps = %v, want [1s]", sleeps)
+	}
+}
+
+func TestOSVRetryT10WaitPastDeadlineNotAttempted(t *testing.T) {
+	id := "ALPINE-CVE-2022-48174"
+	stub := &stubOSV{
+		t:       t,
+		batches: []stubResponse{fixtureResponse(singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id))},
+		details: map[string]stubResponse{id: {status: http.StatusServiceUnavailable, body: []byte("later"), retryAfter: "60"}},
+	}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	var sleeps []time.Duration
+	o.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, err := o.Scan(ctx, Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
+	if err == nil || !strings.Contains(err.Error(), "status 503") || strings.Contains(err.Error(), "attempts") {
+		t.Fatalf("err = %v, want the 503 returned without exhausting attempts", err)
+	}
+	if got := len(stub.detailIDs); got != 1 {
+		t.Fatalf("detail requests = %d, want 1", got)
+	}
+	if len(sleeps) != 0 {
+		t.Fatalf("sleeps = %v, want none: a 60s wait cannot fit a 5s deadline", sleeps)
+	}
+}
+
+func TestOSVRetryT8ParentContextAlreadyCancelled(t *testing.T) {
+	o := NewOSV("http://127.0.0.1:1", http.DefaultClient, testClock())
+	var sleeps int
+	o.sleep = func(ctx context.Context, _ time.Duration) error {
+		sleeps++
+		return ctx.Err()
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	attempts := 0
+	_, err := o.retry(ctx, func() (*http.Request, error) {
+		attempts++
+		return http.NewRequestWithContext(ctx, http.MethodGet, o.base+"/v1/vulns/test", nil)
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err = %v, want context canceled", err)
+	}
+	if attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", attempts)
+	}
+	if sleeps != 0 {
+		t.Fatalf("sleeps = %d, want none", sleeps)
 	}
 }
 
@@ -466,7 +857,7 @@ func TestScanFailsClosed(t *testing.T) {
 			stub: &stubOSV{t: t,
 				batches: []stubResponse{
 					fixtureResponse([]byte(`{"results":[{"vulns":[],"next_page_token":"x"}]}`)),
-					{status: http.StatusInternalServerError, body: []byte("boom")},
+					{status: http.StatusBadRequest, body: []byte("boom")},
 				},
 				details: map[string]stubResponse{}},
 			wantRecords: 2,
@@ -476,7 +867,7 @@ func TestScanFailsClosed(t *testing.T) {
 			// must retain the provider's error payload.
 			name: "querybatch failure",
 			stub: &stubOSV{t: t,
-				batches: []stubResponse{{status: http.StatusInternalServerError, body: []byte(`{"code":13,"message":"boom"}`)}},
+				batches: []stubResponse{{status: http.StatusBadRequest, body: []byte(`{"code":13,"message":"boom"}`)}},
 				details: map[string]stubResponse{}},
 			wantRecords: 1,
 		},
@@ -491,7 +882,7 @@ func TestScanFailsClosed(t *testing.T) {
 			name: "detail fetch failure",
 			stub: &stubOSV{t: t,
 				batches: []stubResponse{fixtureResponse(singleBatch("ALPINE-CVE-2022-48174"))},
-				details: map[string]stubResponse{"ALPINE-CVE-2022-48174": {status: http.StatusInternalServerError, body: []byte(`{"code":13}`)}}},
+				details: map[string]stubResponse{"ALPINE-CVE-2022-48174": {status: http.StatusBadRequest, body: []byte(`{"code":13}`)}}},
 			wantRecords: 2,
 		},
 		{
@@ -607,7 +998,7 @@ func TestScanRedHatConfirmationFailureFailsRun(t *testing.T) {
 			"RHSA-2023:7877": fixtureResponse(readFixture(t, "detail-RHSA-2023-7877.json")),
 		},
 		queries: map[string]stubResponse{
-			"Red Hat:enterprise_linux:8::baseos|openssl|1:1.1.1k-7.el8": {status: http.StatusInternalServerError},
+			"Red Hat:enterprise_linux:8::baseos|openssl|1:1.1.1k-7.el8": {status: http.StatusBadRequest},
 		},
 	}
 	res, err := scanOne(t, stub, Package{SBOMID: "s", Name: "openssl", Version: "1.1.1k-7.el8", Purl: redhatVulnerablePurl})
@@ -631,7 +1022,7 @@ func TestScanTimeoutFailsRun(t *testing.T) {
 	}
 	srv := stub.server()
 	defer srv.Close()
-	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o := newTestOSV(srv)
 	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 	defer cancel()
 	res, err := o.Scan(ctx, Inventory{Packages: []Package{{SBOMID: "s", Name: "busybox", Version: "1.36.1-r31",
@@ -741,7 +1132,7 @@ func TestProbe(t *testing.T) {
 		stub := &stubOSV{t: t, batches: []stubResponse{fixtureResponse([]byte(`{"results":[]}`))}}
 		srv := stub.server()
 		defer srv.Close()
-		o := NewOSV(srv.URL, srv.Client(), testClock())
+		o := newTestOSV(srv)
 		h, err := o.Probe(context.Background())
 		if err != nil || !h.OK {
 			t.Fatalf("probe = %+v, %v", h, err)
@@ -757,7 +1148,7 @@ func TestProbe(t *testing.T) {
 		stub := &stubOSV{t: t, batches: []stubResponse{{status: http.StatusInternalServerError}}}
 		srv := stub.server()
 		defer srv.Close()
-		o := NewOSV(srv.URL, srv.Client(), testClock())
+		o := newTestOSV(srv)
 		h, err := o.Probe(context.Background())
 		if err == nil || h.OK {
 			t.Fatalf("probe = %+v, want failure", h)
@@ -770,7 +1161,7 @@ func TestProbe(t *testing.T) {
 		stub := &stubOSV{t: t, batches: []stubResponse{fixtureResponse([]byte(`{"results":[]}`))}, delay: 200 * time.Millisecond}
 		srv := stub.server()
 		defer srv.Close()
-		o := NewOSV(srv.URL, srv.Client(), testClock())
+		o := newTestOSV(srv)
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 		h, err := o.Probe(ctx)
@@ -936,7 +1327,7 @@ func runCanonicalOSVStubInteraction(responses map[OSVStubRoute][]byte) (Transcri
 	stub := NewOSVStub(responses)
 	server := httptest.NewServer(stub)
 	defer server.Close()
-	adapter := NewOSV(server.URL, server.Client(), testClock())
+	adapter := newTestOSV(server)
 
 	inventories := []Inventory{
 		{Packages: []Package{{
@@ -1136,7 +1527,7 @@ func TestQuerybatchFollowsPagination(t *testing.T) {
 	stub := &stubOSV{t: t, batches: []stubResponse{fixtureResponse(page1), fixtureResponse(page2)}}
 	srv := stub.server()
 	defer srv.Close()
-	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o := newTestOSV(srv)
 	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
 	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "5.15.0-113.123"}}}
 
@@ -1170,7 +1561,7 @@ func TestQuerybatchPaginationCapFails(t *testing.T) {
 	stub := &stubOSV{t: t, batches: responses}
 	srv := stub.server()
 	defer srv.Close()
-	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o := newTestOSV(srv)
 	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
 	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "1"}}}
 
@@ -1258,7 +1649,7 @@ func TestPaginationSucceedsAtExactlyTheBound(t *testing.T) {
 	stub := &stubOSV{t: t, batches: responses}
 	srv := stub.server()
 	defer srv.Close()
-	o := NewOSV(srv.URL, srv.Client(), testClock())
+	o := newTestOSV(srv)
 	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
 	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "1"}}}
 
