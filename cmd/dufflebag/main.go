@@ -463,7 +463,7 @@ func scannerConfigurationFromEnvironment() (*scannerRuntimeConfig, error) {
 	}
 	config := &scannerRuntimeConfig{
 		adapter: adapter, endpoint: "https://api.osv.dev", format: "purl",
-		requestTimeout: 30 * time.Second, passTimeout: 15 * time.Minute,
+		requestTimeout: 30 * time.Second, passTimeout: 60 * time.Minute,
 		runRetention: 2160 * time.Hour, workers: 2, interval: 24 * time.Hour,
 		caFile: os.Getenv("DFBG_SCANNER_CA_FILE"),
 	}

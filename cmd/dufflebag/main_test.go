@@ -237,7 +237,7 @@ func TestScannerConfiguration(t *testing.T) {
 			t.Fatal(err)
 		}
 		if config.endpoint != "https://api.osv.dev" || config.format != "purl" ||
-			config.requestTimeout != 30*time.Second || config.passTimeout != 15*time.Minute ||
+			config.requestTimeout != 30*time.Second || config.passTimeout != 60*time.Minute ||
 			config.runRetention != 2160*time.Hour || config.workers != 2 ||
 			config.interval != 24*time.Hour {
 			t.Fatalf("defaults = %#v", config)
