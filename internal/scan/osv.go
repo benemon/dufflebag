@@ -17,7 +17,7 @@ import (
 
 const (
 	osvQuerybatchLimit   = 1000
-	osvDetailConcurrency = 4
+	osvDetailConcurrency = 8
 	osvDatabaseRevision  = "unreported"
 	osvRedHatEcosystem   = "Red Hat"
 	osvEnterpriseLinux   = "enterprise_linux"
