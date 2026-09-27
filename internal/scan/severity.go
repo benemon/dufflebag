@@ -30,6 +30,9 @@ var labelSeverity = map[string]Severity{
 	"critical":   SeverityCritical,
 }
 
+// Worse reports whether a ranks above b on the display scale.
+func Worse(a, b Severity) bool { return severityRank[a] > severityRank[b] }
+
 // deriveSeverity computes the fixed display scale as the WORST band across
 // every supplied value. Values that carry no usable signal (unrecognised
 // labels like Debian's "not yet assigned", unparseable vectors) contribute

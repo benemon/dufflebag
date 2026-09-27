@@ -713,17 +713,12 @@ func (o *OSV) get(ctx context.Context, path string) ([]byte, error) {
 // replayed. The final attempt's body is what callers record, so a recovered
 // run transcribes identically to a clean one.
 func (o *OSV) retry(ctx context.Context, build func() (*http.Request, error)) ([]byte, error) {
-	var body []byte
-	var err error
-	for attempt := 1; attempt <= osvMaxAttempts; attempt++ {
-		var req *http.Request
-		req, err = build()
+	for attempt := 1; ; attempt++ {
+		req, err := build()
 		if err != nil {
 			return nil, err
 		}
-		var transient bool
-		var retryAfter string
-		body, transient, retryAfter, err = o.do(req)
+		body, transient, retryAfter, err := o.do(req)
 		if err == nil || !transient {
 			return body, err
 		}
@@ -741,7 +736,6 @@ func (o *OSV) retry(ctx context.Context, build func() (*http.Request, error)) ([
 			return body, waitErr
 		}
 	}
-	return body, err
 }
 
 func (o *OSV) retryAfter(value string) time.Duration {
@@ -758,9 +752,8 @@ func (o *OSV) retryAfter(value string) time.Duration {
 	return max(when.Sub(o.clock()), 0)
 }
 
-// do returns the response body alongside any error, whether the failure is
-// transient, and any Retry-After: a failed request's body was still received,
-// and the transcript contract wants it retained.
+// do returns the response body alongside any error: a failed request's body
+// was still received, and the transcript contract wants it retained.
 func (o *OSV) do(req *http.Request) ([]byte, bool, string, error) {
 	resp, err := o.client.Do(req)
 	if err != nil {

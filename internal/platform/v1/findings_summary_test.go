@@ -81,7 +81,7 @@ func TestVersionFindingsSummaryGeneratedClient(t *testing.T) {
 			Summary: &store.BuildFindingsSummary{
 				RunID: "run-a", Scanned: 2, Findings: 1, AffectedPackages: 1,
 				Worst: scan.SeverityCritical, Counts: store.SeverityCounts{Critical: 1},
-				ComputedAt: at, ObservedAt: at, Adapter: "osv", Engine: "osv.example",
+				ObservedAt: at, Adapter: "osv", Engine: "osv.example",
 				DatabaseRevision: "unreported", Coverage: scan.Coverage{Submitted: 2},
 			},
 		}},

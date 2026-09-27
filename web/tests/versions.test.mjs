@@ -1158,20 +1158,15 @@ test('the version security summary projects the producer fixture into display sh
   assert.deepEqual(summary.version, {
     worst: 'critical', counts: [{ severity: 'critical', count: 1 }],
     findings: 1, affectedPackages: 1, buildsSummarised: 1,
-    computedAt: '2026-09-22T08:00:00Z',
   })
   assert.deepEqual(summary.builds[0], {
     buildID: 'build-a', component: 'docker', platform: 'linux',
     inventory: 'parsed', packages: 2,
     summary: {
       worst: 'critical', counts: [{ severity: 'critical', count: 1 }],
-      findings: 1, affectedPackages: 1, scanned: 2,
+      scanned: 2,
       observedAt: '2026-09-22T08:00:00Z',
-      scan: {
-        adapter: 'osv', engine: 'osv.example', databaseRevision: 'unreported',
-        observedAt: '2026-09-22T08:00:00Z', submitted: 2,
-        invalid: 0, unversioned: 0, unsupported: 0,
-      },
+      scan: { submitted: 2, invalid: 0, unversioned: 0, unsupported: 0 },
     },
   })
 })
@@ -1579,10 +1574,7 @@ test('an unparseable SBOM is not rendered as a zero package inventory', async ()
 })
 
 test('the Build inventory projection preserves an unparseable inventory', () => {
-  const findings = {
-    buildID: 'broken', platform: 'docker', component: 'docker.ubuntu',
-    packages: [], scanned: 0, unparseable: true,
-  }
+  const findings = { buildID: 'broken', packages: [], unparseable: true }
   assert.deepEqual(packageInventoryFromFindings(findings), { status: 'unparseable' })
   assert.deepEqual(packageInventoryFromFindings(), { status: 'not-loaded' })
 })

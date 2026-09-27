@@ -194,13 +194,8 @@ export function scanAttribution(headers: Headers): ScanAttribution | undefined {
 /** One build's loaded package inventory and scan attribution. */
 export type BuildFindings = {
   buildID: string
-  platform: string
-  /** The Packer build name, e.g. docker.distro — what the author called it. */
-  component: string
   packages: PackageRow[]
   scan?: ScanAttribution
-  /** Packages examined, for a build that has findings-free coverage to report. */
-  scanned: number
   /** The build's SBOM could not be parsed, so its inventory is unknown. */
   unparseable?: true
 }

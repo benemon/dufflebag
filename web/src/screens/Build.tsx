@@ -23,7 +23,7 @@ import {
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
-import { BuildStateLabel, packageSummary, pluginSummary } from './Version'
+import { BuildStateLabel, pluginSummary } from './Version'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
 import { FindingCounts, PackageFindingsTable } from '../components/Findings'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
@@ -637,6 +637,17 @@ export function packerBuildCommand(build: Build): string | null {
   return args.length === 1
     ? `packer build ${args[0]}`
     : `packer build \\\n  ${args.join(' \\\n  ')}`
+}
+
+function packageSummary(build: Build): string {
+  switch (build.packageInventory.status) {
+    case 'parsed':
+      return countLabel(build.packageInventory.packages.length, 'package')
+    case 'unparseable':
+      return 'SBOM unparseable'
+    case 'not-loaded':
+      return '—'
+  }
 }
 
 function countLabel(count: number, singular: string): string {

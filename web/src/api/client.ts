@@ -718,7 +718,6 @@ export type ApiBuildScanSummary = {
   findings: number
   affected_packages: number
   scanned: number
-  computed_at: string
   observed_at: string
   adapter: string
   engine: string
@@ -755,20 +754,15 @@ export type ApiVersionFindingsSummaryResponse = {
   builds: ApiBuildFindingsSummary[]
 }
 
-function versionFindingsSummaryPath(
-  tenant: Tenant, bucket: string, fingerprint: string,
-): string {
-  return `/organizations/${encodeURIComponent(tenant.organizationID)}` +
-    `/projects/${encodeURIComponent(tenant.projectID)}` +
-    `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
-    '/findings-summary'
-}
-
 export async function getVersionFindingsSummary(
   token: string, tenant: Tenant, bucket: string, fingerprint: string,
 ): Promise<ApiVersionFindingsSummaryResponse> {
   return platformGet<ApiVersionFindingsSummaryResponse>(
-    token, versionFindingsSummaryPath(tenant, bucket, fingerprint),
+    token,
+    `/organizations/${encodeURIComponent(tenant.organizationID)}` +
+      `/projects/${encodeURIComponent(tenant.projectID)}` +
+      `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
+      '/findings-summary',
   )
 }
 
