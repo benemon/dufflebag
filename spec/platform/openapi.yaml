@@ -1772,7 +1772,10 @@ components:
         purl: { type: string }
         sbom_id: { type: string }
         fixed_version: { type: string }
-      required: [name, version, purl, sbom_id, fixed_version]
+        reported:
+          type: string
+          description: The provider's verbatim severity value for this package's finding; not comparable across providers.
+      required: [name, version, purl, sbom_id, fixed_version, reported]
 
     InitRequest:
       type: object

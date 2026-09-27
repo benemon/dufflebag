@@ -743,7 +743,8 @@ func renderBuildFindings(findings store.BuildFindings, scannerConfigured bool) B
 		}
 		for _, pkg := range advisory.Packages {
 			wire.Packages = append(wire.Packages, BuildAdvisoryPackage{
-				Name: pkg.Name, Version: pkg.Version, Purl: pkg.Purl, SbomId: pkg.SBOMID, FixedVersion: pkg.FixedVersion,
+				Name: pkg.Name, Version: pkg.Version, Purl: pkg.Purl, SbomId: pkg.SBOMID,
+				FixedVersion: pkg.FixedVersion, Reported: pkg.Reported,
 			})
 		}
 		response.Advisories = append(response.Advisories, wire)

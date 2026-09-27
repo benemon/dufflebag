@@ -2294,6 +2294,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(affectedRow.Name, 'github.com/go-jose/go-jose/v4')
     assert.equal(affectedRow.Version, 'v4.1.1')
     assert.ok(affectedRow.SBOM, 'affected row must name its SBOM id')
+    assert.match(affectedRow.Reported, /^CVSS:3\.1\//, 'the provider\'s verbatim severity is shown')
     assert.equal(affectedRow['Fixed in'], '4.1.4')
     await clickFacet('Build facets', 'Packages')
     await waitForText('github.com/go-jose/go-jose/v4')

@@ -774,6 +774,7 @@ export type ApiBuildAdvisoryPackage = {
   purl: string
   sbom_id: string
   fixed_version: string
+  reported: string
 }
 
 export type ApiBuildAdvisory = {

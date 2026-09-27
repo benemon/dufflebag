@@ -1127,7 +1127,7 @@ function fixedInCell(advisory: Advisory) {
 function AffectedPackagesTable({ advisory, packagePath }: { advisory: Advisory; packagePath: string }) {
   return (
     <Table aria-label={`Affected packages for ${advisory.identifier}`} variant="compact" borders={false}>
-      <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>SBOM</Th><Th>Fixed in</Th></Tr></Thead>
+      <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>SBOM</Th><Th>Reported</Th><Th>Fixed in</Th></Tr></Thead>
       <Tbody>
         {advisory.hits.map((hit) => (
           <Tr key={[hit.packageIdentity, hit.sbomID, hit.fixedVersion].join('/') }>
@@ -1136,6 +1136,11 @@ function AffectedPackagesTable({ advisory, packagePath }: { advisory: Advisory; 
             </Td>
             <Td dataLabel="Version">{hit.version}</Td>
             <Td dataLabel="SBOM">{hit.sbomID || '—'}</Td>
+            <Td dataLabel="Reported" modifier="truncate">
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {hit.reported ? <Truncate content={hit.reported} /> : '—'}
+              </code>
+            </Td>
             <Td dataLabel="Fixed in">{hit.fixedVersion || 'No fix available'}</Td>
           </Tr>
         ))}

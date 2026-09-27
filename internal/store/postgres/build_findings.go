@@ -39,6 +39,9 @@ type BuildAdvisoryPackage struct {
 	Purl         string
 	SBOMID       string
 	FixedVersion string
+	// Reported is the provider's verbatim severity value, kept beside the
+	// derived band because the scales are not comparable across providers.
+	Reported string
 }
 
 type buildFindingPackageKey struct {
@@ -52,6 +55,7 @@ type buildAdvisoryGroup struct {
 	packageFixed map[buildFindingPackageKey][]string
 	packageSeen  map[buildFindingPackageKey]map[string]bool
 	packageIDs   map[packageSummaryKey]bool
+	reported     map[buildFindingPackageKey]string
 }
 
 // GetBuildFindings reads a build, inventory state and current findings in one
@@ -127,6 +131,7 @@ func groupBuildAdvisories(findings []StoredFinding) ([]BuildAdvisory, int) {
 				packageFixed: make(map[buildFindingPackageKey][]string),
 				packageSeen:  make(map[buildFindingPackageKey]map[string]bool),
 				packageIDs:   make(map[packageSummaryKey]bool),
+				reported:     make(map[buildFindingPackageKey]string),
 			}
 			groups[finding.ID] = group
 		}
@@ -150,6 +155,7 @@ func groupBuildAdvisories(findings []StoredFinding) ([]BuildAdvisory, int) {
 		}
 		if group.packageSeen[key] == nil {
 			group.packageSeen[key] = make(map[string]bool)
+			group.reported[key] = scan.WorstSeverityValue(finding.Severities)
 		}
 		for _, fixed := range finding.FixedVersions {
 			if !group.fixedSeen[fixed] {
@@ -188,7 +194,7 @@ func groupBuildAdvisories(findings []StoredFinding) ([]BuildAdvisory, int) {
 		for _, key := range keys {
 			group.Packages = append(group.Packages, BuildAdvisoryPackage{
 				Name: key.name, Version: key.version, Purl: key.purl, SBOMID: key.sbomID,
-				FixedVersion: strings.Join(group.packageFixed[key], ", "),
+				FixedVersion: strings.Join(group.packageFixed[key], ", "), Reported: group.reported[key],
 			})
 		}
 		packageCounts[identifier] = len(group.packageIDs)

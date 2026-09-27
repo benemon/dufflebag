@@ -846,8 +846,11 @@ type BuildAdvisoryPackage struct {
 	FixedVersion string `json:"fixed_version"`
 	Name         string `json:"name"`
 	Purl         string `json:"purl"`
-	SbomId       string `json:"sbom_id"`
-	Version      string `json:"version"`
+
+	// Reported The provider's verbatim severity value for this package's finding; not comparable across providers.
+	Reported string `json:"reported"`
+	SbomId   string `json:"sbom_id"`
+	Version  string `json:"version"`
 }
 
 // BuildFindingsResponse defines model for BuildFindingsResponse.

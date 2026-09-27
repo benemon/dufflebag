@@ -8,6 +8,8 @@ export type AdvisoryHit = {
   version: string
   sbomID: string
   fixedVersion: string
+  /** The provider's verbatim severity value; scales are not comparable across providers. */
+  reported: string
 }
 
 export type Advisory = {
@@ -60,6 +62,7 @@ export function projectBuildFindings(response: ApiBuildFindingsResponse): BuildF
       version: pkg.version,
       sbomID: pkg.sbom_id,
       fixedVersion: pkg.fixed_version,
+      reported: pkg.reported,
     }))
     return {
       identifier: advisory.identifier,

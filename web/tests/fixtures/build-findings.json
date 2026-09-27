@@ -13,6 +13,7 @@
           "fixed_version": "4.1.4",
           "name": "github.com/go-jose/go-jose/v4",
           "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1",
+          "reported": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
           "sbom_id": "sbom-a",
           "version": "v4.1.1"
         },
@@ -20,6 +21,7 @@
           "fixed_version": "4.1.4",
           "name": "github.com/go-jose/go-jose/v4",
           "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1",
+          "reported": "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H",
           "sbom_id": "sbom-b",
           "version": "v4.1.1"
         }
@@ -37,6 +39,7 @@
           "fixed_version": "",
           "name": "golang.org/x/crypto",
           "purl": "pkg:golang/golang.org/x/crypto@v0.31.0",
+          "reported": "",
           "sbom_id": "sbom-a",
           "version": "v0.31.0"
         }

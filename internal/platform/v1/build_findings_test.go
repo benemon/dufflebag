@@ -39,8 +39,8 @@ func TestBuildFindingsGeneratedClientAndWebFixture(t *testing.T) {
 			Identifier: "GHSA-78h2-9frx-2jm8", Severity: scan.SeverityHigh, Summary: "go-jose accepts unbounded input",
 			Aliases: []string{"CVE-2026-34986"}, Published: &published, FixedVersions: []string{"4.1.4"},
 			Packages: []store.BuildAdvisoryPackage{
-				{Name: "github.com/go-jose/go-jose/v4", Version: "v4.1.1", Purl: "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1", SBOMID: "sbom-a", FixedVersion: "4.1.4"},
-				{Name: "github.com/go-jose/go-jose/v4", Version: "v4.1.1", Purl: "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1", SBOMID: "sbom-b", FixedVersion: "4.1.4"},
+				{Name: "github.com/go-jose/go-jose/v4", Version: "v4.1.1", Purl: "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1", SBOMID: "sbom-a", FixedVersion: "4.1.4", Reported: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"},
+				{Name: "github.com/go-jose/go-jose/v4", Version: "v4.1.1", Purl: "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1", SBOMID: "sbom-b", FixedVersion: "4.1.4", Reported: "CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H"},
 			},
 		}, {
 			Identifier: "GO-2026-4945", Severity: scan.SeverityUnknown, Summary: "",

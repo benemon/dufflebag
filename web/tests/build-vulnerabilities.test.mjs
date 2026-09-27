@@ -42,7 +42,7 @@ const wireAdvisory = (identifier, severity, packages, over = {}) => ({
   identifier, severity, summary: '', aliases: [`ALIAS-${identifier}`],
   published: '2026-04-03T03:28:56Z', fixed_versions: ['4.1.4'],
   packages: packages.map((name) => ({
-    name, version: 'v4.1.1', purl: `pkg:golang/${name}@v4.1.1`, sbom_id: 'sbom-a', fixed_version: '4.1.4',
+    name, version: 'v4.1.1', purl: `pkg:golang/${name}@v4.1.1`, sbom_id: 'sbom-a', fixed_version: '4.1.4', reported: '',
   })),
   ...over,
 })
@@ -54,7 +54,6 @@ const wire = (advisories, over = {}) => ({
 
 const finding = (identifier, criticality, over = {}) => ({
   identifier,
-  description: 'recorded advisory',
   criticality,
   severity: '',
   fixedVersion: '4.1.4',
@@ -107,6 +106,7 @@ test('the fixture projects one row per advisory with a package entry per reporti
   const shared = data.advisories.find((a) => a.identifier === 'GHSA-78h2-9frx-2jm8')
   assert.equal(shared.hits.length, 2)
   assert.equal(shared.packages, 1, 'one identity in two SBOMs counts once')
+  assert.equal(shared.hits[0].reported, 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H')
   assert.deepEqual(data.run, { id: 'run-a', observedAt: '2026-09-27T14:00:00Z' })
   assert.equal(data.packagesTotal, 3)
   assert.equal(data.packagesAffected, 2)
@@ -185,8 +185,8 @@ test('the Vulnerabilities package filter matches identity, not a substring', () 
   const data = projectBuildFindings(wire([
     wireAdvisory('ONLY-LIBSSL3', 'high', []), wireAdvisory('DEV-ONLY', 'high', []),
   ]))
-  data.advisories[0].hits = [{ packageIdentity: 'libssl3@3.0', name: 'libssl3', version: '3.0', sbomID: 's', fixedVersion: '' }]
-  data.advisories[1].hits = [{ packageIdentity: 'libssl3-dev@3.0', name: 'libssl3-dev', version: '3.0', sbomID: 's', fixedVersion: '' }]
+  data.advisories[0].hits = [{ packageIdentity: 'libssl3@3.0', name: 'libssl3', version: '3.0', sbomID: 's', fixedVersion: '', reported: '' }]
+  data.advisories[1].hits = [{ packageIdentity: 'libssl3-dev@3.0', name: 'libssl3-dev', version: '3.0', sbomID: 's', fixedVersion: '', reported: '' }]
   const html = renderVulnerabilities(data, { packageFilter: 'libssl3@3.0' })
   assert.match(html, /ONLY-LIBSSL3/)
   assert.doesNotMatch(html, /DEV-ONLY/)

@@ -79,7 +79,6 @@ export type Package = {
 
 export type Finding = {
   identifier: string
-  description: string
   /** The derived fixed scale, comparable across providers. */
   criticality: string
   /** The provider's verbatim value, which is NOT comparable across providers. */
@@ -846,7 +845,6 @@ function toFindings(pkg: ApiPackage): Finding[] {
     for (const vulnerability of detail.vulnerabilities ?? []) {
       findings.push({
         identifier: vulnerability.identifier ?? '',
-        description: vulnerability.description ?? '',
         criticality: (vulnerability.criticality ?? 'unknown').toLowerCase(),
         severity: vulnerability.severity ?? '',
         fixedVersion: vulnerability.fixed_version ?? '',
