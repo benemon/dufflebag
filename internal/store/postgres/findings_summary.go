@@ -69,7 +69,7 @@ type ScanAttempt struct {
 }
 
 // latestAttempt reads the build's scan pointers and, when the newest attempt
-// is not the current run, that attempt. Both reads verify their MACs.
+// is not the current run, that attempt.
 func latestAttempt(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string) (bool, *ScanAttempt, error) {
 	state, err := readBuildScanState(ctx, tx, r, tenant, buildID, false)
 	if err != nil || state == nil {

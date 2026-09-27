@@ -64,6 +64,7 @@ export function VersionSecurityCard({
   }, undefined)
   const unsummarised = summary.builds.filter((build) => !build.summary && build.inventory !== 'unparseable')
   const pending = unsummarised.filter((build) => build.scanned).length
+  const unscanned = unsummarised.length - pending
   const lastScanned = summary.builds.reduce<string | undefined>((latest, build) => {
     const observed = build.summary?.observedAt
     return observed && (!latest || Date.parse(observed) > Date.parse(latest)) ? observed : latest
@@ -122,7 +123,10 @@ export function VersionSecurityCard({
             Covers {version.buildsSummarised} of {summary.builds.length} builds;{' '}
             {pending === 0
               ? 'the rest are not yet scanned.'
-              : `${pending} scanned ${pending === 1 ? 'build shows its' : 'builds show their'} figures after the next scan.`}
+              : [
+                `${pending} scanned ${pending === 1 ? 'build shows its' : 'builds show their'} figures after the next scan`,
+                ...(unscanned > 0 ? [`${unscanned} not yet scanned`] : []),
+              ].join('; ') + '.'}
           </Content>
         )}
         {outOfScanSet && (

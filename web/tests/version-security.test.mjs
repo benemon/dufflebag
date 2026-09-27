@@ -179,6 +179,17 @@ test('a scanned build without a stored summary is not called unscanned', () => {
   assert.doesNotMatch(html, /Not yet scanned/)
 })
 
+test('the coverage line names pending and unscanned builds together', () => {
+  const mixed = structuredClone(fixtures.mixedBuilds)
+  mixed.builds.find((build) => build.build_id === 'pending-build').scanned = true
+  const html = render(mixed)
+  assert.match(html, /Covers 3 of 5 builds; 1 scanned build shows its figures after the next scan/)
+  assert.doesNotMatch(html, /not yet scanned\./, 'the unparseable build is labelled, not counted as unscanned')
+  const both = structuredClone(mixed)
+  both.builds.find((build) => build.build_id === 'broken-build').inventory = 'parsed'
+  assert.match(render(both), /1 scanned build shows its figures after the next scan; 1 not yet scanned\./)
+})
+
 test('a failed rescan is stated under the figures it left standing', () => {
   const html = render(fixtures.failedRescan)
   assert.match(html, /data-rescan="failed"/)
