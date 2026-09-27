@@ -1,4 +1,4 @@
-import { useState, type CSSProperties } from 'react'
+import { useEffect, useRef, useState, type CSSProperties } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Card, CardBody, CardTitle, CodeBlock,
   CodeBlockCode, Content, DataList, DataListCell, DataListItem, DataListItemCells,
@@ -19,8 +19,8 @@ import { downloadSbom, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
 import {
-  buildIsInProgress, packageInventoryFromFindings, useBuild, useVersionFindings,
-  useVersionSecuritySummary, type Build, type BuildDetail, type InventoryProgress,
+  buildIsInProgress, packageInventoryFromFindings, runsDisagree, useBuild, useBuildFindings,
+  useVersionFindings, useVersionSecuritySummary, type Build, type BuildDetail, type InventoryProgress,
   type Package, type SbomRef, type VersionSecuritySummary,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
@@ -31,7 +31,7 @@ import { SEVERITY_COLOUR } from '../components/Findings'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { SEVERITY_ORDER, severityCounts, type Severity } from '../data/findings'
 import {
-  deriveBuildAdvisories, packageIdentity, type Advisory, type BuildAdvisories,
+  packageIdentity, type Advisory, type BuildFindingsData, type VulnerablePackage,
 } from '../data/advisories'
 import { When } from '../components/When'
 
@@ -74,6 +74,17 @@ export function Build() {
     : []
   const inventory = useVersionFindings(bucket, fingerprint, inventoryBuilds)
   const security = useVersionSecuritySummary(bucket, fingerprint)
+  const findings = useBuildFindings(bucket, fingerprint, build)
+  const inventoryRun = inventory.data[0]?.scan?.runID
+  const findingsRun = findings.data?.run?.id
+  const reconciled = useRef('')
+  useEffect(() => {
+    const pair = `${inventoryRun}/${findingsRun}`
+    if (!runsDisagree(inventoryRun, findingsRun) || reconciled.current === pair) return
+    reconciled.current = pair
+    inventory.reload()
+    findings.reload()
+  }, [inventoryRun, findingsRun, inventory, findings])
   const detail = data ? {
     ...data,
     build: {
@@ -81,7 +92,7 @@ export function Build() {
       packageInventory: packageInventoryFromFindings(inventory.data[0]),
     },
   } : null
-  const refreshing = detailRefreshing || inventory.loading || security.refreshing
+  const refreshing = detailRefreshing || inventory.loading || security.refreshing || findings.refreshing
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const fetchSbom = async (sbom: SbomRef): Promise<ArrayBuffer> => {
     if (!state || !selectedOrganization || !selectedProject) {
@@ -134,6 +145,9 @@ export function Build() {
       inventoryFailure={inventory.failure}
       inventoryProgress={inventory.progress}
       securitySummary={security.data}
+      findings={findings.data}
+      findingsLoading={findings.loading}
+      findingsFailure={findings.failure}
       facet={selectedFacet}
       packageFilter={searchParams.get('package') ?? ''}
       severityFilter={severityFilter}
@@ -151,6 +165,7 @@ export function Build() {
         reload()
         inventory.reload()
         security.reload()
+        findings.reload()
       }}
       fetchSbom={fetchSbom}
     />
@@ -164,6 +179,9 @@ export function BuildView({
   inventoryFailure = null,
   inventoryProgress = { packages: 0 },
   securitySummary = null,
+  findings = null,
+  findingsLoading = false,
+  findingsFailure = null,
   facet: suppliedFacet,
   packageFilter = '',
   severityFilter = [],
@@ -186,6 +204,9 @@ export function BuildView({
   inventoryFailure?: string | null
   inventoryProgress?: InventoryProgress
   securitySummary?: VersionSecuritySummary | null
+  findings?: BuildFindingsData | null
+  findingsLoading?: boolean
+  findingsFailure?: string | null
   facet?: BuildFacet
   packageFilter?: string
   severityFilter?: Severity[]
@@ -294,15 +315,12 @@ export function BuildView({
               },
               {
                 key: 'vulnerabilities', label: 'Vulnerabilities',
-                count: vulnerabilityFacetCount(build, inventoryLoading, scanned),
+                count: vulnerabilityFacetCount(findings),
                 content: (
                   <VulnerabilitiesCard
-                    build={build}
-                    inventoryLoading={inventoryLoading}
-                    inventoryFailure={inventoryFailure}
-                    inventoryProgress={inventoryProgress}
-                    scannerConfigured={securitySummary?.scannerConfigured ?? false}
-                    scanned={scanned}
+                    findings={findings}
+                    loading={findingsLoading}
+                    failure={findingsFailure}
                     packageFilter={packageFilter}
                     severityFilter={severityFilter}
                     buildPath={buildFacetPath(
@@ -732,23 +750,17 @@ export const PackageTableForTest = PackageTable
 export const PackagesCardForTest = PackagesCard
 
 export function VulnerabilitiesCard({
-  build,
-  inventoryLoading = false,
-  inventoryFailure = null,
-  inventoryProgress = { packages: 0 },
-  scannerConfigured,
-  scanned,
+  findings,
+  loading = false,
+  failure = null,
   packageFilter = '',
   severityFilter = [],
   buildPath = '',
   onFiltersChange = () => {},
 }: {
-  build: Build
-  inventoryLoading?: boolean
-  inventoryFailure?: string | null
-  inventoryProgress?: InventoryProgress
-  scannerConfigured: boolean
-  scanned: boolean
+  findings: BuildFindingsData | null
+  loading?: boolean
+  failure?: string | null
   packageFilter?: string
   severityFilter?: Severity[]
   buildPath?: string
@@ -758,35 +770,32 @@ export function VulnerabilitiesCard({
   const [expanded, setExpanded] = useState<string | null>(null)
   const [page, setPage] = useState(1)
   const [perPage, setPerPage] = useState(20)
-  if (inventoryLoading) {
+  if (failure) {
     return (
       <Card>
         <CardTitle>Vulnerabilities</CardTitle>
         <CardBody>
-          <div data-state="loading" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <Spinner isInline aria-label="Reading package inventory…" />
-            <Content component="p" aria-live="polite" style={{ margin: 0 }}>
-              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
-              Large images can take a minute or more.
-            </Content>
-          </div>
-        </CardBody>
-      </Card>
-    )
-  }
-  if (inventoryFailure) {
-    return (
-      <Card>
-        <CardTitle>Vulnerabilities</CardTitle>
-        <CardBody>
-          <Alert data-state="failed" variant="danger" isInline title="Package inventory could not be loaded">
-            <Content component="p">{inventoryFailure}</Content>
+          <Alert data-state="failed" variant="danger" isInline title="Findings could not be loaded">
+            <Content component="p">{failure}</Content>
           </Alert>
         </CardBody>
       </Card>
     )
   }
-  if (build.packageInventory.status === 'unparseable') {
+  if (loading || !findings) {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <div data-state="loading" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner isInline aria-label="Reading findings…" />
+            <Content component="p" aria-live="polite" style={{ margin: 0 }}>Reading findings…</Content>
+          </div>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (findings.inventory === 'unparseable') {
     return (
       <Card>
         <CardTitle>Vulnerabilities</CardTitle>
@@ -794,17 +803,7 @@ export function VulnerabilitiesCard({
       </Card>
     )
   }
-  if (build.packageInventory.status === 'not-loaded') {
-    return (
-      <Card>
-        <CardTitle>Vulnerabilities</CardTitle>
-        <CardBody>
-          <Content component="p" data-state="not-loaded">Package inventory has not been loaded.</Content>
-        </CardBody>
-      </Card>
-    )
-  }
-  if (!scannerConfigured) {
+  if (!findings.scannerConfigured) {
     return (
       <Card>
         <CardTitle>Vulnerabilities</CardTitle>
@@ -816,7 +815,7 @@ export function VulnerabilitiesCard({
       </Card>
     )
   }
-  if (!scanned) {
+  if (!findings.scanned || !findings.run) {
     return (
       <Card>
         <CardTitle>Vulnerabilities</CardTitle>
@@ -829,8 +828,7 @@ export function VulnerabilitiesCard({
     )
   }
 
-  const packages = build.packageInventory.packages
-  const data = deriveBuildAdvisories(packages)
+  const data = findings
   const normalized = query.trim().toLowerCase()
   const advisories = data.advisories.filter((advisory) => {
     if (packageFilter && !advisory.hits.some((hit) => hit.packageIdentity === packageFilter)) return false
@@ -856,12 +854,10 @@ export function VulnerabilitiesCard({
         <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
           Reported by client-supplied SBOMs; dufflebag has not verified this inventory.{' '}
           {data.advisories.length === 0
-            ? `${countLabel(packages.length, 'package')} · 0 advisories.`
-            : `${data.advisories.length} ${data.advisories.length === 1 ? 'advisory' : 'advisories'} · ${data.affectedPackages} of ${packages.length} packages affected.`}
+            ? `${countLabel(data.packagesTotal, 'package')} · 0 advisories.`
+            : `${data.advisories.length} ${data.advisories.length === 1 ? 'advisory' : 'advisories'} · ${data.packagesAffected} of ${data.packagesTotal} packages affected.`}
         </Content>
-        {build.packageInventory.scan?.observedAt ? (
-          <AsOf observedAt={build.packageInventory.scan.observedAt} />
-        ) : null}
+        <AsOf observedAt={findings.run.observedAt} />
         <ToggleGroup aria-label="Filter by severity" isCompact style={{ marginTop: 16 }}>
           {[...SEVERITY_ORDER].reverse().map((band) => (
             <ToggleGroupItem
@@ -890,7 +886,7 @@ export function VulnerabilitiesCard({
 
         {data.advisories.length === 0 ? (
           <Content component="p" data-state="zero-findings" style={{ marginTop: 18 }}>
-            No findings in {countLabel(packages.length, 'package')}
+            No findings in {countLabel(data.packagesTotal, 'package')}
           </Content>
         ) : (
           <div data-state="findings">
@@ -1014,7 +1010,7 @@ function AsOf({ observedAt }: { observedAt: string }) {
 function TopVulnerablePackages({
   rows, packagePath,
 }: {
-  rows: BuildAdvisories['topVulnerablePackages']
+  rows: VulnerablePackage[]
   packagePath: string
 }) {
   return (
@@ -1131,7 +1127,7 @@ function fixedInCell(advisory: Advisory) {
 function AffectedPackagesTable({ advisory, packagePath }: { advisory: Advisory; packagePath: string }) {
   return (
     <Table aria-label={`Affected packages for ${advisory.identifier}`} variant="compact" borders={false}>
-      <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>SBOM</Th><Th>Fixed in</Th></Tr></Thead>
+      <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>SBOM</Th><Th>Reported</Th><Th>Fixed in</Th></Tr></Thead>
       <Tbody>
         {advisory.hits.map((hit) => (
           <Tr key={[hit.packageIdentity, hit.sbomID, hit.fixedVersion].join('/') }>
@@ -1140,6 +1136,11 @@ function AffectedPackagesTable({ advisory, packagePath }: { advisory: Advisory; 
             </Td>
             <Td dataLabel="Version">{hit.version}</Td>
             <Td dataLabel="SBOM">{hit.sbomID || '—'}</Td>
+            <Td dataLabel="Reported" modifier="truncate">
+              <code style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+                {hit.reported ? <Truncate content={hit.reported} /> : '—'}
+              </code>
+            </Td>
             <Td dataLabel="Fixed in">{hit.fixedVersion || 'No fix available'}</Td>
           </Tr>
         ))}
@@ -1170,11 +1171,9 @@ function packageFacetCount(build: Build, inventoryLoading = false): FacetCount {
     : { status: 'unknown' }
 }
 
-function vulnerabilityFacetCount(
-  build: Build, inventoryLoading: boolean, scanned: boolean,
-): FacetCount {
-  return !inventoryLoading && scanned && build.packageInventory.status === 'parsed'
-    ? knownCount(deriveBuildAdvisories(build.packageInventory.packages).advisories.length)
+function vulnerabilityFacetCount(findings: BuildFindingsData | null): FacetCount {
+  return findings?.scanned && findings.inventory === 'parsed'
+    ? knownCount(findings.advisories.length)
     : { status: 'unknown' }
 }
 

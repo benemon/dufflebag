@@ -52,6 +52,7 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"RescanBuild":               {"scan.request", "build", "buildId"},
 		"ListPins":                  {"pin.list", "pin_collection", ""},
 		"GetVersionFindingsSummary": {"findings_summary.read", "version", "fingerprint"},
+		"GetBuildFindings":          {"findings.read", "build", "buildId"},
 		"SetPin":                    {"pin.set", "pin", "bucketName"},
 		"DeletePin":                 {"pin.delete", "pin", "bucketName"},
 		"GetBagDropConfig":          {"bagdrop.config.read", "bagdrop_config", ""},

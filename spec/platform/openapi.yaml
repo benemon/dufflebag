@@ -993,6 +993,45 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/organizations/{organizationId}/projects/{projectId}/buckets/{bucketName}/versions/{fingerprint}/builds/{buildId}/findings:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/ProjectId"
+      - name: bucketName
+        in: path
+        required: true
+        schema: { type: string }
+      - name: fingerprint
+        in: path
+        required: true
+        schema: { type: string }
+      - name: buildId
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [findings]
+      operationId: getBuildFindings
+      summary: Get stored findings for a build
+      description: |
+        Returns the current successful scan and its advisories without
+        downloading the build's paginated package inventory. An existing build
+        without a current successful scan returns scanned=false, run=null and
+        an empty advisory list.
+
+        Requires the reader role on this project. A tenancy the caller may
+        not see, or an unknown build, answers 404. The two are deliberately
+        indistinguishable because existence is a disclosure.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/BuildFindingsResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/v1/organizations/{organizationId}/projects/{projectId}/pins:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -1659,6 +1698,84 @@ components:
         - engine
         - database_revision
         - coverage
+
+    BuildFindingsResponse:
+      type: object
+      properties:
+        scanner_configured: { type: boolean }
+        inventory:
+          type: string
+          enum: [parsed, unparseable]
+        packages_total: { type: integer, minimum: 0 }
+        scanned: { type: boolean }
+        run:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/BuildScanRun"
+        packages_affected: { type: integer, minimum: 0 }
+        advisories:
+          type: array
+          items: { $ref: "#/components/schemas/BuildAdvisory" }
+      required:
+        - scanner_configured
+        - inventory
+        - packages_total
+        - scanned
+        - run
+        - packages_affected
+        - advisories
+
+    BuildScanRun:
+      type: object
+      properties:
+        id: { type: string }
+        observed_at: { type: string, format: date-time }
+        adapter: { type: string }
+        engine: { type: string }
+        database_revision: { type: string }
+        coverage:
+          type: object
+          properties:
+            submitted: { type: integer, minimum: 0 }
+            invalid: { type: integer, minimum: 0 }
+            unversioned: { type: integer, minimum: 0 }
+            unsupported: { type: integer, minimum: 0 }
+          required: [submitted, invalid, unversioned, unsupported]
+      required: [id, observed_at, adapter, engine, database_revision, coverage]
+
+    BuildAdvisory:
+      type: object
+      properties:
+        identifier: { type: string }
+        severity: { $ref: "#/components/schemas/Severity" }
+        summary: { type: string }
+        aliases:
+          type: array
+          items: { type: string }
+        published:
+          type: string
+          format: date-time
+          nullable: true
+        fixed_versions:
+          type: array
+          items: { type: string }
+        packages:
+          type: array
+          items: { $ref: "#/components/schemas/BuildAdvisoryPackage" }
+      required: [identifier, severity, summary, aliases, published, fixed_versions, packages]
+
+    BuildAdvisoryPackage:
+      type: object
+      properties:
+        name: { type: string }
+        version: { type: string }
+        purl: { type: string }
+        sbom_id: { type: string }
+        fixed_version: { type: string }
+        reported:
+          type: string
+          description: The provider's verbatim severity value for this package's finding; not comparable across providers.
+      required: [name, version, purl, sbom_id, fixed_version, reported]
 
     InitRequest:
       type: object

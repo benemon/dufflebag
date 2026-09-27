@@ -2759,8 +2759,13 @@ func TestUploadSbomStoresAndReplaces(t *testing.T) {
 		t.Fatalf("upload second SBOM: %v", err)
 	}
 
-	packages, unparseable, err := repository.ListBuildPackages(
-		ctx, tenant, bucket.Name, version.Fingerprint, build.ID.String())
+	total, unparseable, err := repository.CountBuildPackages(
+		ctx, tenant, bucket.Name, version.Fingerprint, build.ID.String(), store.BuildPackageFilter{})
+	if err != nil || len(unparseable) != 0 || total != 1 {
+		t.Fatalf("CountBuildPackages = %d, unparseable %#v, %v", total, unparseable, err)
+	}
+	packages, err := repository.ListBuildPackages(
+		ctx, tenant, build.ID.String(), store.BuildPackageFilter{}, 0, total)
 	if err != nil || len(unparseable) != 0 || len(packages) != 1 {
 		t.Fatalf("ListBuildPackages = %#v, unparseable %#v, %v", packages, unparseable, err)
 	}
@@ -2777,8 +2782,8 @@ func TestUploadSbomStoresAndReplaces(t *testing.T) {
 	if err != nil || broken.ParseStatus != "unparseable" || broken.ParseError == "" {
 		t.Fatalf("unparseable upload = %#v, %v", broken, err)
 	}
-	if _, unparseable, err := repository.ListBuildPackages(
-		ctx, tenant, bucket.Name, version.Fingerprint, build.ID.String()); err != nil ||
+	if _, unparseable, err := repository.CountBuildPackages(
+		ctx, tenant, bucket.Name, version.Fingerprint, build.ID.String(), store.BuildPackageFilter{}); err != nil ||
 		len(unparseable) != 1 || unparseable[0] != "broken" {
 		t.Fatalf("unparseable read state = %#v, %v", unparseable, err)
 	}

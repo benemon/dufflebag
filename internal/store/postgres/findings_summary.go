@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/scan"
@@ -94,27 +95,53 @@ func (counts *SeverityCounts) add(severity scan.Severity) {
 	}
 }
 
-func deduplicateSummaryFindings(findings []StoredFinding) []StoredFinding {
-	selected := make(map[findingSummaryKey]StoredFinding, len(findings))
-	for _, finding := range findings {
+// DeduplicateBuildFindings collapses repeated SBOM reports to one logical
+// package-identity/advisory finding. The lowest SBOM id wins so callers get a
+// stable representative without depending on query order.
+func DeduplicateBuildFindings(findings []StoredFinding) []StoredFinding {
+	sorted := append([]StoredFinding(nil), findings...)
+	sort.Slice(sorted, func(i, j int) bool {
+		left, right := sorted[i], sorted[j]
+		leftKey := findingSummaryKey{
+			name: left.Package.Name, version: left.Package.Version,
+			purl: left.Package.Purl, advisory: left.ID,
+		}
+		rightKey := findingSummaryKey{
+			name: right.Package.Name, version: right.Package.Version,
+			purl: right.Package.Purl, advisory: right.ID,
+		}
+		if leftKey != rightKey {
+			if leftKey.name != rightKey.name {
+				return leftKey.name < rightKey.name
+			}
+			if leftKey.version != rightKey.version {
+				return leftKey.version < rightKey.version
+			}
+			if leftKey.purl != rightKey.purl {
+				return leftKey.purl < rightKey.purl
+			}
+			return leftKey.advisory < rightKey.advisory
+		}
+		return left.Package.SBOMID < right.Package.SBOMID
+	})
+	seen := make(map[findingSummaryKey]bool, len(sorted))
+	deduplicated := make([]StoredFinding, 0, len(sorted))
+	for _, finding := range sorted {
 		key := findingSummaryKey{
 			name: finding.Package.Name, version: finding.Package.Version,
 			purl: finding.Package.Purl, advisory: finding.ID,
 		}
-		current, exists := selected[key]
-		if !exists || finding.Package.SBOMID < current.Package.SBOMID {
-			selected[key] = finding
+		if seen[key] {
+			continue
 		}
-	}
-	deduplicated := make([]StoredFinding, 0, len(selected))
-	for _, finding := range selected {
+		seen[key] = true
 		deduplicated = append(deduplicated, finding)
 	}
 	return deduplicated
 }
 
 func summarizeBuildFindings(findings []StoredFinding) findingsSummary {
-	findings = deduplicateSummaryFindings(findings)
+	findings = DeduplicateBuildFindings(findings)
 	packages := make(map[packageSummaryKey]bool, len(findings))
 	summary := findingsSummary{Findings: len(findings)}
 	for _, finding := range findings {
@@ -132,7 +159,7 @@ func summarizeVersionFindings(builds [][]StoredFinding) findingsSummary {
 	worstByFinding := make(map[findingSummaryKey]scan.Severity)
 	packages := make(map[packageSummaryKey]bool)
 	for _, findings := range builds {
-		for _, finding := range deduplicateSummaryFindings(findings) {
+		for _, finding := range DeduplicateBuildFindings(findings) {
 			key := findingSummaryKey{
 				name: finding.Package.Name, version: finding.Package.Version,
 				purl: finding.Package.Purl, advisory: finding.ID,

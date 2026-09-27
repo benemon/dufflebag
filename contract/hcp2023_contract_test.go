@@ -1758,15 +1758,57 @@ func (r *contractRepository) DownloadSbom(
 	return sbom.CompressedData, nil
 }
 
-func (r *contractRepository) ListBuildPackages(
+func (r *contractRepository) CountBuildPackages(
 	_ context.Context,
 	_ store.Tenant,
 	bucket, fingerprint, buildID string,
-) ([]store.ReportedPackage, []string, error) {
+	filter store.BuildPackageFilter,
+) (int, []string, error) {
 	if _, err := r.GetBuild(context.Background(), store.Tenant{}, bucket, fingerprint, buildID); err != nil {
-		return nil, nil, err
+		return 0, nil, err
 	}
-	return append([]store.ReportedPackage(nil), r.packages...), nil, nil
+	total := 0
+	for _, pkg := range r.packages {
+		if filter.Name != "" && pkg.Name != filter.Name ||
+			filter.NamePrefix != "" && !strings.HasPrefix(pkg.Name, filter.NamePrefix) ||
+			filter.Version != "" && pkg.Version != filter.Version {
+			continue
+		}
+		total++
+	}
+	return total, nil, nil
+}
+
+func (r *contractRepository) ListBuildPackages(
+	_ context.Context,
+	_ store.Tenant,
+	_ string,
+	filter store.BuildPackageFilter,
+	offset, limit int,
+) ([]store.ReportedPackage, error) {
+	packages := make([]store.ReportedPackage, 0, len(r.packages))
+	for _, pkg := range r.packages {
+		if filter.Name != "" && pkg.Name != filter.Name ||
+			filter.NamePrefix != "" && !strings.HasPrefix(pkg.Name, filter.NamePrefix) ||
+			filter.Version != "" && pkg.Version != filter.Version {
+			continue
+		}
+		packages = append(packages, pkg)
+	}
+	sort.Slice(packages, func(i, j int) bool {
+		if packages[i].Name != packages[j].Name {
+			return packages[i].Name < packages[j].Name
+		}
+		if packages[i].Version != packages[j].Version {
+			return packages[i].Version < packages[j].Version
+		}
+		return packages[i].Purl < packages[j].Purl
+	})
+	end := offset + limit
+	if end > len(packages) {
+		end = len(packages)
+	}
+	return append([]store.ReportedPackage(nil), packages[offset:end]...), nil
 }
 
 func (r *contractRepository) GetBuildScanState(
@@ -1795,6 +1837,25 @@ func (r *contractRepository) ListScanFindings(
 	runID string,
 ) ([]store.StoredFinding, error) {
 	return append([]store.StoredFinding(nil), r.scanFindings[runID]...), nil
+}
+
+func (r *contractRepository) ListScanFindingsForPackages(
+	_ context.Context,
+	_ store.Tenant,
+	runID string,
+	packages []store.ReportedPackage,
+) ([]store.StoredFinding, error) {
+	findings := make([]store.StoredFinding, 0)
+	for _, finding := range r.scanFindings[runID] {
+		for _, pkg := range packages {
+			if finding.Package.Name == pkg.Name && finding.Package.Version == pkg.Version &&
+				finding.Package.Purl == pkg.Purl {
+				findings = append(findings, finding)
+				break
+			}
+		}
+	}
+	return findings, nil
 }
 
 func (r *contractRepository) CreateBucket(

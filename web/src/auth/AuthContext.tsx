@@ -8,7 +8,6 @@ import {
   requestToken, signOutIfUnauthorized, storeSession,
   type ApiOrganization, type ApiProject, type ApiSelf,
 } from '../api/client'
-import { clearInventoryCache } from '../data/inventoryCache'
 import { decodeClaims, isExpired, type TokenClaims } from './token'
 
 /**
@@ -275,7 +274,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signOut = useCallback((reason: 'expired' | 'requested') => {
     organizationSession.current += 1
     organizationRefreshFlight.current = null
-    clearInventoryCache()
     setState(null)
     setSelf(null)
     setSelfLoading(false)

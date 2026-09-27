@@ -39,6 +39,7 @@ type PlatformRepository interface {
 	SetPin(context.Context, store.Tenant, string, string, time.Time) (*store.Pin, error)
 	DeletePin(context.Context, store.Tenant, string) error
 	GetVersionFindingsSummary(context.Context, store.Tenant, string, string) (*store.VersionFindingsSummaryResult, error)
+	GetBuildFindings(context.Context, store.Tenant, string, string, string) (*store.BuildFindings, error)
 	// ListPrincipals lists the principals bound to EXACTLY the selected scope.
 	// The caller authorizes, the selection filters; the store re-asserts the
 	// caller may see the selection rather than trusting it (duf-4qr).
@@ -676,6 +677,79 @@ func (s *server) GetVersionFindingsSummary(
 		response.Builds = append(response.Builds, renderBuildFindingsSummary(build))
 	}
 	return response, nil
+}
+
+func (s *server) GetBuildFindings(
+	ctx context.Context,
+	request GetBuildFindingsRequestObject,
+) (GetBuildFindingsResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	audited.event.TargetID = request.BuildId
+	defer func() { audited.log(ctx) }()
+
+	caller, refused := authorizeTenancy(
+		ctx, identity.RoleReader, request.OrganizationId.String(), request.ProjectId.String(),
+	)
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	tenant := store.ParseTenant(request.OrganizationId.String(), request.ProjectId.String())
+	tenant.BucketID = caller.Scope.BucketID
+	findings, err := s.repository.GetBuildFindings(
+		ctx, tenant, request.BucketName, request.Fingerprint, request.BuildId,
+	)
+	if errors.Is(err, registry.ErrNotFound) {
+		audited.refused("not_found")
+		return GetBuildFindings404JSONResponse{
+			NotFoundJSONResponse: NotFoundJSONResponse{Message: "build not found"},
+		}, nil
+	}
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(request.BuildId, "")
+	_, scannerConfig := s.scannerStates()
+	return GetBuildFindings200JSONResponse(renderBuildFindings(*findings, scannerConfig.Configured)), nil
+}
+
+func renderBuildFindings(findings store.BuildFindings, scannerConfigured bool) BuildFindingsResponse {
+	response := BuildFindingsResponse{
+		ScannerConfigured: scannerConfigured,
+		Inventory:         BuildFindingsResponseInventory(findings.Inventory),
+		PackagesTotal:     findings.PackagesTotal,
+		Scanned:           findings.Scanned,
+		PackagesAffected:  findings.PackagesAffected,
+		Advisories:        make([]BuildAdvisory, 0, len(findings.Advisories)),
+	}
+	if findings.Run != nil {
+		run := &BuildScanRun{
+			Id: findings.Run.ID, ObservedAt: findings.Run.ObservedAt, Adapter: findings.Run.Adapter,
+			Engine: findings.Run.Engine, DatabaseRevision: findings.Run.DatabaseRevision,
+		}
+		run.Coverage.Submitted = findings.Run.Coverage.Submitted
+		run.Coverage.Invalid = findings.Run.Coverage.Invalid
+		run.Coverage.Unversioned = findings.Run.Coverage.Unversioned
+		run.Coverage.Unsupported = findings.Run.Coverage.Unsupported
+		response.Run = run
+	}
+	for _, advisory := range findings.Advisories {
+		wire := BuildAdvisory{
+			Identifier: advisory.Identifier, Severity: Severity(advisory.Severity), Summary: advisory.Summary,
+			Aliases: advisory.Aliases, Published: advisory.Published, FixedVersions: advisory.FixedVersions,
+			Packages: make([]BuildAdvisoryPackage, 0, len(advisory.Packages)),
+		}
+		for _, pkg := range advisory.Packages {
+			wire.Packages = append(wire.Packages, BuildAdvisoryPackage{
+				Name: pkg.Name, Version: pkg.Version, Purl: pkg.Purl, SbomId: pkg.SBOMID,
+				FixedVersion: pkg.FixedVersion, Reported: pkg.Reported,
+			})
+		}
+		response.Advisories = append(response.Advisories, wire)
+	}
+	return response
 }
 
 func renderVersionFindingsSummary(summary store.VersionFindingsSummary) *VersionFindingsSummary {

@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/scan"
@@ -42,7 +43,14 @@ type ScanRun struct {
 	TranscriptDigest string
 	Coverage         scan.Coverage
 	CreatedAt        time.Time
+	// InventoryDigest is carried at completion only: the claim-time digest the
+	// run scanned, compared against the live inventory and never stored.
+	InventoryDigest string
 }
+
+// ErrScanRunRefused reports a completion recorded as failed because the
+// build's inventory or status changed while the scan ran.
+var ErrScanRunRefused = errors.New("scan run refused: the build changed during the scan")
 
 const (
 	ScanRunSucceeded = "succeeded"
@@ -137,6 +145,16 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 	if err := lockBuildScan(ctx, tx, tenant, run.BuildID); err != nil {
 		return err
 	}
+	if run.InventoryDigest == "" {
+		return fmt.Errorf("scan run %s carries no inventory digest", run.ID)
+	}
+	refusal, err := completionRefusal(ctx, tx, run)
+	if err != nil {
+		return err
+	}
+	if refusal != "" {
+		run.Status, run.Error, findings = ScanRunFailed, refusal, nil
+	}
 
 	coverage, err := json.Marshal(run.Coverage)
 	if err != nil {
@@ -216,7 +234,40 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if refusal != "" {
+		return ErrScanRunRefused
+	}
+	return nil
+}
+
+// completionRefusal names why a run must not become current: the build left
+// done, or its inventory is no longer the one the run examined. The refused
+// run is still recorded, as failed, so the attempt is visible.
+func completionRefusal(ctx context.Context, tx *sql.Tx, run ScanRun) (string, error) {
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM builds WHERE id = $1`, run.BuildID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The build was deleted mid-scan: the inserts below write nothing
+		// against it, so there is nothing to refuse.
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read build status at completion: %w", err)
+	}
+	if status != "done" {
+		return "build not eligible at completion", nil
+	}
+	live, err := InventoryDigestTx(ctx, tx, run.BuildID)
+	if err != nil {
+		return "", err
+	}
+	if live != run.InventoryDigest {
+		return "inventory changed during scan", nil
+	}
+	return "", nil
 }
 
 func insertScanFinding(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, runID string, f StoredFinding) error {
@@ -288,13 +339,22 @@ func orEmpty(s []string) []string {
 // one. The advisory lock already serializes writers; FOR UPDATE keeps the
 // read honest anyway.
 func lockBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string) (*BuildScanState, error) {
+	return readBuildScanState(ctx, tx, r, tenant, buildID, true)
+}
+
+func readBuildScanState(
+	ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string, forUpdate bool,
+) (*BuildScanState, error) {
 	state := BuildScanState{BuildID: buildID}
 	var current sql.NullString
 	var mac []byte
-	err := tx.QueryRowContext(ctx, `
+	query := `
 		SELECT current_findings_run_id, latest_attempt_run_id, integrity_mac FROM build_scan_state
-		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3
-		FOR UPDATE`,
+		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	err := tx.QueryRowContext(ctx, query,
 		tenant.OrganizationID, tenant.ProjectID, buildID,
 	).Scan(&current, &state.LatestAttemptRunID, &mac)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -395,26 +455,7 @@ func (r *Repository) GetBuildScanState(ctx context.Context, tenant Tenant, build
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	state := BuildScanState{BuildID: buildID}
-	var current sql.NullString
-	var mac []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT current_findings_run_id, latest_attempt_run_id, integrity_mac FROM build_scan_state
-		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`,
-		tenant.OrganizationID, tenant.ProjectID, buildID,
-	).Scan(&current, &state.LatestAttemptRunID, &mac)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read build scan state: %w", err)
-	}
-	state.CurrentFindingsRunID = current.String
-	if err := r.verifyRowMAC("build scan state "+buildID,
-		mac, buildScanStateMACMessage(tenant, buildID, state.CurrentFindingsRunID, state.LatestAttemptRunID)); err != nil {
-		return nil, err
-	}
-	return &state, nil
+	return readBuildScanState(ctx, tx, r, tenant, buildID, false)
 }
 
 // GetScanRun returns the verified run row.
@@ -463,6 +504,47 @@ func (r *Repository) ListScanFindings(ctx context.Context, tenant Tenant, runID 
 	}
 	defer func() { _ = tx.Rollback() }()
 	return queryScanFindings(ctx, tx, r, tenant, runID, "")
+}
+
+// findingsIdentityBatch bounds the VALUES list so a caller-chosen page size
+// cannot exceed Postgres's parameter limit (three parameters per identity).
+const findingsIdentityBatch = 1000
+
+// ListScanFindingsForPackages returns verified findings for package identities.
+func (r *Repository) ListScanFindingsForPackages(
+	ctx context.Context, tenant Tenant, runID string, packages []ReportedPackage,
+) ([]StoredFinding, error) {
+	if len(packages) == 0 {
+		return nil, nil
+	}
+	tx, _, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var findings []StoredFinding
+	for start := 0; start < len(packages); start += findingsIdentityBatch {
+		batch := packages[start:min(start+findingsIdentityBatch, len(packages))]
+		var filter strings.Builder
+		filter.WriteString("\n\t  AND (package_name, package_version, purl) IN (VALUES ")
+		args := make([]any, 0, len(batch)*3)
+		for i, pkg := range batch {
+			if i > 0 {
+				filter.WriteString(", ")
+			}
+			parameter := 4 + i*3
+			fmt.Fprintf(&filter, "($%d, $%d, $%d)", parameter, parameter+1, parameter+2)
+			args = append(args, pkg.Name, pkg.Version, pkg.Purl)
+		}
+		filter.WriteByte(')')
+		rows, err := queryScanFindings(ctx, tx, r, tenant, runID, filter.String(), args...)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, rows...)
+	}
+	return findings, nil
 }
 
 // queryScanFindings reads findings of a run, verifying every row's MAC.

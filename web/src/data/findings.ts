@@ -36,6 +36,7 @@ export type PackageRow = {
  */
 export type ScanAttribution = {
   adapter?: string
+  runID?: string
   engine?: string
   databaseRevision?: string
   observedAt?: string
@@ -181,6 +182,7 @@ export function scanAttribution(headers: Headers): ScanAttribution | undefined {
   }
   return {
     adapter,
+    runID: headers.get('dufflebag-scan-run-id') ?? undefined,
     engine: headers.get('dufflebag-scan-engine') ?? undefined,
     databaseRevision: headers.get('dufflebag-scan-database-revision') ?? undefined,
     observedAt: headers.get('dufflebag-scan-observed-at') ?? undefined,

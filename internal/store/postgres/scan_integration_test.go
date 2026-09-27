@@ -7,13 +7,16 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
+	"github.com/benemon/dufflebag/internal/keyring"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -72,15 +75,33 @@ func scanFindingFixture(sbomID, advisory string, seen time.Time) scan.Finding {
 	}
 }
 
-func scanRunFixture(id, buildID string, sequence int64, status string, at time.Time, transcript []byte) store.ScanRun {
+// scanRunFixture binds the run to the build's inventory as it stands now, the
+// way a claim does in production; a test that changes the inventory afterwards
+// is testing the refusal.
+func scanRunFixture(t *testing.T, db *sql.DB, id, buildID string, sequence int64, status string, at time.Time, transcript []byte) store.ScanRun {
+	t.Helper()
 	sum := sha256.Sum256(transcript)
 	return store.ScanRun{
 		ID: id, BuildID: buildID, RunSequence: sequence, Status: status,
 		Adapter: "osv", Engine: "https://api.osv.dev", DatabaseRevision: "unreported",
 		ObservedAt: at, TranscriptDigest: hex.EncodeToString(sum[:]),
 		Coverage:  scan.Coverage{Submitted: 1},
-		CreatedAt: at,
+		CreatedAt: at, InventoryDigest: inventoryDigestOf(t, db, buildID),
 	}
+}
+
+func inventoryDigestOf(t *testing.T, db *sql.DB, buildID string) string {
+	t.Helper()
+	tx, err := store.BeginTenant(context.Background(), db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	digest, err := store.InventoryDigestTx(context.Background(), tx, buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return digest
 }
 
 func seedScanSiblingBuild(t *testing.T, db *sql.DB, suffix, buildID, sbomID string) {
@@ -111,6 +132,202 @@ func seedScanSiblingBuild(t *testing.T, db *sql.DB, suffix, buildID, sbomID stri
 	}
 }
 
+func TestPagedBuildPackagesAndFindings(t *testing.T) {
+	db, databaseURL, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	repository.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	bucketID := registry.NewID(at).String()
+	versionID := registry.NewID(at.Add(time.Millisecond)).String()
+	buildID := registry.NewID(at.Add(2 * time.Millisecond)).String()
+	sbomA := registry.NewID(at.Add(3 * time.Millisecond)).String()
+	sbomB := registry.NewID(at.Add(4 * time.Millisecond)).String()
+	const bucketName = "package-pages"
+	const fingerprint = "fp-package-pages"
+
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$5)`, []any{orgA, projectA, bucketID, bucketName, at}},
+		{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'HCL2',true,1,$6,$6)`, []any{orgA, projectA, versionID, bucketID, fingerprint, at}},
+		{`INSERT INTO builds (organization_id, project_id, id, bucket_id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'docker','done','linux',true,$6,$6)`, []any{orgA, projectA, buildID, bucketID, versionID, at}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, parse_status, created_at)
+			VALUES ($1,$2,$3,$4,$5,'a-sbom','SPDX','page-a','parsed',$6)`, []any{orgA, projectA, sbomA, bucketID, buildID, at}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, parse_status, created_at)
+			VALUES ($1,$2,$3,$4,$5,'z-sbom','SPDX','page-b','parsed',$6)`, []any{orgA, projectA, sbomB, bucketID, buildID, at}},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 250; i++ {
+		name := fmt.Sprintf("package-%03d", i)
+		version := "odd"
+		if i%2 == 0 {
+			version = "even"
+		}
+		purl := fmt.Sprintf("pkg:generic/%s@%s", name, version)
+		for _, sbomID := range []string{sbomA, sbomB} {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+				VALUES ($1,$2,$3,$4,$5,$6,$7)
+			`, orgA, projectA, bucketID, sbomID, name, version, purl); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte("paged-package-findings")
+	run := scanRunFixture(t, db, "run-package-pages", buildID, sequence, store.ScanRunSucceeded, at, transcript)
+	finding := func(index int) scan.Finding {
+		name := fmt.Sprintf("package-%03d", index)
+		version := "odd"
+		if index%2 == 0 {
+			version = "even"
+		}
+		value := scanFindingFixture(sbomA, fmt.Sprintf("CVE-2026-%04d", index), at)
+		value.Package = scan.Package{
+			SBOMID: sbomA, Name: name, Version: version,
+			Purl: fmt.Sprintf("pkg:generic/%s@%s", name, version),
+		}
+		return value
+	}
+	if err := repository.RecordScanRun(ctx, tenant, run,
+		[]scan.Finding{finding(99), finding(100)}, transcript); err != nil {
+		t.Fatal(err)
+	}
+
+	total, unparseable, err := repository.CountBuildPackages(
+		ctx, tenant, bucketName, fingerprint, buildID, store.BuildPackageFilter{})
+	if err != nil || len(unparseable) != 0 || total != 250 {
+		t.Fatalf("CountBuildPackages = %d, unparseable %#v, %v", total, unparseable, err)
+	}
+	all, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 0, total)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("filters match the unpaged projection", func(t *testing.T) {
+		filters := []store.BuildPackageFilter{
+			{Name: "package-042"},
+			{NamePrefix: "package-1"},
+			{Version: "even"},
+		}
+		for _, filter := range filters {
+			want := make([]store.ReportedPackage, 0)
+			for _, pkg := range all {
+				if filter.Name != "" && pkg.Name != filter.Name ||
+					filter.NamePrefix != "" && !strings.HasPrefix(pkg.Name, filter.NamePrefix) ||
+					filter.Version != "" && pkg.Version != filter.Version {
+					continue
+				}
+				want = append(want, pkg)
+			}
+			count, broken, err := repository.CountBuildPackages(
+				ctx, tenant, bucketName, fingerprint, buildID, filter)
+			if err != nil || len(broken) != 0 || count != len(want) {
+				t.Fatalf("filter %#v count = %d, unparseable %#v, %v; want %d", filter, count, broken, err, len(want))
+			}
+			got, err := repository.ListBuildPackages(ctx, tenant, buildID, filter, 0, count)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("filter %#v packages differ from unpaged projection", filter)
+			}
+		}
+	})
+
+	t.Run("page SBOMs and findings match the unpaged identity range", func(t *testing.T) {
+		page, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 95, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(page, all[95:105]) {
+			t.Fatalf("page packages = %#v, want %#v", page, all[95:105])
+		}
+		fullFindings, err := repository.ListScanFindings(ctx, tenant, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identities := make(map[string]bool, len(page))
+		for _, pkg := range page {
+			identities[pkg.Name+"\x00"+pkg.Version+"\x00"+pkg.Purl] = true
+		}
+		want := make([]store.StoredFinding, 0)
+		for _, stored := range fullFindings {
+			if identities[stored.Package.Name+"\x00"+stored.Package.Version+"\x00"+stored.Package.Purl] {
+				want = append(want, stored)
+			}
+		}
+		got, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("page findings = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("tampered second page does not poison the first", func(t *testing.T) {
+		adminURL, err := url.Parse(databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		adminURL.User = url.UserPassword("postgres", "postgres")
+		admin, err := sql.Open("pgx", adminURL.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer admin.Close()
+		for _, statement := range []string{
+			`ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`,
+			`UPDATE scan_findings SET derived_severity = 'negligible' WHERE run_id = 'run-package-pages' AND package_name = 'package-100'`,
+			`ALTER TABLE scan_findings ENABLE TRIGGER scan_findings_immutable`,
+		} {
+			if _, err := admin.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		pageOne, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, pageOne); err != nil {
+			t.Fatalf("page one read page two's tampered finding: %v", err)
+		}
+		pageTwo, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 100, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, pageTwo); !errors.Is(err, keyring.ErrMAC) {
+			t.Fatalf("page two tampered finding error = %v, want %v", err, keyring.ErrMAC)
+		}
+	})
+}
+
 func TestFindingsSummaries(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()
@@ -133,7 +350,7 @@ func TestFindingsSummaries(t *testing.T) {
 		return sequence
 	}
 
-	runA := scanRunFixture("summary-run-a", buildA, allocate(), store.ScanRunSucceeded, base, transcript)
+	runA := scanRunFixture(t, db, "summary-run-a", buildA, allocate(), store.ScanRunSucceeded, base, transcript)
 	findingsA := []scan.Finding{
 		scanFindingFixture(sbomA, "ALPINE-CVE-2022-48174", base),
 		scanFindingFixture(sbomA, "ALPINE-CVE-2023-42363", base),
@@ -164,7 +381,7 @@ func TestFindingsSummaries(t *testing.T) {
 		t.Fatalf("build summary = %#v, want findings=2 affected=1 scanned=1", buildSummary)
 	}
 
-	runB := scanRunFixture("summary-run-b", buildB, allocate(), store.ScanRunSucceeded, base.Add(time.Minute), transcript)
+	runB := scanRunFixture(t, db, "summary-run-b", buildB, allocate(), store.ScanRunSucceeded, base.Add(time.Minute), transcript)
 	if err := repository.RecordScanRun(ctx, tenant, runB,
 		[]scan.Finding{scanFindingFixture(sbomB, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
 		t.Fatal(err)
@@ -179,11 +396,11 @@ func TestFindingsSummaries(t *testing.T) {
 	}
 
 	staleSequence, newerSequence := allocate(), allocate()
-	newer := scanRunFixture("summary-run-newer", buildA, newerSequence, store.ScanRunSucceeded, base.Add(3*time.Minute), transcript)
+	newer := scanRunFixture(t, db, "summary-run-newer", buildA, newerSequence, store.ScanRunSucceeded, base.Add(3*time.Minute), transcript)
 	if err := repository.RecordScanRun(ctx, tenant, newer, findingsA, transcript); err != nil {
 		t.Fatal(err)
 	}
-	stale := scanRunFixture("summary-run-stale", buildA, staleSequence, store.ScanRunSucceeded, base.Add(2*time.Minute), transcript)
+	stale := scanRunFixture(t, db, "summary-run-stale", buildA, staleSequence, store.ScanRunSucceeded, base.Add(2*time.Minute), transcript)
 	if err := repository.RecordScanRun(ctx, tenant, stale, nil, transcript); err != nil {
 		t.Fatal(err)
 	}
@@ -246,12 +463,12 @@ func TestScanStore(t *testing.T) {
 		seq1, seq2 := allocate(), allocate()
 
 		// The NEWER run completes first.
-		run2 := scanRunFixture("run-rt-2", buildID, seq2, store.ScanRunSucceeded, base.Add(time.Hour), transcript)
+		run2 := scanRunFixture(t, db, "run-rt-2", buildID, seq2, store.ScanRunSucceeded, base.Add(time.Hour), transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run2, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base.Add(time.Hour))}, transcript); err != nil {
 			t.Fatal(err)
 		}
 		// The older completion arrives late and must not advance anything.
-		run1 := scanRunFixture("run-rt-1", buildID, seq1, store.ScanRunSucceeded, base, transcript)
+		run1 := scanRunFixture(t, db, "run-rt-1", buildID, seq1, store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run1, nil, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -265,7 +482,7 @@ func TestScanStore(t *testing.T) {
 
 		// A newer FAILED run becomes latest_attempt but never erases current.
 		seq3 := allocate()
-		run3 := scanRunFixture("run-rt-3", buildID, seq3, store.ScanRunFailed, base.Add(2*time.Hour), transcript)
+		run3 := scanRunFixture(t, db, "run-rt-3", buildID, seq3, store.ScanRunFailed, base.Add(2*time.Hour), transcript)
 		run3.Error = "provider unreachable"
 		if err := repo.RecordScanRun(ctx, tenant, run3, nil, transcript); err != nil {
 			t.Fatal(err)
@@ -280,7 +497,7 @@ func TestScanStore(t *testing.T) {
 
 		// A newer success copies first_seen_at forward for the same finding.
 		seq4 := allocate()
-		run4 := scanRunFixture("run-rt-4", buildID, seq4, store.ScanRunSucceeded, base.Add(3*time.Hour), transcript)
+		run4 := scanRunFixture(t, db, "run-rt-4", buildID, seq4, store.ScanRunSucceeded, base.Add(3*time.Hour), transcript)
 		findings := []scan.Finding{
 			scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base.Add(3*time.Hour)),
 			scanFindingFixture(sbomID, "ALPINE-CVE-2099-9999", base.Add(3*time.Hour)),
@@ -329,7 +546,7 @@ func TestScanStore(t *testing.T) {
 	t.Run("immutability and FK teeth", func(t *testing.T) {
 		buildID, sbomID := seedScanParents(t, db, orgA, projectA, "teeth")
 		transcript := []byte("transcript-teeth")
-		run := scanRunFixture("run-teeth-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run := scanRunFixture(t, db, "run-teeth-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -358,14 +575,14 @@ func TestScanStore(t *testing.T) {
 		_ = tx.Rollback()
 
 		// A finding whose package identity is not in sbom_packages fails.
-		badRun := scanRunFixture("run-teeth-2", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		badRun := scanRunFixture(t, db, "run-teeth-2", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		bad := scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)
 		bad.Package.Version = "no-such-version"
 		if err := repo.RecordScanRun(ctx, tenant, badRun, []scan.Finding{bad}, transcript); err == nil {
 			t.Fatal("finding with an incomplete package identity was accepted")
 		}
 		// A finding against another tenant's SBOM fails inside this tenant.
-		otherRun := scanRunFixture("run-teeth-3", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		otherRun := scanRunFixture(t, db, "run-teeth-3", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		foreign := scanFindingFixture("not-my-sbom", "ALPINE-CVE-2022-48174", base)
 		if err := repo.RecordScanRun(ctx, tenant, otherRun, []scan.Finding{foreign}, transcript); err == nil {
 			t.Fatal("finding against a foreign sbom id was accepted")
@@ -375,7 +592,7 @@ func TestScanStore(t *testing.T) {
 	t.Run("transcript expiry retains digest", func(t *testing.T) {
 		buildID, _ := seedScanParents(t, db, orgA, projectA, "expiry")
 		transcript := []byte("transcript-expiry")
-		run := scanRunFixture("run-exp-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run := scanRunFixture(t, db, "run-exp-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run, nil, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -418,9 +635,9 @@ func TestScanStore(t *testing.T) {
 		transcript := []byte("transcript-retention")
 		seq := []int64{allocate(), allocate(), allocate()}
 		runs := []store.ScanRun{
-			scanRunFixture("run-ret-1", buildID, seq[0], store.ScanRunSucceeded, base, transcript),
-			scanRunFixture("run-ret-2", buildID, seq[1], store.ScanRunSucceeded, base.Add(time.Hour), transcript),
-			scanRunFixture("run-ret-3", buildID, seq[2], store.ScanRunFailed, base.Add(2*time.Hour), transcript),
+			scanRunFixture(t, db, "run-ret-1", buildID, seq[0], store.ScanRunSucceeded, base, transcript),
+			scanRunFixture(t, db, "run-ret-2", buildID, seq[1], store.ScanRunSucceeded, base.Add(time.Hour), transcript),
+			scanRunFixture(t, db, "run-ret-3", buildID, seq[2], store.ScanRunFailed, base.Add(2*time.Hour), transcript),
 		}
 		for _, run := range runs {
 			if err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", run.ObservedAt)}, transcript); err != nil {
@@ -460,7 +677,7 @@ func TestScanStore(t *testing.T) {
 		}
 		broken := store.NewRepositoryWithObjectStore(db, dead)
 		transcript := []byte("transcript-putfail")
-		run := scanRunFixture("run-putfail-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run := scanRunFixture(t, db, "run-putfail-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		if err := broken.RecordScanRun(ctx, tenant, run, nil, transcript); err == nil {
 			t.Fatal("run recorded despite transcript write failure")
 		}
@@ -475,7 +692,7 @@ func TestScanStore(t *testing.T) {
 	t.Run("sealed bucket bytes are not plaintext", func(t *testing.T) {
 		buildID, _ := seedScanParents(t, db, orgA, projectA, "sealed")
 		transcript := []byte("SECRET-TRANSCRIPT-MARKER-dufflebag")
-		run := scanRunFixture("run-sealed-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run := scanRunFixture(t, db, "run-sealed-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run, nil, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -520,7 +737,7 @@ func TestScanStoreReviewFindings(t *testing.T) {
 
 	t.Run("digest mismatch is refused before anything is written", func(t *testing.T) {
 		buildID, _ := seedScanParents(t, db, orgA, projectA, "digest")
-		run := scanRunFixture("run-digest-1", buildID, allocate(), store.ScanRunSucceeded, base, []byte("declared"))
+		run := scanRunFixture(t, db, "run-digest-1", buildID, allocate(), store.ScanRunSucceeded, base, []byte("declared"))
 		if err := repo.RecordScanRun(ctx, tenant, run, nil, []byte("actually-different")); err == nil {
 			t.Fatal("a run whose digest does not match its transcript was recorded")
 		}
@@ -533,11 +750,11 @@ func TestScanStoreReviewFindings(t *testing.T) {
 		buildID, sbomID := seedScanParents(t, db, orgA, projectA, "firstseen")
 		transcript := []byte("transcript-firstseen")
 		seq1, seq2 := allocate(), allocate()
-		newer := scanRunFixture("run-fs-2", buildID, seq2, store.ScanRunSucceeded, base.Add(time.Hour), transcript)
+		newer := scanRunFixture(t, db, "run-fs-2", buildID, seq2, store.ScanRunSucceeded, base.Add(time.Hour), transcript)
 		if err := repo.RecordScanRun(ctx, tenant, newer, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base.Add(time.Hour))}, transcript); err != nil {
 			t.Fatal(err)
 		}
-		older := scanRunFixture("run-fs-1", buildID, seq1, store.ScanRunSucceeded, base, transcript)
+		older := scanRunFixture(t, db, "run-fs-1", buildID, seq1, store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, older, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -557,7 +774,7 @@ func TestScanStoreReviewFindings(t *testing.T) {
 	t.Run("delimiter collision cannot forge a MAC", func(t *testing.T) {
 		buildID, _ := seedScanParents(t, db, orgA, projectA, "delim")
 		transcript := []byte("transcript-delim")
-		run := scanRunFixture("run-delim-1", buildID, allocate(), store.ScanRunFailed, base, transcript)
+		run := scanRunFixture(t, db, "run-delim-1", buildID, allocate(), store.ScanRunFailed, base, transcript)
 		run.Error = "timeout|osv"
 		run.Adapter = "official"
 		if err := repo.RecordScanRun(ctx, tenant, run, nil, transcript); err != nil {
@@ -591,7 +808,7 @@ func TestScanStoreReviewFindings(t *testing.T) {
 	t.Run("tampered transcript locator is not a delete target", func(t *testing.T) {
 		buildID, _ := seedScanParents(t, db, orgA, projectA, "locator")
 		transcript := []byte("transcript-locator")
-		run := scanRunFixture("run-loc-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run := scanRunFixture(t, db, "run-loc-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
 		if err := repo.RecordScanRun(ctx, tenant, run, nil, transcript); err != nil {
 			t.Fatal(err)
 		}
@@ -646,7 +863,7 @@ func TestScanRowTamperingFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	run := scanRunFixture("run-tamper-1", buildID, sequence, store.ScanRunSucceeded, base, transcript)
+	run := scanRunFixture(t, db, "run-tamper-1", buildID, sequence, store.ScanRunSucceeded, base, transcript)
 	if err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
 		t.Fatal(err)
 	}
@@ -809,7 +1026,7 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 		}
 		finding := scanFindingFixture(builds[index].sbomID, advisory, at)
 		finding.Package = scan.Package{SBOMID: builds[index].sbomID, Name: "openssl", Version: "3.0.11", Purl: "pkg:rpm/openssl@3.0.11"}
-		run := scanRunFixture(fmt.Sprintf("lifecycle-run-%d", index), builds[index].build.ID.String(), sequence,
+		run := scanRunFixture(t, db, fmt.Sprintf("lifecycle-run-%d", index), builds[index].build.ID.String(), sequence,
 			store.ScanRunSucceeded, at.Add(2*time.Minute), transcript)
 		if err := repository.RecordScanRun(ctx, tenant, run, []scan.Finding{finding}, transcript); err != nil {
 			t.Fatal(err)
@@ -873,7 +1090,7 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 	rescan := scanFindingFixture(reuploaded, "CVE-2026-0001", at)
 	rescan.Package = scan.Package{SBOMID: reuploaded, Name: "openssl", Version: "3.0.11", Purl: "pkg:rpm/openssl@3.0.11"}
 	if err := repository.RecordScanRun(ctx, tenant,
-		scanRunFixture("lifecycle-rescan", reopened.ID.String(), sequence, store.ScanRunSucceeded, at.Add(5*time.Minute), transcript),
+		scanRunFixture(t, db, "lifecycle-rescan", reopened.ID.String(), sequence, store.ScanRunSucceeded, at.Add(5*time.Minute), transcript),
 		[]scan.Finding{rescan}, transcript); err != nil {
 		t.Fatal(err)
 	}
@@ -889,4 +1106,261 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 	if got := summary().Version; got != nil {
 		t.Fatalf("version summary with no scanned build left = %#v, want absent", got)
 	}
+}
+
+// TestGetBuildFindings pins the native per-build read: one advisory per
+// identifier with a package entry per reporting SBOM, an existing build
+// without a scan answering scanned=false rather than not-found, unparseable
+// inventories reported as such, MAC failure surfacing, and tenancy.
+func TestGetBuildFindings(t *testing.T) {
+	db, adminURL, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	repo.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	allocate := func() int64 {
+		t.Helper()
+		sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+	buildID, sbomA := seedScanParents(t, db, orgA, projectA, "native")
+	sbomB := "scansbom-native-b"
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at, parse_status)
+			VALUES ($1,$2,$3,'scanbucket-native',$4,'second.spdx.json','SPDX','scan-key-native-b',$5,'parsed')`, []any{orgA, projectA, sbomB, buildID, base}},
+		{`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,'scanbucket-native',$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{orgA, projectA, sbomB}},
+	} {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// seedScanParents leaves the SBOM pending, which a read finalises as
+	// unparseable; this test wants a parsed inventory until it says otherwise.
+	if _, err := tx.ExecContext(ctx, `UPDATE sboms SET parse_status = 'parsed' WHERE id = $1`, sbomA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	unscanned, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unscanned.Scanned || unscanned.Run != nil || len(unscanned.Advisories) != 0 ||
+		unscanned.Inventory != "parsed" || unscanned.PackagesTotal != 1 {
+		t.Fatalf("unscanned build = %+v, want scanned=false, no run, no advisories, one distinct package", unscanned)
+	}
+
+	transcript := []byte("native-findings-transcript")
+	run := scanRunFixture(t, db, "run-native-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+	findings := []scan.Finding{
+		scanFindingFixture(sbomA, "ALPINE-CVE-2022-48174", base),
+		scanFindingFixture(sbomB, "ALPINE-CVE-2022-48174", base),
+		scanFindingFixture(sbomA, "ALPINE-CVE-2023-42363", base),
+	}
+	if err := repo.RecordScanRun(ctx, tenant, run, findings, transcript); err != nil {
+		t.Fatal(err)
+	}
+	scanned, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scanned.Scanned || scanned.Run == nil || scanned.Run.ID != "run-native-1" {
+		t.Fatalf("scanned build = %+v, want run-native-1 current", scanned)
+	}
+	if len(scanned.Advisories) != 2 || scanned.PackagesAffected != 1 {
+		t.Fatalf("advisories = %+v, affected = %d; want two advisories across one package", scanned.Advisories, scanned.PackagesAffected)
+	}
+	var shared *store.BuildAdvisory
+	for i := range scanned.Advisories {
+		if scanned.Advisories[i].Identifier == "ALPINE-CVE-2022-48174" {
+			shared = &scanned.Advisories[i]
+		}
+	}
+	if shared == nil || len(shared.Packages) != 2 || shared.Packages[0].SBOMID == shared.Packages[1].SBOMID {
+		t.Fatalf("shared advisory = %+v, want one package entry per reporting SBOM", shared)
+	}
+	if shared.Packages[0].FixedVersion != "1.36.1-r2" || len(shared.FixedVersions) != 1 {
+		t.Fatalf("fixed versions = %+v / %+v, want the single fixed version once", shared.Packages, shared.FixedVersions)
+	}
+
+	foreign := store.ParseTenant(orgB, projectB)
+	if _, err := repo.GetBuildFindings(ctx, foreign, "scan-native", "fp-scan-native", buildID); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("foreign tenant read = %v, want not found", err)
+	}
+
+	superURL, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	superURL.User = url.UserPassword("postgres", "postgres")
+	admin, err := sql.Open("pgx", superURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	for _, statement := range []string{
+		`ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`,
+		`UPDATE scan_findings SET derived_severity = 'negligible' WHERE run_id = 'run-native-1' AND advisory_id = 'ALPINE-CVE-2023-42363'`,
+		`ALTER TABLE scan_findings ENABLE TRIGGER scan_findings_immutable`,
+	} {
+		if _, err := admin.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID); err == nil {
+		t.Fatal("tampered finding row served as findings")
+	}
+
+	if _, err := admin.ExecContext(ctx,
+		`UPDATE sboms SET parse_status = 'unparseable' WHERE id = $1`, sbomA); err != nil {
+		t.Fatal(err)
+	}
+	broken, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if broken == nil && err != nil {
+		// The tampered row still fails the run read; the inventory state is
+		// reported before it, so restore the row to reach the assertion.
+		if _, err := admin.ExecContext(ctx, `ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.ExecContext(ctx,
+			`UPDATE scan_findings SET derived_severity = 'critical' WHERE run_id = 'run-native-1' AND advisory_id = 'ALPINE-CVE-2023-42363'`); err != nil {
+			t.Fatal(err)
+		}
+		broken, err = repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if broken.Inventory != "unparseable" || broken.PackagesTotal != 0 {
+		t.Fatalf("unparseable inventory = %+v, want inventory=unparseable with zero packages", broken)
+	}
+}
+
+// TestScanRunBinding pins that a run becomes current only over the inventory
+// it examined, on a build still done at completion.
+func TestScanRunBinding(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	repo.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 27, 10, 0, 0, 0, time.UTC)
+	allocate := func() int64 {
+		t.Helper()
+		sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+	exec := func(query string, args ...any) {
+		t.Helper()
+		tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(ctx, query, args...); err != nil {
+			t.Fatal(err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	transcript := []byte("binding-transcript")
+
+	t.Run("a package added during the scan refuses the run", func(t *testing.T) {
+		buildID, sbomID := seedScanParents(t, db, orgA, projectA, "bind-inv")
+		run := scanRunFixture(t, db, "run-bind-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		exec(`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,'scanbucket-bind-inv',$3,'openssl','3.0.11','pkg:apk/alpine/openssl@3.0.11')`, orgA, projectA, sbomID)
+		err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript)
+		if !errors.Is(err, store.ErrScanRunRefused) {
+			t.Fatalf("RecordScanRun = %v, want ErrScanRunRefused", err)
+		}
+		recorded, err := repo.GetScanRun(ctx, tenant, "run-bind-1")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recorded.Status != store.ScanRunFailed || recorded.Error != "inventory changed during scan" {
+			t.Fatalf("refused run = %+v, want failed with the inventory reason", recorded)
+		}
+		if findings, err := repo.ListScanFindings(ctx, tenant, "run-bind-1"); err != nil || len(findings) != 0 {
+			t.Fatalf("findings = %v, %v; want none recorded for a refused run", findings, err)
+		}
+		state, err := repo.GetBuildScanState(ctx, tenant, buildID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state == nil || state.CurrentFindingsRunID != "" || state.LatestAttemptRunID != "run-bind-1" {
+			t.Fatalf("state = %+v, want latest attempt recorded and current empty", state)
+		}
+	})
+
+	t.Run("a build no longer done at completion refuses the run", func(t *testing.T) {
+		buildID, sbomID := seedScanParents(t, db, orgA, projectA, "bind-status")
+		run := scanRunFixture(t, db, "run-bind-2", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		exec(`UPDATE builds SET status = 'running' WHERE id = $1`, buildID)
+		err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript)
+		if !errors.Is(err, store.ErrScanRunRefused) {
+			t.Fatalf("RecordScanRun = %v, want ErrScanRunRefused", err)
+		}
+		recorded, err := repo.GetScanRun(ctx, tenant, "run-bind-2")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if recorded.Error != "build not eligible at completion" {
+			t.Fatalf("refused run = %+v, want the eligibility reason", recorded)
+		}
+	})
+
+	t.Run("an unchanged inventory records and advances as before", func(t *testing.T) {
+		buildID, sbomID := seedScanParents(t, db, orgA, projectA, "bind-same")
+		run := scanRunFixture(t, db, "run-bind-3", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		if err := repo.RecordScanRun(ctx, tenant, run, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
+			t.Fatal(err)
+		}
+		state, err := repo.GetBuildScanState(ctx, tenant, buildID)
+		if err != nil || state == nil || state.CurrentFindingsRunID != "run-bind-3" {
+			t.Fatalf("state = %+v, %v; want run-bind-3 current", state, err)
+		}
+	})
+
+	t.Run("a run without a digest is refused outright", func(t *testing.T) {
+		buildID, _ := seedScanParents(t, db, orgA, projectA, "bind-none")
+		run := scanRunFixture(t, db, "run-bind-4", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+		run.InventoryDigest = ""
+		if err := repo.RecordScanRun(ctx, tenant, run, nil, transcript); err == nil {
+			t.Fatal("a run without an inventory digest was recorded")
+		}
+	})
+
+	t.Run("the digest follows every identity field", func(t *testing.T) {
+		one := scan.Inventory{Packages: []scan.Package{{SBOMID: "s", Name: "busybox", Version: "1.36.1-r0", Purl: "pkg:apk/alpine/busybox@1.36.1-r0"}}}
+		same := scan.Inventory{Packages: []scan.Package{{SBOMID: "s", Name: "busybox", Version: "1.36.1-r0", Purl: "pkg:apk/alpine/busybox@1.36.1-r0"}}}
+		bumped := scan.Inventory{Packages: []scan.Package{{SBOMID: "s", Name: "busybox", Version: "1.36.1-r1", Purl: "pkg:apk/alpine/busybox@1.36.1-r1"}}}
+		if store.InventoryDigest(one) != store.InventoryDigest(same) {
+			t.Fatal("identical inventories digest differently")
+		}
+		if store.InventoryDigest(one) == store.InventoryDigest(bumped) {
+			t.Fatal("a version change did not change the digest")
+		}
+	})
 }

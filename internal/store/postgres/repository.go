@@ -109,6 +109,12 @@ type ReportedPackage struct {
 	Sboms          []Sbom
 }
 
+type BuildPackageFilter struct {
+	Name       string
+	NamePrefix string
+	Version    string
+}
+
 // StoredBuild is the domain build plus persisted compatibility-neutral metadata.
 type StoredBuild struct {
 	registry.Build

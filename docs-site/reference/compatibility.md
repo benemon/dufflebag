@@ -379,6 +379,24 @@ while `GET` keeps its HTTP 409-ish / code 10 version-identity miss. A missing
 build is HTTP 404 / code 5, `The build with identifier <build_id> does not
 exist.`
 
+### Fidelity rungs
+
+Each served operation sits on one of three rungs. Rung one is the default: the
+operation answers as HCP does, quirks included. Rung two keeps the wire
+contract byte-identical - response schema, pagination semantics, error
+shapes, the `Dufflebag-*` extension headers - and reimplements the cost model
+beneath it, so a stock client observes only that the operation is faster.
+Rung three replaces the operation with a native platform-plane endpoint; the
+HCP-shaped operation is then retired and answers HTTP 501 with gRPC code 12,
+the same refusal as an operation never served. An operation climbs a rung
+only when the one below cannot carry the need.
+
+| Rung | Operations |
+|---|---|
+| Same shape, same behaviour | Every operation in the tables above except `ListBuildPackages` |
+| Same shape, our cost model | `ListBuildPackages` |
+| Retired in favour of a native endpoint | None yet |
+
 ### The 2021-04-30 API
 
 Every API reached by a **supported client version** must be compatible
@@ -938,7 +956,8 @@ extending their JSON contract. These three published operations are in scope:
 `PackerService_ListBuildPackages` also populates the frozen package model's
 `vuln_details` from the build's current findings run. A failed newer attempt
 does not erase those findings. Reads follow `current_findings_run_id`, never
-`latest_attempt_run_id`.
+`latest_attempt_run_id`. Each page verifies the integrity of the finding rows
+it returns.
 
 Absent-not-empty remains the compatibility rule. On a
 [deployment with no scanner configured](../components/vulnerability-scanning.md),
@@ -947,14 +966,17 @@ build-package `vuln_details` and every
 operations retain a not-found response instead of returning a successful empty
 collection. An empty success would falsely claim that an unscanned bucket is
 clean. Once a build has a current successful scan, its build-package response
-carries `Dufflebag-Scan-Adapter`, `Dufflebag-Scan-Engine`,
+carries `Dufflebag-Scan-Run-Id`, `Dufflebag-Scan-Adapter`, `Dufflebag-Scan-Engine`,
 `Dufflebag-Scan-Database-Revision`, `Dufflebag-Scan-Observed-At`,
 `Dufflebag-Scan-Submitted`, `Dufflebag-Scan-Invalid`,
 `Dufflebag-Scan-Unversioned`, and `Dufflebag-Scan-Unsupported`. Attribution is
 kept in headers because the frozen vulnerability JSON has no coverage or
 provenance fields.
 
-Findings are deduplicated by
+A run becomes a build's current findings only if the build is still `done`
+and its inventory is byte-for-byte the one the run examined; otherwise the
+run is recorded as failed with the reason and the previous current findings
+stand. Findings are deduplicated by
 `(build_id, package_name, package_version, purl, vulnerability_id)` before
 package rows, impacts, and counts are produced. Package identity remains the
 client-reported SBOM projection described above. Vulnerability metadata and

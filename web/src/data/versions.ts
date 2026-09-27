@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {
-  ApiError, getBucket, getVersion, getVersionFindingsSummary, listBucketAncestry, listBuildPackages,
+  ApiError, getBucket, getBuildFindings, getVersion, getVersionFindingsSummary, listBucketAncestry,
+  listBuildPackages,
   listChannelAssignmentHistory, listChannels, listEnforcedBlocksByBucket, listSboms, listVersions,
   signOutIfUnauthorized,
   type ApiAncestryStatus, type ApiBucket, type ApiBucketAncestry, type ApiBuild,
@@ -9,7 +10,7 @@ import {
   type ApiVersionFindingsSummaryResponse, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
-import { inventoryCacheKey, readInventoryOnce } from './inventoryCache'
+import { projectBuildFindings, type BuildFindingsData } from './advisories'
 import { createReloadGate } from './reloadGate'
 import { platformTenancyGap, type TenancyGap } from './tenant'
 import {
@@ -78,7 +79,6 @@ export type Package = {
 
 export type Finding = {
   identifier: string
-  description: string
   /** The derived fixed scale, comparable across providers. */
   criticality: string
   /** The provider's verbatim value, which is NOT comparable across providers. */
@@ -845,7 +845,6 @@ function toFindings(pkg: ApiPackage): Finding[] {
     for (const vulnerability of detail.vulnerabilities ?? []) {
       findings.push({
         identifier: vulnerability.identifier ?? '',
-        description: vulnerability.description ?? '',
         criticality: (vulnerability.criticality ?? 'unknown').toLowerCase(),
         severity: vulnerability.severity ?? '',
         fixedVersion: vulnerability.fixed_version ?? '',
@@ -949,14 +948,9 @@ export function useVersionFindings(
   const [inventoryFailure, setInventoryFailure] = useState<string | null>(null)
   const progressIdentity = useRef(identity)
   progressIdentity.current = identity
-  // Set by an explicit refresh and consumed by the load it triggers, so a
-  // refresh queued behind an in-flight read still bypasses the cache when it runs.
-  const bypassCache = useRef(false)
   const result = useVersionData<LoadedBuildFindings[]>(
     [],
     async (token, tenant) => {
-      const force = bypassCache.current
-      bypassCache.current = false
       if (progressIdentity.current === identity) {
         setProgress({ packages: 0 })
         setInventoryFailure(null)
@@ -967,7 +961,6 @@ export function useVersionFindings(
           (next) => {
             if (progressIdentity.current === identity) setProgress(next)
           },
-          { force },
         )
       } catch (err: unknown) {
         if (progressIdentity.current === identity && !(err instanceof ApiError && err.status === 401)) {
@@ -978,18 +971,37 @@ export function useVersionFindings(
     },
     identity,
   )
-  const { reload } = result
-  const refresh = useCallback(() => {
-    bypassCache.current = true
-    reload()
-  }, [reload])
   return {
     data: result.data,
     loading: result.loading || result.refreshing,
     failure: inventoryFailure ?? result.failure,
-    reload: refresh,
+    reload: result.reload,
     progress,
   }
+}
+
+/** The native per-build findings read; independent of the inventory read. */
+export function useBuildFindings(bucket: string, fingerprint: string, build: string) {
+  return useVersionData<BuildFindingsData | null>(
+    null,
+    (token, tenant) => loadBuildFindings(token, tenant, bucket, fingerprint, build),
+    `${bucket}/${fingerprint}/${build}/findings`,
+  )
+}
+
+export async function loadBuildFindings(
+  token: string, tenant: ApiTenant, bucket: string, fingerprint: string, build: string,
+): Promise<BuildFindingsData> {
+  return projectBuildFindings(await getBuildFindings(token, tenant, bucket, fingerprint, build))
+}
+
+/**
+ * The Packages and Vulnerabilities facets read the same build through two
+ * endpoints. A run id on both is the proof they show one scan; when they
+ * differ a rescan landed between the reads and both must be read again.
+ */
+export function runsDisagree(inventoryRun: string | undefined, findingsRun: string | undefined): boolean {
+  return Boolean(inventoryRun && findingsRun && inventoryRun !== findingsRun)
 }
 
 export async function loadVersionFindings(
@@ -999,41 +1011,32 @@ export async function loadVersionFindings(
   fingerprint: string,
   builds: { id: string }[],
   onProgress?: (progress: InventoryProgress) => void,
-  options: { force?: boolean } = {},
 ): Promise<LoadedBuildFindings[]> {
   const progress = { packages: 0 }
-  return Promise.all(builds.map((build) => {
-    const cacheKey = inventoryCacheKey(tenant, bucket, fingerprint, build.id)
+  return Promise.all(builds.map(async (build) => {
     let received = 0
-    return readInventoryOnce(
-      cacheKey,
-      Boolean(options.force),
-      async (onPage) => {
-        try {
-          const { packages, headers } = await listBuildPackages(
-            token, tenant, bucket, fingerprint, build.id,
-            (next) => onPage(next.packages),
-          )
-          const scan = scanAttribution(headers)
-          return {
-            buildID: build.id,
-            packages: packages.map(toPackage),
-            ...(scan ? { scan } : {}),
-          }
-        } catch (err: unknown) {
-          if (!(err instanceof ApiError) || err.status !== 422) throw err
-          return {
-            buildID: build.id,
-            packages: [],
-            unparseable: true,
-          }
-        }
-      },
-      (packages) => {
-        progress.packages += packages - received
-        received = packages
-        onProgress?.({ ...progress })
-      },
-    )
+    try {
+      const { packages, headers } = await listBuildPackages(
+        token, tenant, bucket, fingerprint, build.id,
+        (next) => {
+          progress.packages += next.packages - received
+          received = next.packages
+          onProgress?.({ ...progress })
+        },
+      )
+      const scan = scanAttribution(headers)
+      return {
+        buildID: build.id,
+        packages: packages.map(toPackage),
+        ...(scan ? { scan } : {}),
+      }
+    } catch (err: unknown) {
+      if (!(err instanceof ApiError) || err.status !== 422) throw err
+      return {
+        buildID: build.id,
+        packages: [],
+        unparseable: true,
+      }
+    }
   }))
 }

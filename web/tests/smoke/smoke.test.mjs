@@ -2256,10 +2256,24 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await assertNoVerdicts()
 
     // A Security row opens the build's URL-addressable Vulnerabilities facet.
-    // The advisory list is derived from the same package response used by the
-    // Packages facet, then expands by affected package.
+    // The facet is served by the native per-build findings endpoint; the
+    // Packages facet still pages the inventory, and both print the same
+    // run's as-of.
+    const buildRequests = []
+    const recordBuildRequest = (request) => {
+      const url = request.url()
+      if (url.includes('/packages?') || url.endsWith('/findings')) buildRequests.push(url)
+    }
+    page.on('request', recordBuildRequest)
+    t.after(() => page.off('request', recordBuildRequest))
     await page.click(`[data-build-link="${findings.build.id}"]`)
     await page.waitForSelector('[aria-label="Filter by severity"]')
+    await waitForText('GHSA-78h2-9frx-2jm8')
+    assert.ok(buildRequests.some((url) => url.endsWith('/findings')), 'the facet read the findings endpoint')
+    const asOf = () => page.$$eval('small', (nodes) =>
+      nodes.map((node) => node.innerText.trim()).filter((text) => text.startsWith('As of')))
+    const vulnerabilitiesAsOf = await asOf()
+    assert.equal(vulnerabilitiesAsOf.length, 1, 'one as-of line on the Vulnerabilities facet')
     assert.deepEqual(
       await page.$eval('nav[aria-label="Build facets"] [aria-selected="true"]', (item) => ({
         label: item.querySelector('.pf-v6-c-tabs__item-text')?.innerText.trim() ?? '',
@@ -2280,7 +2294,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(affectedRow.Name, 'github.com/go-jose/go-jose/v4')
     assert.equal(affectedRow.Version, 'v4.1.1')
     assert.ok(affectedRow.SBOM, 'affected row must name its SBOM id')
+    assert.match(affectedRow.Reported, /^CVSS:3\.1\//, 'the provider\'s verbatim severity is shown')
     assert.equal(affectedRow['Fixed in'], '4.1.4')
+    await clickFacet('Build facets', 'Packages')
+    await waitForText('github.com/go-jose/go-jose/v4')
+    await until('the Packages facet paged the inventory', async () =>
+      buildRequests.some((url) => url.includes('/packages?')))
+    await until('the Packages as-of line', async () => (await asOf()).length === 1)
+    assert.deepEqual(await asOf(), vulnerabilitiesAsOf, 'both facets show the same run')
 
     // The completed full-coverage scenario reaches the build's zero-findings
     // state. The not-yet-scanned scenario above deliberately keeps its build
