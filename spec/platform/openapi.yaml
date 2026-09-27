@@ -1636,10 +1636,6 @@ components:
         findings: { type: integer, minimum: 0 }
         affected_packages: { type: integer, minimum: 0 }
         scanned: { type: integer, minimum: 0 }
-        computed_at:
-          type: string
-          format: date-time
-          description: The current run's observed_at used when this summary was computed.
         observed_at: { type: string, format: date-time }
         adapter: { type: string }
         engine: { type: string }
@@ -1658,7 +1654,6 @@ components:
         - findings
         - affected_packages
         - scanned
-        - computed_at
         - observed_at
         - adapter
         - engine

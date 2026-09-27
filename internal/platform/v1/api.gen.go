@@ -830,9 +830,6 @@ type BuildScanSummary struct {
 	Adapter          string `json:"adapter"`
 	AffectedPackages int    `json:"affected_packages"`
 
-	// ComputedAt The current run's observed_at used when this summary was computed.
-	ComputedAt time.Time `json:"computed_at"`
-
 	// Counts Every severity band is present, including bands with a zero count.
 	Counts   SeverityCounts `json:"counts"`
 	Coverage struct {

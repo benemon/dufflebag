@@ -213,7 +213,7 @@ What happens when each dependency is unavailable:
 | Key service | Continues | Running replicas keep serving. Health reports `degraded`. A process restart refuses to start (sealed) |
 | Every audit sink | Stops | Audit fails closed. An instance that cannot record a request does not serve it |
 | One of several audit sinks | Continues | Requests proceed. The failing sink surfaces through audit health |
-| Scanner endpoint | Continues | Scans fail and retry on cadence. Findings from the last successful run remain |
+| Scanner endpoint | Continues | Transient failures retry within the pass; a failed pass retries on cadence. Findings from the last successful run remain |
 | Destination registry | Continues | A Packer build succeeds with the destination down. The mirror backs off and retries |
 | Webhook receiver | Continues | Deliveries retry with backoff, then drop. The domain write is never delayed |
 

@@ -703,8 +703,7 @@ func renderBuildFindingsSummary(build store.VersionBuildFindingsSummary) BuildFi
 	rendered := &BuildScanSummary{
 		RunId: summary.RunID, Counts: renderSeverityCounts(summary.Counts),
 		Findings: summary.Findings, AffectedPackages: summary.AffectedPackages,
-		Scanned: summary.Scanned, ComputedAt: summary.ComputedAt,
-		ObservedAt: summary.ObservedAt, Adapter: summary.Adapter, Engine: summary.Engine,
+		Scanned: summary.Scanned, ObservedAt: summary.ObservedAt, Adapter: summary.Adapter, Engine: summary.Engine,
 		DatabaseRevision: summary.DatabaseRevision,
 	}
 	rendered.Coverage.Submitted = summary.Coverage.Submitted

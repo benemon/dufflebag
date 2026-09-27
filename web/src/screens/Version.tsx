@@ -858,7 +858,7 @@ export function platformConsumeSnippet(
           : null
       return [
         show,
-        // az vm create refuses to run without a key or password (verified live).
+        // az vm create refuses to run without a key or password.
         `az vm create --resource-group <resource-group> --name <vm-name> ` +
           `--image ${artifact.externalIdentifier} --location ${artifact.region} ` +
           '--ssh-key-values <ssh-public-key>',
@@ -1085,13 +1085,7 @@ export function BuildTable({
                   <DescriptionListGroup>
                     <DescriptionListTerm>Packages</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {(() => {
-                        const buildSummary = securityBuilds.get(build.id)
-                        if (!buildSummary) return '—'
-                        return buildSummary.inventory === 'unparseable'
-                          ? 'SBOM unparseable'
-                          : countLabel(buildSummary.packages, 'package')
-                      })()}
+                      {summaryPackages(securityBuilds.get(build.id))}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
@@ -1138,17 +1132,13 @@ export function pluginSummary(build: Build): string {
     .join(', ') || '—'
 }
 
-export function packageSummary(
-  build: Build,
+function summaryPackages(
+  buildSummary: VersionSecuritySummary['builds'][number] | undefined,
 ): string {
-  switch (build.packageInventory.status) {
-    case 'parsed':
-      return countLabel(build.packageInventory.packages.length, 'package')
-    case 'unparseable':
-      return 'SBOM unparseable'
-    case 'not-loaded':
-      return '—'
-  }
+  if (!buildSummary) return '—'
+  return buildSummary.inventory === 'unparseable'
+    ? 'SBOM unparseable'
+    : countLabel(buildSummary.packages, 'package')
 }
 
 function countLabel(count: number, singular: string): string {

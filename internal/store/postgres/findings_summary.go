@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/scan"
 )
 
@@ -30,7 +29,6 @@ type BuildFindingsSummary struct {
 	AffectedPackages int
 	Worst            scan.Severity
 	Counts           SeverityCounts
-	ComputedAt       time.Time
 	ObservedAt       time.Time
 	Adapter          string
 	Engine           string
@@ -79,23 +77,6 @@ type packageSummaryKey struct {
 	name, version, purl string
 }
 
-func severityRank(severity scan.Severity) int {
-	switch severity {
-	case scan.SeverityCritical:
-		return 5
-	case scan.SeverityHigh:
-		return 4
-	case scan.SeverityMedium:
-		return 3
-	case scan.SeverityLow:
-		return 2
-	case scan.SeverityNegligible:
-		return 1
-	default:
-		return 0
-	}
-}
-
 func (counts *SeverityCounts) add(severity scan.Severity) {
 	switch severity {
 	case scan.SeverityCritical:
@@ -139,7 +120,7 @@ func summarizeBuildFindings(findings []StoredFinding) findingsSummary {
 	for _, finding := range findings {
 		packages[packageSummaryKey{finding.Package.Name, finding.Package.Version, finding.Package.Purl}] = true
 		summary.Counts.add(finding.Severity)
-		if summary.Worst == "" || severityRank(finding.Severity) > severityRank(summary.Worst) {
+		if summary.Worst == "" || scan.Worse(finding.Severity, summary.Worst) {
 			summary.Worst = finding.Severity
 		}
 	}
@@ -156,7 +137,7 @@ func summarizeVersionFindings(builds [][]StoredFinding) findingsSummary {
 				name: finding.Package.Name, version: finding.Package.Version,
 				purl: finding.Package.Purl, advisory: finding.ID,
 			}
-			if current, exists := worstByFinding[key]; !exists || severityRank(finding.Severity) > severityRank(current) {
+			if current, exists := worstByFinding[key]; !exists || scan.Worse(finding.Severity, current) {
 				worstByFinding[key] = finding.Severity
 			}
 			packages[packageSummaryKey{finding.Package.Name, finding.Package.Version, finding.Package.Purl}] = true
@@ -165,7 +146,7 @@ func summarizeVersionFindings(builds [][]StoredFinding) findingsSummary {
 	summary := findingsSummary{Findings: len(worstByFinding), AffectedPackages: len(packages)}
 	for _, severity := range worstByFinding {
 		summary.Counts.add(severity)
-		if summary.Worst == "" || severityRank(severity) > severityRank(summary.Worst) {
+		if summary.Worst == "" || scan.Worse(severity, summary.Worst) {
 			summary.Worst = severity
 		}
 	}
@@ -254,8 +235,8 @@ func (r *Repository) recomputeVersionFindingsSummaryLocked(
 }
 
 // withdrawBuildFindingsSummary returns a scanned build to unscanned. The
-// version recompute and the backfill both read current_findings_run_id, so
-// deleting the summary row alone would leave the old findings readable.
+// version recompute reads current_findings_run_id, so deleting the summary
+// row alone would leave the old findings readable.
 func (r *Repository) withdrawBuildFindingsSummary(ctx context.Context, tx *sql.Tx, tenant Tenant, buildID string) error {
 	var versionID, bucketID string
 	if err := tx.QueryRowContext(ctx, `
@@ -438,10 +419,7 @@ func (r *Repository) GetVersionFindingsSummary(
 			AND buckets.name = $3 AND versions.fingerprint = $4`,
 		tenant.OrganizationID, tenant.ProjectID, bucketName, fingerprint,
 	).Scan(&versionID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return nil, registry.ErrNotFound
-		}
-		return nil, fmt.Errorf("get findings summary version: %w", err)
+		return nil, mapNotFound("get findings summary version", err)
 	}
 	result := &VersionFindingsSummaryResult{Builds: make([]VersionBuildFindingsSummary, 0)}
 	version, err := readVersionFindingsSummary(ctx, tx, r, tenant, versionID)
@@ -532,7 +510,7 @@ func (r *Repository) GetVersionFindingsSummary(
 			build.Summary = &BuildFindingsSummary{
 				RunID: row.RunID, Scanned: row.Scanned, Findings: row.Findings,
 				AffectedPackages: row.AffectedPackages, Worst: row.Worst, Counts: row.Counts,
-				ComputedAt: row.ComputedAt, ObservedAt: run.ObservedAt, Adapter: run.Adapter,
+				ObservedAt: run.ObservedAt, Adapter: run.Adapter,
 				Engine: run.Engine, DatabaseRevision: run.DatabaseRevision, Coverage: run.Coverage,
 			}
 		}

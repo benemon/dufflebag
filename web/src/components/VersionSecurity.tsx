@@ -102,7 +102,7 @@ export function VersionSecurityCard({
         )}
 
         {version.buildsSummarised < summary.builds.length && (
-          <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage-builds="true">
+          <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }}>
             Covers {version.buildsSummarised} of {summary.builds.length} builds; the rest are not yet scanned.
           </Content>
         )}

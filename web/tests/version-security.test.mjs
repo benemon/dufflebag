@@ -13,8 +13,7 @@ const themeSource = readFileSync(new URL('../src/theme.css', import.meta.url), '
 
 // generatedClient and absentScans transcribe the responses constructed by
 // internal/platform/v1/findings_summary_test.go:71 and :32. mixedBuilds and
-// scannerNotConfigured are spec-derived from spec/platform/openapi.yaml:1590-1664;
-// they add summary presence, inventory, counts, timestamps, attribution and coverage cases.
+// scannerNotConfigured are spec-derived from spec/platform/openapi.yaml:1590-1664.
 const fixtures = JSON.parse(readFileSync(
   new URL('./fixtures/findings-summary.json', import.meta.url), 'utf8',
 ))

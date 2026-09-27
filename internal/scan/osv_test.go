@@ -295,7 +295,7 @@ func TestScanAlpinePatchedControl(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT1NonTransientDetailStatus(t *testing.T) {
+func TestOSVRetryNonTransientStatusNotRetried(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	stub := &stubOSV{
 		t:       t,
@@ -322,7 +322,7 @@ func TestOSVRetryT1NonTransientDetailStatus(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT2aDetail503Then200(t *testing.T) {
+func TestOSVRetryRecoversAfterTransientStatus(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
 	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
@@ -363,7 +363,7 @@ func TestOSVRetryT2aDetail503Then200(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT2bDetail503Exhaustion(t *testing.T) {
+func TestOSVRetryExhaustsAfterFiveAttempts(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	failureBody := []byte(`{"code":14,"message":"unavailable"}`)
 	stub := &stubOSV{
@@ -371,19 +371,30 @@ func TestOSVRetryT2bDetail503Exhaustion(t *testing.T) {
 		batches: []stubResponse{fixtureResponse(singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id))},
 		details: map[string]stubResponse{id: {status: http.StatusServiceUnavailable, body: failureBody}},
 	}
-	res, err := scanOne(t, stub, Package{Purl: alpineVulnerablePurl})
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	var sleeps []time.Duration
+	o.sleep = func(ctx context.Context, d time.Duration) error {
+		sleeps = append(sleeps, d)
+		return ctx.Err()
+	}
+	res, err := o.Scan(context.Background(), Inventory{Packages: []Package{{Purl: alpineVulnerablePurl}}})
 	if err == nil || !strings.Contains(err.Error(), "after 5 attempts") {
 		t.Fatalf("err = %v, want exhaustion after 5 attempts", err)
 	}
 	if got := len(stub.detailIDs); got != 5 {
 		t.Fatalf("detail requests = %d, want 5", got)
 	}
+	if want := []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second}; !reflect.DeepEqual(sleeps, want) {
+		t.Fatalf("sleeps = %v, want %v", sleeps, want)
+	}
 	if len(res.Transcript.Records) != 2 || !bytes.Equal(res.Transcript.Records[1], failureBody) {
 		t.Fatalf("transcript = %q, want final 503 body retained", res.Transcript.Records)
 	}
 }
 
-func TestOSVRetryT3QuerybatchFreshPOSTBody(t *testing.T) {
+func TestOSVRetryBuildsFreshRequestPerAttempt(t *testing.T) {
 	success := readFixture(t, "querybatch-alpine-patched.json")
 	stub := &stubOSV{
 		t: t,
@@ -421,7 +432,7 @@ func TestOSVRetryT3QuerybatchFreshPOSTBody(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT4TranscriptDigestAfterRecovery(t *testing.T) {
+func TestOSVRetryRecoveredTranscriptMatchesClean(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
 	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
@@ -449,7 +460,7 @@ func TestOSVRetryT4TranscriptDigestAfterRecovery(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT5RetryAfter(t *testing.T) {
+func TestOSVRetryHonoursRetryAfter(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
 	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
@@ -497,7 +508,7 @@ func TestOSVRetryT5RetryAfter(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT6CancelDuringBackoff(t *testing.T) {
+func TestOSVRetryCancelDuringBackoffReturnsPromptly(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	stub := &stubOSV{
 		t:       t,
@@ -536,7 +547,7 @@ func TestOSVRetryT6CancelDuringBackoff(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT7ProbeDoesNotRetry(t *testing.T) {
+func TestOSVRetryProbeMakesOneAttempt(t *testing.T) {
 	stub := &stubOSV{t: t, batches: []stubResponse{{status: http.StatusServiceUnavailable}}}
 	srv := stub.server()
 	defer srv.Close()
@@ -550,9 +561,9 @@ func TestOSVRetryT7ProbeDoesNotRetry(t *testing.T) {
 	}
 }
 
-// T9 is the lab failure: one detail fetch stalls past the per-request client
-// timeout while the pass context is still live.
-func TestOSVRetryT9ClientTimeoutThenSuccess(t *testing.T) {
+// A detail fetch stalling past the per-request client timeout while the pass
+// context is still live is transient, not a pass failure.
+func TestOSVRetryRecoversAfterClientTimeout(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	batch := singleVulnBatch(t, "querybatch-alpine-vulnerable.json", id)
 	detail := readFixture(t, "detail-ALPINE-CVE-2022-48174.json")
@@ -600,7 +611,7 @@ func TestOSVRetryT9ClientTimeoutThenSuccess(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT10WaitPastDeadlineNotAttempted(t *testing.T) {
+func TestOSVRetryDoesNotWaitPastDeadline(t *testing.T) {
 	id := "ALPINE-CVE-2022-48174"
 	stub := &stubOSV{
 		t:       t,
@@ -629,7 +640,7 @@ func TestOSVRetryT10WaitPastDeadlineNotAttempted(t *testing.T) {
 	}
 }
 
-func TestOSVRetryT8ParentContextAlreadyCancelled(t *testing.T) {
+func TestOSVRetryCancelledContextMakesOneAttempt(t *testing.T) {
 	o := NewOSV("http://127.0.0.1:1", http.DefaultClient, testClock())
 	var sleeps int
 	o.sleep = func(ctx context.Context, _ time.Duration) error {
