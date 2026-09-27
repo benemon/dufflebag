@@ -966,7 +966,7 @@ build-package `vuln_details` and every
 operations retain a not-found response instead of returning a successful empty
 collection. An empty success would falsely claim that an unscanned bucket is
 clean. Once a build has a current successful scan, its build-package response
-carries `Dufflebag-Scan-Adapter`, `Dufflebag-Scan-Engine`,
+carries `Dufflebag-Scan-Run-Id`, `Dufflebag-Scan-Adapter`, `Dufflebag-Scan-Engine`,
 `Dufflebag-Scan-Database-Revision`, `Dufflebag-Scan-Observed-At`,
 `Dufflebag-Scan-Submitted`, `Dufflebag-Scan-Invalid`,
 `Dufflebag-Scan-Unversioned`, and `Dufflebag-Scan-Unsupported`. Attribution is

@@ -1439,7 +1439,7 @@ func (h *handler) listBuildPackages(w http.ResponseWriter, r *http.Request) {
 			h.writeInternal(w, r, "read current scan findings", err)
 			return
 		}
-		for _, finding := range deduplicateBuildFindings(r.PathValue("build"), findings) {
+		for _, finding := range store.DeduplicateBuildFindings(findings) {
 			key := packageIdentity{
 				name: finding.Package.Name, version: finding.Package.Version, purl: finding.Package.Purl,
 			}

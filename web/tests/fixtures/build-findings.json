@@ -1,0 +1,68 @@
+{
+  "advisories": [
+    {
+      "aliases": [
+        "CVE-2026-34986"
+      ],
+      "fixed_versions": [
+        "4.1.4"
+      ],
+      "identifier": "GHSA-78h2-9frx-2jm8",
+      "packages": [
+        {
+          "fixed_version": "4.1.4",
+          "name": "github.com/go-jose/go-jose/v4",
+          "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1",
+          "sbom_id": "sbom-a",
+          "version": "v4.1.1"
+        },
+        {
+          "fixed_version": "4.1.4",
+          "name": "github.com/go-jose/go-jose/v4",
+          "purl": "pkg:golang/github.com/go-jose/go-jose/v4@v4.1.1",
+          "sbom_id": "sbom-b",
+          "version": "v4.1.1"
+        }
+      ],
+      "published": "2026-04-03T03:28:56Z",
+      "severity": "high",
+      "summary": "go-jose accepts unbounded input"
+    },
+    {
+      "aliases": [],
+      "fixed_versions": [],
+      "identifier": "GO-2026-4945",
+      "packages": [
+        {
+          "fixed_version": "",
+          "name": "golang.org/x/crypto",
+          "purl": "pkg:golang/golang.org/x/crypto@v0.31.0",
+          "sbom_id": "sbom-a",
+          "version": "v0.31.0"
+        }
+      ],
+      "published": null,
+      "severity": "unknown",
+      "summary": ""
+    }
+  ],
+  "inventory": "parsed",
+  "packages_affected": 2,
+  "packages_total": 3,
+  "run": {
+    "adapter": "osv",
+    "coverage": {
+      "invalid": 0,
+      "submitted": 3,
+      "unsupported": 0,
+      "unversioned": 0
+    },
+    "database_revision": "unreported",
+    "engine": "osv.example",
+    "id": "run-a",
+    "observed_at": "2026-09-27T14:00:00Z"
+  },
+  "scanned": true,
+  "scanner_configured": true
+}
+

@@ -458,6 +458,8 @@ type fakeTenancyRepository struct {
 	projects              []store.Project
 	pins                  []store.Pin
 	findingsSummary       *store.VersionFindingsSummaryResult
+	buildFindings         *store.BuildFindings
+	buildFindingsErr      error
 	principals            []*identity.Principal
 	listOrganizationsErr  error
 	createOrganizationErr error
@@ -636,6 +638,13 @@ func (r *fakeTenancyRepository) GetVersionFindingsSummary(
 		return nil, registry.ErrNotFound
 	}
 	return r.findingsSummary, nil
+}
+
+func (r *fakeTenancyRepository) GetBuildFindings(context.Context, store.Tenant, string, string, string) (*store.BuildFindings, error) {
+	if r.buildFindingsErr != nil {
+		return nil, r.buildFindingsErr
+	}
+	return r.buildFindings, nil
 }
 
 // ListPrincipals filters exactly like the real repository: principals bound to

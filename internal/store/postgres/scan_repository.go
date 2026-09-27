@@ -289,13 +289,22 @@ func orEmpty(s []string) []string {
 // one. The advisory lock already serializes writers; FOR UPDATE keeps the
 // read honest anyway.
 func lockBuildScanState(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string) (*BuildScanState, error) {
+	return readBuildScanState(ctx, tx, r, tenant, buildID, true)
+}
+
+func readBuildScanState(
+	ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string, forUpdate bool,
+) (*BuildScanState, error) {
 	state := BuildScanState{BuildID: buildID}
 	var current sql.NullString
 	var mac []byte
-	err := tx.QueryRowContext(ctx, `
+	query := `
 		SELECT current_findings_run_id, latest_attempt_run_id, integrity_mac FROM build_scan_state
-		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3
-		FOR UPDATE`,
+		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`
+	if forUpdate {
+		query += ` FOR UPDATE`
+	}
+	err := tx.QueryRowContext(ctx, query,
 		tenant.OrganizationID, tenant.ProjectID, buildID,
 	).Scan(&current, &state.LatestAttemptRunID, &mac)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -396,26 +405,7 @@ func (r *Repository) GetBuildScanState(ctx context.Context, tenant Tenant, build
 		return nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
-	state := BuildScanState{BuildID: buildID}
-	var current sql.NullString
-	var mac []byte
-	err = tx.QueryRowContext(ctx, `
-		SELECT current_findings_run_id, latest_attempt_run_id, integrity_mac FROM build_scan_state
-		WHERE organization_id = $1 AND project_id = $2 AND build_id = $3`,
-		tenant.OrganizationID, tenant.ProjectID, buildID,
-	).Scan(&current, &state.LatestAttemptRunID, &mac)
-	if errors.Is(err, sql.ErrNoRows) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, fmt.Errorf("read build scan state: %w", err)
-	}
-	state.CurrentFindingsRunID = current.String
-	if err := r.verifyRowMAC("build scan state "+buildID,
-		mac, buildScanStateMACMessage(tenant, buildID, state.CurrentFindingsRunID, state.LatestAttemptRunID)); err != nil {
-		return nil, err
-	}
-	return &state, nil
+	return readBuildScanState(ctx, tx, r, tenant, buildID, false)
 }
 
 // GetScanRun returns the verified run row.

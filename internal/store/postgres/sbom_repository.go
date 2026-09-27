@@ -201,7 +201,25 @@ func (r *Repository) CountBuildPackages(
 		return 0, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
+	total, unparseable, err := countBuildPackages(
+		ctx, tx, q, bucketName, fingerprint, buildID, filter,
+	)
+	if err != nil {
+		return 0, nil, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("commit SBOM projection: %w", err)
+	}
+	return total, unparseable, nil
+}
 
+func countBuildPackages(
+	ctx context.Context,
+	tx *sql.Tx,
+	q *postgresdb.Queries,
+	bucketName, fingerprint, buildID string,
+	filter BuildPackageFilter,
+) (int, []string, error) {
 	if _, err := q.GetBuild(ctx, postgresdb.GetBuildParams{
 		Name: bucketName, Fingerprint: fingerprint, ID: buildID,
 	}); err != nil {
@@ -241,9 +259,6 @@ func (r *Repository) CountBuildPackages(
 		return 0, nil, fmt.Errorf("close unparseable SBOMs: %w", err)
 	}
 	if len(unparseable) > 0 {
-		if err := tx.Commit(); err != nil {
-			return 0, nil, fmt.Errorf("commit SBOM projection: %w", err)
-		}
 		return 0, unparseable, nil
 	}
 
@@ -263,9 +278,6 @@ func (r *Repository) CountBuildPackages(
 		) AS identities
 	`, buildID, filter.Name, filter.NamePrefix, filter.Version).Scan(&total); err != nil {
 		return 0, nil, fmt.Errorf("count build packages: %w", err)
-	}
-	if err := tx.Commit(); err != nil {
-		return 0, nil, fmt.Errorf("commit count build packages: %w", err)
 	}
 	return total, nil, nil
 }

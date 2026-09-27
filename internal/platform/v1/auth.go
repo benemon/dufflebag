@@ -390,6 +390,9 @@ func (response refusalResponse) VisitListPinsResponse(w http.ResponseWriter) err
 func (response refusalResponse) VisitGetVersionFindingsSummaryResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitGetBuildFindingsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitSetPinResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

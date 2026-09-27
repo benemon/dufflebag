@@ -1089,3 +1089,147 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 		t.Fatalf("version summary with no scanned build left = %#v, want absent", got)
 	}
 }
+
+// TestGetBuildFindings pins the native per-build read: one advisory per
+// identifier with a package entry per reporting SBOM, an existing build
+// without a scan answering scanned=false rather than not-found, unparseable
+// inventories reported as such, MAC failure surfacing, and tenancy.
+func TestGetBuildFindings(t *testing.T) {
+	db, adminURL, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	repo.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	allocate := func() int64 {
+		t.Helper()
+		sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+	buildID, sbomA := seedScanParents(t, db, orgA, projectA, "native")
+	sbomB := "scansbom-native-b"
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, created_at, parse_status)
+			VALUES ($1,$2,$3,'scanbucket-native',$4,'second.spdx.json','SPDX','scan-key-native-b',$5,'parsed')`, []any{orgA, projectA, sbomB, buildID, base}},
+		{`INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+			VALUES ($1,$2,'scanbucket-native',$3,'busybox','1.36.1-r0','pkg:apk/alpine/busybox@1.36.1-r0')`, []any{orgA, projectA, sbomB}},
+	} {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// seedScanParents leaves the SBOM pending, which a read finalises as
+	// unparseable; this test wants a parsed inventory until it says otherwise.
+	if _, err := tx.ExecContext(ctx, `UPDATE sboms SET parse_status = 'parsed' WHERE id = $1`, sbomA); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	unscanned, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unscanned.Scanned || unscanned.Run != nil || len(unscanned.Advisories) != 0 ||
+		unscanned.Inventory != "parsed" || unscanned.PackagesTotal != 1 {
+		t.Fatalf("unscanned build = %+v, want scanned=false, no run, no advisories, one distinct package", unscanned)
+	}
+
+	transcript := []byte("native-findings-transcript")
+	run := scanRunFixture("run-native-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+	findings := []scan.Finding{
+		scanFindingFixture(sbomA, "ALPINE-CVE-2022-48174", base),
+		scanFindingFixture(sbomB, "ALPINE-CVE-2022-48174", base),
+		scanFindingFixture(sbomA, "ALPINE-CVE-2023-42363", base),
+	}
+	if err := repo.RecordScanRun(ctx, tenant, run, findings, transcript); err != nil {
+		t.Fatal(err)
+	}
+	scanned, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scanned.Scanned || scanned.Run == nil || scanned.Run.ID != "run-native-1" {
+		t.Fatalf("scanned build = %+v, want run-native-1 current", scanned)
+	}
+	if len(scanned.Advisories) != 2 || scanned.PackagesAffected != 1 {
+		t.Fatalf("advisories = %+v, affected = %d; want two advisories across one package", scanned.Advisories, scanned.PackagesAffected)
+	}
+	var shared *store.BuildAdvisory
+	for i := range scanned.Advisories {
+		if scanned.Advisories[i].Identifier == "ALPINE-CVE-2022-48174" {
+			shared = &scanned.Advisories[i]
+		}
+	}
+	if shared == nil || len(shared.Packages) != 2 || shared.Packages[0].SBOMID == shared.Packages[1].SBOMID {
+		t.Fatalf("shared advisory = %+v, want one package entry per reporting SBOM", shared)
+	}
+	if shared.Packages[0].FixedVersion != "1.36.1-r2" || len(shared.FixedVersions) != 1 {
+		t.Fatalf("fixed versions = %+v / %+v, want the single fixed version once", shared.Packages, shared.FixedVersions)
+	}
+
+	foreign := store.ParseTenant(orgB, projectB)
+	if _, err := repo.GetBuildFindings(ctx, foreign, "scan-native", "fp-scan-native", buildID); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("foreign tenant read = %v, want not found", err)
+	}
+
+	superURL, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	superURL.User = url.UserPassword("postgres", "postgres")
+	admin, err := sql.Open("pgx", superURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	for _, statement := range []string{
+		`ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`,
+		`UPDATE scan_findings SET derived_severity = 'negligible' WHERE run_id = 'run-native-1' AND advisory_id = 'ALPINE-CVE-2023-42363'`,
+		`ALTER TABLE scan_findings ENABLE TRIGGER scan_findings_immutable`,
+	} {
+		if _, err := admin.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID); err == nil {
+		t.Fatal("tampered finding row served as findings")
+	}
+
+	if _, err := admin.ExecContext(ctx,
+		`UPDATE sboms SET parse_status = 'unparseable' WHERE id = $1`, sbomA); err != nil {
+		t.Fatal(err)
+	}
+	broken, err := repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	if broken == nil && err != nil {
+		// The tampered row still fails the run read; the inventory state is
+		// reported before it, so restore the row to reach the assertion.
+		if _, err := admin.ExecContext(ctx, `ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := admin.ExecContext(ctx,
+			`UPDATE scan_findings SET derived_severity = 'critical' WHERE run_id = 'run-native-1' AND advisory_id = 'ALPINE-CVE-2023-42363'`); err != nil {
+			t.Fatal(err)
+		}
+		broken, err = repo.GetBuildFindings(ctx, tenant, "scan-native", "fp-scan-native", buildID)
+	}
+	if err != nil {
+		t.Fatal(err)
+	}
+	if broken.Inventory != "unparseable" || broken.PackagesTotal != 0 {
+		t.Fatalf("unparseable inventory = %+v, want inventory=unparseable with zero packages", broken)
+	}
+}

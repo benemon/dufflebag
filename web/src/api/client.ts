@@ -754,6 +754,60 @@ export type ApiVersionFindingsSummaryResponse = {
   builds: ApiBuildFindingsSummary[]
 }
 
+export type ApiBuildScanRun = {
+  id: string
+  observed_at: string
+  adapter: string
+  engine: string
+  database_revision: string
+  coverage: {
+    submitted: number
+    invalid: number
+    unversioned: number
+    unsupported: number
+  }
+}
+
+export type ApiBuildAdvisoryPackage = {
+  name: string
+  version: string
+  purl: string
+  sbom_id: string
+  fixed_version: string
+}
+
+export type ApiBuildAdvisory = {
+  identifier: string
+  severity: string
+  summary: string
+  aliases: string[]
+  published: string | null
+  fixed_versions: string[]
+  packages: ApiBuildAdvisoryPackage[]
+}
+
+export type ApiBuildFindingsResponse = {
+  scanner_configured: boolean
+  inventory: 'parsed' | 'unparseable'
+  packages_total: number
+  scanned: boolean
+  run: ApiBuildScanRun | null
+  packages_affected: number
+  advisories: ApiBuildAdvisory[]
+}
+
+export async function getBuildFindings(
+  token: string, tenant: Tenant, bucket: string, fingerprint: string, build: string,
+): Promise<ApiBuildFindingsResponse> {
+  return platformGet<ApiBuildFindingsResponse>(
+    token,
+    `/organizations/${encodeURIComponent(tenant.organizationID)}` +
+      `/projects/${encodeURIComponent(tenant.projectID)}` +
+      `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
+      `/builds/${encodeURIComponent(build)}/findings`,
+  )
+}
+
 export async function getVersionFindingsSummary(
   token: string, tenant: Tenant, bucket: string, fingerprint: string,
 ): Promise<ApiVersionFindingsSummaryResponse> {
