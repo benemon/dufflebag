@@ -901,7 +901,7 @@ func startRealServer(t *testing.T, handler http.Handler) string {
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
-	server := newHTTPServer(listener.Addr().String(), handler)
+	server := newHTTPServer(listener.Addr().String(), gzipGET(handler))
 	done := make(chan error, 1)
 	go func() { done <- server.Serve(listener) }()
 	t.Cleanup(func() {
