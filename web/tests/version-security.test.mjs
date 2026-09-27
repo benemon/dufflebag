@@ -160,8 +160,16 @@ test('coverage appears only when something was not examined', () => {
   const gap = structuredClone(fixtures.generatedClient)
   gap.builds[0].summary.coverage.unsupported = 12
   const html = render(gap)
-  assert.match(html, /Coverage:/)
+  assert.match(html, /Coverage on linux:/)
   assert.match(html, /does not cover/)
+})
+
+test('a coverage gap on any build is reported, not only the first build\'s', () => {
+  const gap = structuredClone(fixtures.mixedBuilds)
+  gap.builds[1].summary.coverage.unversioned = 7
+  const html = render(gap)
+  assert.match(html, /Coverage on aws: 180 queried; 7 without a version to match\./)
+  assert.equal((html.match(/data-coverage="true"/g) ?? []).length, 1, 'only the build with a gap gets a line')
 })
 
 test('a scanned build without a stored summary is not called unscanned', () => {

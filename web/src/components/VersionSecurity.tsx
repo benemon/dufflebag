@@ -49,12 +49,12 @@ export function VersionSecurityCard({
   }
 
   const version = summary.version
-  const attribution = summary.builds.find((build) => build.summary)?.summary?.scan
-  // Coverage appears ONLY when something was not examined. With full coverage
-  // the counts are noise; with a gap they are the difference between "nothing
+  // Coverage appears ONLY when something was not examined, and per build:
+  // summed across builds, one package shipped on three platforms would count
+  // three times. With a gap the counts are the difference between "nothing
   // found" and "not looked at", which is the distinction the console exists to
   // preserve.
-  const coverage = hasCoverageGap(attribution) ? coverageSummary(attribution) : []
+  const coverageGaps = summary.builds.filter((build) => hasCoverageGap(build.summary?.scan))
   // Compared as instants: RFC 3339 strings with and without fractional seconds
   // do not sort lexically.
   const failedRescans = summary.builds.filter((build) => build.latestAttempt?.status === 'failed')
@@ -130,11 +130,11 @@ export function VersionSecurityCard({
             No channel selects this version, so these figures are not being updated.
           </Content>
         )}
-        {coverage.length > 0 && (
-          <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
-            Coverage: {coverage.join('; ')}.
+        {coverageGaps.map((build) => (
+          <Content key={build.buildID} component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
+            Coverage on {build.platform}: {coverageSummary(build.summary?.scan).join('; ')}.
           </Content>
-        )}
+        ))}
 
         <div style={{ marginTop: 20 }}>
           <Title headingLevel="h3" size="md">
