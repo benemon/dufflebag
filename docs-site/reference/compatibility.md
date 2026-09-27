@@ -895,7 +895,8 @@ build-package response nor
 dufflebag's exposes them. `vuln_details` is absent, not an
 empty array, until that build has a current successful scan. Once a current
 scan exists it is populated, including an empty findings list when the scan
-really found nothing.
+really found nothing. A re-uploaded SBOM withdraws the current scan, so
+`vuln_details` is absent again until the next successful scan.
 
 SPDX packages targeted by the document's `DESCRIBES` relationship are omitted
 as artefact self-entries. A real Packer/Syft document establishes this

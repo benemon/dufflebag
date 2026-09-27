@@ -878,8 +878,8 @@ func TestFindingsSummariesFollowBuildLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantVersion("rescanned", 2, 2)
-	// Bag drop writes SBOMs through the repository without the HCP plane's
-	// running-only rule, so a done build's inventory can change in place.
+	// No production caller replaces a done build's SBOM; the repository allows
+	// it, and this case pins that the withdrawal fires if one ever does.
 	upload(reopened, 6*time.Minute)
 	wantVersion("sbom replaced on a done build", 1, 1)
 
