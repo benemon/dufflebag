@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/scan"
@@ -463,6 +464,47 @@ func (r *Repository) ListScanFindings(ctx context.Context, tenant Tenant, runID 
 	}
 	defer func() { _ = tx.Rollback() }()
 	return queryScanFindings(ctx, tx, r, tenant, runID, "")
+}
+
+// findingsIdentityBatch bounds the VALUES list so a caller-chosen page size
+// cannot exceed Postgres's parameter limit (three parameters per identity).
+const findingsIdentityBatch = 1000
+
+// ListScanFindingsForPackages returns verified findings for package identities.
+func (r *Repository) ListScanFindingsForPackages(
+	ctx context.Context, tenant Tenant, runID string, packages []ReportedPackage,
+) ([]StoredFinding, error) {
+	if len(packages) == 0 {
+		return nil, nil
+	}
+	tx, _, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var findings []StoredFinding
+	for start := 0; start < len(packages); start += findingsIdentityBatch {
+		batch := packages[start:min(start+findingsIdentityBatch, len(packages))]
+		var filter strings.Builder
+		filter.WriteString("\n\t  AND (package_name, package_version, purl) IN (VALUES ")
+		args := make([]any, 0, len(batch)*3)
+		for i, pkg := range batch {
+			if i > 0 {
+				filter.WriteString(", ")
+			}
+			parameter := 4 + i*3
+			fmt.Fprintf(&filter, "($%d, $%d, $%d)", parameter, parameter+1, parameter+2)
+			args = append(args, pkg.Name, pkg.Version, pkg.Purl)
+		}
+		filter.WriteByte(')')
+		rows, err := queryScanFindings(ctx, tx, r, tenant, runID, filter.String(), args...)
+		if err != nil {
+			return nil, err
+		}
+		findings = append(findings, rows...)
+	}
+	return findings, nil
 }
 
 // queryScanFindings reads findings of a run, verifying every row's MAC.

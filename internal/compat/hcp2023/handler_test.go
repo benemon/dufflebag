@@ -2,9 +2,12 @@ package hcp2023
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -1175,15 +1178,60 @@ func (r *fakeRepository) DownloadSbom(
 	return sbom.CompressedData, nil
 }
 
-func (r *fakeRepository) ListBuildPackages(
+func (r *fakeRepository) CountBuildPackages(
 	_ context.Context,
 	_ store.Tenant,
 	bucket, fingerprint, buildID string,
-) ([]store.ReportedPackage, []string, error) {
+	filter store.BuildPackageFilter,
+) (int, []string, error) {
 	if _, err := r.GetBuild(context.Background(), store.Tenant{}, bucket, fingerprint, buildID); err != nil {
-		return nil, nil, err
+		return 0, nil, err
 	}
-	return append([]store.ReportedPackage(nil), r.packages...), append([]string(nil), r.unparseable...), nil
+	if len(r.unparseable) > 0 {
+		return 0, append([]string(nil), r.unparseable...), nil
+	}
+	return len(filterBuildPackages(r.packages, filter)), nil, nil
+}
+
+func (r *fakeRepository) ListBuildPackages(
+	_ context.Context,
+	_ store.Tenant,
+	_ string,
+	filter store.BuildPackageFilter,
+	offset, limit int,
+) ([]store.ReportedPackage, error) {
+	packages := filterBuildPackages(r.packages, filter)
+	end := offset + limit
+	if end > len(packages) {
+		end = len(packages)
+	}
+	return append([]store.ReportedPackage(nil), packages[offset:end]...), nil
+}
+
+func filterBuildPackages(packages []store.ReportedPackage, filter store.BuildPackageFilter) []store.ReportedPackage {
+	filtered := make([]store.ReportedPackage, 0, len(packages))
+	for _, pkg := range packages {
+		if filter.Name != "" && pkg.Name != filter.Name {
+			continue
+		}
+		if filter.NamePrefix != "" && !strings.HasPrefix(pkg.Name, filter.NamePrefix) {
+			continue
+		}
+		if filter.Version != "" && pkg.Version != filter.Version {
+			continue
+		}
+		filtered = append(filtered, pkg)
+	}
+	sort.Slice(filtered, func(i, j int) bool {
+		if filtered[i].Name != filtered[j].Name {
+			return filtered[i].Name < filtered[j].Name
+		}
+		if filtered[i].Version != filtered[j].Version {
+			return filtered[i].Version < filtered[j].Version
+		}
+		return filtered[i].Purl < filtered[j].Purl
+	})
+	return filtered
 }
 
 func (r *fakeRepository) GetBuildScanState(
@@ -1212,6 +1260,27 @@ func (r *fakeRepository) ListScanFindings(
 	runID string,
 ) ([]store.StoredFinding, error) {
 	return append([]store.StoredFinding(nil), r.scanFindings[runID]...), nil
+}
+
+func (r *fakeRepository) ListScanFindingsForPackages(
+	_ context.Context,
+	_ store.Tenant,
+	runID string,
+	packages []store.ReportedPackage,
+) ([]store.StoredFinding, error) {
+	identities := make(map[packageIdentity]bool, len(packages))
+	for _, pkg := range packages {
+		identities[packageIdentity{name: pkg.Name, version: pkg.Version, purl: pkg.Purl}] = true
+	}
+	findings := make([]store.StoredFinding, 0)
+	for _, finding := range r.scanFindings[runID] {
+		if identities[packageIdentity{
+			name: finding.Package.Name, version: finding.Package.Version, purl: finding.Package.Purl,
+		}] {
+			findings = append(findings, finding)
+		}
+	}
+	return findings, nil
 }
 
 func (r *fakeRepository) CreateChannel(
@@ -2514,6 +2583,120 @@ func TestListSbomsAndBuildPackagesUsePublishedReadShape(t *testing.T) {
 	decodeResponse(t, response, &filtered)
 	if response.Code != http.StatusOK || len(filtered.Packages) != 1 || filtered.Packages[0].Name != "openssl" {
 		t.Fatalf("filtered packages = %#v; status/body %d %s", filtered, response.Code, response.Body)
+	}
+}
+
+func TestListBuildPackagesPagesFilteredInventoryBeforeReading(t *testing.T) {
+	repository := newFakeRepository()
+	server := newHandler(repository, testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	request(t, server, http.MethodPut, testBase+"/buckets", map[string]any{"name": "images"})
+	request(t, server, http.MethodPost, testBase+"/buckets/images/versions",
+		map[string]any{"fingerprint": "fp", "template_type": "HCL2"})
+	created := request(t, server, http.MethodPost, testBase+"/buckets/images/versions/fp/builds",
+		map[string]any{"component_type": "docker"})
+	var build models.HashicorpCloudPacker20230101CreateBuildResponse
+	decodeResponse(t, created, &build)
+
+	for i := 249; i >= 0; i-- {
+		version := "skip"
+		if i%2 == 0 {
+			version = "keep"
+		}
+		repository.packages = append(repository.packages, store.ReportedPackage{
+			Name: fmt.Sprintf("package-%03d", i), Version: version,
+			Purl: fmt.Sprintf("pkg:generic/package-%03d@%s", i, version),
+		})
+	}
+	base := testBase + "/buckets/images/versions/fp/builds/" + build.Build.ID + "/packages"
+
+	readPages := func(query string) ([]string, []string) {
+		t.Helper()
+		names := make([]string, 0)
+		tokens := make([]string, 0)
+		next := ""
+		for {
+			path := base
+			if query != "" || next != "" {
+				path += "?" + query
+				if query != "" && next != "" {
+					path += "&"
+				}
+				if next != "" {
+					path += "pagination.next_page_token=" + next
+				}
+			}
+			response := request(t, server, http.MethodGet, path, nil)
+			if response.Code != http.StatusOK {
+				t.Fatalf("ListBuildPackages page = %d %s", response.Code, response.Body)
+			}
+			var page listBuildPackagesResponse
+			decodeResponse(t, response, &page)
+			for _, pkg := range page.Packages {
+				names = append(names, pkg.Name)
+			}
+			if page.Pagination == nil || page.Pagination.NextPageToken == "" {
+				break
+			}
+			tokens = append(tokens, page.Pagination.NextPageToken)
+			next = page.Pagination.NextPageToken
+		}
+		return names, tokens
+	}
+
+	all, tokens := readPages("")
+	if len(all) != 250 || !reflect.DeepEqual(tokens, []string{encodePageToken(100), encodePageToken(200)}) {
+		t.Fatalf("unfiltered pages = %d packages, tokens %#v", len(all), tokens)
+	}
+	for i, name := range all {
+		if want := fmt.Sprintf("package-%03d", i); name != want {
+			t.Fatalf("unfiltered package %d = %q, want %q", i, name, want)
+		}
+	}
+
+	filtered, tokens := readPages("package_version=keep")
+	if len(filtered) != 125 || !reflect.DeepEqual(tokens, []string{encodePageToken(100)}) {
+		t.Fatalf("filtered pages = %d packages, tokens %#v", len(filtered), tokens)
+	}
+	for i, name := range filtered {
+		if want := fmt.Sprintf("package-%03d", i*2); name != want {
+			t.Fatalf("filtered package %d = %q, want %q", i, name, want)
+		}
+	}
+}
+
+func TestCompatibilityGETCompressionNegotiation(t *testing.T) {
+	server := newHandler(newFakeRepository(), testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
+	path := testBase + "/buckets"
+	identity := request(t, server, http.MethodGet, path, nil)
+	if identity.Header().Get("Content-Encoding") != "" {
+		t.Fatalf("identity response Content-Encoding = %q", identity.Header().Get("Content-Encoding"))
+	}
+	if !strings.Contains(identity.Header().Get("Vary"), "Accept-Encoding") {
+		t.Fatalf("identity response Vary = %q", identity.Header().Get("Vary"))
+	}
+
+	req := httptest.NewRequest(http.MethodGet, path, nil)
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Accept-Encoding", "br, gzip")
+	compressed := httptest.NewRecorder()
+	server.ServeHTTP(compressed, req)
+	if compressed.Header().Get("Content-Encoding") != "gzip" ||
+		!strings.Contains(compressed.Header().Get("Vary"), "Accept-Encoding") {
+		t.Fatalf("gzip headers = %#v", compressed.Header())
+	}
+	reader, err := gzip.NewReader(compressed.Body)
+	if err != nil {
+		t.Fatalf("open gzip response: %v", err)
+	}
+	body, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read gzip response: %v", err)
+	}
+	if err := reader.Close(); err != nil {
+		t.Fatalf("close gzip response: %v", err)
+	}
+	if !bytes.Equal(body, identity.Body.Bytes()) {
+		t.Fatalf("gzip body = %q, want identity %q", body, identity.Body.Bytes())
 	}
 }
 

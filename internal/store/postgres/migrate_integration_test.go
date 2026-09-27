@@ -33,8 +33,8 @@ func TestMigrationsRoundTrip(t *testing.T) {
 	if err := admin.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 3 || dirty {
-		t.Fatalf("migration state = version %d dirty %v, want version 3 clean", version, dirty)
+	if version != 4 || dirty {
+		t.Fatalf("migration state = version %d dirty %v, want version 4 clean", version, dirty)
 	}
 
 	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})

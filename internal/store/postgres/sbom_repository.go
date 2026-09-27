@@ -186,25 +186,26 @@ func (r *Repository) DownloadSbom(
 	return data, nil
 }
 
-// ListBuildPackages returns the flat package projection for one build. Current
-// uploads parse before commit, so pending can only be compatibility residue
-// written by the preceding release. Its Postgres bytes are deliberately
-// abandoned and the row receives an honest terminal state.
-func (r *Repository) ListBuildPackages(
+// CountBuildPackages validates and counts the filtered package projection.
+// Current uploads parse before commit, so pending can only be compatibility
+// residue written by the preceding release. Its Postgres bytes are
+// deliberately abandoned and the row receives an honest terminal state.
+func (r *Repository) CountBuildPackages(
 	ctx context.Context,
 	tenant Tenant,
 	bucketName, fingerprint, buildID string,
-) ([]ReportedPackage, []string, error) {
+	filter BuildPackageFilter,
+) (int, []string, error) {
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
-		return nil, nil, err
+		return 0, nil, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	if _, err := q.GetBuild(ctx, postgresdb.GetBuildParams{
 		Name: bucketName, Fingerprint: fingerprint, ID: buildID,
 	}); err != nil {
-		return nil, nil, mapNotFound("list build packages", err)
+		return 0, nil, mapNotFound("list build packages", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE sboms
@@ -212,7 +213,7 @@ func (r *Repository) ListBuildPackages(
 		    parse_error = 'payload predates object storage and was deliberately abandoned'
 		WHERE build_id = $1 AND parse_status = 'pending'
 	`, buildID); err != nil {
-		return nil, nil, fmt.Errorf("finalize pending SBOMs: %w", err)
+		return 0, nil, fmt.Errorf("finalize pending SBOMs: %w", err)
 	}
 
 	unparseableRows, err := tx.QueryContext(ctx, `
@@ -221,43 +222,97 @@ func (r *Repository) ListBuildPackages(
 		ORDER BY name, id
 	`, buildID)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list unparseable SBOMs: %w", err)
+		return 0, nil, fmt.Errorf("list unparseable SBOMs: %w", err)
 	}
 	unparseable := make([]string, 0)
 	for unparseableRows.Next() {
 		var name string
 		if err := unparseableRows.Scan(&name); err != nil {
 			_ = unparseableRows.Close()
-			return nil, nil, fmt.Errorf("scan unparseable SBOM: %w", err)
+			return 0, nil, fmt.Errorf("scan unparseable SBOM: %w", err)
 		}
 		unparseable = append(unparseable, name)
 	}
 	if err := unparseableRows.Err(); err != nil {
 		_ = unparseableRows.Close()
-		return nil, nil, fmt.Errorf("list unparseable SBOMs: %w", err)
+		return 0, nil, fmt.Errorf("list unparseable SBOMs: %w", err)
 	}
 	if err := unparseableRows.Close(); err != nil {
-		return nil, nil, fmt.Errorf("close unparseable SBOMs: %w", err)
+		return 0, nil, fmt.Errorf("close unparseable SBOMs: %w", err)
 	}
 	if len(unparseable) > 0 {
 		if err := tx.Commit(); err != nil {
-			return nil, nil, fmt.Errorf("commit SBOM projection: %w", err)
+			return 0, nil, fmt.Errorf("commit SBOM projection: %w", err)
 		}
-		return nil, unparseable, nil
+		return 0, unparseable, nil
 	}
 
+	var total int
+	if err := tx.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM (
+			SELECT DISTINCT packages.name, packages.version, packages.purl
+			FROM sbom_packages AS packages
+			JOIN sboms ON sboms.organization_id = packages.organization_id
+			          AND sboms.project_id = packages.project_id
+			          AND sboms.id = packages.sbom_id
+			WHERE sboms.build_id = $1
+			  AND ($2 = '' OR packages.name = $2)
+			  AND ($3 = '' OR starts_with(packages.name, $3))
+			  AND ($4 = '' OR packages.version = $4)
+		) AS identities
+	`, buildID, filter.Name, filter.NamePrefix, filter.Version).Scan(&total); err != nil {
+		return 0, nil, fmt.Errorf("count build packages: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, nil, fmt.Errorf("commit count build packages: %w", err)
+	}
+	return total, nil, nil
+}
+
+// ListBuildPackages returns one ordered page of the flat package projection.
+func (r *Repository) ListBuildPackages(
+	ctx context.Context,
+	tenant Tenant,
+	buildID string,
+	filter BuildPackageFilter,
+	offset, limit int,
+) ([]ReportedPackage, error) {
+	tx, _, err := r.begin(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
 	rows, err := tx.QueryContext(ctx, `
-		SELECT packages.name, packages.version, packages.purl,
+		WITH page AS (
+			SELECT DISTINCT packages.name, packages.version, packages.purl
+			FROM sbom_packages AS packages
+			JOIN sboms ON sboms.organization_id = packages.organization_id
+			          AND sboms.project_id = packages.project_id
+			          AND sboms.id = packages.sbom_id
+			WHERE sboms.build_id = $1
+			  AND ($2 = '' OR packages.name = $2)
+			  AND ($3 = '' OR starts_with(packages.name, $3))
+			  AND ($4 = '' OR packages.version = $4)
+			ORDER BY packages.name, packages.version, packages.purl
+			LIMIT $5 OFFSET $6
+		)
+		SELECT page.name, page.version, page.purl,
 		       sboms.id, sboms.build_id, sboms.name, sboms.format, sboms.created_at
-		FROM sbom_packages AS packages
+		FROM page
+		JOIN sbom_packages AS packages
+		  ON packages.name = page.name
+		 AND packages.version = page.version
+		 AND packages.purl = page.purl
 		JOIN sboms ON sboms.organization_id = packages.organization_id
 		          AND sboms.project_id = packages.project_id
 		          AND sboms.id = packages.sbom_id
 		WHERE sboms.build_id = $1
-		ORDER BY packages.name, packages.version, packages.purl, sboms.name, sboms.id
-	`, buildID)
+		ORDER BY page.name, page.version, page.purl, sboms.name, sboms.id
+	`, buildID, filter.Name, filter.NamePrefix, filter.Version, limit, offset)
 	if err != nil {
-		return nil, nil, fmt.Errorf("list build packages: %w", err)
+		return nil, fmt.Errorf("list build packages: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -270,7 +325,7 @@ func (r *Repository) ListBuildPackages(
 		if err := rows.Scan(
 			&name, &version, &purl, &sbomID, &sbomBuildID, &sbomName, &format, &createdAt,
 		); err != nil {
-			return nil, nil, fmt.Errorf("scan build package: %w", err)
+			return nil, fmt.Errorf("scan build package: %w", err)
 		}
 		identity := packageKey{name, version, purl}
 		pkg := byIdentity[identity]
@@ -281,11 +336,11 @@ func (r *Repository) ListBuildPackages(
 		}
 		id, err := registry.ParseID(sbomID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("restore package SBOM id: %w", err)
+			return nil, fmt.Errorf("restore package SBOM id: %w", err)
 		}
 		restoredBuildID, err := registry.ParseID(sbomBuildID)
 		if err != nil {
-			return nil, nil, fmt.Errorf("restore package SBOM build id: %w", err)
+			return nil, fmt.Errorf("restore package SBOM build id: %w", err)
 		}
 		pkg.Sboms = append(pkg.Sboms, Sbom{
 			ID: id, BuildID: restoredBuildID, Name: sbomName, Format: format,
@@ -293,14 +348,14 @@ func (r *Repository) ListBuildPackages(
 		})
 	}
 	if err := rows.Err(); err != nil {
-		return nil, nil, fmt.Errorf("list build packages: %w", err)
+		return nil, fmt.Errorf("list build packages: %w", err)
 	}
 	packages := make([]ReportedPackage, 0, len(order))
 	for _, identity := range order {
 		packages = append(packages, *byIdentity[identity])
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, nil, fmt.Errorf("commit list build packages: %w", err)
+		return nil, fmt.Errorf("commit list build packages: %w", err)
 	}
-	return packages, nil, nil
+	return packages, nil
 }

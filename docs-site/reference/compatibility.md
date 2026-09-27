@@ -393,8 +393,8 @@ only when the one below cannot carry the need.
 
 | Rung | Operations |
 |---|---|
-| Same shape, same behaviour | Every operation in the tables above |
-| Same shape, our cost model | None yet |
+| Same shape, same behaviour | Every operation in the tables above except `ListBuildPackages` |
+| Same shape, our cost model | `ListBuildPackages` |
 | Retired in favour of a native endpoint | None yet |
 
 ### The 2021-04-30 API
@@ -956,7 +956,8 @@ extending their JSON contract. These three published operations are in scope:
 `PackerService_ListBuildPackages` also populates the frozen package model's
 `vuln_details` from the build's current findings run. A failed newer attempt
 does not erase those findings. Reads follow `current_findings_run_id`, never
-`latest_attempt_run_id`.
+`latest_attempt_run_id`. Each page verifies the integrity of the finding rows
+it returns.
 
 Absent-not-empty remains the compatibility rule. On a
 [deployment with no scanner configured](../components/vulnerability-scanning.md),

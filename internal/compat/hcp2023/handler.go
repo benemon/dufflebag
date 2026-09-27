@@ -65,10 +65,12 @@ type Repository interface {
 	ListSboms(context.Context, store.Tenant, string, string, string) ([]store.Sbom, error)
 	GetSbom(context.Context, store.Tenant, string, string, string, string) (*store.Sbom, error)
 	DownloadSbom(context.Context, store.Tenant, string, string, string, string) ([]byte, error)
-	ListBuildPackages(context.Context, store.Tenant, string, string, string) ([]store.ReportedPackage, []string, error)
+	CountBuildPackages(context.Context, store.Tenant, string, string, string, store.BuildPackageFilter) (int, []string, error)
+	ListBuildPackages(context.Context, store.Tenant, string, store.BuildPackageFilter, int, int) ([]store.ReportedPackage, error)
 	GetBuildScanState(context.Context, store.Tenant, string) (*store.BuildScanState, error)
 	GetScanRun(context.Context, store.Tenant, string) (*store.ScanRun, error)
 	ListScanFindings(context.Context, store.Tenant, string) ([]store.StoredFinding, error)
+	ListScanFindingsForPackages(context.Context, store.Tenant, string, []store.ReportedPackage) ([]store.StoredFinding, error)
 }
 
 type handler struct {
@@ -237,7 +239,7 @@ func newHandlerWithMaxBody(
 	}})
 	// Authentication wraps every route, so a route added later is protected
 	// without anyone remembering to protect it.
-	return &resolvedHandler{Handler: authenticate(auth, mux), descriptors: descriptors}
+	return &resolvedHandler{Handler: gzipGET(authenticate(auth, mux)), descriptors: descriptors}
 }
 
 func (h *handler) listBuckets(w http.ResponseWriter, r *http.Request) {
@@ -1380,9 +1382,15 @@ type listBuildPackagesResponse struct {
 }
 
 func (h *handler) listBuildPackages(w http.ResponseWriter, r *http.Request) {
-	packages, unparseable, err := h.repository.ListBuildPackages(
+	query := r.URL.Query()
+	filter := store.BuildPackageFilter{
+		Name:       query.Get("package_name"),
+		NamePrefix: query.Get("package_name_starts_with"),
+		Version:    query.Get("package_version"),
+	}
+	total, unparseable, err := h.repository.CountBuildPackages(
 		r.Context(), tenant(r), r.PathValue("bucket"), r.PathValue("fingerprint"),
-		r.PathValue("build"),
+		r.PathValue("build"), filter,
 	)
 	if errors.Is(err, registry.ErrNotFound) {
 		writeRPCError(w, http.StatusNotFound, 5, "build not found")
@@ -1396,6 +1404,18 @@ func (h *handler) listBuildPackages(w http.ResponseWriter, r *http.Request) {
 		names, _ := json.Marshal(unparseable)
 		writeRPCError(w, http.StatusUnprocessableEntity, 9,
 			"package inventory is unparseable for SBOMs "+string(names))
+		return
+	}
+	start, end, pagination, err := paginationPage(r, total)
+	if err != nil {
+		writeRPCError(w, http.StatusBadRequest, 3, err.Error())
+		return
+	}
+	packages, err := h.repository.ListBuildPackages(
+		r.Context(), tenant(r), r.PathValue("build"), filter, start, end-start,
+	)
+	if err != nil {
+		h.writeInternal(w, r, "list build packages", err)
 		return
 	}
 
@@ -1412,7 +1432,9 @@ func (h *handler) listBuildPackages(w http.ResponseWriter, r *http.Request) {
 			h.writeInternal(w, r, "read current scan run", err)
 			return
 		}
-		findings, err := h.repository.ListScanFindings(r.Context(), tenant(r), state.CurrentFindingsRunID)
+		findings, err := h.repository.ListScanFindingsForPackages(
+			r.Context(), tenant(r), state.CurrentFindingsRunID, packages,
+		)
 		if err != nil {
 			h.writeInternal(w, r, "read current scan findings", err)
 			return
@@ -1425,28 +1447,8 @@ func (h *handler) listBuildPackages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	query := r.URL.Query()
-	filtered := make([]store.ReportedPackage, 0, len(packages))
+	wire := make([]*reportedPackageResponse, 0, len(packages))
 	for _, pkg := range packages {
-		if name := query.Get("package_name"); name != "" && pkg.Name != name {
-			continue
-		}
-		if prefix := query.Get("package_name_starts_with"); prefix != "" &&
-			!strings.HasPrefix(pkg.Name, prefix) {
-			continue
-		}
-		if version := query.Get("package_version"); version != "" && pkg.Version != version {
-			continue
-		}
-		filtered = append(filtered, pkg)
-	}
-	start, end, pagination, err := paginationPage(r, len(filtered))
-	if err != nil {
-		writeRPCError(w, http.StatusBadRequest, 3, err.Error())
-		return
-	}
-	wire := make([]*reportedPackageResponse, 0, end-start)
-	for _, pkg := range filtered[start:end] {
 		sources := make([]*models.HashicorpCloudPacker20230101Sbom, 0, len(pkg.Sboms))
 		for _, sbom := range pkg.Sboms {
 			sources = append(sources, renderSbom(sbom))

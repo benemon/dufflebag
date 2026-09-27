@@ -7,13 +7,16 @@ import (
 	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"net/url"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
+	"github.com/benemon/dufflebag/internal/keyring"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -109,6 +112,202 @@ func seedScanSiblingBuild(t *testing.T, db *sql.DB, suffix, buildID, sbomID stri
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestPagedBuildPackagesAndFindings(t *testing.T) {
+	db, databaseURL, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	repository.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	at := time.Date(2026, 9, 27, 9, 0, 0, 0, time.UTC)
+	bucketID := registry.NewID(at).String()
+	versionID := registry.NewID(at.Add(time.Millisecond)).String()
+	buildID := registry.NewID(at.Add(2 * time.Millisecond)).String()
+	sbomA := registry.NewID(at.Add(3 * time.Millisecond)).String()
+	sbomB := registry.NewID(at.Add(4 * time.Millisecond)).String()
+	const bucketName = "package-pages"
+	const fingerprint = "fp-package-pages"
+
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	statements := []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO buckets (organization_id, project_id, id, name, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,$5)`, []any{orgA, projectA, bucketID, bucketName, at}},
+		{`INSERT INTO versions (organization_id, project_id, id, bucket_id, fingerprint, template_type, complete, sequence, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'HCL2',true,1,$6,$6)`, []any{orgA, projectA, versionID, bucketID, fingerprint, at}},
+		{`INSERT INTO builds (organization_id, project_id, id, bucket_id, version_id, component_type, status, platform, metadata_seen, created_at, updated_at)
+			VALUES ($1,$2,$3,$4,$5,'docker','done','linux',true,$6,$6)`, []any{orgA, projectA, buildID, bucketID, versionID, at}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, parse_status, created_at)
+			VALUES ($1,$2,$3,$4,$5,'a-sbom','SPDX','page-a','parsed',$6)`, []any{orgA, projectA, sbomA, bucketID, buildID, at}},
+		{`INSERT INTO sboms (organization_id, project_id, id, bucket_id, build_id, name, format, object_key, parse_status, created_at)
+			VALUES ($1,$2,$3,$4,$5,'z-sbom','SPDX','page-b','parsed',$6)`, []any{orgA, projectA, sbomB, bucketID, buildID, at}},
+	}
+	for _, statement := range statements {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for i := 0; i < 250; i++ {
+		name := fmt.Sprintf("package-%03d", i)
+		version := "odd"
+		if i%2 == 0 {
+			version = "even"
+		}
+		purl := fmt.Sprintf("pkg:generic/%s@%s", name, version)
+		for _, sbomID := range []string{sbomA, sbomB} {
+			if _, err := tx.ExecContext(ctx, `
+				INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+				VALUES ($1,$2,$3,$4,$5,$6,$7)
+			`, orgA, projectA, bucketID, sbomID, name, version, purl); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+
+	sequence, err := repository.AllocateScanRunSequence(ctx, tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	transcript := []byte("paged-package-findings")
+	run := scanRunFixture("run-package-pages", buildID, sequence, store.ScanRunSucceeded, at, transcript)
+	finding := func(index int) scan.Finding {
+		name := fmt.Sprintf("package-%03d", index)
+		version := "odd"
+		if index%2 == 0 {
+			version = "even"
+		}
+		value := scanFindingFixture(sbomA, fmt.Sprintf("CVE-2026-%04d", index), at)
+		value.Package = scan.Package{
+			SBOMID: sbomA, Name: name, Version: version,
+			Purl: fmt.Sprintf("pkg:generic/%s@%s", name, version),
+		}
+		return value
+	}
+	if err := repository.RecordScanRun(ctx, tenant, run,
+		[]scan.Finding{finding(99), finding(100)}, transcript); err != nil {
+		t.Fatal(err)
+	}
+
+	total, unparseable, err := repository.CountBuildPackages(
+		ctx, tenant, bucketName, fingerprint, buildID, store.BuildPackageFilter{})
+	if err != nil || len(unparseable) != 0 || total != 250 {
+		t.Fatalf("CountBuildPackages = %d, unparseable %#v, %v", total, unparseable, err)
+	}
+	all, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 0, total)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("filters match the unpaged projection", func(t *testing.T) {
+		filters := []store.BuildPackageFilter{
+			{Name: "package-042"},
+			{NamePrefix: "package-1"},
+			{Version: "even"},
+		}
+		for _, filter := range filters {
+			want := make([]store.ReportedPackage, 0)
+			for _, pkg := range all {
+				if filter.Name != "" && pkg.Name != filter.Name ||
+					filter.NamePrefix != "" && !strings.HasPrefix(pkg.Name, filter.NamePrefix) ||
+					filter.Version != "" && pkg.Version != filter.Version {
+					continue
+				}
+				want = append(want, pkg)
+			}
+			count, broken, err := repository.CountBuildPackages(
+				ctx, tenant, bucketName, fingerprint, buildID, filter)
+			if err != nil || len(broken) != 0 || count != len(want) {
+				t.Fatalf("filter %#v count = %d, unparseable %#v, %v; want %d", filter, count, broken, err, len(want))
+			}
+			got, err := repository.ListBuildPackages(ctx, tenant, buildID, filter, 0, count)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(got, want) {
+				t.Fatalf("filter %#v packages differ from unpaged projection", filter)
+			}
+		}
+	})
+
+	t.Run("page SBOMs and findings match the unpaged identity range", func(t *testing.T) {
+		page, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 95, 10)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(page, all[95:105]) {
+			t.Fatalf("page packages = %#v, want %#v", page, all[95:105])
+		}
+		fullFindings, err := repository.ListScanFindings(ctx, tenant, run.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		identities := make(map[string]bool, len(page))
+		for _, pkg := range page {
+			identities[pkg.Name+"\x00"+pkg.Version+"\x00"+pkg.Purl] = true
+		}
+		want := make([]store.StoredFinding, 0)
+		for _, stored := range fullFindings {
+			if identities[stored.Package.Name+"\x00"+stored.Package.Version+"\x00"+stored.Package.Purl] {
+				want = append(want, stored)
+			}
+		}
+		got, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, page)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("page findings = %#v, want %#v", got, want)
+		}
+	})
+
+	t.Run("tampered second page does not poison the first", func(t *testing.T) {
+		adminURL, err := url.Parse(databaseURL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		adminURL.User = url.UserPassword("postgres", "postgres")
+		admin, err := sql.Open("pgx", adminURL.String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer admin.Close()
+		for _, statement := range []string{
+			`ALTER TABLE scan_findings DISABLE TRIGGER scan_findings_immutable`,
+			`UPDATE scan_findings SET derived_severity = 'negligible' WHERE run_id = 'run-package-pages' AND package_name = 'package-100'`,
+			`ALTER TABLE scan_findings ENABLE TRIGGER scan_findings_immutable`,
+		} {
+			if _, err := admin.ExecContext(ctx, statement); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		pageOne, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 0, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, pageOne); err != nil {
+			t.Fatalf("page one read page two's tampered finding: %v", err)
+		}
+		pageTwo, err := repository.ListBuildPackages(ctx, tenant, buildID, store.BuildPackageFilter{}, 100, 100)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.ListScanFindingsForPackages(ctx, tenant, run.ID, pageTwo); !errors.Is(err, keyring.ErrMAC) {
+			t.Fatalf("page two tampered finding error = %v, want %v", err, keyring.ErrMAC)
+		}
+	})
 }
 
 func TestFindingsSummaries(t *testing.T) {
