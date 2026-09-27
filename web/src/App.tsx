@@ -118,7 +118,7 @@ function Authenticated({
       >
         <Route index element={<Versions />} />
         <Route path="versions/:fingerprint" element={<Version />} />
-        <Route path="versions/:fingerprint/builds/:build" element={<Build />} />
+        <Route path="versions/:fingerprint/builds/:build/:facet?" element={<Build />} />
       </Route>
     </Routes>
   )

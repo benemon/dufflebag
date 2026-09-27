@@ -6,9 +6,12 @@ package inventory and vulnerability findings.
 
 ## The build screen
 
-A build shows its status history, artifacts and SBOMs. The **Packages** tab
-shows the package inventory projected from its SBOMs, with findings when a
-scanner is configured.
+A build shows its status history, artifacts and SBOMs. Each build facet has
+its own URL, so the **Packages** and **Vulnerabilities** facets can be linked
+directly. The Packages facet shows the package inventory projected from its
+SBOMs. Its Findings labels link to the same package on the Vulnerabilities
+facet, and vulnerable-package links lead back to the exact package identity
+rather than a name search.
 
 The **Packer runner environment** card surfaces what the build reported
 about the machine and invocation that produced it: the Packer and plugin
@@ -79,6 +82,10 @@ re-read it; **Refresh** re-reads it. Large images can take a minute or more, so
 the card reports how many packages it has read while the request is in
 progress.
 
+After a scan, the Packages and Vulnerabilities cards show an **As of** line
+from the inventory's scan observation time. This timestamp describes the
+inventory and findings being displayed, not the time the page was opened.
+
 A document that cannot be parsed remains stored with an explicit unparseable
 status. The packages response reports that status instead of returning an
 empty list that could be mistaken for an SBOM with no packages.
@@ -117,8 +124,12 @@ With a scanner configured:
 - Bucket-level `reader` operations aggregate across builds. They return a
   vulnerability summary, packages with vulnerabilities, and a flat
   vulnerability list.
-- Console package tables show severity counts. Rows with findings expand to
-  show individual findings. Rows without findings do not expand.
+- The build's Vulnerabilities facet deduplicates advisories across packages,
+  provides build-total severity filters, lists the most affected critical and
+  high severity packages, and expands an advisory to show every affected
+  package, SBOM and fixed version.
+- The Packages facet keeps the inventory lean. Severity labels in its Findings
+  column open the Vulnerabilities facet pre-filtered to that package.
 
 When findings require removing an image from circulation, revoke the
 version. Channels roll back, and consumers stop resolving it. See

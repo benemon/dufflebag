@@ -1849,7 +1849,7 @@ test('the Build timer refreshes detail without re-reading inventory', () => {
   assert.doesNotMatch(buildScreenSource, /useAutoRefresh\(\{[^}]*inventory\.reload/)
   assert.match(
     buildScreenSource,
-    /onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+    /onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+security\.reload\(\)\s+\}\}/,
   )
 })
 

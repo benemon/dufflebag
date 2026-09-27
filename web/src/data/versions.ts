@@ -86,6 +86,7 @@ export type Finding = {
   fixedVersion: string
   aliases: string[]
   firstSeen: string
+  published: string
 }
 
 /**
@@ -856,6 +857,7 @@ function toFindings(pkg: ApiPackage): Finding[] {
           .map((alias) => alias.trim())
           .filter(Boolean),
         firstSeen: vulnerability.first_seen_at ?? '',
+        published: vulnerability.published_at ?? '',
       })
     }
   }

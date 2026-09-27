@@ -26,8 +26,9 @@ schedule, restore it, or delete it.
 
 The Security card reads a stored summary computed when each build's scan
 completes. It refreshes with the page, so a rescan's findings appear without a
-manual refresh. Opening a build reads that build's package inventory, which
-large images can take a minute or more to deliver.
+manual refresh. Opening a row in the Security card goes directly to that
+build's Vulnerabilities facet. Opening a build reads that build's package
+inventory, which large images can take a minute or more to deliver.
 
 ![dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
 

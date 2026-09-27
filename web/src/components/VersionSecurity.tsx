@@ -6,13 +6,8 @@ import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-i
 
 import { coverageSummary, hasCoverageGap } from '../data/findings'
 import type { VersionSecuritySummary } from '../data/versions'
-import { OUT_OF_SCAN_SET_CLASS } from './Findings'
+import { OUT_OF_SCAN_SET_CLASS, SEVERITY_COLOUR } from './Findings'
 import { When } from './When'
-
-const SEVERITY_COLOUR: Record<string, 'red' | 'orange' | 'yellow' | 'blue' | 'grey'> = {
-  critical: 'red', high: 'orange', medium: 'yellow', low: 'blue',
-  negligible: 'grey', unknown: 'grey',
-}
 
 /**
  * A version's security answer, which is what a reader arriving from a channel
