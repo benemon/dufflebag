@@ -79,6 +79,9 @@ export function Version() {
         `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
         `/builds/${encodeURIComponent(build)}`,
       )}
+      onOpenSecurityBuild={(build) => navigate(
+        versionBuildFacetPath(bucket, fingerprint, build, 'vulnerabilities'),
+      )}
       onOpenVersion={(relatedBucket, relatedFingerprint) => navigate(
         `/buckets/${encodeURIComponent(relatedBucket)}/versions/${encodeURIComponent(relatedFingerprint)}`,
       )}
@@ -141,6 +144,7 @@ export function VersionView({
   onBackToRegistry,
   onBackToBucket,
   onOpenBuild = () => {},
+  onOpenSecurityBuild = onOpenBuild,
   onOpenVersion = () => {},
   callerRole = null,
   onRevoke = () => Promise.reject(new Error('No session.')),
@@ -164,6 +168,7 @@ export function VersionView({
   onBackToRegistry: () => void
   onBackToBucket: () => void
   onOpenBuild?: (build: string) => void
+  onOpenSecurityBuild?: (build: string) => void
   onOpenVersion?: (bucket: string, fingerprint: string) => void
   callerRole?: Role | null
   onRevoke?: (options: RevokeVersionOptions) => Promise<void>
@@ -293,7 +298,7 @@ export function VersionView({
                     securityLoading={securityLoading}
                     securityFailure={securityFailure}
                     callerRole={callerRole}
-                    onOpenBuild={onOpenBuild}
+                    onOpenBuild={onOpenSecurityBuild}
                     onOpenVersion={onOpenVersion}
                     onPromote={onPromote}
                   />
@@ -312,6 +317,8 @@ export function VersionView({
                           builds={version.builds}
                           securitySummary={securitySummary}
                           onOpenBuild={onOpenBuild}
+                          bucket={bucket}
+                          fingerprint={version.fingerprint}
                         />
                       )}
                     </CardBody>
@@ -1020,11 +1027,13 @@ function terraformLabel(value: string): string {
 }
 
 export function BuildTable({
-  builds, securitySummary, onOpenBuild,
+  builds, securitySummary, onOpenBuild, bucket = '', fingerprint = '',
 }: {
   builds: Build[]
   securitySummary?: VersionSecuritySummary | null
   onOpenBuild: (id: string) => void
+  bucket?: string
+  fingerprint?: string
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
   const securityBuilds = new Map(
@@ -1085,7 +1094,16 @@ export function BuildTable({
                   <DescriptionListGroup>
                     <DescriptionListTerm>Packages</DescriptionListTerm>
                     <DescriptionListDescription>
-                      {summaryPackages(securityBuilds.get(build.id))}
+                      {bucket && fingerprint ? (
+                        <Button
+                          component="a"
+                          variant="link"
+                          isInline
+                          href={versionBuildFacetPath(bucket, fingerprint, build.id, 'packages')}
+                        >
+                          {summaryPackages(securityBuilds.get(build.id))}
+                        </Button>
+                      ) : summaryPackages(securityBuilds.get(build.id))}
                     </DescriptionListDescription>
                   </DescriptionListGroup>
                   <DescriptionListGroup>
@@ -1107,6 +1125,13 @@ export function BuildTable({
       ))}
     </Table>
   )
+}
+
+export function versionBuildFacetPath(
+  bucket: string, fingerprint: string, build: string, facet: 'packages' | 'vulnerabilities',
+): string {
+  return `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
+    `/builds/${encodeURIComponent(build)}/${facet}`
 }
 
 export function BuildStateLabel({ state }: { state: BuildState }) {

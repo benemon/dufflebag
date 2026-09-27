@@ -144,7 +144,7 @@ test('the landing routes by scope while bucket detail routes keep their paths', 
   assert.match(appSource, /claims.bucketID/)
   assert.match(appSource, /path="\/buckets\/:bucket"/)
   assert.match(appSource, /<Route path="versions\/:fingerprint" element=\{<Version \/>\}/)
-  assert.match(appSource, /<Route path="versions\/:fingerprint\/builds\/:build" element=\{<Build \/>\}/)
+  assert.match(appSource, /<Route path="versions\/:fingerprint\/builds\/:build\/:facet\?" element=\{<Build \/>\}/)
 })
 
 test('the masthead uses the PatternFly brand slot for the lowercase wordmark', () => {
