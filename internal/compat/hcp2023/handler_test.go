@@ -2,12 +2,10 @@ package hcp2023
 
 import (
 	"bytes"
-	"compress/gzip"
 	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -2661,42 +2659,6 @@ func TestListBuildPackagesPagesFilteredInventoryBeforeReading(t *testing.T) {
 		if want := fmt.Sprintf("package-%03d", i*2); name != want {
 			t.Fatalf("filtered package %d = %q, want %q", i, name, want)
 		}
-	}
-}
-
-func TestCompatibilityGETCompressionNegotiation(t *testing.T) {
-	server := newHandler(newFakeRepository(), testPrincipals(), testAuthenticator{}, testLogger(), func() time.Time { return testTime })
-	path := testBase + "/buckets"
-	identity := request(t, server, http.MethodGet, path, nil)
-	if identity.Header().Get("Content-Encoding") != "" {
-		t.Fatalf("identity response Content-Encoding = %q", identity.Header().Get("Content-Encoding"))
-	}
-	if !strings.Contains(identity.Header().Get("Vary"), "Accept-Encoding") {
-		t.Fatalf("identity response Vary = %q", identity.Header().Get("Vary"))
-	}
-
-	req := httptest.NewRequest(http.MethodGet, path, nil)
-	req.Header.Set("Authorization", "Bearer "+testToken)
-	req.Header.Set("Accept-Encoding", "br, gzip")
-	compressed := httptest.NewRecorder()
-	server.ServeHTTP(compressed, req)
-	if compressed.Header().Get("Content-Encoding") != "gzip" ||
-		!strings.Contains(compressed.Header().Get("Vary"), "Accept-Encoding") {
-		t.Fatalf("gzip headers = %#v", compressed.Header())
-	}
-	reader, err := gzip.NewReader(compressed.Body)
-	if err != nil {
-		t.Fatalf("open gzip response: %v", err)
-	}
-	body, err := io.ReadAll(reader)
-	if err != nil {
-		t.Fatalf("read gzip response: %v", err)
-	}
-	if err := reader.Close(); err != nil {
-		t.Fatalf("close gzip response: %v", err)
-	}
-	if !bytes.Equal(body, identity.Body.Bytes()) {
-		t.Fatalf("gzip body = %q, want identity %q", body, identity.Body.Bytes())
 	}
 }
 

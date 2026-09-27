@@ -1,4 +1,4 @@
-package hcp2023
+package main
 
 import (
 	"compress/gzip"
@@ -21,6 +21,15 @@ func (w gzipResponseWriter) Write(body []byte) (int, error) {
 	return w.writer.Write(body)
 }
 
+// Flush commits what the handler has written so far, which is how a handler
+// commits its headers before the response body is complete.
+func (w gzipResponseWriter) Flush() {
+	_ = w.writer.Flush()
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
 func gzipGET(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -34,8 +43,16 @@ func gzipGET(next http.Handler) http.Handler {
 		}
 		w.Header().Set("Content-Encoding", "gzip")
 		writer := gzip.NewWriter(w)
-		defer func() { _ = writer.Close() }()
+		// The trailer is written only for a handler that returned: a panic
+		// must reach the audit boundary untouched, not be capped as a body.
+		finished := false
+		defer func() {
+			if finished {
+				_ = writer.Close()
+			}
+		}()
 		next.ServeHTTP(gzipResponseWriter{ResponseWriter: w, writer: writer}, r)
+		finished = true
 	})
 }
 

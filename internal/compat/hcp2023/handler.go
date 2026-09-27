@@ -239,7 +239,7 @@ func newHandlerWithMaxBody(
 	}})
 	// Authentication wraps every route, so a route added later is protected
 	// without anyone remembering to protect it.
-	return &resolvedHandler{Handler: gzipGET(authenticate(auth, mux)), descriptors: descriptors}
+	return &resolvedHandler{Handler: authenticate(auth, mux), descriptors: descriptors}
 }
 
 func (h *handler) listBuckets(w http.ResponseWriter, r *http.Request) {

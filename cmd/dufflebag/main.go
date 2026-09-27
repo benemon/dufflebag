@@ -319,7 +319,7 @@ func main() {
 	// a connection and sends a byte at a time holds a goroutine, a connection
 	// and — on the token endpoint — a verification permit indefinitely (duf-39p).
 	// Generous enough for a slow link carrying a build's PATCH bodies.
-	server := newHTTPServer(address, handler)
+	server := newHTTPServer(address, gzipGET(handler))
 	shutdownSignal := make(chan os.Signal, 1)
 	reopenSignal := make(chan os.Signal, 1)
 	signal.Notify(shutdownSignal, os.Interrupt, syscall.SIGTERM)
