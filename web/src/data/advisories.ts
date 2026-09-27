@@ -1,6 +1,6 @@
 import type { ApiBuildFindingsResponse } from '../api/client'
 import { SEVERITY_ORDER, type Severity } from './findings'
-import type { Package } from './versions'
+import { projectScanAttempt, type Package, type ScanAttempt } from './versions'
 
 export type AdvisoryHit = {
   packageIdentity: string
@@ -38,6 +38,7 @@ export type BuildFindingsData = {
   packagesTotal: number
   scanned: boolean
   run: { id: string; observedAt: string } | null
+  latestAttempt?: ScanAttempt
   packagesAffected: number
   advisories: Advisory[]
   counts: AdvisoryCounts
@@ -101,6 +102,7 @@ export function projectBuildFindings(response: ApiBuildFindingsResponse): BuildF
     packagesTotal: response.packages_total,
     scanned: response.scanned,
     run: response.run ? { id: response.run.id, observedAt: response.run.observed_at } : null,
+    ...(response.latest_attempt ? { latestAttempt: projectScanAttempt(response.latest_attempt) } : {}),
     packagesAffected: response.packages_affected,
     advisories,
     counts,

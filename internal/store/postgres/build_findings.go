@@ -17,6 +17,7 @@ type BuildFindings struct {
 	PackagesTotal    int
 	Scanned          bool
 	Run              *ScanRun
+	LatestAttempt    *ScanAttempt
 	PackagesAffected int
 	Advisories       []BuildAdvisory
 }
@@ -102,6 +103,9 @@ func (r *Repository) GetBuildFindings(
 		}
 		result.Scanned = true
 		result.Advisories, result.PackagesAffected = groupBuildAdvisories(findings)
+	}
+	if _, result.LatestAttempt, err = latestAttempt(ctx, tx, r, tenant, buildID); err != nil {
+		return nil, err
 	}
 
 	if err := tx.Commit(); err != nil {

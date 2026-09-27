@@ -474,6 +474,24 @@ func (e Role) Valid() bool {
 	}
 }
 
+// Defines values for ScanAttemptStatus.
+const (
+	ScanAttemptStatusFailed    ScanAttemptStatus = "failed"
+	ScanAttemptStatusSucceeded ScanAttemptStatus = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the ScanAttemptStatus enum.
+func (e ScanAttemptStatus) Valid() bool {
+	switch e {
+	case ScanAttemptStatusFailed:
+		return true
+	case ScanAttemptStatusSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for ScannerHealthState.
 const (
 	ScannerHealthStateAuditPaused ScannerHealthState = "audit_paused"
@@ -855,13 +873,18 @@ type BuildAdvisoryPackage struct {
 
 // BuildFindingsResponse defines model for BuildFindingsResponse.
 type BuildFindingsResponse struct {
-	Advisories        []BuildAdvisory                `json:"advisories"`
-	Inventory         BuildFindingsResponseInventory `json:"inventory"`
-	PackagesAffected  int                            `json:"packages_affected"`
-	PackagesTotal     int                            `json:"packages_total"`
-	Run               *BuildScanRun                  `json:"run"`
-	Scanned           bool                           `json:"scanned"`
-	ScannerConfigured bool                           `json:"scanner_configured"`
+	Advisories []BuildAdvisory                `json:"advisories"`
+	Inventory  BuildFindingsResponseInventory `json:"inventory"`
+
+	// LatestAttempt The build's newest scan attempt, present only when it is not the scan
+	// whose findings are current: an attempt that failed or was refused, so
+	// the findings shown are older than it.
+	LatestAttempt     *ScanAttempt  `json:"latest_attempt,omitempty"`
+	PackagesAffected  int           `json:"packages_affected"`
+	PackagesTotal     int           `json:"packages_total"`
+	Run               *BuildScanRun `json:"run"`
+	Scanned           bool          `json:"scanned"`
+	ScannerConfigured bool          `json:"scanner_configured"`
 }
 
 // BuildFindingsResponseInventory defines model for BuildFindingsResponse.Inventory.
@@ -872,9 +895,17 @@ type BuildFindingsSummary struct {
 	BuildId   string                        `json:"build_id"`
 	Component string                        `json:"component"`
 	Inventory BuildFindingsSummaryInventory `json:"inventory"`
-	Packages  int                           `json:"packages"`
-	Platform  string                        `json:"platform"`
-	Summary   *BuildScanSummary             `json:"summary,omitempty"`
+
+	// LatestAttempt The build's newest scan attempt, present only when it is not the scan
+	// whose findings are current: an attempt that failed or was refused, so
+	// the findings shown are older than it.
+	LatestAttempt *ScanAttempt `json:"latest_attempt,omitempty"`
+	Packages      int          `json:"packages"`
+	Platform      string       `json:"platform"`
+
+	// Scanned A current successful scan exists for this build, whether or not its summary has been stored yet.
+	Scanned bool              `json:"scanned"`
+	Summary *BuildScanSummary `json:"summary,omitempty"`
 }
 
 // BuildFindingsSummaryInventory defines model for BuildFindingsSummary.Inventory.
@@ -1232,6 +1263,18 @@ type RecoveryResponse struct {
 // Role The principal's authority within its scope. A caller may grant or modify
 // only roles at or below its own.
 type Role string
+
+// ScanAttempt The build's newest scan attempt, present only when it is not the scan
+// whose findings are current: an attempt that failed or was refused, so
+// the findings shown are older than it.
+type ScanAttempt struct {
+	Error      string            `json:"error"`
+	ObservedAt time.Time         `json:"observed_at"`
+	Status     ScanAttemptStatus `json:"status"`
+}
+
+// ScanAttemptStatus defines model for ScanAttempt.Status.
+type ScanAttemptStatus string
 
 // ScannerHealth The detail deliberately withheld from `/sys/health`. Root only,
 // because it names the external service this deployment talks to.

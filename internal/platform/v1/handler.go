@@ -722,6 +722,7 @@ func renderBuildFindings(findings store.BuildFindings, scannerConfigured bool) B
 		PackagesTotal:     findings.PackagesTotal,
 		Scanned:           findings.Scanned,
 		PackagesAffected:  findings.PackagesAffected,
+		LatestAttempt:     renderScanAttempt(findings.LatestAttempt),
 		Advisories:        make([]BuildAdvisory, 0, len(findings.Advisories)),
 	}
 	if findings.Run != nil {
@@ -752,6 +753,15 @@ func renderBuildFindings(findings store.BuildFindings, scannerConfigured bool) B
 	return response
 }
 
+func renderScanAttempt(attempt *store.ScanAttempt) *ScanAttempt {
+	if attempt == nil {
+		return nil
+	}
+	return &ScanAttempt{
+		ObservedAt: attempt.ObservedAt, Status: ScanAttemptStatus(attempt.Status), Error: attempt.Error,
+	}
+}
+
 func renderVersionFindingsSummary(summary store.VersionFindingsSummary) *VersionFindingsSummary {
 	response := &VersionFindingsSummary{
 		Counts: renderSeverityCounts(summary.Counts), Findings: summary.Findings,
@@ -769,6 +779,7 @@ func renderBuildFindingsSummary(build store.VersionBuildFindingsSummary) BuildFi
 	response := BuildFindingsSummary{
 		BuildId: build.BuildID, Component: build.ComponentType, Platform: build.Platform,
 		Inventory: BuildFindingsSummaryInventory(build.Inventory), Packages: build.Packages,
+		Scanned: build.Scanned, LatestAttempt: renderScanAttempt(build.LatestAttempt),
 	}
 	if build.Summary == nil {
 		return response

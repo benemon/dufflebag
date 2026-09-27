@@ -1157,7 +1157,7 @@ test('the version security summary projects the producer fixture into display sh
   })
   assert.deepEqual(summary.builds[0], {
     buildID: 'build-a', component: 'docker', platform: 'linux',
-    inventory: 'parsed', packages: 2,
+    inventory: 'parsed', packages: 2, scanned: true,
     summary: {
       worst: 'critical', counts: [{ severity: 'critical', count: 1 }],
       scanned: 2,

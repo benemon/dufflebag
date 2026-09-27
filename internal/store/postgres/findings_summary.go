@@ -54,7 +54,36 @@ type VersionBuildFindingsSummary struct {
 	Platform      string
 	Inventory     string
 	Packages      int
+	// Scanned is true when a current successful run exists, with or without a
+	// stored summary; a build scanned before summaries existed has none yet.
+	Scanned       bool
 	Summary       *BuildFindingsSummary
+	LatestAttempt *ScanAttempt
+}
+
+// ScanAttempt is a build's newest scan attempt when it is not the current run.
+type ScanAttempt struct {
+	ObservedAt time.Time
+	Status     string
+	Error      string
+}
+
+// latestAttempt reads the build's scan pointers and, when the newest attempt
+// is not the current run, that attempt. Both reads verify their MACs.
+func latestAttempt(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string) (bool, *ScanAttempt, error) {
+	state, err := readBuildScanState(ctx, tx, r, tenant, buildID, false)
+	if err != nil || state == nil {
+		return false, nil, err
+	}
+	scanned := state.CurrentFindingsRunID != ""
+	if state.LatestAttemptRunID == "" || state.LatestAttemptRunID == state.CurrentFindingsRunID {
+		return scanned, nil, nil
+	}
+	run, err := readScanRun(ctx, tx, r, tenant, state.LatestAttemptRunID)
+	if err != nil {
+		return false, nil, err
+	}
+	return scanned, &ScanAttempt{ObservedAt: run.ObservedAt, Status: run.Status, Error: run.Error}, nil
 }
 
 // VersionFindingsSummaryResult contains the version rollup and all its builds.
@@ -573,6 +602,13 @@ func (r *Repository) GetVersionFindingsSummary(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list version summary builds: %w", err)
+	}
+	_ = rows.Close()
+	for i := range result.Builds {
+		build := &result.Builds[i]
+		if build.Scanned, build.LatestAttempt, err = latestAttempt(ctx, tx, r, tenant, build.BuildID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

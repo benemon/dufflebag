@@ -7,7 +7,7 @@ import {
   signOutIfUnauthorized,
   type ApiAncestryStatus, type ApiBucket, type ApiBucketAncestry, type ApiBuild,
   type ApiChannel, type ApiPackage, type ApiSeverityCounts, type ApiVersion,
-  type ApiVersionFindingsSummaryResponse, type Tenant as ApiTenant,
+  type ApiScanAttempt, type ApiVersionFindingsSummaryResponse, type Tenant as ApiTenant,
 } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { projectBuildFindings, type BuildFindingsData } from './advisories'
@@ -217,6 +217,9 @@ export type VersionSecuritySummary = {
     platform: string
     inventory: 'parsed' | 'unparseable'
     packages: number
+    /** A current successful scan exists, with or without a stored summary. */
+    scanned: boolean
+    latestAttempt?: ScanAttempt
     summary?: {
       worst?: Severity
       counts: SeverityCount[]
@@ -565,6 +568,8 @@ export function projectVersionSecuritySummary(
       platform: build.platform,
       inventory: build.inventory,
       packages: build.packages,
+      scanned: build.scanned,
+      ...(build.latest_attempt ? { latestAttempt: projectScanAttempt(build.latest_attempt) } : {}),
       ...(build.summary ? { summary: {
         ...(build.summary.worst ? { worst: build.summary.worst as Severity } : {}),
         counts: projectSeverityCounts(build.summary.counts),
@@ -579,6 +584,13 @@ export function projectVersionSecuritySummary(
       } } : {}),
     })),
   }
+}
+
+/** The newest scan attempt, when it is not the scan whose figures are shown. */
+export type ScanAttempt = { observedAt: string; status: 'succeeded' | 'failed'; error: string }
+
+export function projectScanAttempt(attempt: ApiScanAttempt): ScanAttempt {
+  return { observedAt: attempt.observed_at, status: attempt.status, error: attempt.error }
 }
 
 export async function loadVersionDetail(

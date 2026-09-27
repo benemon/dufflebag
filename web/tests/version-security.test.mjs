@@ -163,3 +163,29 @@ test('coverage appears only when something was not examined', () => {
   assert.match(html, /Coverage:/)
   assert.match(html, /does not cover/)
 })
+
+test('a scanned build without a stored summary is not called unscanned', () => {
+  const html = render(fixtures.scannedWithoutSummary)
+  assert.match(html, /data-state="scanned-no-summary"/)
+  assert.match(html, /Scanned\. Figures appear here after the next scan of this version&#x27;s builds\./)
+  assert.doesNotMatch(html, /Not yet scanned/)
+})
+
+test('a failed rescan is stated under the figures it left standing', () => {
+  const html = render(fixtures.failedRescan)
+  assert.match(html, /data-rescan="failed"/)
+  assert.match(html, /The latest rescan failed for 1 build/)
+  assert.match(html, /dateTime="2026-09-23T08:00:00Z"/)
+  assert.match(html, /rescan failed/)
+  assert.doesNotMatch(render(fixtures.generatedClient), /data-rescan/)
+})
+
+test('the projection carries whether a build is scanned and its latest attempt', () => {
+  const summary = project(fixtures.failedRescan)
+  assert.equal(summary.builds[0].scanned, true)
+  assert.deepEqual(summary.builds[0].latestAttempt, {
+    observedAt: '2026-09-23T08:00:00Z', status: 'failed',
+    error: 'detail GHSA-x: after 5 attempts: status 503',
+  })
+  assert.equal(project(fixtures.absentScans).builds[0].scanned, false)
+})

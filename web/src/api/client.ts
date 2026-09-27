@@ -730,13 +730,21 @@ export type ApiBuildScanSummary = {
   }
 }
 
+export type ApiScanAttempt = {
+  observed_at: string
+  status: 'succeeded' | 'failed'
+  error: string
+}
+
 export type ApiBuildFindingsSummary = {
   build_id: string
   component: string
   platform: string
   inventory: 'parsed' | 'unparseable'
   packages: number
+  scanned: boolean
   summary?: ApiBuildScanSummary
+  latest_attempt?: ApiScanAttempt
 }
 
 export type ApiVersionFindingsSummary = {
@@ -794,6 +802,7 @@ export type ApiBuildFindingsResponse = {
   scanned: boolean
   run: ApiBuildScanRun | null
   packages_affected: number
+  latest_attempt?: ApiScanAttempt
   advisories: ApiBuildAdvisory[]
 }
 
