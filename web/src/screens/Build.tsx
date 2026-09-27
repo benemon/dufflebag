@@ -522,8 +522,7 @@ export function PackagesCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Spinner isInline aria-label="Reading package inventory…" />
             <Content component="p" aria-live="polite" style={{ margin: 0 }}>
-              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
-              Large images can take a minute or more.
+              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.
             </Content>
           </div>
         </CardBody>
@@ -858,6 +857,12 @@ export function VulnerabilitiesCard({
             : `${data.advisories.length} ${data.advisories.length === 1 ? 'advisory' : 'advisories'} · ${data.packagesAffected} of ${data.packagesTotal} packages affected.`}
         </Content>
         <AsOf observedAt={findings.run.observedAt} />
+        {findings.latestAttempt?.status === 'failed' ? (
+          <Content component="p" data-rescan="failed" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+            The latest rescan failed on <When iso={findings.latestAttempt.observedAt} dateOnly />; these
+            findings are from the scan above.
+          </Content>
+        ) : null}
         <ToggleGroup aria-label="Filter by severity" isCompact style={{ marginTop: 16 }}>
           {[...SEVERITY_ORDER].reverse().map((band) => (
             <ToggleGroupItem

@@ -766,6 +766,11 @@ after(async () => {
 })
 
 test('the console works end to end, from first run to a seeded tenancy', async (t) => {
+  // A 500 in a failed step names only a correlation id; the server's own log
+  // is the rest of the evidence, and a CI runner keeps nothing else.
+  t.afterEach((step) => {
+    if (!step.passed) process.stderr.write(`--- server output after "${step.name}" ---\n${serverOutput.slice(-20000)}\n`)
+  })
   let credentials
 
   await t.test('a fresh instance lands on the wizard, not on sign-in', async () => {
@@ -2221,7 +2226,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(fullText, /Last scanned:/)
     assert.match(fullText, /No known findings/)
     assert.match(fullText, /1 scanned/)
-    assert.doesNotMatch(fullText, /Coverage:/)
+    assert.doesNotMatch(fullText, /Coverage on/)
     await assertNoVerdicts()
 
     // 3. The same zero result with unsupported and unqueryable packages is a
@@ -2229,10 +2234,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await openVersion(gap)
     const gapDate = new Date(gapScan.observedAt).toISOString().slice(0, 10)
     const gapCoverage =
-      'Coverage: 1 queried; 1 in ecosystems the scanner does not cover; ' +
+      'Coverage on docker: 1 queried; 1 in ecosystems the scanner does not cover; ' +
       '1 without a version to match.'
     await until('the coverage-gap figures', async () =>
-      (await securityText()).includes(gapCoverage))
+      (await securityText()).includes(gapCoverage)).catch(async (err) => {
+      throw new Error(`${err.message}; the Security card read:\n${await securityText()}`)
+    })
     const gapText = await securityText()
     assert.ok((await securityScanDate()).startsWith(gapDate), 'gap scan date must render')
     assert.match(gapText, /No known findings/)

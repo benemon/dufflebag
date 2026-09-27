@@ -28,7 +28,13 @@ The Security card reads a stored summary computed when each build's scan
 completes. It refreshes with the page, so a rescan's findings appear without a
 manual refresh. Opening a row in the Security card goes directly to that
 build's Vulnerabilities facet. Opening a build reads that build's package
-inventory, which large images can take a minute or more to deliver.
+inventory.
+
+A build scanned before stored summaries existed shows as **summary pending**
+until its next scan. When a build's latest rescan
+failed, the card says so and names the date; the figures shown are from the
+last successful scan, which stays current until a rescan succeeds. The build's
+**Vulnerabilities** tab carries the same notice.
 
 ![dufflebag version screen showing the version operations card](/screenshots/version-operations.png)
 

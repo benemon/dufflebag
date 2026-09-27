@@ -193,6 +193,16 @@ test('the Vulnerabilities package filter matches identity, not a substring', () 
   assert.match(html, />1 of 2</)
 })
 
+test('a failed rescan is stated beside the findings it left standing', () => {
+  const failed = projectBuildFindings(wire(buildFindingsFixture.advisories, {
+    latest_attempt: { observed_at: '2026-09-28T08:00:00Z', status: 'failed', error: 'status 503' },
+  }))
+  const html = renderVulnerabilities(failed)
+  assert.match(html, /data-rescan="failed"/)
+  assert.match(html, /dateTime="2026-09-28T08:00:00Z"/)
+  assert.doesNotMatch(renderVulnerabilities(projectBuildFindings(buildFindingsFixture)), /data-rescan/)
+})
+
 test('an unrecognised wire severity projects as unknown', () => {
   const data = projectBuildFindings(wire([wireAdvisory('ODD', 'catastrophic', ['x'])]))
   assert.equal(data.advisories[0].severity, 'unknown')

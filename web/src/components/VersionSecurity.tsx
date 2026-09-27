@@ -28,14 +28,20 @@ export function VersionSecurityCard({
 }) {
   if (!summary.version) {
     const scannerConfigured = summary.scannerConfigured
+    // A build scanned before summaries were stored has findings but no
+    // figures here yet; calling it unscanned would be false.
+    const scanned = summary.builds.some((build) => build.scanned)
+    const state = !scannerConfigured ? 'never-scanned' : scanned ? 'scanned-no-summary' : 'not-yet-scanned'
     return (
       <Card>
         <CardTitle>Security</CardTitle>
         <CardBody>
-          <Content component="p" data-state={scannerConfigured ? 'not-yet-scanned' : 'never-scanned'}>
-            {scannerConfigured
-              ? 'Not yet scanned. Findings appear once the scanner has examined a build of this version.'
-              : 'Not scanned. No vulnerability source is configured for this deployment.'}
+          <Content component="p" data-state={state}>
+            {state === 'never-scanned'
+              ? 'Not scanned. No vulnerability source is configured for this deployment.'
+              : state === 'scanned-no-summary'
+                ? 'Scanned. Figures appear here after the next scan of this version\'s builds.'
+                : 'Not yet scanned. Findings appear once the scanner has examined a build of this version.'}
           </Content>
         </CardBody>
       </Card>
@@ -43,14 +49,22 @@ export function VersionSecurityCard({
   }
 
   const version = summary.version
-  const attribution = summary.builds.find((build) => build.summary)?.summary?.scan
-  // Coverage appears ONLY when something was not examined. With full coverage
-  // the counts are noise; with a gap they are the difference between "nothing
+  // Coverage appears ONLY when something was not examined, and per build:
+  // summed across builds, one package shipped on three platforms would count
+  // three times. With a gap the counts are the difference between "nothing
   // found" and "not looked at", which is the distinction the console exists to
   // preserve.
-  const coverage = hasCoverageGap(attribution) ? coverageSummary(attribution) : []
+  const coverageGaps = summary.builds.filter((build) => hasCoverageGap(build.summary?.scan))
   // Compared as instants: RFC 3339 strings with and without fractional seconds
   // do not sort lexically.
+  const failedRescans = summary.builds.filter((build) => build.latestAttempt?.status === 'failed')
+  const lastFailure = failedRescans.reduce<string | undefined>((latest, build) => {
+    const observed = build.latestAttempt?.observedAt
+    return observed && (!latest || Date.parse(observed) > Date.parse(latest)) ? observed : latest
+  }, undefined)
+  const unsummarised = summary.builds.filter((build) => !build.summary && build.inventory !== 'unparseable')
+  const pending = unsummarised.filter((build) => build.scanned).length
+  const unscanned = unsummarised.length - pending
   const lastScanned = summary.builds.reduce<string | undefined>((latest, build) => {
     const observed = build.summary?.observedAt
     return observed && (!latest || Date.parse(observed) > Date.parse(latest)) ? observed : latest
@@ -96,9 +110,23 @@ export function VersionSecurityCard({
           </div>
         )}
 
+        {failedRescans.length > 0 && (
+          <Content component="p" style={{ marginTop: 12 }} data-rescan="failed">
+            The latest rescan failed for {failedRescans.length}{' '}
+            {failedRescans.length === 1 ? 'build' : 'builds'}
+            {lastFailure ? <> on <When iso={lastFailure} dateOnly /></> : null}; the figures are from
+            the last successful scan.
+          </Content>
+        )}
         {version.buildsSummarised < summary.builds.length && (
           <Content component="p" style={{ marginTop: 12, color: 'var(--pf-t--global--text--color--subtle)' }}>
-            Covers {version.buildsSummarised} of {summary.builds.length} builds; the rest are not yet scanned.
+            Covers {version.buildsSummarised} of {summary.builds.length} builds;{' '}
+            {pending === 0
+              ? 'the rest are not yet scanned.'
+              : [
+                `${pending} scanned ${pending === 1 ? 'build shows its' : 'builds show their'} figures after the next scan`,
+                ...(unscanned > 0 ? [`${unscanned} not yet scanned`] : []),
+              ].join('; ') + '.'}
           </Content>
         )}
         {outOfScanSet && (
@@ -106,11 +134,11 @@ export function VersionSecurityCard({
             No channel selects this version, so these figures are not being updated.
           </Content>
         )}
-        {coverage.length > 0 && (
-          <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
-            Coverage: {coverage.join('; ')}.
+        {coverageGaps.map((build) => (
+          <Content key={build.buildID} component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
+            Coverage on {build.platform || build.component || build.buildID}: {coverageSummary(build.summary?.scan).join('; ')}.
           </Content>
-        )}
+        ))}
 
         <div style={{ marginTop: 20 }}>
           <Title headingLevel="h3" size="md">
@@ -144,8 +172,11 @@ export function VersionSecurityCard({
                         <Label color={buildSummary?.worst ? SEVERITY_COLOUR[buildSummary.worst] ?? 'grey' : 'grey'} isCompact>
                           {build.inventory === 'unparseable'
                             ? 'SBOM unparseable'
-                            : buildSummary?.worst ?? (buildSummary ? 'no findings' : 'not scanned')}
+                            : buildSummary?.worst ?? (buildSummary ? 'no findings' : build.scanned ? 'summary pending' : 'not scanned')}
                         </Label>
+                        {build.latestAttempt?.status === 'failed' ? (
+                          <Label color="orange" variant="outline" isCompact style={{ marginLeft: 6 }}>rescan failed</Label>
+                        ) : null}
                       </DataListCell>,
                       <DataListCell key="counts" alignRight>
                         {buildSummary && buildSummary.counts.length > 0 ? (

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"reflect"
 	"testing"
 	"time"
 
@@ -162,5 +164,63 @@ func TestVersionFindingsSummaryAuthorizationAxes(t *testing.T) {
 	response = call(t, findingsSummaryServer(repository, inScope, nil), http.MethodGet, findingsSummaryPath(), nil, testToken)
 	if response.Code != http.StatusForbidden {
 		t.Fatalf("role below reader = %d, want 403: %s", response.Code, response.Body)
+	}
+}
+
+// The failedRescan and scannedWithoutSummary cases of
+// web/tests/fixtures/findings-summary.json are this handler's output for
+// these inputs; the test fails when either side drifts.
+func TestVersionFindingsSummaryScanStateMatchesWebFixture(t *testing.T) {
+	at := time.Date(2026, 9, 22, 8, 0, 0, 0, time.UTC)
+	cases := map[string]*store.VersionFindingsSummaryResult{
+		"failedRescan": {
+			Version: &store.VersionFindingsSummary{
+				Findings: 1, AffectedPackages: 1, Worst: scan.SeverityCritical,
+				Counts: store.SeverityCounts{Critical: 1}, BuildsSummarised: 1, ComputedAt: at,
+			},
+			Builds: []store.VersionBuildFindingsSummary{{
+				BuildID: "build-a", ComponentType: "docker", Platform: "linux",
+				Inventory: "parsed", Packages: 2, Scanned: true,
+				Summary: &store.BuildFindingsSummary{
+					RunID: "run-a", Scanned: 2, Findings: 1, AffectedPackages: 1,
+					Worst: scan.SeverityCritical, Counts: store.SeverityCounts{Critical: 1},
+					ObservedAt: at, Adapter: "osv", Engine: "osv.example",
+					DatabaseRevision: "unreported", Coverage: scan.Coverage{Submitted: 2},
+				},
+				LatestAttempt: &store.ScanAttempt{
+					ObservedAt: at.Add(24 * time.Hour), Status: store.ScanRunFailed,
+					Error: "detail GHSA-x: after 5 attempts: status 503",
+				},
+			}},
+		},
+		"scannedWithoutSummary": {
+			Builds: []store.VersionBuildFindingsSummary{{
+				BuildID: "build-a", ComponentType: "docker", Platform: "linux",
+				Inventory: "parsed", Packages: 2, Scanned: true,
+			}},
+		},
+	}
+	fixture, err := os.ReadFile("../../../web/tests/fixtures/findings-summary.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures map[string]any
+	if err := json.Unmarshal(fixture, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	for name, result := range cases {
+		handler := findingsSummaryServer(
+			&fakeTenancyRepository{findingsSummary: result},
+			pinIdentity{id: "reader-a", role: identity.RoleReader, scope: scannerTestScope()},
+			healthyScanner(),
+		)
+		response := call(t, handler, http.MethodGet, findingsSummaryPath(), nil, testToken)
+		var got any
+		if err := json.Unmarshal(response.Body.Bytes(), &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, fixtures[name]) {
+			t.Errorf("%s: handler output %s differs from the web fixture", name, response.Body.String())
+		}
 	}
 }

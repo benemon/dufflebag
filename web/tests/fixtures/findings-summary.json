@@ -1,12 +1,32 @@
 {
-  "generatedClient": {
+  "absentScans": {
+    "builds": [
+      {
+        "build_id": "build-a",
+        "component": "amazon-ebs",
+        "inventory": "unparseable",
+        "packages": 0,
+        "platform": "aws",
+        "scanned": false
+      }
+    ],
+    "scanner_configured": true,
+    "version": null
+  },
+  "failedRescan": {
     "builds": [
       {
         "build_id": "build-a",
         "component": "docker",
         "inventory": "parsed",
+        "latest_attempt": {
+          "error": "detail GHSA-x: after 5 attempts: status 503",
+          "observed_at": "2026-09-23T08:00:00Z",
+          "status": "failed"
+        },
         "packages": 2,
         "platform": "linux",
+        "scanned": true,
         "summary": {
           "adapter": "osv",
           "affected_packages": 1,
@@ -51,18 +71,58 @@
       "worst": "critical"
     }
   },
-  "absentScans": {
+  "generatedClient": {
     "builds": [
       {
         "build_id": "build-a",
-        "component": "amazon-ebs",
-        "inventory": "unparseable",
-        "packages": 0,
-        "platform": "aws"
+        "component": "docker",
+        "inventory": "parsed",
+        "packages": 2,
+        "platform": "linux",
+        "scanned": true,
+        "summary": {
+          "adapter": "osv",
+          "affected_packages": 1,
+          "counts": {
+            "critical": 1,
+            "high": 0,
+            "low": 0,
+            "medium": 0,
+            "negligible": 0,
+            "unknown": 0
+          },
+          "coverage": {
+            "invalid": 0,
+            "submitted": 2,
+            "unsupported": 0,
+            "unversioned": 0
+          },
+          "database_revision": "unreported",
+          "engine": "osv.example",
+          "findings": 1,
+          "observed_at": "2026-09-22T08:00:00Z",
+          "run_id": "run-a",
+          "scanned": 2,
+          "worst": "critical"
+        }
       }
     ],
     "scanner_configured": true,
-    "version": null
+    "version": {
+      "affected_packages": 1,
+      "builds_summarised": 1,
+      "computed_at": "2026-09-22T08:00:00Z",
+      "counts": {
+        "critical": 1,
+        "high": 0,
+        "low": 0,
+        "medium": 0,
+        "negligible": 0,
+        "unknown": 0
+      },
+      "findings": 1,
+      "worst": "critical"
+    }
   },
   "mixedBuilds": {
     "builds": [
@@ -72,6 +132,7 @@
         "inventory": "parsed",
         "packages": 205,
         "platform": "docker",
+        "scanned": true,
         "summary": {
           "adapter": "osv",
           "affected_packages": 1,
@@ -104,6 +165,7 @@
         "inventory": "parsed",
         "packages": 180,
         "platform": "aws",
+        "scanned": true,
         "summary": {
           "adapter": "osv",
           "affected_packages": 1,
@@ -136,6 +198,7 @@
         "inventory": "parsed",
         "packages": 12,
         "platform": "azure",
+        "scanned": true,
         "summary": {
           "adapter": "osv",
           "affected_packages": 0,
@@ -166,14 +229,16 @@
         "component": "azure-arm.broken",
         "inventory": "unparseable",
         "packages": 0,
-        "platform": "azure"
+        "platform": "azure",
+        "scanned": false
       },
       {
         "build_id": "pending-build",
         "component": "googlecompute.pending",
         "inventory": "parsed",
         "packages": 4,
-        "platform": "gce"
+        "platform": "gce",
+        "scanned": false
       }
     ],
     "scanner_configured": true,
@@ -193,6 +258,20 @@
       "worst": "critical"
     }
   },
+  "scannedWithoutSummary": {
+    "builds": [
+      {
+        "build_id": "build-a",
+        "component": "docker",
+        "inventory": "parsed",
+        "packages": 2,
+        "platform": "linux",
+        "scanned": true
+      }
+    ],
+    "scanner_configured": true,
+    "version": null
+  },
   "scannerNotConfigured": {
     "builds": [
       {
@@ -200,7 +279,8 @@
         "component": "docker",
         "inventory": "parsed",
         "packages": 2,
-        "platform": "linux"
+        "platform": "linux",
+        "scanned": false
       }
     ],
     "scanner_configured": false,

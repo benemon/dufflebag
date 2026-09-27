@@ -1663,8 +1663,26 @@ components:
           type: string
           enum: [parsed, unparseable]
         packages: { type: integer, minimum: 0 }
+        scanned:
+          type: boolean
+          description: A current successful scan exists for this build, whether or not its summary has been stored yet.
         summary: { $ref: "#/components/schemas/BuildScanSummary" }
-      required: [build_id, component, platform, inventory, packages]
+        latest_attempt: { $ref: "#/components/schemas/ScanAttempt" }
+      required: [build_id, component, platform, inventory, packages, scanned]
+
+    ScanAttempt:
+      type: object
+      description: |
+        The build's newest scan attempt, present only when it is not the scan
+        whose findings are current: an attempt that failed or was refused, so
+        the findings shown are older than it.
+      properties:
+        observed_at: { type: string, format: date-time }
+        status:
+          type: string
+          enum: [succeeded, failed]
+        error: { type: string }
+      required: [observed_at, status, error]
 
     BuildScanSummary:
       type: object
@@ -1713,6 +1731,7 @@ components:
           allOf:
             - $ref: "#/components/schemas/BuildScanRun"
         packages_affected: { type: integer, minimum: 0 }
+        latest_attempt: { $ref: "#/components/schemas/ScanAttempt" }
         advisories:
           type: array
           items: { $ref: "#/components/schemas/BuildAdvisory" }

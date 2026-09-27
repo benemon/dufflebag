@@ -160,6 +160,54 @@ test('coverage appears only when something was not examined', () => {
   const gap = structuredClone(fixtures.generatedClient)
   gap.builds[0].summary.coverage.unsupported = 12
   const html = render(gap)
-  assert.match(html, /Coverage:/)
+  assert.match(html, /Coverage on linux:/)
   assert.match(html, /does not cover/)
+})
+
+test('a coverage gap on any build is reported, not only the first build\'s', () => {
+  const gap = structuredClone(fixtures.mixedBuilds)
+  gap.builds[1].summary.coverage.unversioned = 7
+  const html = render(gap)
+  assert.match(html, /Coverage on aws: 180 queried; 7 without a version to match\./)
+  assert.equal((html.match(/data-coverage="true"/g) ?? []).length, 1, 'only the build with a gap gets a line')
+  const unnamed = structuredClone(gap)
+  unnamed.builds[1].platform = ''
+  assert.match(render(unnamed), new RegExp(`Coverage on ${unnamed.builds[1].component}: 180 queried`))
+})
+
+test('a scanned build without a stored summary is not called unscanned', () => {
+  const html = render(fixtures.scannedWithoutSummary)
+  assert.match(html, /data-state="scanned-no-summary"/)
+  assert.match(html, /Scanned\. Figures appear here after the next scan of this version&#x27;s builds\./)
+  assert.doesNotMatch(html, /Not yet scanned/)
+})
+
+test('the coverage line names pending and unscanned builds together', () => {
+  const mixed = structuredClone(fixtures.mixedBuilds)
+  mixed.builds.find((build) => build.build_id === 'pending-build').scanned = true
+  const html = render(mixed)
+  assert.match(html, /Covers 3 of 5 builds; 1 scanned build shows its figures after the next scan/)
+  assert.doesNotMatch(html, /not yet scanned\./, 'the unparseable build is labelled, not counted as unscanned')
+  const both = structuredClone(mixed)
+  both.builds.find((build) => build.build_id === 'broken-build').inventory = 'parsed'
+  assert.match(render(both), /1 scanned build shows its figures after the next scan; 1 not yet scanned\./)
+})
+
+test('a failed rescan is stated under the figures it left standing', () => {
+  const html = render(fixtures.failedRescan)
+  assert.match(html, /data-rescan="failed"/)
+  assert.match(html, /The latest rescan failed for 1 build/)
+  assert.match(html, /dateTime="2026-09-23T08:00:00Z"/)
+  assert.match(html, /rescan failed/)
+  assert.doesNotMatch(render(fixtures.generatedClient), /data-rescan/)
+})
+
+test('the projection carries whether a build is scanned and its latest attempt', () => {
+  const summary = project(fixtures.failedRescan)
+  assert.equal(summary.builds[0].scanned, true)
+  assert.deepEqual(summary.builds[0].latestAttempt, {
+    observedAt: '2026-09-23T08:00:00Z', status: 'failed',
+    error: 'detail GHSA-x: after 5 attempts: status 503',
+  })
+  assert.equal(project(fixtures.absentScans).builds[0].scanned, false)
 })

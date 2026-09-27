@@ -54,7 +54,36 @@ type VersionBuildFindingsSummary struct {
 	Platform      string
 	Inventory     string
 	Packages      int
+	// Scanned is true when a current successful run exists, with or without a
+	// stored summary; a build scanned before summaries existed has none yet.
+	Scanned       bool
 	Summary       *BuildFindingsSummary
+	LatestAttempt *ScanAttempt
+}
+
+// ScanAttempt is a build's newest scan attempt when it is not the current run.
+type ScanAttempt struct {
+	ObservedAt time.Time
+	Status     string
+	Error      string
+}
+
+// latestAttempt reads the build's scan pointers and, when the newest attempt
+// is not the current run, that attempt.
+func latestAttempt(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, buildID string) (bool, *ScanAttempt, error) {
+	state, err := readBuildScanState(ctx, tx, r, tenant, buildID, false)
+	if err != nil || state == nil {
+		return false, nil, err
+	}
+	scanned := state.CurrentFindingsRunID != ""
+	if state.LatestAttemptRunID == "" || state.LatestAttemptRunID == state.CurrentFindingsRunID {
+		return scanned, nil, nil
+	}
+	run, err := readScanRun(ctx, tx, r, tenant, state.LatestAttemptRunID)
+	if err != nil {
+		return false, nil, err
+	}
+	return scanned, &ScanAttempt{ObservedAt: run.ObservedAt, Status: run.Status, Error: run.Error}, nil
 }
 
 // VersionFindingsSummaryResult contains the version rollup and all its builds.
@@ -245,6 +274,34 @@ func lockBuildScan(ctx context.Context, tx *sql.Tx, tenant Tenant, buildID strin
 		tenant.OrganizationID.String()+"|"+tenant.ProjectID.String()+"|"+buildID,
 	); err != nil {
 		return fmt.Errorf("acquire build scan lock: %w", err)
+	}
+	return nil
+}
+
+// lockBuildScans takes the scan lock of every build the query names, in id
+// order, so a deletion serialises with scan completions instead of racing
+// their inserts against its cascade.
+func lockBuildScans(ctx context.Context, tx *sql.Tx, tenant Tenant, query string, args ...any) error {
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY builds.id`, args...)
+	if err != nil {
+		return fmt.Errorf("list builds to lock: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("list builds to lock: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("list builds to lock: %w", err)
+	}
+	for _, id := range ids {
+		if err := lockBuildScan(ctx, tx, tenant, id); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -545,6 +602,13 @@ func (r *Repository) GetVersionFindingsSummary(
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list version summary builds: %w", err)
+	}
+	_ = rows.Close()
+	for i := range result.Builds {
+		build := &result.Builds[i]
+		if build.Scanned, build.LatestAttempt, err = latestAttempt(ctx, tx, r, tenant, build.BuildID); err != nil {
+			return nil, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return nil, err

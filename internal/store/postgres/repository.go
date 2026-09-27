@@ -281,6 +281,13 @@ func (r *Repository) DeleteBucket(ctx context.Context, tenant Tenant, name strin
 	if err != nil {
 		return err
 	}
+	if err := lockBuildScans(ctx, tx, tenant, `
+		SELECT builds.id FROM builds
+		JOIN versions ON versions.id = builds.version_id
+		JOIN buckets ON buckets.id = versions.bucket_id
+		WHERE buckets.name = $1`, name); err != nil {
+		return err
+	}
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT sboms.object_key
@@ -375,6 +382,10 @@ func (r *Repository) DeleteVersion(
 	})
 	if err != nil {
 		return mapNotFound("delete version", err)
+	}
+	if err := lockBuildScans(ctx, tx, tenant,
+		`SELECT builds.id FROM builds WHERE builds.version_id = $1`, versionRow.ID); err != nil {
+		return err
 	}
 	version, err := r.restoreVersion(ctx, q, tenant, versionRow)
 	if err != nil {

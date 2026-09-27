@@ -1364,3 +1364,148 @@ func TestScanRunBinding(t *testing.T) {
 		}
 	})
 }
+
+// TestDeletionAndScanCompletionDoNotDeadlock races a bucket or version
+// deletion against a scan completing on one of its builds. Either order is a
+// valid history; an error from either side is the defect (duf-2myc).
+func TestDeletionAndScanCompletionDoNotDeadlock(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	// seedScannerBuild writes rows without MACs, so this repository runs
+	// without a keyring; integrity is covered elsewhere.
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)
+	transcript := []byte("race-transcript")
+
+	for i := range 30 {
+		for _, target := range []string{"bucket", "version"} {
+			suffix := fmt.Sprintf("race-%s-%d", target, i)
+			seed := seedScannerBuild(t, db, suffix, false, false)
+			buildID, sbomID := seed.buildID, seed.sbomID
+			sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := scanRunFixture(t, db, "run-"+suffix, buildID, sequence, store.ScanRunSucceeded, base, transcript)
+			findings := []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}
+
+			start := make(chan struct{})
+			errs := make(chan error, 2)
+			go func() {
+				<-start
+				errs <- repo.RecordScanRun(ctx, tenant, run, findings, transcript)
+			}()
+			go func() {
+				<-start
+				if target == "bucket" {
+					errs <- repo.DeleteBucket(ctx, tenant, seed.bucketName)
+					return
+				}
+				errs <- repo.DeleteVersion(ctx, tenant, seed.bucketName, seed.fingerprint, base)
+			}()
+			close(start)
+			for range 2 {
+				if err := <-errs; err != nil {
+					t.Fatalf("%s: concurrent deletion and completion: %v", suffix, err)
+				}
+			}
+		}
+	}
+}
+
+// TestSummaryScanStateSignals pins what the summary and native reads say about
+// a build's scan state beyond the figures: whether a current scan exists at
+// all, and whether a newer attempt failed over it.
+func TestSummaryScanStateSignals(t *testing.T) {
+	db, adminURL, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	repo.SetKeyring(testRing(t))
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 28, 10, 0, 0, 0, time.UTC)
+	transcript := []byte("state-signals")
+	buildID, sbomID := seedScanParents(t, db, orgA, projectA, "signals")
+	tx, err := store.BeginTenant(ctx, db, orgA, projectA, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE sboms SET parse_status = 'parsed' WHERE id = $1`, sbomID); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	build := func() store.VersionBuildFindingsSummary {
+		t.Helper()
+		summary, err := repo.GetVersionFindingsSummary(ctx, tenant, "scan-signals", "fp-scan-signals")
+		if err != nil {
+			t.Fatal(err)
+		}
+		return summary.Builds[0]
+	}
+	allocate := func() int64 {
+		t.Helper()
+		sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sequence
+	}
+
+	if got := build(); got.Scanned || got.Summary != nil || got.LatestAttempt != nil {
+		t.Fatalf("never scanned = %+v, want scanned=false with no summary or attempt", got)
+	}
+
+	good := scanRunFixture(t, db, "run-signals-1", buildID, allocate(), store.ScanRunSucceeded, base, transcript)
+	if err := repo.RecordScanRun(ctx, tenant, good, []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}, transcript); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(); !got.Scanned || got.Summary == nil || got.LatestAttempt != nil {
+		t.Fatalf("current scan = %+v, want scanned with a summary and no newer attempt", got)
+	}
+
+	failed := scanRunFixture(t, db, "run-signals-2", buildID, allocate(), store.ScanRunFailed, base.Add(24*time.Hour), transcript)
+	failed.Error = "detail GHSA-x: after 5 attempts: status 503"
+	if err := repo.RecordScanRun(ctx, tenant, failed, nil, transcript); err != nil {
+		t.Fatal(err)
+	}
+	got := build()
+	if got.Summary == nil || got.Summary.RunID != "run-signals-1" {
+		t.Fatalf("summary after a failed rescan = %+v, want the last successful run's", got.Summary)
+	}
+	if got.LatestAttempt == nil || got.LatestAttempt.Status != store.ScanRunFailed ||
+		!got.LatestAttempt.ObservedAt.Equal(base.Add(24*time.Hour)) || got.LatestAttempt.Error != failed.Error {
+		t.Fatalf("latest attempt = %+v, want the failed rescan", got.LatestAttempt)
+	}
+	native, err := repo.GetBuildFindings(ctx, tenant, "scan-signals", "fp-scan-signals", buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if native.LatestAttempt == nil || native.LatestAttempt.Status != store.ScanRunFailed {
+		t.Fatalf("native read latest attempt = %+v, want the failed rescan", native.LatestAttempt)
+	}
+
+	superURL, err := url.Parse(adminURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	superURL.User = url.UserPassword("postgres", "postgres")
+	admin, err := sql.Open("pgx", superURL.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer admin.Close()
+	// A build scanned before stored summaries existed has a current run and no
+	// summary row.
+	if _, err := admin.ExecContext(ctx, `DELETE FROM build_findings_summary WHERE build_id = $1`, buildID); err != nil {
+		t.Fatal(err)
+	}
+	if got := build(); !got.Scanned || got.Summary != nil {
+		t.Fatalf("scanned without a stored summary = %+v, want scanned=true and no summary", got)
+	}
+}
