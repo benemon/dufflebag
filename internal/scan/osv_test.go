@@ -1532,6 +1532,25 @@ func TestFixedVersionIgnoresGitCommits(t *testing.T) {
 // the service page size — whole-VM inventories hit this routinely through
 // kernel-family source packages (duf-1aon).
 
+func TestQuerybatchPaginationDropsRepeatedIDs(t *testing.T) {
+	page1 := batchBody(t, `{"vulns":[{"id":"CVE-A"},{"id":"CVE-B"}],"next_page_token":"tok-1"}`)
+	page2 := batchBody(t, `{"vulns":[{"id":"CVE-B"},{"id":"CVE-C"}]}`)
+	stub := &stubOSV{t: t, batches: []stubResponse{fixtureResponse(page1), fixtureResponse(page2)}}
+	srv := stub.server()
+	defer srv.Close()
+	o := newTestOSV(srv)
+	state := &scanState{details: map[string][]byte{}, confirmations: map[confirmationKey][][]byte{}}
+	subs := []submission{{q: &Query{Ecosystem: "Ubuntu:22.04", Name: "linux", Version: "5.15.0-113.123"}}}
+
+	candidates, err := o.querybatch(context.Background(), subs, state)
+	if err != nil {
+		t.Fatalf("querybatch: %v", err)
+	}
+	if got := candidates[0]; !reflect.DeepEqual(got, []string{"CVE-A", "CVE-B", "CVE-C"}) {
+		t.Fatalf("candidates = %v, want each id once in first-seen order", got)
+	}
+}
+
 func TestQuerybatchFollowsPagination(t *testing.T) {
 	page1 := batchBody(t, `{"vulns":[{"id":"CVE-A"}],"next_page_token":"tok-1"}`)
 	page2 := batchBody(t, `{"vulns":[{"id":"CVE-B"}]}`)
@@ -1668,7 +1687,10 @@ func TestPaginationSucceedsAtExactlyTheBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("querybatch at the bound: %v", err)
 	}
-	if got := len(candidates[0]); got != osvMaxResultPages+1 {
-		t.Fatalf("candidates = %d ids, want one per page", got)
+	if got := len(stub.batchBodies); got != osvMaxResultPages+1 {
+		t.Fatalf("querybatch calls = %d, want every page up to the bound", got)
+	}
+	if !reflect.DeepEqual(candidates[0], []string{"CVE-A", "CVE-Z"}) {
+		t.Fatalf("candidates = %v, want the repeated id once and the last page's id", candidates[0])
 	}
 }

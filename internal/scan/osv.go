@@ -301,11 +301,26 @@ func (o *OSV) querybatch(ctx context.Context, subs []submission, state *scanStat
 				if err != nil {
 					return nil, fmt.Errorf("querybatch chunk %d result %d: %w", start/osvQuerybatchLimit, i, err)
 				}
-				candidates[start+i] = append(candidates[start+i], more...)
+				candidates[start+i] = distinct(append(candidates[start+i], more...))
 			}
 		}
 	}
 	return candidates, nil
+}
+
+// distinct keeps the first occurrence of each id. An advisory repeated across
+// pages would otherwise become two findings for one package and fail the
+// run's insert on every retry.
+func distinct(ids []string) []string {
+	seen := make(map[string]bool, len(ids))
+	kept := ids[:0]
+	for _, id := range ids {
+		if !seen[id] {
+			seen[id] = true
+			kept = append(kept, id)
+		}
+	}
+	return kept
 }
 
 // querybatchPages follows a result's pagination through single-query batch
