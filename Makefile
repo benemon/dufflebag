@@ -4,6 +4,9 @@ SWAGGER_VERSION := v0.35.3
 SWAGGER         := $(shell go env GOPATH)/bin/swagger
 GOLANGCI_VERSION := v2.11.3
 GOLANGCI        := $(shell go env GOPATH)/bin/golangci-lint
+# The linter reads compiler export data, so it and the packages it loads must
+# come from the toolchain go.mod declares; a newer local Go breaks both.
+GO_TOOLCHAIN    := go$(shell awk '/^go /{print $$2}' go.mod)
 SQLC_VERSION    := v1.30.0
 OAPI_VERSION    := v2.8.0
 OAPI            := $(shell go env GOPATH)/bin/oapi-codegen
@@ -109,7 +112,7 @@ $(SWAGGER):
 	go install github.com/go-swagger/go-swagger/cmd/swagger@$(SWAGGER_VERSION)
 
 $(GOLANGCI):
-	go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_VERSION)
 
 $(SQLC):
 	go install github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
@@ -605,7 +608,7 @@ expand-contract: ## Run the previous application release against the new schema
 .PHONY: lint
 lint: $(GOLANGCI) ## Run linters, including the ADR-0002 layer boundaries
 	go vet ./...
-	$(GOLANGCI) run ./...
+	GOTOOLCHAIN=$(GO_TOOLCHAIN) $(GOLANGCI) run ./...
 
 .PHONY: image
 image: ## Build the container image locally
