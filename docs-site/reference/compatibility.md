@@ -379,6 +379,24 @@ while `GET` keeps its HTTP 409-ish / code 10 version-identity miss. A missing
 build is HTTP 404 / code 5, `The build with identifier <build_id> does not
 exist.`
 
+### Fidelity rungs
+
+Each served operation sits on one of three rungs. Rung one is the default: the
+operation answers as HCP does, quirks included. Rung two keeps the wire
+contract byte-identical - response schema, pagination semantics, error
+shapes, the `Dufflebag-*` extension headers - and reimplements the cost model
+beneath it, so a stock client observes only that the operation is faster.
+Rung three replaces the operation with a native platform-plane endpoint; the
+HCP-shaped operation is then retired and answers HTTP 501 with gRPC code 12,
+the same refusal as an operation never served. An operation climbs a rung
+only when the one below cannot carry the need.
+
+| Rung | Operations |
+|---|---|
+| Same shape, same behaviour | Every operation in the tables above |
+| Same shape, our cost model | None yet |
+| Retired in favour of a native endpoint | None yet |
+
 ### The 2021-04-30 API
 
 Every API reached by a **supported client version** must be compatible
