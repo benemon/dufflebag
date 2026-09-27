@@ -2226,15 +2226,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(fullText, /Last scanned:/)
     assert.match(fullText, /No known findings/)
     assert.match(fullText, /1 scanned/)
-    assert.doesNotMatch(fullText, /Coverage:/)
+    assert.doesNotMatch(fullText, /Coverage on/)
     await assertNoVerdicts()
 
     // 3. The same zero result with unsupported and unqueryable packages is a
     // visibly different answer, with every coverage value pinned exactly.
     await openVersion(gap)
     const gapDate = new Date(gapScan.observedAt).toISOString().slice(0, 10)
+    // The seeded builds report no platform, so the line names the component.
     const gapCoverage =
-      'Coverage: 1 queried; 1 in ecosystems the scanner does not cover; ' +
+      'Coverage on docker.scanner-gap: 1 queried; 1 in ecosystems the scanner does not cover; ' +
       '1 without a version to match.'
     await until('the coverage-gap figures', async () =>
       (await securityText()).includes(gapCoverage))

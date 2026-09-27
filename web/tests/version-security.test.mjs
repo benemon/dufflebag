@@ -170,6 +170,9 @@ test('a coverage gap on any build is reported, not only the first build\'s', () 
   const html = render(gap)
   assert.match(html, /Coverage on aws: 180 queried; 7 without a version to match\./)
   assert.equal((html.match(/data-coverage="true"/g) ?? []).length, 1, 'only the build with a gap gets a line')
+  const unnamed = structuredClone(gap)
+  unnamed.builds[1].platform = ''
+  assert.match(render(unnamed), new RegExp(`Coverage on ${unnamed.builds[1].component}: 180 queried`))
 })
 
 test('a scanned build without a stored summary is not called unscanned', () => {

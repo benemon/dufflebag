@@ -136,7 +136,7 @@ export function VersionSecurityCard({
         )}
         {coverageGaps.map((build) => (
           <Content key={build.buildID} component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
-            Coverage on {build.platform}: {coverageSummary(build.summary?.scan).join('; ')}.
+            Coverage on {build.platform || build.component || build.buildID}: {coverageSummary(build.summary?.scan).join('; ')}.
           </Content>
         ))}
 
