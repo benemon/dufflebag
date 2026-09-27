@@ -522,8 +522,7 @@ export function PackagesCard({
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
             <Spinner isInline aria-label="Reading package inventory…" />
             <Content component="p" aria-live="polite" style={{ margin: 0 }}>
-              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
-              Large images can take a minute or more.
+              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.
             </Content>
           </div>
         </CardBody>

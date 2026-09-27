@@ -28,7 +28,7 @@ The Security card reads a stored summary computed when each build's scan
 completes. It refreshes with the page, so a rescan's findings appear without a
 manual refresh. Opening a row in the Security card goes directly to that
 build's Vulnerabilities facet. Opening a build reads that build's package
-inventory, which large images can take a minute or more to deliver.
+inventory.
 
 A build scanned before stored summaries existed shows as **summary pending**
 until its next scan, rather than as unscanned. When a build's latest rescan

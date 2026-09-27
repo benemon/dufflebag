@@ -1432,7 +1432,7 @@ test('build detail stays visible while package inventory reports progress', asyn
   assert.match(markup, />SBOM</)
   assert.match(markup, /reading packages…/)
   assert.match(markup, /Reading package inventory… 321 packages read so far\./)
-  assert.match(markup, /Large images can take a minute or more\./)
+  assert.doesNotMatch(markup, /minute or more/)
   assert.doesNotMatch(markup, /pf-v6-c-skeleton/)
 })
 
