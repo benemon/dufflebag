@@ -1364,3 +1364,54 @@ func TestScanRunBinding(t *testing.T) {
 		}
 	})
 }
+
+// TestDeletionAndScanCompletionDoNotDeadlock races a bucket or version
+// deletion against a scan completing on one of its builds. Either order is a
+// valid history; an error from either side is the defect (duf-2myc).
+func TestDeletionAndScanCompletionDoNotDeadlock(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	// seedScannerBuild writes rows without MACs, so this repository runs
+	// without a keyring; integrity is covered elsewhere.
+	repo := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+	base := time.Date(2026, 9, 28, 9, 0, 0, 0, time.UTC)
+	transcript := []byte("race-transcript")
+
+	for i := range 30 {
+		for _, target := range []string{"bucket", "version"} {
+			suffix := fmt.Sprintf("race-%s-%d", target, i)
+			seed := seedScannerBuild(t, db, suffix, false, false)
+			buildID, sbomID := seed.buildID, seed.sbomID
+			sequence, err := repo.AllocateScanRunSequence(ctx, tenant)
+			if err != nil {
+				t.Fatal(err)
+			}
+			run := scanRunFixture(t, db, "run-"+suffix, buildID, sequence, store.ScanRunSucceeded, base, transcript)
+			findings := []scan.Finding{scanFindingFixture(sbomID, "ALPINE-CVE-2022-48174", base)}
+
+			start := make(chan struct{})
+			errs := make(chan error, 2)
+			go func() {
+				<-start
+				errs <- repo.RecordScanRun(ctx, tenant, run, findings, transcript)
+			}()
+			go func() {
+				<-start
+				if target == "bucket" {
+					errs <- repo.DeleteBucket(ctx, tenant, seed.bucketName)
+					return
+				}
+				errs <- repo.DeleteVersion(ctx, tenant, seed.bucketName, seed.fingerprint, base)
+			}()
+			close(start)
+			for range 2 {
+				if err := <-errs; err != nil {
+					t.Fatalf("%s: concurrent deletion and completion: %v", suffix, err)
+				}
+			}
+		}
+	}
+}

@@ -766,6 +766,11 @@ after(async () => {
 })
 
 test('the console works end to end, from first run to a seeded tenancy', async (t) => {
+  // A 500 in a failed step names only a correlation id; the server's own log
+  // is the rest of the evidence, and a CI runner keeps nothing else.
+  t.afterEach((step) => {
+    if (!step.passed) process.stderr.write(`--- server output after "${step.name}" ---\n${serverOutput.slice(-20000)}\n`)
+  })
   let credentials
 
   await t.test('a fresh instance lands on the wizard, not on sign-in', async () => {

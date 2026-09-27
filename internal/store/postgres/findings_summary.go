@@ -249,6 +249,34 @@ func lockBuildScan(ctx context.Context, tx *sql.Tx, tenant Tenant, buildID strin
 	return nil
 }
 
+// lockBuildScans takes the scan lock of every build the query names, in id
+// order, so a deletion serialises with scan completions instead of racing
+// their inserts against its cascade.
+func lockBuildScans(ctx context.Context, tx *sql.Tx, tenant Tenant, query string, args ...any) error {
+	rows, err := tx.QueryContext(ctx, query+` ORDER BY builds.id`, args...)
+	if err != nil {
+		return fmt.Errorf("list builds to lock: %w", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("list builds to lock: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("list builds to lock: %w", err)
+	}
+	for _, id := range ids {
+		if err := lockBuildScan(ctx, tx, tenant, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (r *Repository) recomputeVersionFindingsSummaryLocked(
 	ctx context.Context, tx *sql.Tx, tenant Tenant, bucketID, versionID string,
 ) error {
