@@ -209,7 +209,6 @@ export type VersionSecuritySummary = {
     findings: number
     affectedPackages: number
     buildsSummarised: number
-    computedAt: string
   } | null
   builds: {
     buildID: string
@@ -220,11 +219,9 @@ export type VersionSecuritySummary = {
     summary?: {
       worst?: Severity
       counts: SeverityCount[]
-      findings: number
-      affectedPackages: number
       scanned: number
       observedAt: string
-      scan: ScanAttribution
+      scan: Pick<ScanAttribution, 'submitted' | 'invalid' | 'unversioned' | 'unsupported'>
     }
   }[]
 }
@@ -560,7 +557,6 @@ export function projectVersionSecuritySummary(
       findings: response.version.findings,
       affectedPackages: response.version.affected_packages,
       buildsSummarised: response.version.builds_summarised,
-      computedAt: response.version.computed_at,
     } : null,
     builds: response.builds.map((build) => ({
       buildID: build.build_id,
@@ -571,15 +567,9 @@ export function projectVersionSecuritySummary(
       ...(build.summary ? { summary: {
         ...(build.summary.worst ? { worst: build.summary.worst as Severity } : {}),
         counts: projectSeverityCounts(build.summary.counts),
-        findings: build.summary.findings,
-        affectedPackages: build.summary.affected_packages,
         scanned: build.summary.scanned,
         observedAt: build.summary.observed_at,
         scan: {
-          adapter: build.summary.adapter,
-          engine: build.summary.engine,
-          databaseRevision: build.summary.database_revision,
-          observedAt: build.summary.observed_at,
           submitted: build.summary.coverage.submitted,
           invalid: build.summary.coverage.invalid,
           unversioned: build.summary.coverage.unversioned,
@@ -932,7 +922,7 @@ function buildState(status?: string): BuildState {
   }
 }
 
-/** Package inventories for the supplied builds. */
+/** LoadedBuildFindings is one build's inventory with its packages resolved. */
 export type LoadedBuildFindings = Omit<BuildFindings, 'packages'> & { packages: Package[] }
 
 export function packageInventoryFromFindings(
@@ -949,7 +939,7 @@ export function packageInventoryFromFindings(
 
 export function useVersionFindings(
   bucket: string, fingerprint: string,
-  builds: { id: string; platform: string; component: string }[],
+  builds: { id: string }[],
 ) {
   const key = builds.map((build) => build.id).join(',')
   const identity = `${bucket}/${fingerprint}/${key}`
@@ -1005,7 +995,7 @@ export async function loadVersionFindings(
   tenant: ApiTenant,
   bucket: string,
   fingerprint: string,
-  builds: { id: string; platform: string; component: string }[],
+  builds: { id: string }[],
   onProgress?: (progress: InventoryProgress) => void,
   options: { force?: boolean } = {},
 ): Promise<LoadedBuildFindings[]> {
@@ -1025,20 +1015,14 @@ export async function loadVersionFindings(
           const scan = scanAttribution(headers)
           return {
             buildID: build.id,
-            platform: build.platform || 'unknown',
-            component: build.component,
             packages: packages.map(toPackage),
-            scanned: packages.length,
             ...(scan ? { scan } : {}),
           }
         } catch (err: unknown) {
           if (!(err instanceof ApiError) || err.status !== 422) throw err
           return {
             buildID: build.id,
-            platform: build.platform || 'unknown',
-            component: build.component,
             packages: [],
-            scanned: 0,
             unparseable: true,
           }
         }

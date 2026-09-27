@@ -11,8 +11,8 @@ import (
 // Scanner is the seam between the reconciler and an external scanner service.
 // Scan is all-or-nothing: any partial provider failure returns an error, and
 // Findings are usable only when the error is nil. Result always carries the
-// attribution and every provider response received, even alongside an error,
-// so a failed run still leaves an auditable transcript.
+// attribution and the final provider response to every request, even
+// alongside an error, so a failed run still leaves an auditable transcript.
 type Scanner interface {
 	Scan(ctx context.Context, inv Inventory) (Result, error)
 	Probe(ctx context.Context) (Health, error)
