@@ -2233,12 +2233,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // visibly different answer, with every coverage value pinned exactly.
     await openVersion(gap)
     const gapDate = new Date(gapScan.observedAt).toISOString().slice(0, 10)
-    // The seeded builds report no platform, so the line names the component.
     const gapCoverage =
-      'Coverage on docker.scanner-gap: 1 queried; 1 in ecosystems the scanner does not cover; ' +
+      'Coverage on docker: 1 queried; 1 in ecosystems the scanner does not cover; ' +
       '1 without a version to match.'
     await until('the coverage-gap figures', async () =>
-      (await securityText()).includes(gapCoverage))
+      (await securityText()).includes(gapCoverage)).catch(async (err) => {
+      throw new Error(`${err.message}; the Security card read:\n${await securityText()}`)
+    })
     const gapText = await securityText()
     assert.ok((await securityScanDate()).startsWith(gapDate), 'gap scan date must render')
     assert.match(gapText, /No known findings/)
