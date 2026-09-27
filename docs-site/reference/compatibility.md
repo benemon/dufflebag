@@ -973,7 +973,10 @@ carries `Dufflebag-Scan-Run-Id`, `Dufflebag-Scan-Adapter`, `Dufflebag-Scan-Engin
 kept in headers because the frozen vulnerability JSON has no coverage or
 provenance fields.
 
-Findings are deduplicated by
+A run becomes a build's current findings only if the build is still `done`
+and its inventory is byte-for-byte the one the run examined; otherwise the
+run is recorded as failed with the reason and the previous current findings
+stand. Findings are deduplicated by
 `(build_id, package_name, package_version, purl, vulnerability_id)` before
 package rows, impacts, and counts are produced. Package identity remains the
 client-reported SBOM projection described above. Vulnerability metadata and

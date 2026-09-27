@@ -2,7 +2,9 @@ package postgres
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -390,7 +392,7 @@ func (s *ScannerService) processClaim(ctx context.Context, claim *pendingScanCla
 	if !eligible {
 		return s.deletePendingScan(ctx, claim)
 	}
-	terminal, dispatchErr := s.dispatch(ctx, claim.tenant, claim.buildID, inventory)
+	terminal, dispatchErr := s.dispatch(ctx, claim.tenant, claim.buildID, inventory, InventoryDigest(inventory))
 	if terminal {
 		return errors.Join(dispatchErr, s.deletePendingScan(ctx, claim))
 	}
@@ -449,6 +451,11 @@ func scanInventoryTx(ctx context.Context, tx *sql.Tx, buildID string) (scan.Inve
 	if !eligible {
 		return scan.Inventory{}, false, nil
 	}
+	inventory, err := buildInventoryTx(ctx, tx, buildID)
+	return inventory, true, err
+}
+
+func buildInventoryTx(ctx context.Context, tx *sql.Tx, buildID string) (scan.Inventory, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT packages.sbom_id, packages.name, packages.version, packages.purl
 		FROM sbom_packages packages
@@ -457,21 +464,45 @@ func scanInventoryTx(ctx context.Context, tx *sql.Tx, buildID string) (scan.Inve
 		WHERE sboms.build_id = $1
 		ORDER BY packages.sbom_id, packages.name, packages.version, packages.purl`, buildID)
 	if err != nil {
-		return scan.Inventory{}, false, fmt.Errorf("list scan inventory: %w", err)
+		return scan.Inventory{}, fmt.Errorf("list scan inventory: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 	var inventory scan.Inventory
 	for rows.Next() {
 		var pkg scan.Package
 		if err := rows.Scan(&pkg.SBOMID, &pkg.Name, &pkg.Version, &pkg.Purl); err != nil {
-			return scan.Inventory{}, false, fmt.Errorf("scan inventory package: %w", err)
+			return scan.Inventory{}, fmt.Errorf("scan inventory package: %w", err)
 		}
 		inventory.Packages = append(inventory.Packages, pkg)
 	}
-	return inventory, true, rows.Err()
+	return inventory, rows.Err()
 }
 
-func (s *ScannerService) dispatch(ctx context.Context, tenant Tenant, buildID string, inventory scan.Inventory) (bool, error) {
+// InventoryDigest identifies exactly which package rows a scan examined, so
+// a run can be refused at completion if the build's inventory moved under it.
+func InventoryDigest(inventory scan.Inventory) string {
+	sum := sha256.New()
+	for _, pkg := range inventory.Packages {
+		for _, field := range []string{pkg.SBOMID, pkg.Name, pkg.Version, pkg.Purl} {
+			sum.Write([]byte(field))
+			sum.Write([]byte{0})
+		}
+		sum.Write([]byte{'\n'})
+	}
+	return hex.EncodeToString(sum.Sum(nil))
+}
+
+// InventoryDigestTx digests the build's live inventory inside the caller's
+// transaction; it is the completion-time half of the run binding.
+func InventoryDigestTx(ctx context.Context, tx *sql.Tx, buildID string) (string, error) {
+	inventory, err := buildInventoryTx(ctx, tx, buildID)
+	if err != nil {
+		return "", err
+	}
+	return InventoryDigest(inventory), nil
+}
+
+func (s *ScannerService) dispatch(ctx context.Context, tenant Tenant, buildID string, inventory scan.Inventory, inventoryDigest string) (bool, error) {
 	if !s.beginCircuitAttempt() {
 		return false, errors.New("scanner audit circuit is open")
 	}
@@ -533,19 +564,24 @@ func (s *ScannerService) dispatch(ctx context.Context, tenant Tenant, buildID st
 		Status: ScanRunSucceeded, Adapter: adapterName, Engine: engine,
 		DatabaseRevision: result.Attribution.DatabaseRevision, ObservedAt: observedAt,
 		TranscriptDigest: result.Transcript.Digest(), Coverage: result.Coverage, CreatedAt: now,
+		InventoryDigest: inventoryDigest,
 	}
 	findings := result.Findings
 	if scanErr != nil {
 		run.Status, run.Error, findings = ScanRunFailed, scanErr.Error(), nil
 	}
 	recordErr := s.repository.RecordScanRun(ctx, tenant, run, findings, result.Transcript.Encode())
-	terminal := recordErr == nil
+	refused := errors.Is(recordErr, ErrScanRunRefused)
+	terminal := recordErr == nil || refused
 	outcome, reason := identity.AuditOutcomeSuccess, ""
 	if scanErr != nil || recordErr != nil {
 		outcome = identity.AuditOutcomeFailure
-		if scanErr != nil {
+		switch {
+		case scanErr != nil:
 			reason = "adapter_failed"
-		} else {
+		case refused:
+			reason = "inventory_changed"
+		default:
 			reason = "record_failed"
 		}
 	}

@@ -844,3 +844,68 @@ func TestScannerHubIntegration(t *testing.T) {
 		}
 	})
 }
+
+// mutatingAdapter changes the build's inventory while its scan is in flight,
+// the shape of a mid-run SBOM re-upload.
+type mutatingAdapter struct {
+	scannerStub
+	db     *sql.DB
+	sbomID string
+}
+
+func (a *mutatingAdapter) Scan(ctx context.Context, inventory scan.Inventory) (scan.Result, error) {
+	tx, err := store.BeginTenant(ctx, a.db, orgA, projectA, "")
+	if err != nil {
+		return scan.Result{}, err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO sbom_packages (organization_id, project_id, bucket_id, sbom_id, name, version, purl)
+		SELECT organization_id, project_id, bucket_id, id, 'openssl', '3.0.11', 'pkg:apk/alpine/openssl@3.0.11' FROM sboms WHERE id = $1`, a.sbomID); err != nil {
+		return scan.Result{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return scan.Result{}, err
+	}
+	return a.scannerStub.Scan(ctx, inventory)
+}
+
+// TestScannerRefusesRunOverChangedInventory drives the refusal through the
+// service: the run is recorded failed, the queue row is consumed, and the
+// audit response names the reason.
+func TestScannerRefusesRunOverChangedInventory(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseTenant(orgA, projectA)
+	ctx := context.Background()
+
+	seed := seedScannerBuild(t, db, "mutating", true, true)
+	writer := &scannerAuditWriter{}
+	service := newScannerService(t, repository, &mutatingAdapter{db: db, sbomID: seed.sbomID}, writer, 1, time.Now)
+	err := service.DrainOnce(ctx)
+	if !errors.Is(err, store.ErrScanRunRefused) {
+		t.Fatalf("DrainOnce = %v, want the refusal surfaced", err)
+	}
+	if pendingCount(t, db, seed.buildID) != 0 {
+		t.Fatal("a refused run left its queue row behind")
+	}
+	state, err := repository.GetBuildScanState(ctx, tenant, seed.buildID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state == nil || state.CurrentFindingsRunID != "" || state.LatestAttemptRunID == "" {
+		t.Fatalf("state = %+v, want no current findings and the refused attempt as latest", state)
+	}
+	run, err := repository.GetScanRun(ctx, tenant, state.LatestAttemptRunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != store.ScanRunFailed || run.Error != "inventory changed during scan" {
+		t.Fatalf("recorded run = %+v, want failed with the inventory reason", run)
+	}
+	records := writer.decoded(t)
+	if len(records) != 2 || records[1]["kind"] != "response" || records[1]["outcome"] != "failure" ||
+		records[1]["reason"] != "inventory_changed" {
+		t.Fatalf("audit records = %#v, want a failure response with reason inventory_changed", records)
+	}
+}

@@ -43,7 +43,14 @@ type ScanRun struct {
 	TranscriptDigest string
 	Coverage         scan.Coverage
 	CreatedAt        time.Time
+	// InventoryDigest is carried at completion only: the claim-time digest the
+	// run scanned, compared against the live inventory and never stored.
+	InventoryDigest string
 }
+
+// ErrScanRunRefused reports a completion recorded as failed because the
+// build's inventory or status changed while the scan ran.
+var ErrScanRunRefused = errors.New("scan run refused: the build changed during the scan")
 
 const (
 	ScanRunSucceeded = "succeeded"
@@ -138,6 +145,16 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 	if err := lockBuildScan(ctx, tx, tenant, run.BuildID); err != nil {
 		return err
 	}
+	if run.InventoryDigest == "" {
+		return fmt.Errorf("scan run %s carries no inventory digest", run.ID)
+	}
+	refusal, err := completionRefusal(ctx, tx, run)
+	if err != nil {
+		return err
+	}
+	if refusal != "" {
+		run.Status, run.Error, findings = ScanRunFailed, refusal, nil
+	}
 
 	coverage, err := json.Marshal(run.Coverage)
 	if err != nil {
@@ -217,7 +234,40 @@ func (r *Repository) RecordScanRun(ctx context.Context, tenant Tenant, run ScanR
 			return err
 		}
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	if refusal != "" {
+		return ErrScanRunRefused
+	}
+	return nil
+}
+
+// completionRefusal names why a run must not become current: the build left
+// done, or its inventory is no longer the one the run examined. The refused
+// run is still recorded, as failed, so the attempt is visible.
+func completionRefusal(ctx context.Context, tx *sql.Tx, run ScanRun) (string, error) {
+	var status string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM builds WHERE id = $1`, run.BuildID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		// The build was deleted mid-scan: the inserts below write nothing
+		// against it, so there is nothing to refuse.
+		return "", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("read build status at completion: %w", err)
+	}
+	if status != "done" {
+		return "build not eligible at completion", nil
+	}
+	live, err := InventoryDigestTx(ctx, tx, run.BuildID)
+	if err != nil {
+		return "", err
+	}
+	if live != run.InventoryDigest {
+		return "inventory changed during scan", nil
+	}
+	return "", nil
 }
 
 func insertScanFinding(ctx context.Context, tx *sql.Tx, r *Repository, tenant Tenant, runID string, f StoredFinding) error {
