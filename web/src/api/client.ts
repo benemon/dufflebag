@@ -383,31 +383,47 @@ export async function listBuildPackages(
   build: string,
   onPage?: (received: { packages: number }) => void,
 ): Promise<{ packages: ApiPackage[]; headers: Headers }> {
-  const packages: ApiPackage[] = []
-  let headers = new Headers()
-  let next = ''
-  do {
-    const query = new URLSearchParams({ 'pagination.page_size': '100' })
-    if (next) query.set('pagination.next_page_token', next)
-    const response = await getWithHeaders<{
-      packages?: ApiPackage[]
-      pagination?: { next_page_token?: string } | null
-    }>(
-      token,
-      `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
-        `/versions/${encodeURIComponent(fingerprint)}/builds/${encodeURIComponent(build)}` +
-        `/packages?${query}`,
-    )
-    // Scan attribution rides on the response headers because the frozen
-    // package JSON has nowhere to carry it. Every page reports the same run,
-    // so the first page's headers stand for the inventory.
-    if (!next) headers = response.headers
-    packages.push(...(response.body?.packages ?? []))
-    onPage?.({ packages: packages.length })
-    next = response.body?.pagination?.next_page_token ?? ''
-  } while (next)
-  return { packages, headers }
+  // Scan attribution rides on the response headers because the frozen package
+  // JSON has nowhere to carry it. Each page reads the build's current run, so a
+  // rescan landing mid-read changes the run id between pages; the read then
+  // starts again rather than returning pages from two scans.
+  for (let attempt = 1; ; attempt++) {
+    const packages: ApiPackage[] = []
+    let headers = new Headers()
+    let next = ''
+    let changed = false
+    do {
+      const query = new URLSearchParams({ 'pagination.page_size': '100' })
+      if (next) query.set('pagination.next_page_token', next)
+      const response = await getWithHeaders<{
+        packages?: ApiPackage[]
+        pagination?: { next_page_token?: string } | null
+      }>(
+        token,
+        `${packerPath(tenant)}/buckets/${encodeURIComponent(bucket)}` +
+          `/versions/${encodeURIComponent(fingerprint)}/builds/${encodeURIComponent(build)}` +
+          `/packages?${query}`,
+      )
+      if (!next) {
+        headers = response.headers
+      } else if (response.headers.get(scanRunHeader) !== headers.get(scanRunHeader)) {
+        changed = true
+        break
+      }
+      packages.push(...(response.body?.packages ?? []))
+      onPage?.({ packages: packages.length })
+      next = response.body?.pagination?.next_page_token ?? ''
+    } while (next)
+    if (!changed) return { packages, headers }
+    if (attempt === inventoryReadAttempts) {
+      throw new Error('The build was rescanned repeatedly while its inventory was being read.')
+    }
+    onPage?.({ packages: 0 })
+  }
 }
+
+const scanRunHeader = 'dufflebag-scan-run-id'
+const inventoryReadAttempts = 3
 
 /**
  * Shape from the producer: renderChannel in internal/compat/hcp2023/handler.go

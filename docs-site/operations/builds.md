@@ -86,7 +86,8 @@ already deduplicated, so it renders without waiting for the inventory.
 
 After a scan, both cards show an **As of** line from the scan run they
 display. The two reads carry the run's id, and the screen re-reads both when
-they disagree, so the tabs never show two different scans of one build. The
+they disagree, so the tabs never show two different scans of one build. A
+rescan that lands while the inventory is being read restarts the read. The
 timestamp describes the findings being displayed, not the time the page was
 opened.
 

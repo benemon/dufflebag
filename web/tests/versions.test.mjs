@@ -1624,6 +1624,39 @@ test('build detail defers inventory and its separate inventory read follows ever
   assert.deepEqual(inventory.packages.map(({ name }) => name), ['openssl', 'zlib'])
 })
 
+test('an inventory read restarts when a rescan lands between its pages', async () => {
+  // Header names and values follow writeScanHeaders in
+  // internal/compat/hcp2023/vulnerability.go; only the run id matters here.
+  const page = (run, body) => new Response(JSON.stringify(body), {
+    status: 200,
+    headers: {
+      'Content-Type': 'application/json',
+      'Dufflebag-Scan-Adapter': 'osv',
+      'Dufflebag-Scan-Run-Id': run,
+    },
+  })
+  let firstPages = 0
+  const [findings] = await withFetch(
+    {
+      '/packages?pagination.page_size=100&pagination.next_page_token=next': () =>
+        page('run-new', { packages: [{ name: 'zlib' }], pagination: {} }),
+      '/packages?pagination.page_size=100': () => {
+        firstPages += 1
+        return page(firstPages === 1 ? 'run-old' : 'run-new', {
+          packages: [{ name: 'openssl' }], pagination: { next_page_token: 'next' },
+        })
+      },
+    },
+    () => loadVersionFindings(
+      'token', { organizationID: 'org', projectID: 'project' }, 'images',
+      'fp-complete', [completeVersion.builds[0]],
+    ),
+  )
+  assert.equal(firstPages, 2, 'the read started again from the first page')
+  assert.equal(findings.scan.runID, 'run-new')
+  assert.deepEqual(findings.packages.map(({ name }) => name), ['openssl', 'zlib'])
+})
+
 test('package paging reports cumulative progress after every page', async () => {
   const progress = []
   const result = await withFetch(
