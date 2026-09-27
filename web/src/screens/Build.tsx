@@ -4,11 +4,12 @@ import {
   CodeBlockCode, Content, DataList, DataListCell, DataListItem, DataListItemCells,
   DataListItemRow, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, FormSelect, FormSelectOption, Label, PageSection, Pagination,
-  Spinner, TextInput, Toolbar, ToolbarContent, ToolbarItem, Truncate,
+  SearchInput, Spinner, TextInput, Title, ToggleGroup, ToggleGroupItem, Toolbar,
+  ToolbarContent, ToolbarFilter, ToolbarItem, Truncate,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import DownloadIcon from '@patternfly/react-icons/dist/esm/icons/download-icon'
-import { useNavigate, useParams } from 'react-router'
+import { useNavigate, useParams, useSearchParams } from 'react-router'
 
 import { PlatformLabel } from '../components/PlatformLabel'
 import { SkeletonRows } from '../components/Loading'
@@ -19,25 +20,51 @@ import { useAuth } from '../auth/AuthContext'
 import type { Role } from '../auth/permissions'
 import {
   buildIsInProgress, packageInventoryFromFindings, useBuild, useVersionFindings,
-  type Build, type BuildDetail, type InventoryProgress, type Package, type SbomRef,
+  useVersionSecuritySummary, type Build, type BuildDetail, type InventoryProgress,
+  type Package, type SbomRef, type VersionSecuritySummary,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
 import { BuildStateLabel, pluginSummary } from './Version'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
-import { FindingCounts, PackageFindingsTable } from '../components/Findings'
+import { SEVERITY_COLOUR } from '../components/Findings'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
-import { SEVERITY_ORDER } from '../data/findings'
+import { SEVERITY_ORDER, severityCounts, type Severity } from '../data/findings'
+import {
+  deriveBuildAdvisories, packageIdentity, type Advisory, type BuildAdvisories,
+} from '../data/advisories'
+import { When } from '../components/When'
 
 const darkCodeStyle: CSSProperties = {
   '--pf-v6-c-code-block--BackgroundColor': 'var(--pf-t--color--gray--95)',
   '--pf-v6-c-code-block--BorderWidth': '0',
 } as CSSProperties
 
+export type BuildFacet = 'overview' | 'artifacts' | 'packages' | 'vulnerabilities'
+
+export function buildFacet(value: string | undefined): BuildFacet {
+  switch (value) {
+    case 'artifacts':
+    case 'packages':
+    case 'vulnerabilities':
+      return value
+    default:
+      return 'overview'
+  }
+}
+
+export function buildFacetPath(
+  bucket: string, fingerprint: string, build: string, facet: BuildFacet,
+): string {
+  return `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}` +
+    `/builds/${encodeURIComponent(build)}/${facet}`
+}
+
 /** Build metadata, labels, command reconstruction and artifact inventory. */
 export function Build() {
-  const { bucket = '', fingerprint = '', build = '' } = useParams()
+  const { bucket = '', fingerprint = '', build = '', facet: facetParam } = useParams()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { data, loading, refreshing: detailRefreshing, failure, gap, reload } =
     useBuild(bucket, fingerprint, build)
   const buildInProgress = data ? buildIsInProgress(data.build) : false
@@ -46,6 +73,7 @@ export function Build() {
     ? (buildInProgress ? [] : [data.build])
     : []
   const inventory = useVersionFindings(bucket, fingerprint, inventoryBuilds)
+  const security = useVersionSecuritySummary(bucket, fingerprint)
   const detail = data ? {
     ...data,
     build: {
@@ -53,7 +81,7 @@ export function Build() {
       packageInventory: packageInventoryFromFindings(inventory.data[0]),
     },
   } : null
-  const refreshing = detailRefreshing || inventory.loading
+  const refreshing = detailRefreshing || inventory.loading || security.refreshing
   const { state, self, selectedOrganization, selectedProject, signOut } = useAuth()
   const fetchSbom = async (sbom: SbomRef): Promise<ArrayBuffer> => {
     if (!state || !selectedOrganization || !selectedProject) {
@@ -74,6 +102,30 @@ export function Build() {
   }
   const versionPath =
     `/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}`
+  const selectedFacet = buildFacet(facetParam)
+  const severityFilter = (searchParams.get('severity') ?? '').split(',').filter(
+    (value): value is Severity => SEVERITY_ORDER.includes(value as Severity),
+  )
+  const selectFacet = (next: BuildFacet) => {
+    const nextSearch = new URLSearchParams()
+    const packageFilter = searchParams.get('package')
+    if ((next === 'packages' || next === 'vulnerabilities') && packageFilter) {
+      nextSearch.set('package', packageFilter)
+    }
+    if (next === 'vulnerabilities' && severityFilter.length > 0) {
+      nextSearch.set('severity', severityFilter.join(','))
+    }
+    const query = nextSearch.toString()
+    navigate(buildFacetPath(bucket, fingerprint, build, next) + (query ? `?${query}` : ''), {
+      replace: true,
+    })
+  }
+  const updateFilters = (packageFilter: string, severities: Severity[]) => {
+    const next = new URLSearchParams()
+    if (packageFilter) next.set('package', packageFilter)
+    if (severities.length > 0) next.set('severity', severities.join(','))
+    setSearchParams(next, { replace: true })
+  }
   return (
     <BuildView
       bucket={bucket}
@@ -81,6 +133,10 @@ export function Build() {
       inventoryLoading={inventory.loading}
       inventoryFailure={inventory.failure}
       inventoryProgress={inventory.progress}
+      securitySummary={security.data}
+      facet={selectedFacet}
+      packageFilter={searchParams.get('package') ?? ''}
+      severityFilter={severityFilter}
       loading={loading}
       refreshing={refreshing}
       failure={failure}
@@ -89,9 +145,12 @@ export function Build() {
       onBackToRegistry={() => navigate('/')}
       onBackToBucket={() => navigate(`/buckets/${encodeURIComponent(bucket)}`)}
       onBackToVersion={() => navigate(versionPath)}
+      onSelectFacet={selectFacet}
+      onUpdateFilters={updateFilters}
       onRefresh={() => {
         reload()
         inventory.reload()
+        security.reload()
       }}
       fetchSbom={fetchSbom}
     />
@@ -104,6 +163,10 @@ export function BuildView({
   inventoryLoading = false,
   inventoryFailure = null,
   inventoryProgress = { packages: 0 },
+  securitySummary = null,
+  facet: suppliedFacet,
+  packageFilter = '',
+  severityFilter = [],
   loading,
   refreshing = false,
   failure,
@@ -112,6 +175,8 @@ export function BuildView({
   onBackToRegistry,
   onBackToBucket,
   onBackToVersion,
+  onSelectFacet = () => {},
+  onUpdateFilters = () => {},
   onRefresh = () => {},
   fetchSbom = () => Promise.reject(new Error('No session.')),
 }: {
@@ -120,6 +185,10 @@ export function BuildView({
   inventoryLoading?: boolean
   inventoryFailure?: string | null
   inventoryProgress?: InventoryProgress
+  securitySummary?: VersionSecuritySummary | null
+  facet?: BuildFacet
+  packageFilter?: string
+  severityFilter?: Severity[]
   loading: boolean
   refreshing?: boolean
   failure: string | null
@@ -128,12 +197,17 @@ export function BuildView({
   onBackToRegistry: () => void
   onBackToBucket: () => void
   onBackToVersion: () => void
+  onSelectFacet?: (facet: BuildFacet) => void
+  onUpdateFilters?: (packageFilter: string, severities: Severity[]) => void
   onRefresh?: () => void
   /** Fetches one stored SBOM's bytes; the view saves them as a file. */
   fetchSbom?: (sbom: SbomRef) => Promise<ArrayBuffer>
 }) {
-  const [facet, setFacet] = useState<'overview' | 'artifacts' | 'packages'>('overview')
+  const { facet: routeFacet } = useParams()
+  const facet = suppliedFacet ?? buildFacet(routeFacet)
   const build = detail?.build
+  const securityBuild = securitySummary?.builds.find((candidate) => candidate.buildID === build?.id)
+  const scanned = Boolean(securityBuild?.summary)
   return (
     <>
       <ScreenHeader
@@ -182,7 +256,7 @@ export function BuildView({
         ) : build ? (
           <FacetRail
             active={facet}
-            onSelect={setFacet}
+            onSelect={onSelectFacet}
             heading="This build"
             label="Build facets"
             unmountOnExit
@@ -209,6 +283,32 @@ export function BuildView({
                     inventoryLoading={inventoryLoading}
                     inventoryFailure={inventoryFailure}
                     inventoryProgress={inventoryProgress}
+                    scanned={scanned}
+                    packageFilter={packageFilter}
+                    vulnerabilityPath={buildFacetPath(
+                      bucket, detail!.version.fingerprint, build.id, 'vulnerabilities',
+                    )}
+                    onPackageFilterChange={(identity) => onUpdateFilters(identity, severityFilter)}
+                  />
+                ),
+              },
+              {
+                key: 'vulnerabilities', label: 'Vulnerabilities',
+                count: vulnerabilityFacetCount(build, inventoryLoading, scanned),
+                content: (
+                  <VulnerabilitiesCard
+                    build={build}
+                    inventoryLoading={inventoryLoading}
+                    inventoryFailure={inventoryFailure}
+                    inventoryProgress={inventoryProgress}
+                    scannerConfigured={securitySummary?.scannerConfigured ?? false}
+                    scanned={scanned}
+                    packageFilter={packageFilter}
+                    severityFilter={severityFilter}
+                    buildPath={buildFacetPath(
+                      bucket, detail!.version.fingerprint, build.id, 'vulnerabilities',
+                    )}
+                    onFiltersChange={onUpdateFilters}
                   />
                 ),
               },
@@ -377,15 +477,21 @@ export function PackagesCard({
   inventoryLoading = false,
   inventoryFailure = null,
   inventoryProgress = { packages: 0 },
+  scanned = false,
+  packageFilter = '',
+  vulnerabilityPath = '',
+  onPackageFilterChange = () => {},
 }: {
   build: Build
   inventoryLoading?: boolean
   inventoryFailure?: string | null
   inventoryProgress?: InventoryProgress
+  scanned?: boolean
+  packageFilter?: string
+  vulnerabilityPath?: string
+  onPackageFilterChange?: (identity: string) => void
 }) {
   const [query, setQuery] = useState('')
-  // Keyed by purl: the identity the findings themselves are keyed by.
-  const [expanded, setExpanded] = useState<string | null>(null)
   // '' = every package, 'affected' = only those with findings, or one band.
   const [findingFilter, setFindingFilter] = useState('')
   const [page, setPage] = useState(1)
@@ -443,6 +549,7 @@ export function PackagesCard({
   const all = build.packageInventory.packages
   const affected = all.filter((pkg) => (pkg.findings?.length ?? 0) > 0)
   const packages = all.filter((pkg) => {
+    if (packageFilter && packageIdentity(pkg) !== packageFilter) return false
     if (!pkg.name.toLowerCase().includes(normalized)) return false
     const findings = pkg.findings ?? []
     if (findingFilter === '') return true
@@ -461,12 +568,10 @@ export function PackagesCard({
   const visiblePackages = packages.slice(first, first + perPage)
   const setCurrentPage = (_event: unknown, nextPage: number) => {
     setPage(nextPage)
-    setExpanded(null)
   }
   const selectPerPage = (_event: unknown, nextPerPage: number) => {
     setPerPage(nextPerPage)
     setPage(1)
-    setExpanded(null)
   }
 
   return (
@@ -477,8 +582,30 @@ export function PackagesCard({
           Reported by client-supplied SBOMs; dufflebag has not verified this inventory.
           {' '}{all.length} {all.length === 1 ? 'package' : 'packages'} · {affected.length} with findings.
         </Content>
-        <Toolbar id="packages-toolbar">
+        {scanned && build.packageInventory.scan?.observedAt ? (
+          <AsOf observedAt={build.packageInventory.scan.observedAt} />
+        ) : null}
+        <Toolbar
+          id="packages-toolbar"
+          clearAllFilters={() => {
+            setQuery('')
+            setFindingFilter('')
+            onPackageFilterChange('')
+            setPage(1)
+          }}
+        >
           <ToolbarContent>
+            <ToolbarFilter
+              categoryName="Package"
+              labels={packageFilter ? [packageFilter] : []}
+              deleteLabel={() => {
+                onPackageFilterChange('')
+                setPage(1)
+              }}
+              showToolbarItem={false}
+            >
+              <span />
+            </ToolbarFilter>
             <ToolbarItem>
               <TextInput
                 aria-label="Filter packages by name"
@@ -528,8 +655,7 @@ export function PackagesCard({
           <>
             <PackageTable
               packages={visiblePackages}
-              expanded={expanded}
-              onToggle={setExpanded}
+              vulnerabilityPath={vulnerabilityPath}
             />
             <Pagination
               itemCount={packages.length}
@@ -548,11 +674,10 @@ export function PackagesCard({
 }
 
 function PackageTable({
-  packages, expanded, onToggle,
+  packages, vulnerabilityPath,
 }: {
   packages: Package[]
-  expanded: string | null
-  onToggle: (purl: string | null) => void
+  vulnerabilityPath: string
 }) {
   return (
     <Table aria-label="Packages" variant="compact" isStickyHeader style={{ marginTop: 14 }}>
@@ -564,43 +689,409 @@ function PackageTable({
           <Th width={20}>Findings</Th>
         </Tr>
       </Thead>
-      {packages.map((pkg, rowIndex) => {
-        // The expander lives ON the findings cell rather than in a leading
-        // column, so a package with nothing found keeps its alignment and
-        // gains no affordance at all.
-        const findings = pkg.findings ?? []
-        const isExpanded = expanded === pkg.purl && findings.length > 0
-        return (
-          <Tbody key={`${pkg.purl}/${pkg.name}/${pkg.version}`} isExpanded={isExpanded}>
+      {packages.map((pkg) => (
+          <Tbody key={`${pkg.purl}/${pkg.name}/${pkg.version}`}>
             <Tr>
               <Td dataLabel="Name"><code>{pkg.name}</code></Td>
               <Td dataLabel="Version">{pkg.version}</Td>
               <Td dataLabel="SBOM">{sbomNames(pkg)}</Td>
-              {findings.length > 0 ? (
-                <Td
-                  dataLabel="Findings"
-                  compoundExpand={{
-                    isExpanded,
-                    onToggle: () => onToggle(isExpanded ? null : pkg.purl),
-                    rowIndex,
-                    columnIndex: 3,
-                  }}
-                >
-                  <FindingCounts findings={findings} isExpanded={isExpanded} />
-                </Td>
-              ) : (
-                <Td dataLabel="Findings"><FindingCounts findings={findings} /></Td>
-              )}
+              <Td dataLabel="Findings">
+                <PackageFindingLinks pkg={pkg} vulnerabilityPath={vulnerabilityPath} />
+              </Td>
             </Tr>
-            {isExpanded && (
+          </Tbody>
+      ))}
+    </Table>
+  )
+}
+
+function PackageFindingLinks({ pkg, vulnerabilityPath }: { pkg: Package; vulnerabilityPath: string }) {
+  const counts = severityCounts(pkg.findings ?? [])
+  if (counts.length === 0) {
+    return <span style={{ color: 'var(--pf-t--global--text--color--disabled)' }} data-findings="none">—</span>
+  }
+  const href = withSearch(vulnerabilityPath, { package: packageIdentity(pkg) })
+  return (
+    <span style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
+      {counts.map(({ severity, count }) => (
+        <Label
+          key={severity}
+          href={href}
+          color={SEVERITY_COLOUR[severity] ?? 'grey'}
+          isCompact
+        >
+          {count} {severity}
+        </Label>
+      ))}
+      <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>›</span>
+    </span>
+  )
+}
+
+export const PackageTableForTest = PackageTable
+export const PackagesCardForTest = PackagesCard
+
+export function VulnerabilitiesCard({
+  build,
+  inventoryLoading = false,
+  inventoryFailure = null,
+  inventoryProgress = { packages: 0 },
+  scannerConfigured,
+  scanned,
+  packageFilter = '',
+  severityFilter = [],
+  buildPath = '',
+  onFiltersChange = () => {},
+}: {
+  build: Build
+  inventoryLoading?: boolean
+  inventoryFailure?: string | null
+  inventoryProgress?: InventoryProgress
+  scannerConfigured: boolean
+  scanned: boolean
+  packageFilter?: string
+  severityFilter?: Severity[]
+  buildPath?: string
+  onFiltersChange?: (packageFilter: string, severities: Severity[]) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [expanded, setExpanded] = useState<string | null>(null)
+  const [page, setPage] = useState(1)
+  const [perPage, setPerPage] = useState(20)
+  if (inventoryLoading) {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <div data-state="loading" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Spinner isInline aria-label="Reading package inventory…" />
+            <Content component="p" aria-live="polite" style={{ margin: 0 }}>
+              Reading package inventory… {countLabel(inventoryProgress.packages, 'package')} read so far.{' '}
+              Large images can take a minute or more.
+            </Content>
+          </div>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (inventoryFailure) {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <Alert data-state="failed" variant="danger" isInline title="Package inventory could not be loaded">
+            <Content component="p">{inventoryFailure}</Content>
+          </Alert>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (build.packageInventory.status === 'unparseable') {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody><Content component="p" data-state="unparseable">SBOM unparseable</Content></CardBody>
+      </Card>
+    )
+  }
+  if (build.packageInventory.status === 'not-loaded') {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <Content component="p" data-state="not-loaded">Package inventory has not been loaded.</Content>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (!scannerConfigured) {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <Content component="p" data-state="never-scanned">
+            Not scanned. No vulnerability source is configured for this deployment.
+          </Content>
+        </CardBody>
+      </Card>
+    )
+  }
+  if (!scanned) {
+    return (
+      <Card>
+        <CardTitle>Vulnerabilities</CardTitle>
+        <CardBody>
+          <Content component="p" data-state="not-yet-scanned">
+            Not yet scanned. Findings appear once the scanner has examined this build.
+          </Content>
+        </CardBody>
+      </Card>
+    )
+  }
+
+  const packages = build.packageInventory.packages
+  const data = deriveBuildAdvisories(packages)
+  const normalized = query.trim().toLowerCase()
+  const advisories = data.advisories.filter((advisory) => {
+    if (packageFilter && !advisory.hits.some((hit) => hit.packageIdentity === packageFilter)) return false
+    if (severityFilter.length > 0 && !severityFilter.includes(advisory.severity)) return false
+    return !normalized || advisory.identifier.toLowerCase().includes(normalized) ||
+      advisory.aliases.some((alias) => alias.toLowerCase().includes(normalized))
+  })
+  const lastPage = Math.max(1, Math.ceil(advisories.length / perPage))
+  const currentPage = Math.min(page, lastPage)
+  const first = (currentPage - 1) * perPage
+  const visible = advisories.slice(first, first + perPage)
+  const packagePath = buildPath.replace(/\/vulnerabilities$/, '/packages')
+  const setSeverities = (next: Severity[]) => {
+    onFiltersChange(packageFilter, next)
+    setPage(1)
+    setExpanded(null)
+  }
+
+  return (
+    <Card>
+      <CardTitle>Vulnerabilities</CardTitle>
+      <CardBody>
+        <Content component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+          Reported by client-supplied SBOMs; dufflebag has not verified this inventory.{' '}
+          {data.advisories.length === 0
+            ? `${countLabel(packages.length, 'package')} · 0 advisories.`
+            : `${data.advisories.length} ${data.advisories.length === 1 ? 'advisory' : 'advisories'} · ${data.affectedPackages} of ${packages.length} packages affected.`}
+        </Content>
+        {build.packageInventory.scan?.observedAt ? (
+          <AsOf observedAt={build.packageInventory.scan.observedAt} />
+        ) : null}
+        <ToggleGroup aria-label="Filter by severity" isCompact style={{ marginTop: 16 }}>
+          {[...SEVERITY_ORDER].reverse().map((band) => (
+            <ToggleGroupItem
+              key={band}
+              buttonId={`severity-${band}`}
+              text={(
+                <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <Label color={SEVERITY_COLOUR[band] ?? 'grey'} isCompact>{band}</Label>
+                  {data.counts[band]}
+                </span>
+              )}
+              isDisabled={data.counts[band] === 0}
+              isSelected={severityFilter.includes(band)}
+              onChange={(_event, selected) => setSeverities(
+                selected
+                  ? [...severityFilter, band]
+                  : severityFilter.filter((severity) => severity !== band),
+              )}
+            />
+          ))}
+        </ToggleGroup>
+
+        {data.topVulnerablePackages.length > 0 ? (
+          <TopVulnerablePackages rows={data.topVulnerablePackages} packagePath={packagePath} />
+        ) : null}
+
+        {data.advisories.length === 0 ? (
+          <Content component="p" data-state="zero-findings" style={{ marginTop: 18 }}>
+            No findings in {countLabel(packages.length, 'package')}
+          </Content>
+        ) : (
+          <div data-state="findings">
+            <Toolbar
+              id="vulnerabilities-toolbar"
+              clearAllFilters={() => {
+                setQuery('')
+                onFiltersChange('', [])
+                setPage(1)
+                setExpanded(null)
+              }}
+            >
+              <ToolbarContent>
+                <ToolbarItem>
+                  <SearchInput
+                    aria-label="Filter by advisory or alias"
+                    placeholder="Filter by advisory or alias"
+                    value={query}
+                    onChange={(_event, value) => {
+                      setQuery(value)
+                      setPage(1)
+                    }}
+                    onClear={() => {
+                      setQuery('')
+                      setPage(1)
+                    }}
+                  />
+                </ToolbarItem>
+                <ToolbarFilter
+                  categoryName="Severity"
+                  labels={severityFilter}
+                  deleteLabel={(_category, label) => setSeverities(
+                    severityFilter.filter((severity) => severity !== label),
+                  )}
+                >
+                  <FormSelect
+                    aria-label="Filter advisories by severity"
+                    value={severityFilter.length === 1 ? severityFilter[0] : ''}
+                    onChange={(_event, value) => setSeverities(value ? [value as Severity] : [])}
+                  >
+                    <FormSelectOption value="" label="All severities" />
+                    {[...SEVERITY_ORDER].reverse().map((band) => (
+                      <FormSelectOption key={band} value={band} label={band} />
+                    ))}
+                  </FormSelect>
+                </ToolbarFilter>
+                <ToolbarFilter
+                  categoryName="Package"
+                  labels={packageFilter ? [packageFilter] : []}
+                  deleteLabel={() => {
+                    onFiltersChange('', severityFilter)
+                    setPage(1)
+                  }}
+                  showToolbarItem={false}
+                >
+                  <span />
+                </ToolbarFilter>
+                <ToolbarItem><Content component="p">{advisories.length} of {data.advisories.length}</Content></ToolbarItem>
+                <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
+                  <Pagination
+                    itemCount={advisories.length}
+                    page={currentPage}
+                    perPage={perPage}
+                    onSetPage={(_event, next) => {
+                      setPage(next)
+                      setExpanded(null)
+                    }}
+                    onPerPageSelect={(_event, next) => {
+                      setPerPage(next)
+                      setPage(1)
+                      setExpanded(null)
+                    }}
+                    isCompact
+                  />
+                </ToolbarItem>
+              </ToolbarContent>
+            </Toolbar>
+            {advisories.length === 0 ? (
+              <Content component="p" style={{ marginTop: 14 }}>No advisories match these filters.</Content>
+            ) : (
+              <>
+                <AdvisoryTable
+                  advisories={visible}
+                  expanded={expanded}
+                  onToggle={setExpanded}
+                  packagePath={packagePath}
+                />
+                <Pagination
+                  itemCount={advisories.length}
+                  page={currentPage}
+                  perPage={perPage}
+                  onSetPage={(_event, next) => {
+                    setPage(next)
+                    setExpanded(null)
+                  }}
+                  onPerPageSelect={(_event, next) => {
+                    setPerPage(next)
+                    setPage(1)
+                    setExpanded(null)
+                  }}
+                  variant="bottom"
+                  dropDirection="up"
+                />
+              </>
+            )}
+          </div>
+        )}
+      </CardBody>
+    </Card>
+  )
+}
+
+function AsOf({ observedAt }: { observedAt: string }) {
+  return (
+    <Content component="small" style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
+      As of <When iso={observedAt} utc />
+    </Content>
+  )
+}
+
+function TopVulnerablePackages({
+  rows, packagePath,
+}: {
+  rows: BuildAdvisories['topVulnerablePackages']
+  packagePath: string
+}) {
+  return (
+    <div style={{ marginTop: 20 }}>
+      <Title headingLevel="h3" size="md">Top vulnerable packages</Title>
+      <Table aria-label="Top vulnerable packages" variant="compact" borders={false}>
+        <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>Findings</Th></Tr></Thead>
+        <Tbody>
+          {rows.map((pkg) => (
+            <Tr key={pkg.identity}>
+              <Td dataLabel="Name">
+                <a href={withSearch(packagePath, { package: pkg.identity })}>{pkg.name}</a>
+              </Td>
+              <Td dataLabel="Version">{pkg.version}</Td>
+              <Td dataLabel="Findings">
+                <span style={{ display: 'flex', gap: 6 }}>
+                  {pkg.critical > 0 ? <Label color="red" isCompact>{pkg.critical} critical</Label> : null}
+                  {pkg.high > 0 ? <Label color="orange" isCompact>{pkg.high} high</Label> : null}
+                </span>
+              </Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+    </div>
+  )
+}
+
+function AdvisoryTable({
+  advisories, expanded, onToggle, packagePath,
+}: {
+  advisories: Advisory[]
+  expanded: string | null
+  onToggle: (identifier: string | null) => void
+  packagePath: string
+}) {
+  return (
+    <Table aria-label="Advisories" variant="compact" style={{ marginTop: 14 }}>
+      <Thead>
+        <Tr>
+          <Th>Advisory</Th>
+          <Th>Severity</Th>
+          <Th>Affected packages</Th>
+          <Th>Published</Th>
+          <Th>Fixed in</Th>
+        </Tr>
+      </Thead>
+      {advisories.map((advisory, rowIndex) => {
+        const isExpanded = expanded === advisory.identifier
+        return (
+          <Tbody key={advisory.identifier} isExpanded={isExpanded}>
+            <Tr>
+              <Td dataLabel="Advisory">{advisoryCell(advisory)}</Td>
+              <Td dataLabel="Severity">{severityCell(advisory)}</Td>
+              <Td
+                dataLabel="Affected packages"
+                compoundExpand={{
+                  isExpanded,
+                  onToggle: () => onToggle(isExpanded ? null : advisory.identifier),
+                  rowIndex,
+                  columnIndex: 2,
+                }}
+              >
+                {countLabel(advisory.packages, 'package')}
+              </Td>
+              <Td dataLabel="Published">{publishedCell(advisory)}</Td>
+              <Td dataLabel="Fixed in">{fixedInCell(advisory)}</Td>
+            </Tr>
+            {isExpanded ? (
               <Tr isExpanded>
-                <Td dataLabel="Findings" colSpan={4} noPadding>
+                <Td dataLabel="Affected packages" colSpan={5} noPadding>
                   <ExpandableRowContent>
-                    <PackageFindingsTable findings={findings} />
+                    <AffectedPackagesTable advisory={advisory} packagePath={packagePath} />
                   </ExpandableRowContent>
                 </Td>
               </Tr>
-            )}
+            ) : null}
           </Tbody>
         )
       })}
@@ -608,8 +1099,65 @@ function PackageTable({
   )
 }
 
-export const PackageTableForTest = PackageTable
-export const PackagesCardForTest = PackagesCard
+function advisoryCell(advisory: Advisory) {
+  return (
+    <span style={{ display: 'block', minWidth: 0 }}>
+      <code><Truncate content={advisory.identifier} /></code>
+      {advisory.aliases.length > 0 ? (
+        <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)' }}>
+          <Truncate content={advisory.aliases.join(', ')} />
+        </code>
+      ) : null}
+    </span>
+  )
+}
+
+function severityCell(advisory: Advisory) {
+  return <Label color={SEVERITY_COLOUR[advisory.severity] ?? 'grey'} isCompact>{advisory.severity}</Label>
+}
+
+function publishedCell(advisory: Advisory) {
+  return advisory.published ? <When iso={advisory.published} dateOnly /> : '—'
+}
+
+function fixedInCell(advisory: Advisory) {
+  const versions = advisoryFixedVersions(advisory)
+  if (versions.length === 0) {
+    return <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>No fix available</span>
+  }
+  return <span><code>{versions[0]}</code>{versions.length > 1 ? ` +${versions.length - 1} more` : ''}</span>
+}
+
+function AffectedPackagesTable({ advisory, packagePath }: { advisory: Advisory; packagePath: string }) {
+  return (
+    <Table aria-label={`Affected packages for ${advisory.identifier}`} variant="compact" borders={false}>
+      <Thead><Tr><Th>Name</Th><Th>Version</Th><Th>SBOM</Th><Th>Fixed in</Th></Tr></Thead>
+      <Tbody>
+        {advisory.hits.map((hit) => (
+          <Tr key={[hit.packageIdentity, hit.sbomID, hit.fixedVersion].join('/') }>
+            <Td dataLabel="Name">
+              <a href={withSearch(packagePath, { package: hit.packageIdentity })}>{hit.name}</a>
+            </Td>
+            <Td dataLabel="Version">{hit.version}</Td>
+            <Td dataLabel="SBOM">{hit.sbomID || '—'}</Td>
+            <Td dataLabel="Fixed in">{hit.fixedVersion || 'No fix available'}</Td>
+          </Tr>
+        ))}
+      </Tbody>
+    </Table>
+  )
+}
+
+function advisoryFixedVersions(advisory: Advisory): string[] {
+  return [...new Set(advisory.hits.flatMap((hit) =>
+    hit.fixedVersion.split(',').map((version) => version.trim()).filter(Boolean),
+  ))]
+}
+
+function withSearch(path: string, values: Record<string, string>): string {
+  const search = new URLSearchParams(values)
+  return `${path}?${search}`
+}
 
 function sbomNames(pkg: Package): string {
   if (pkg.sboms.length === 0) return '—'
@@ -619,6 +1167,14 @@ function sbomNames(pkg: Package): string {
 function packageFacetCount(build: Build, inventoryLoading = false): FacetCount {
   return !inventoryLoading && build.packageInventory.status === 'parsed'
     ? knownCount(build.packageInventory.packages.length)
+    : { status: 'unknown' }
+}
+
+function vulnerabilityFacetCount(
+  build: Build, inventoryLoading: boolean, scanned: boolean,
+): FacetCount {
+  return !inventoryLoading && scanned && build.packageInventory.status === 'parsed'
+    ? knownCount(deriveBuildAdvisories(build.packageInventory.packages).advisories.length)
     : { status: 'unknown' }
 }
 

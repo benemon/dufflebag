@@ -1815,6 +1815,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       { label: 'Overview', count: '' },
       { label: 'Artifacts', count: '0' },
       { label: 'Packages', count: '' },
+      { label: 'Vulnerabilities', count: '' },
     ])
     await clickByText('button', 'v1')
     await clickFacet('Version facets', 'Builds')
@@ -1831,6 +1832,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       { label: 'Overview', count: '' },
       { label: 'Artifacts', count: '1' },
       { label: 'Packages', count: '1' },
+      { label: 'Vulnerabilities', count: '0' },
     ])
     await waitForText('Build options')
     await waitForText('base_image=***')
@@ -2253,32 +2255,41 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.match(findingsText, /1 unknown/)
     await assertNoVerdicts()
 
+    // A Security row opens the build's URL-addressable Vulnerabilities facet.
+    // The advisory list is derived from the same package response used by the
+    // Packages facet, then expands by affected package.
     await page.click(`[data-build-link="${findings.build.id}"]`)
-    await clickFacet('Build facets', 'Packages')
-    await waitForText('github.com/go-jose/go-jose/v4')
-    assert.equal(
-      await rowCellText('github.com/go-jose/go-jose/v4', 'Name'),
-      'github.com/go-jose/go-jose/v4',
+    await page.waitForSelector('[aria-label="Filter by severity"]')
+    assert.deepEqual(
+      await page.$eval('nav[aria-label="Build facets"] [aria-selected="true"]', (item) => ({
+        label: item.querySelector('.pf-v6-c-tabs__item-text')?.innerText.trim() ?? '',
+        count: item.querySelector('.pf-v6-c-badge')?.innerText.trim() ?? '',
+      })),
+      { label: 'Vulnerabilities', count: '2' },
     )
-    assert.equal(await rowCellText('github.com/go-jose/go-jose/v4', 'Version'), 'v4.1.1')
-    await toggleRow('github.com/go-jose/go-jose/v4')
+    await waitForText('github.com/go-jose/go-jose/v4')
     await waitForText('GHSA-78h2-9frx-2jm8')
-    const findingRows = await page.$$eval('table[aria-label="Findings"] tbody tr', (rows) =>
-      Object.fromEntries(rows.map((row) => [
-        row.querySelector('td[data-label="Advisory"]')?.innerText.trim() ?? '',
-        Object.fromEntries([...row.querySelectorAll('td')].map((cell) => [
-          cell.getAttribute('data-label'), cell.innerText.trim(),
-        ])),
-      ])))
-    assert.deepEqual(findingRows['GHSA-78h2-9frx-2jm8'], {
-      Advisory: 'GHSA-78h2-9frx-2jm8', Severity: 'high',
-      Reported: 'CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:N/I:N/A:H',
-      Aliases: 'CVE-2026-34986, GO-2026-4945', 'Fixed in': '4.1.4',
-    })
-    assert.deepEqual(findingRows['GO-2026-4945'], {
-      Advisory: 'GO-2026-4945', Severity: 'unknown', Reported: '—',
-      Aliases: 'CVE-2026-34986, GHSA-78h2-9frx-2jm8', 'Fixed in': '4.1.4',
-    })
+    await toggleRow('GHSA-78h2-9frx-2jm8')
+    await page.waitForSelector(`table[aria-label="Affected packages for GHSA-78h2-9frx-2jm8"]`)
+    const affectedRow = await page.$eval(
+      `table[aria-label="Affected packages for GHSA-78h2-9frx-2jm8"] tbody tr`,
+      (row) => Object.fromEntries([...row.querySelectorAll('td')].map((cell) => [
+        cell.getAttribute('data-label'), cell.innerText.trim(),
+      ])),
+    )
+    assert.equal(affectedRow.Name, 'github.com/go-jose/go-jose/v4')
+    assert.equal(affectedRow.Version, 'v4.1.1')
+    assert.ok(affectedRow.SBOM, 'affected row must name its SBOM id')
+    assert.equal(affectedRow['Fixed in'], '4.1.4')
+
+    // The completed full-coverage scenario reaches the build's zero-findings
+    // state. The not-yet-scanned scenario above deliberately keeps its build
+    // running, and Build defers inventory reads until completion, so that
+    // build-level state is not reachable in this lane.
+    await openVersion(full)
+    await page.click(`[data-build-link="${full.build.id}"]`)
+    await waitForText('No findings in 1 package')
+    assert.ok(await page.$('[data-state="zero-findings"]'))
 
     // 5. Completing the next version moves managed latest. The prior version
     // keeps its exact figures and timestamp, but its treatment visibly changes.

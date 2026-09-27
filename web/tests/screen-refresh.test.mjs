@@ -79,7 +79,7 @@ test('MUTATION_BUILD_REFRESH_BINDING keeps Build wired to its live quiet reload'
   assert.match(source, /const refreshing = detailRefreshing \|\| inventory\.loading/)
   assert.match(
     source,
-    /<BuildView[\s\S]*?onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+\}\}/,
+    /<BuildView[\s\S]*?onRefresh=\{\(\) => \{\s+reload\(\)\s+inventory\.reload\(\)\s+security\.reload\(\)\s+\}\}/,
   )
   assert.match(source, /<ScreenHeader[\s\S]*?onRefresh=\{onRefresh\}/)
 })
