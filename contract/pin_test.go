@@ -2,7 +2,9 @@ package contract_test
 
 import (
 	"os"
+	"os/exec"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -39,9 +41,24 @@ func requireVersion(t *testing.T, gomod, module, want string) {
 	}
 }
 
+// This module builds in the go.work workspace, where versions resolve across
+// both modules and contract/go.mod is never re-tidied, so its text can lag
+// what the build uses. The toolchain's resolved build list is the authority;
+// test-binary build info is not, because Go 1.26 omits its dependencies.
+func requireResolved(t *testing.T, module, want string) {
+	t.Helper()
+	out, err := exec.Command("go", "list", "-m", "-f", "{{.Version}}{{if .Replace}} => {{.Replace.Path}}{{end}}", module).CombinedOutput()
+	if err != nil {
+		t.Fatalf("go list -m %s: %v\n%s", module, err, out)
+	}
+	if got := strings.TrimSpace(string(out)); got != want {
+		t.Fatalf("contract resolves %s %s, want %s", module, got, want)
+	}
+}
+
 func TestPinnedClientStackBindsBothModules(t *testing.T) {
-	requireVersion(t, "go.mod", "github.com/go-openapi/strfmt", pinnedStrfmt)
+	requireResolved(t, "github.com/go-openapi/strfmt", pinnedStrfmt)
 	requireVersion(t, "../go.mod", "github.com/go-openapi/strfmt", pinnedStrfmt)
-	requireVersion(t, "go.mod", "github.com/hashicorp/hcp-sdk-go", pinnedSDK)
-	requireVersion(t, "go.mod", "github.com/go-openapi/runtime", pinnedRuntime)
+	requireResolved(t, "github.com/hashicorp/hcp-sdk-go", pinnedSDK)
+	requireResolved(t, "github.com/go-openapi/runtime", pinnedRuntime)
 }
