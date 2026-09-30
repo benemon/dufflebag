@@ -3,6 +3,7 @@ package contract_test
 import (
 	"os"
 	"regexp"
+	"runtime/debug"
 	"testing"
 )
 
@@ -39,9 +40,32 @@ func requireVersion(t *testing.T, gomod, module, want string) {
 	}
 }
 
+// This module builds in the go.work workspace, where versions resolve across
+// both modules and contract/go.mod is never re-tidied, so its text can lag
+// what the test binary links. The binary's own build info is the authority.
+func requireLinked(t *testing.T, module, want string) {
+	t.Helper()
+	bi, ok := debug.ReadBuildInfo()
+	if !ok {
+		t.Fatal("test binary carries no build info")
+	}
+	for _, d := range bi.Deps {
+		if d.Path == module {
+			if d.Replace != nil {
+				t.Fatalf("%s is replaced by %s", module, d.Replace.Path)
+			}
+			if d.Version != want {
+				t.Fatalf("contract links %s %s, want %s", module, d.Version, want)
+			}
+			return
+		}
+	}
+	t.Fatalf("contract does not link %s", module)
+}
+
 func TestPinnedClientStackBindsBothModules(t *testing.T) {
-	requireVersion(t, "go.mod", "github.com/go-openapi/strfmt", pinnedStrfmt)
+	requireLinked(t, "github.com/go-openapi/strfmt", pinnedStrfmt)
 	requireVersion(t, "../go.mod", "github.com/go-openapi/strfmt", pinnedStrfmt)
-	requireVersion(t, "go.mod", "github.com/hashicorp/hcp-sdk-go", pinnedSDK)
-	requireVersion(t, "go.mod", "github.com/go-openapi/runtime", pinnedRuntime)
+	requireLinked(t, "github.com/hashicorp/hcp-sdk-go", pinnedSDK)
+	requireLinked(t, "github.com/go-openapi/runtime", pinnedRuntime)
 }
