@@ -53,7 +53,9 @@ Actions by role:
 
 Maintainers can create projects from the project context picker.
 Platform-scoped roots can create organisations from the organisation context
-picker.
+picker. An organisation name must be a lowercase RFC 1123 DNS label: 1 to 63
+characters using lowercase letters, digits and hyphens, with no leading or
+trailing hyphen. Project names are unchanged.
 
 Until the console resolves who you are, it shows the reader-tier navigation.
 A direct URL to a restricted screen still reports that access is restricted.

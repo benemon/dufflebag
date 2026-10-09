@@ -8,13 +8,21 @@ export type TenancyKind = 'organization' | 'project'
 const tenancyCopy = {
   organization: {
     label: 'Organization name',
-    helper: 'Contains projects and their principals. The name cannot be changed later.',
+    helper: 'Use a lowercase RFC 1123 DNS label: 1 to 63 characters using lowercase letters, digits and hyphens, with no leading or trailing hyphen. The name cannot be changed later.',
   },
   project: {
     label: 'Project name',
     helper: 'Scopes buckets, principals and channels. The name cannot be changed later.',
   },
 } as const
+
+const organizationNamePattern = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/
+
+export function organizationNameError(name: string): string | null {
+  return organizationNamePattern.test(name)
+    ? null
+    : 'Organization name must be a lowercase RFC 1123 DNS label.'
+}
 
 /** The one name form used by first-run and steady-state tenancy creation. */
 export function TenancyForm({
@@ -33,13 +41,17 @@ export function TenancyForm({
 }) {
   const [name, setName] = useState('')
   const copy = tenancyCopy[kind]
+  const trimmedName = name.trim()
+  const nameFailure = kind === 'organization' ? organizationNameError(trimmedName) : null
+  const nameInvalid = name !== '' && nameFailure !== null
+  const nameValid = kind === 'organization' ? nameFailure === null : trimmedName !== ''
   const submit = (
     <Button
       type="submit"
       form={formID}
       variant="primary"
       isLoading={submitting}
-      isDisabled={submitting || name.trim() === ''}
+      isDisabled={submitting || !nameValid}
     >
       {submitLabel}
     </Button>
@@ -51,7 +63,7 @@ export function TenancyForm({
       style={{ marginTop: 16 }}
       onSubmit={(event) => {
         event.preventDefault()
-        void onSubmit(name.trim())
+        if (nameValid) void onSubmit(trimmedName)
       }}
     >
       <FormGroup label={copy.label} isRequired fieldId={fieldID}>
@@ -59,9 +71,12 @@ export function TenancyForm({
           id={fieldID}
           value={name}
           onChange={(_event, value) => setName(value)}
+          validated={nameInvalid ? 'error' : 'default'}
+          aria-invalid={nameInvalid ? 'true' : undefined}
+          aria-describedby={`${fieldID}-helper`}
           autoFocus
         />
-        <Content component="small">{copy.helper}</Content>
+        <Content component="small" id={`${fieldID}-helper`}>{copy.helper}</Content>
       </FormGroup>
     </Form>
   )

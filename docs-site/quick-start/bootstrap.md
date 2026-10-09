@@ -60,6 +60,10 @@ initialization.
    project. For a headless setup, use the organisation and project operations
    in the [platform API reference](pathname:///platform-api.html).
 
+   The organisation name must be a lowercase RFC 1123 DNS label: 1 to 63
+   characters using lowercase letters, digits and hyphens, with no leading or
+   trailing hyphen. Project names are unchanged.
+
 ## Mint a builder principal
 
 Prerequisites: An organisation and project.

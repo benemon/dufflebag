@@ -146,6 +146,53 @@ func TestTenancyHandlers(t *testing.T) {
 	)
 }
 
+func TestCreateOrganizationNameValidation(t *testing.T) {
+	accepted := []string{
+		"acme",
+		"a",
+		"a-b",
+		strings.Repeat("a", 63),
+	}
+	for _, name := range accepted {
+		t.Run("accepts "+name, func(t *testing.T) {
+			handler := newHandler(
+				&fakeTenancyRepository{}, &fakeInstanceRepository{},
+				testAuth{}, testRoles{}, testLogger(), time.Now,
+			)
+			requestJSON(
+				t, handler, http.MethodPost, "/api/v1/organizations",
+				map[string]string{"name": name}, http.StatusCreated, nil,
+			)
+		})
+	}
+
+	rejected := []string{
+		"Acme",
+		"Acme Corp",
+		"acme/x",
+		"-acme",
+		"acme-",
+		"a.b",
+		"a_b",
+		strings.Repeat("a", 64),
+		"",
+		"acmé",
+	}
+	for _, name := range rejected {
+		t.Run("refuses "+name, func(t *testing.T) {
+			handler := newHandler(
+				&fakeTenancyRepository{}, &fakeInstanceRepository{},
+				testAuth{}, testRoles{}, testLogger(), time.Now,
+			)
+			response := requestJSON(
+				t, handler, http.MethodPost, "/api/v1/organizations",
+				map[string]string{"name": name}, http.StatusBadRequest, nil,
+			)
+			assertPlatformError(t, response, "organization name must be a lowercase RFC 1123 DNS label: 1 to 63 characters using lowercase letters, digits, and hyphens, with no leading or trailing hyphen")
+		})
+	}
+}
+
 func TestTenancyHandlerErrorsUsePlatformShape(t *testing.T) {
 	at := time.Date(2026, 7, 30, 10, 0, 0, 0, time.UTC)
 	tests := []struct {
@@ -222,7 +269,7 @@ func TestTenancyHandlerErrorsUsePlatformShape(t *testing.T) {
 			body:       map[string]string{"name": ""},
 			repository: &fakeTenancyRepository{},
 			status:     http.StatusBadRequest,
-			message:    "organization name must contain 1 to 200 characters",
+			message:    "organization name must be a lowercase RFC 1123 DNS label: 1 to 63 characters using lowercase letters, digits, and hyphens, with no leading or trailing hyphen",
 		},
 		{
 			name:       "malformed organization id",

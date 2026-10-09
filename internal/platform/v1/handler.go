@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"regexp"
 	"sync"
 	"time"
 	"unicode/utf8"
@@ -343,8 +344,8 @@ func (s *server) CreateOrganization(
 	if _, refused := authorizePlatform(ctx, identity.RoleRoot); refused != permitted {
 		return newRefusal(refused), nil
 	}
-	if request.Body == nil || !validName(request.Body.Name) {
-		return badRequestResponse{message: "organization name must contain 1 to 200 characters"}, nil
+	if request.Body == nil || !organizationNamePattern.MatchString(request.Body.Name) {
+		return badRequestResponse{message: "organization name must be a lowercase RFC 1123 DNS label: 1 to 63 characters using lowercase letters, digits, and hyphens, with no leading or trailing hyphen"}, nil
 	}
 	organization, err := s.repository.CreateOrganization(ctx, store.Organization{
 		ID:        uuid.NewString(),
@@ -575,6 +576,8 @@ func validName(name string) bool {
 	length := utf8.RuneCountInString(name)
 	return length >= 1 && length <= 200
 }
+
+var organizationNamePattern = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
 
 type badRequestResponse struct {
 	message string
