@@ -25,7 +25,7 @@ type NavGroupModel = {
 const NAV: readonly NavGroupModel[] = [
   { group: 'Registry', items: [
     { key: 'buckets', to: '/buckets', label: 'Buckets' },
-    { key: 'plugins', to: '/plugins', label: 'Plugins' },
+    { key: 'plugins', to: '/plugin-registry', label: 'Plugins' },
   ]},
   // Instance stays under Administration where the design put it: it is
   // reader-tier, so the group renders for every role — role filtering changes

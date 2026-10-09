@@ -173,7 +173,7 @@ test('400 and 409 server messages are preserved for inline action errors', () =>
 
 test('the organization-level route bypasses project loading and missing-project gates', () => {
   const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8')
-  assert.match(source, /const organizationRoute = pathname === '\/plugins' \|\| pathname\.startsWith\('\/plugins\/'\)/)
+  assert.match(source, /const organizationRoute = pathname === '\/plugin-registry' \|\| pathname\.startsWith\('\/plugin-registry\/'\)/)
   assert.match(source, /!platform && !organizationRoute && projectsLoading/)
   assert.match(source, /!platform && !organizationRoute && !selectedProject/)
 })

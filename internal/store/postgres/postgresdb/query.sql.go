@@ -1108,6 +1108,17 @@ func (q *Queries) GetOrganization(ctx context.Context, id uuid.UUID) (Organizati
 	return i, err
 }
 
+const getOrganizationIDByName = `-- name: GetOrganizationIDByName :one
+SELECT id FROM organizations WHERE name = $1
+`
+
+func (q *Queries) GetOrganizationIDByName(ctx context.Context, name string) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationIDByName, name)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
 const getPin = `-- name: GetPin :one
 SELECT buckets.name AS bucket_name, pins.pinned_at, pins.pinned_by
 FROM pins
@@ -1273,6 +1284,72 @@ func (q *Queries) GetRecoveryVerifier(ctx context.Context) (GetRecoveryVerifierR
 	row := q.db.QueryRowContext(ctx, getRecoveryVerifier)
 	var i GetRecoveryVerifierRow
 	err := row.Scan(&i.RecoveryDigest, &i.RecoveryThreshold)
+	return i, err
+}
+
+const getServedPluginVersion = `-- name: GetServedPluginVersion :one
+SELECT
+    plugin_versions.id, plugin_versions.sums_key, plugin_versions.sums_size,
+    plugin_versions.signature_key, plugin_versions.signature_size,
+    plugin_versions.manifest_key, plugin_versions.manifest_size, plugin_versions.protocol_version
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+JOIN plugin_registries ON plugin_registries.organization_id = plugins.organization_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+  AND plugin_registries.exposed AND NOT plugin_versions.revoked
+`
+
+type GetServedPluginVersionParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+type GetServedPluginVersionRow struct {
+	ID              uuid.UUID      `json:"id"`
+	SumsKey         string         `json:"sums_key"`
+	SumsSize        int64          `json:"sums_size"`
+	SignatureKey    sql.NullString `json:"signature_key"`
+	SignatureSize   sql.NullInt64  `json:"signature_size"`
+	ManifestKey     sql.NullString `json:"manifest_key"`
+	ManifestSize    sql.NullInt64  `json:"manifest_size"`
+	ProtocolVersion sql.NullString `json:"protocol_version"`
+}
+
+func (q *Queries) GetServedPluginVersion(ctx context.Context, arg GetServedPluginVersionParams) (GetServedPluginVersionRow, error) {
+	row := q.db.QueryRowContext(ctx, getServedPluginVersion, arg.OrganizationID, arg.Name, arg.Version)
+	var i GetServedPluginVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.SumsKey,
+		&i.SumsSize,
+		&i.SignatureKey,
+		&i.SignatureSize,
+		&i.ManifestKey,
+		&i.ManifestSize,
+		&i.ProtocolVersion,
+	)
+	return i, err
+}
+
+const getServedPluginZip = `-- name: GetServedPluginZip :one
+SELECT object_key, size FROM plugin_files WHERE version_id = $1 AND filename = $2
+`
+
+type GetServedPluginZipParams struct {
+	VersionID uuid.UUID `json:"version_id"`
+	Filename  string    `json:"filename"`
+}
+
+type GetServedPluginZipRow struct {
+	ObjectKey string `json:"object_key"`
+	Size      int64  `json:"size"`
+}
+
+func (q *Queries) GetServedPluginZip(ctx context.Context, arg GetServedPluginZipParams) (GetServedPluginZipRow, error) {
+	row := q.db.QueryRowContext(ctx, getServedPluginZip, arg.VersionID, arg.Filename)
+	var i GetServedPluginZipRow
+	err := row.Scan(&i.ObjectKey, &i.Size)
 	return i, err
 }
 
@@ -3231,6 +3308,43 @@ func (q *Queries) RootPrincipalExists(ctx context.Context) (bool, error) {
 	var initialized bool
 	err := row.Scan(&initialized)
 	return initialized, err
+}
+
+const servedPluginVersions = `-- name: ServedPluginVersions :many
+SELECT plugin_versions.version
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+JOIN plugin_registries ON plugin_registries.organization_id = plugins.organization_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2
+  AND plugin_registries.exposed AND NOT plugin_versions.revoked
+`
+
+type ServedPluginVersionsParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+}
+
+func (q *Queries) ServedPluginVersions(ctx context.Context, arg ServedPluginVersionsParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, servedPluginVersions, arg.OrganizationID, arg.Name)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var version string
+		if err := rows.Scan(&version); err != nil {
+			return nil, err
+		}
+		items = append(items, version)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const setArtifactIntegrityMAC = `-- name: SetArtifactIntegrityMAC :exec

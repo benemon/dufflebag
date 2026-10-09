@@ -174,3 +174,9 @@ func TestNewestFollowsSemanticVersionPrecedence(t *testing.T) {
 		}
 	}
 }
+
+func TestRenderManifestMatchesTheReleaseSiteShape(t *testing.T) {
+	if got, want := string(RenderManifest("5.0")), string(fixture(t, "packer-plugin-amazon_1.8.2_manifest.json")); got != want {
+		t.Fatalf("rendered manifest = %q, want the releases.hashicorp.com shape %q", got, want)
+	}
+}

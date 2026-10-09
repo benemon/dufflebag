@@ -933,3 +933,28 @@ WHERE doomed.webhook_id = $1 AND doomed.id IN (
     ORDER BY retained.created_at DESC, retained.id DESC
     OFFSET 100
 );
+
+-- name: GetOrganizationIDByName :one
+SELECT id FROM organizations WHERE name = $1;
+
+-- name: ServedPluginVersions :many
+SELECT plugin_versions.version
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+JOIN plugin_registries ON plugin_registries.organization_id = plugins.organization_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2
+  AND plugin_registries.exposed AND NOT plugin_versions.revoked;
+
+-- name: GetServedPluginVersion :one
+SELECT
+    plugin_versions.id, plugin_versions.sums_key, plugin_versions.sums_size,
+    plugin_versions.signature_key, plugin_versions.signature_size,
+    plugin_versions.manifest_key, plugin_versions.manifest_size, plugin_versions.protocol_version
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+JOIN plugin_registries ON plugin_registries.organization_id = plugins.organization_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+  AND plugin_registries.exposed AND NOT plugin_versions.revoked;
+
+-- name: GetServedPluginZip :one
+SELECT object_key, size FROM plugin_files WHERE version_id = $1 AND filename = $2;

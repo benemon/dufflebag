@@ -54,3 +54,19 @@ func TestGETCompressionNegotiation(t *testing.T) {
 		t.Fatalf("POST response compressed: %#v", post.Header())
 	}
 }
+
+func TestPluginDownloadsAreNotRecompressed(t *testing.T) {
+	zip := bytes.Repeat([]byte("PK"), 512)
+	server := gzipGET(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", "1024")
+		_, _ = w.Write(zip)
+	}))
+	request := httptest.NewRequest(http.MethodGet, "/plugins/acme/packer-plugin-amazon/1.8.2/packer-plugin-amazon_1.8.2_linux_amd64.zip", nil)
+	request.Header.Set("Accept-Encoding", "gzip")
+	response := httptest.NewRecorder()
+	server.ServeHTTP(response, request)
+	if response.Header().Get("Content-Encoding") != "" || response.Header().Get("Content-Length") != "1024" ||
+		!bytes.Equal(response.Body.Bytes(), zip) {
+		t.Fatalf("plugin download headers = %#v; want identity encoding with its Content-Length", response.Header())
+	}
+}

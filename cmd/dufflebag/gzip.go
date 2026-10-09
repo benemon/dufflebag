@@ -4,6 +4,8 @@ import (
 	"compress/gzip"
 	"net/http"
 	"strings"
+
+	"github.com/benemon/dufflebag/internal/pluginread"
 )
 
 type gzipResponseWriter struct {
@@ -32,7 +34,9 @@ func (w gzipResponseWriter) Flush() {
 
 func gzipGET(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
+		// Plugin zips are already compressed, and Packer's getter streams
+		// them by Content-Length; recompressing costs CPU for nothing.
+		if r.Method != http.MethodGet || strings.HasPrefix(r.URL.Path, pluginread.Prefix) {
 			next.ServeHTTP(w, r)
 			return
 		}

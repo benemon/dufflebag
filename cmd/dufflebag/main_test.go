@@ -275,7 +275,7 @@ func TestScannerConfiguration(t *testing.T) {
 
 func TestMountedAPIVersionsComeFromRootRouteTable(t *testing.T) {
 	want := []string{"/packer/2023-01-01", "/resource-manager/2019-12-10", "/api/v1"}
-	got := mountedAPIVersions(rootRoutes(nil, nil, nil, nil))
+	got := mountedAPIVersions(rootRoutes(nil, nil, nil, nil, nil))
 	if !slices.Equal(got, want) {
 		t.Fatalf("mounted API versions = %v, want %v", got, want)
 	}
@@ -428,7 +428,7 @@ func testComposer(
 	}
 	return composeHandler(
 		broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey),
-		testTokenPlane{Handler: token}, packer, resourceManager, platformPlane,
+		testTokenPlane{Handler: token}, packer, resourceManager, platformPlane, platformPlane,
 	), sink
 }
 
@@ -467,6 +467,7 @@ func TestComposerAuditsEveryNonExemptRootRouteClass(t *testing.T) {
 		{name: "session", method: http.MethodGet, path: platform.SessionPath, routeID: rootRouteSession},
 		{name: "platform", method: http.MethodGet, path: "/api/v1/route", routeID: rootRoutePlatform},
 		{name: "closed subtree", method: http.MethodGet, path: "/api/v1", routeID: rootRouteNotFound},
+		{name: "plugin read plane", method: http.MethodGet, path: "/plugins/acme/packer-plugin-amazon/index.json", routeID: rootRoutePlugins},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -513,7 +514,7 @@ func TestComposerUsesPlaneDescriptorBeforeHandlerRuns(t *testing.T) {
 
 func TestRootRouteTableMatchesIndependentRegistrationInventory(t *testing.T) {
 	plane := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	routes := rootRoutes(plane, plane, plane, plane)
+	routes := rootRoutes(plane, plane, plane, plane, plane)
 	type semantic struct{ routeID, operation, targetType string }
 	want := map[string]semantic{
 		"/oauth2/token":      {rootRouteToken, "token.issue", "access_token"},
@@ -530,6 +531,7 @@ func TestRootRouteTableMatchesIndependentRegistrationInventory(t *testing.T) {
 		"/sys/session/":      {rootRouteNotFound, "request.not_found", "request"},
 		"/api/v1":            {rootRouteNotFound, "request.not_found", "request"},
 		"/metrics":           {rootRouteNotFound, "request.not_found", "request"},
+		"/plugins/":          {rootRoutePlugins, "plugin.read", "plugin_file"},
 		"/":                  {rootRouteConsole, "console.serve", "console"},
 	}
 	seen := make(map[string]bool, len(routes))
@@ -602,7 +604,7 @@ func TestComposerServesStaticConsoleWhenAuditBrokerIsDegraded(t *testing.T) {
 	})
 	handler := composeHandler(
 		broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey),
-		testTokenPlane{Handler: other}, other, other, other,
+		testTokenPlane{Handler: other}, other, other, other, other,
 	)
 
 	response := httptest.NewRecorder()
@@ -631,7 +633,7 @@ func TestComposerKeepsAdmissionOutsideAudit(t *testing.T) {
 			w.WriteHeader(http.StatusTooManyRequests)
 		})
 	}
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane, admission: refuse}, plane, plane, plane)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane, admission: refuse}, plane, plane, plane, plane)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodPost, hcpauth.TokenPath, nil))
@@ -656,7 +658,7 @@ func TestProductionTokenAdmissionDoesNotAuditAThrottledRequest(t *testing.T) {
 	other := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("token request reached another plane")
 	})
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), token, other, other, other)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), token, other, other, other, other)
 
 	for attempt := 1; attempt <= 1000; attempt++ {
 		before := len(sink.decoded(t))
@@ -684,7 +686,7 @@ func TestComposerFailsClosedBeforeCallingMux(t *testing.T) {
 	}
 	called := false
 	plane := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane, plane)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/packer/route", nil))
@@ -706,7 +708,7 @@ func TestComposerCannotFailClosedAfterResponseBytes(t *testing.T) {
 		w.WriteHeader(http.StatusAccepted)
 		_, _ = w.Write([]byte("committed"))
 	})
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane, plane)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/packer/route", nil))
@@ -721,7 +723,7 @@ func TestComposerWithDisabledBrokerServesNormally(t *testing.T) {
 		t.Fatalf("new disabled audit broker: %v", err)
 	}
 	plane := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane, plane)
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/packer/route", nil))
 	if response.Code != http.StatusNoContent {
@@ -738,7 +740,7 @@ func TestComposerRecordsAuditUnavailableIfTheResponseRetryRecovers(t *testing.T)
 	plane := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 		t.Fatal("request reached the mux after its audit write failed")
 	})
-	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane)
+	handler := composeHandler(broker, audit.StaticHMACKey(testAuditHMACKeyVersion, testAuditHMACKey), testTokenPlane{Handler: plane}, plane, plane, plane, plane)
 
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/packer/route", nil))

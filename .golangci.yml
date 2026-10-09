@@ -46,6 +46,17 @@ linters:
             - pkg: github.com/benemon/dufflebag/internal/compat
               desc: "ADR-0001: the platform plane must not import compatibility-plane models"
 
+        # ADR-0027: the plugin read plane is a third surface; it reads the
+        # store and the domain and reaches into neither API plane.
+        pluginread:
+          files:
+            - "**/internal/pluginread/**"
+          deny:
+            - pkg: github.com/benemon/dufflebag/internal/compat
+              desc: "ADR-0027: the plugin read plane must not import compatibility-plane models"
+            - pkg: github.com/benemon/dufflebag/internal/platform
+              desc: "ADR-0027: the plugin read plane must not import the platform plane"
+
         compat:
           files:
             - "**/internal/compat/**"
