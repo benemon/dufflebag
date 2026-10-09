@@ -94,53 +94,63 @@ export type ReadyUpload<F extends NamedFile = File> = {
   files: { field: 'sha256sums' | 'sha256sums_sig' | 'manifest' | 'zips'; file: F; platform?: string }[]
 }
 
-export type UploadPlan<F extends NamedFile = File> = ReadyUpload<F> | { kind: 'refused'; reason: string }
+export type RefusedUpload = { label: string; reason: string }
+
+export type UploadPlan<F extends NamedFile = File> = { versions: ReadyUpload<F>[]; refused: RefusedUpload[] }
 
 // Names follow the two shapes Packer's getter accepts: goreleaser
 // (packer-plugin-NAME_vVERSION_xAPI_OS_ARCH.zip) and release-site
 // (packer-plugin-NAME_VERSION_OS_ARCH.zip). The server verifies everything;
-// this only groups files so the operator sees what will be sent.
+// this only groups files into one upload per version so the operator sees
+// what will be sent.
 const sumsName = /^packer-plugin-([a-z0-9-]+)_v?([0-9][^_]*)_SHA256SUMS$/
 const zipName = /^packer-plugin-([a-z0-9-]+)_v?([0-9][^_]*?)(?:_x[0-9]+\.[0-9]+)?_([a-z0-9]+)_([a-z0-9]+)\.zip$/
 const manifestName = /^packer-plugin-([a-z0-9-]+)_v?([0-9][^_]*)_manifest\.json$/
 
-export function planPluginUpload<F extends NamedFile>(files: F[]): UploadPlan<F> {
-  const planned: ReadyUpload<F>['files'] = []
-  const versions = new Set<string>()
-  const names = new Set<string>()
-  const note = (match: RegExpMatchArray) => {
+export function planPluginUploads<F extends NamedFile>(files: F[]): UploadPlan<F> {
+  const groups = new Map<string, ReadyUpload<F>>()
+  const refused: RefusedUpload[] = []
+  const group = (match: RegExpMatchArray) => {
     const [, name = '', version = ''] = match
-    names.add(name)
-    versions.add(version)
+    const key = `${name} ${version}`
+    let found = groups.get(key)
+    if (!found) {
+      found = { kind: 'ready', name, version, files: [] }
+      groups.set(key, found)
+    }
+    return found
   }
   for (const file of files) {
+    const signed = file.name.endsWith('_SHA256SUMS.sig') ? file.name.slice(0, -4).match(sumsName) : null
     const sums = file.name.match(sumsName)
     const manifest = file.name.match(manifestName)
     const zip = file.name.match(zipName)
-    if (file.name.endsWith('_SHA256SUMS.sig') && sumsName.test(file.name.slice(0, -4))) {
-      planned.push({ field: 'sha256sums_sig', file })
+    if (signed) {
+      group(signed).files.push({ field: 'sha256sums_sig', file })
     } else if (sums) {
-      if (planned.some((p) => p.field === 'sha256sums')) return { kind: 'refused', reason: 'Choose one SHA256SUMS file.' }
-      note(sums)
-      planned.push({ field: 'sha256sums', file })
+      group(sums).files.push({ field: 'sha256sums', file })
     } else if (manifest) {
-      note(manifest)
-      planned.push({ field: 'manifest', file })
+      group(manifest).files.push({ field: 'manifest', file })
     } else if (zip) {
-      note(zip)
       const [, , , os = '', arch = ''] = zip
-      planned.push({ field: 'zips', file, platform: `${os}_${arch}` })
+      group(zip).files.push({ field: 'zips', file, platform: `${os}_${arch}` })
     } else {
-      return { kind: 'refused', reason: `${file.name} is not a SHA256SUMS file, signature, manifest or plugin zip.` }
+      refused.push({ label: file.name, reason: 'not a SHA256SUMS file, signature, manifest or plugin zip' })
     }
   }
-  if (!planned.some((p) => p.field === 'sha256sums')) return { kind: 'refused', reason: 'Include the version’s SHA256SUMS file.' }
-  if (!planned.some((p) => p.field === 'zips')) return { kind: 'refused', reason: 'Include at least one plugin zip.' }
-  if (names.size > 1) return { kind: 'refused', reason: `Files name more than one plugin: ${[...names].join(', ')}.` }
-  if (versions.size > 1) return { kind: 'refused', reason: `Files span versions ${[...versions].join(', ')}. Upload one version at a time.` }
-  const [name = ''] = names
-  const [version = ''] = versions
-  return { kind: 'ready', name, version, files: planned }
+  const versions: ReadyUpload<F>[] = []
+  for (const upload of groups.values()) {
+    const label = `${upload.name} ${upload.version}`
+    const sumsFiles = upload.files.filter((f) => f.field === 'sha256sums').length
+    if (sumsFiles !== 1) {
+      refused.push({ label, reason: sumsFiles === 0 ? 'no SHA256SUMS file' : 'more than one SHA256SUMS file' })
+    } else if (!upload.files.some((f) => f.field === 'zips')) {
+      refused.push({ label, reason: 'no plugin zip' })
+    } else {
+      versions.push(upload)
+    }
+  }
+  return { versions, refused }
 }
 
 function versionPath(organizationID: string, name: string, version: string, action = ''): string {

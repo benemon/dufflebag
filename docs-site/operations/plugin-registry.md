@@ -56,8 +56,11 @@ Releases from releases.hashicorp.com list a manifest; goreleaser releases on
 GitHub do not.
 
 In the console, open **Plugins**, choose **Upload plugin files**, and select the
-files. The console groups them and shows the plugin, version and platforms
-before anything is sent. The API takes the same files as one multipart request:
+files for one version or several. The console groups them into one upload per
+plugin version, shows each version's files and platforms before anything is
+sent, and refuses a version with no SHA256SUMS file or no zip. Each version is
+then uploaded separately and shows its own result, so one refusal does not stop
+the others. The API takes one version's files as one multipart request:
 
 ```shell
 curl -X PUT "https://dufflebag.example.com/api/v1/organizations/$ORG_ID/plugin-registry/plugins/git/versions/0.6.3" \
