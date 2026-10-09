@@ -18,7 +18,7 @@ let exposePluginRegistry
 let getPluginRegistry
 let pluginRegistryErrorMessage
 let unexposePluginRegistry
-let planPluginUpload
+let planPluginUploads
 let templateStanza
 let PluginDetailView
 let PluginUploadView
@@ -46,7 +46,7 @@ before(async () => {
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
-    unexposePluginRegistry, planPluginUpload, templateStanza, listPlugins, publishPluginVersion,
+    unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
     revokePluginVersion, restorePluginVersion, deletePluginVersion,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
@@ -187,38 +187,35 @@ test('the organization-level route bypasses project loading and missing-project 
 // (internal/domain/plugin/testdata holds their SHA256SUMS files).
 const file = (name, size = 1) => ({ name, size })
 
-test('upload planning groups both publishing shapes into one version', () => {
-  const amazon = planPluginUpload([
+test('upload planning groups files from both publishing shapes into one upload per version', () => {
+  const plan = planPluginUploads([
     file('packer-plugin-amazon_1.8.2_SHA256SUMS'), file('packer-plugin-amazon_1.8.2_SHA256SUMS.sig'),
     file('packer-plugin-amazon_1.8.2_manifest.json'), file('packer-plugin-amazon_1.8.2_linux_arm64.zip'),
-  ])
-  assert.equal(amazon.kind, 'ready')
-  assert.equal(amazon.name, 'amazon')
-  assert.equal(amazon.version, '1.8.2')
-  assert.deepEqual(amazon.files.map((f) => f.field), ['sha256sums', 'sha256sums_sig', 'manifest', 'zips'])
-  assert.equal(amazon.files[3].platform, 'linux_arm64')
-
-  const git = planPluginUpload([
     file('packer-plugin-git_v0.6.3_SHA256SUMS'), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip'),
     file('packer-plugin-git_v0.6.3_x5.0_darwin_arm64.zip'),
+    file('packer-plugin-git_v0.6.2_SHA256SUMS'), file('packer-plugin-git_v0.6.2_x5.0_linux_arm64.zip'),
   ])
-  assert.equal(git.kind, 'ready')
-  assert.equal(git.version, '0.6.3')
+  assert.deepEqual(plan.refused, [])
+  assert.deepEqual(plan.versions.map((v) => `${v.name} ${v.version}`), ['amazon 1.8.2', 'git 0.6.3', 'git 0.6.2'])
+  const [amazon, git] = plan.versions
+  assert.deepEqual(amazon.files.map((f) => f.field), ['sha256sums', 'sha256sums_sig', 'manifest', 'zips'])
+  assert.equal(amazon.files[3].platform, 'linux_arm64')
   assert.deepEqual(git.files.filter((f) => f.field === 'zips').map((f) => f.platform), ['linux_arm64', 'darwin_arm64'])
 })
 
-test('upload planning refuses what the server would refuse, before sending', () => {
-  const refused = (files, reason) => {
-    const plan = planPluginUpload(files)
-    assert.equal(plan.kind, 'refused')
-    assert.match(plan.reason, reason)
-  }
-  refused([file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')], /SHA256SUMS file/)
-  refused([file('packer-plugin-git_v0.6.3_SHA256SUMS')], /at least one plugin zip/)
-  refused([file('packer-plugin-git_v0.6.3_SHA256SUMS'), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip'),
-    file('packer-plugin-git_v0.6.2_x5.0_linux_amd64.zip')], /span versions 0\.6\.3, 0\.6\.2/)
-  refused([file('packer-plugin-git_v0.6.3_SHA256SUMS'), file('README.md')], /README\.md is not/)
-  refused([file('packer-plugin-amazon_1.8.2_SHA256SUMS'), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')], /more than one plugin/)
+test('upload planning refuses incomplete versions and unknown files before sending', () => {
+  const plan = planPluginUploads([
+    file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip'),
+    file('packer-plugin-git_v0.6.2_SHA256SUMS'),
+    file('README.md'),
+    file('packer-plugin-amazon_1.8.2_SHA256SUMS'), file('packer-plugin-amazon_1.8.2_linux_arm64.zip'),
+  ])
+  assert.deepEqual(plan.versions.map((v) => `${v.name} ${v.version}`), ['amazon 1.8.2'])
+  assert.deepEqual(plan.refused, [
+    { label: 'README.md', reason: 'not a SHA256SUMS file, signature, manifest or plugin zip' },
+    { label: 'git 0.6.3', reason: 'no SHA256SUMS file' },
+    { label: 'git 0.6.2', reason: 'no plugin zip' },
+  ])
 })
 
 test('the catalogue lists plugins with their source, newest version and count', () => {
@@ -253,19 +250,34 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
 })
 
-test('the upload view previews the grouped version before anything is sent', () => {
-  const html = renderToStaticMarkup(React.createElement(PluginUploadView, {
-    registry: { enabled: true, exposed: true }, busy: false, failure: null, result: null,
+test('the upload view shows each version, then its outcome and stanza', () => {
+  const plan = planPluginUploads([
+    file('packer-plugin-git_v0.6.3_SHA256SUMS', 900), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip', 6259751),
+    file('packer-plugin-git_v0.6.2_SHA256SUMS', 900), file('packer-plugin-git_v0.6.2_x5.0_linux_arm64.zip', 6100000),
+  ])
+  const view = (outcomes) => renderToStaticMarkup(React.createElement(PluginUploadView, {
+    registry: { enabled: true, exposed: false }, plan, outcomes, busy: false, failure: null,
     onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
-    plan: planPluginUpload([file('packer-plugin-git_v0.6.3_SHA256SUMS', 900), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip', 6259751)]),
   }))
-  assert.match(html, /git · 0\.6\.3/)
-  assert.match(html, /linux_arm64/)
-  assert.match(html, /6\.3 MB/)
-  assert.match(html, /Upload git 0\.6\.3/)
+  const ready = view({})
+  assert.match(ready, /git · 0\.6\.3/)
+  assert.match(ready, /6\.3 MB/)
+  assert.match(ready, /Upload 2 versions/)
+  assert.equal((ready.match(/>Ready</g) ?? []).length, 2)
+
+  const done = view({
+    'git 0.6.3': { status: 'published', stanza: { source: 'dufflebag.example.com/plugins/acme/git', version: '0.6.3', hcl: 'source  = "dufflebag.example.com/plugins/acme/git"' } },
+    'git 0.6.2': { status: 'refused', message: 'git 0.6.2 already exists; versions are immutable' },
+  })
+  assert.match(done, />Published</)
+  assert.match(done, />Refused</)
+  assert.match(done, /versions are immutable/)
+  assert.match(done, /Open git/)
+  assert.match(done, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+  assert.doesNotMatch(done, /Upload 2 versions/)
 
   const disabled = renderToStaticMarkup(React.createElement(PluginUploadView, {
-    registry: { enabled: false, exposed: false }, busy: false, failure: null, result: null, plan: null,
+    registry: { enabled: false, exposed: false }, plan: null, outcomes: {}, busy: false, failure: null,
     onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
   }))
   assert.match(disabled, /The plugin registry isn&#x27;t enabled/)
@@ -281,7 +293,7 @@ test('publishing sends a multipart PUT to the version path', async () => {
   try {
     const sums = new File(['sums'], 'packer-plugin-git_v0.6.3_SHA256SUMS')
     const zip = new File(['zip'], 'packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')
-    await publishPluginVersion('token', 'organization id', planPluginUpload([sums, zip]))
+    await publishPluginVersion('token', 'organization id', planPluginUploads([sums, zip]).versions[0])
   } finally {
     globalThis.fetch = originalFetch
   }

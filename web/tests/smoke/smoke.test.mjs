@@ -383,15 +383,17 @@ function storedZip(entryName, content) {
   return Buffer.concat([local, name, data, central, name, end])
 }
 
-function pluginReleaseFiles() {
+function pluginReleaseFiles(...versions) {
   const directory = mkdtempSync(join(tmpdir(), 'dufflebag-smoke-plugin-'))
-  const zipName = 'packer-plugin-probe_v1.0.0_x5.0_linux_amd64.zip'
-  const zip = storedZip('packer-plugin-probe_v1.0.0_x5.0_linux_amd64', 'binary')
   const digest = (data) => createHash('sha256').update(data).digest('hex')
-  const sums = `${digest(zip)}  ${zipName}\n${'0'.repeat(64)}  packer-plugin-probe_v1.0.0_x5.0_darwin_arm64.zip\n`
-  writeFileSync(join(directory, zipName), zip)
-  writeFileSync(join(directory, 'packer-plugin-probe_v1.0.0_SHA256SUMS'), sums)
-  return [join(directory, 'packer-plugin-probe_v1.0.0_SHA256SUMS'), join(directory, zipName)]
+  return versions.flatMap((version) => {
+    const zipName = `packer-plugin-probe_v${version}_x5.0_linux_amd64.zip`
+    const zip = storedZip(`packer-plugin-probe_v${version}_x5.0_linux_amd64`, `binary ${version}`)
+    const sums = `${digest(zip)}  ${zipName}\n${'0'.repeat(64)}  packer-plugin-probe_v${version}_x5.0_darwin_arm64.zip\n`
+    writeFileSync(join(directory, zipName), zip)
+    writeFileSync(join(directory, `packer-plugin-probe_v${version}_SHA256SUMS`), sums)
+    return [join(directory, `packer-plugin-probe_v${version}_SHA256SUMS`), join(directory, zipName)]
+  })
 }
 
 async function freePort() {
@@ -920,15 +922,17 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('No plugins mirrored yet')
 
     await clickByText('button', 'Upload plugin files')
-    await waitForText('Upload one version of a plugin built in-house')
+    await waitForText('Upload plugin versions built in-house')
     const chooser = await page.waitForSelector('input[aria-label="Choose plugin files"]')
-    await chooser.uploadFile(...pluginReleaseFiles())
+    await chooser.uploadFile(...pluginReleaseFiles('1.0.0', '1.1.0'))
     await waitForText('probe · 1.0.0')
-    await clickByText('button', 'Upload probe 1.0.0')
-    await waitForText(`/plugins/${wizardOrganizationName}/probe 1.0.0`)
+    await waitForText('probe · 1.1.0')
+    await clickByText('button', 'Upload 2 versions')
+    await until('both versions to publish', async () => ((await bodyText()).match(/Published/g) ?? []).length === 2)
+    await waitForText(`/plugins/${wizardOrganizationName}/probe"`)
     await waitForText("Packer can't resolve this template stanza until the registry is exposed.")
-    await clickByText('button', 'Open the plugin')
-    await waitForText('Pinned to the newest available version, 1.0.0.')
+    await clickByText('button', 'Open probe')
+    await waitForText('Pinned to the newest available version, 1.1.0.')
     assert.equal(await page.$eval('td[data-label="linux_amd64"]', (cell) => cell.innerText.trim()), '●')
     assert.equal(await page.$eval('td[data-label="darwin_arm64"]', (cell) => cell.innerText.trim()), '○')
     await clickByText('button', 'Revoke')
@@ -938,6 +942,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
     await clickByText('button', 'probe')
+    await clickByText('button', 'Remove version')
+    await waitForText('Remove probe 1.1.0?')
+    assert.doesNotMatch(await bodyText(), /last version/)
+    await clickInModal('Remove version')
+    await until('1.1.0 to be removed', async () => !(await bodyText()).includes('1.1.0'))
     await clickByText('button', 'Remove version')
     await waitForText("It is probe's last version, so probe is removed and its name can be used by another source.")
     await clickInModal('Remove version')

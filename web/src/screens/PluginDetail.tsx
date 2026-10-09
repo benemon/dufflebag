@@ -203,20 +203,20 @@ export function NotExposedAlert({ registry }: { registry: PluginRegistry | null 
   )
 }
 
-export function TemplateStanzaBlock({ hcl }: { hcl: string }) {
+export function TemplateStanzaBlock({ hcl, id = 'template-stanza' }: { hcl: string; id?: string }) {
   const [copied, setCopied] = useState(false)
   return (
     <CodeBlock actions={
       <CodeBlockAction>
         <ClipboardCopyButton
-          id="template-stanza-copy" textId="template-stanza" aria-label="Copy template stanza"
+          id={`${id}-copy`} textId={id} aria-label="Copy template stanza"
           exitDelay={copied ? 1500 : 600} variant="plain"
           onClick={() => { void navigator.clipboard.writeText(hcl); setCopied(true) }}
           onTooltipHidden={() => setCopied(false)}
         >{copied ? 'Copied' : 'Copy'}</ClipboardCopyButton>
       </CodeBlockAction>
     }>
-      <CodeBlockCode id="template-stanza">{hcl}</CodeBlockCode>
+      <CodeBlockCode id={id}>{hcl}</CodeBlockCode>
     </CodeBlock>
   )
 }
