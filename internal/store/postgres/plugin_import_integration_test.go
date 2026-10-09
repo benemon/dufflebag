@@ -86,7 +86,7 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 	run := func(tamper bool) store.PluginImport {
 		t.Helper()
 		server := signedRelease(t, signer, tamper)
-		importer := pluginimport.NewImporter(pluginimport.NewUpstream(server.Client(), server.URL, server.URL), openpgp.EntityList{signer}, repository)
+		importer := pluginimport.NewImporter(pluginimport.NewUpstream(server.Client(), server.URL, server.URL), nil, openpgp.EntityList{signer}, repository)
 		id, err := repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
 			SourceKind: "releases-hashicorp", Product: "packer-plugin-probe", Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"},
 		})

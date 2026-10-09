@@ -67,6 +67,7 @@ export function Plugins() {
       onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onUpload={() => navigate('/plugin-registry/upload')}
       onBrowse={() => navigate('/plugin-registry/hashicorp')}
+      onImportGithub={() => navigate('/plugin-registry/github')}
       defaultPlatforms={defaultPlatforms}
       onSetDefaultPlatforms={async (platforms) => {
         setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
@@ -108,6 +109,7 @@ type PluginRegistryViewProps = {
   onOpenPlugin: (name: string) => void
   onUpload: () => void
   onBrowse: () => void
+  onImportGithub: () => void
   defaultPlatforms: string[]
   onSetDefaultPlatforms: (platforms: string[]) => Promise<void>
   loading: boolean
@@ -185,7 +187,7 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 }
 
 function EnabledRegistry({
-  organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload, onBrowse,
+  organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload, onBrowse, onImportGithub,
   defaultPlatforms, onSetDefaultPlatforms, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
 }: PluginRegistryViewProps & {
   canConfigure: boolean
@@ -213,7 +215,7 @@ function EnabledRegistry({
       <PluginCatalogue
         organizationName={organizationName} host={host} plugins={plugins}
         canPublish={permitsAction(callerRole, 'publishPlugin')}
-        onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse}
+        onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse} onImportGithub={onImportGithub}
       />
       {canConfigure ? (
         <Card aria-label="Registry settings">
@@ -338,7 +340,7 @@ export function PluginRegistryConfirmationView({
 }
 
 export function PluginCatalogue({
-  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload, onBrowse,
+  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload, onBrowse, onImportGithub,
 }: {
   organizationName: string
   host: string
@@ -347,11 +349,13 @@ export function PluginCatalogue({
   onOpenPlugin: (name: string) => void
   onUpload: () => void
   onBrowse: () => void
+  onImportGithub: () => void
 }) {
   const [filter, setFilter] = useState('')
   const upload = canPublish ? (
     <>
       <Button variant="primary" onClick={onBrowse}>Browse HashiCorp</Button>{' '}
+      <Button variant="secondary" onClick={onImportGithub}>Import from GitHub</Button>{' '}
       <Button variant="secondary" onClick={onUpload}>Upload plugin files</Button>
     </>
   ) : null

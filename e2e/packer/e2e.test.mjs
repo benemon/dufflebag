@@ -770,6 +770,31 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     )
     assert.ok(amazon.ok, `packer init of the imported amazon plugin failed:\n${amazon.output}`)
     process.stdout.write(`ASSERT imported packer-plugin-amazon 1.8.2 from releases.hashicorp.com (signature verified) and installed it with packer init from ${amazonSource}\n`)
+
+    // A real GitHub import: a public community release, resolved from its link.
+    const resolved = await api(rootToken, 'POST', `${registryPath}/catalogue/github/resolve`, {
+      release_url: 'https://github.com/rgl/packer-plugin-windows-update/releases/tag/v0.16.10',
+    })
+    assert.equal(resolved.version, '0.16.10')
+    assert.equal(resolved.has_checksum, true)
+    const githubQueued = await api(rootToken, 'POST', `${registryPath}/imports`, {
+      source: 'github', product: resolved.repository, versions: [resolved.tag], platforms: [`linux_${arch}`],
+    })
+    let githubJob = githubQueued
+    await until('the GitHub import to finish', async () => {
+      githubJob = await api(rootToken, 'GET', `${registryPath}/imports/${githubQueued.id}`)
+      return ['succeeded', 'partially_succeeded', 'failed'].includes(githubJob.state)
+    }, 10 * 60 * 1000, 2000)
+    assert.equal(githubJob.state, 'succeeded', `GitHub import: ${JSON.stringify(githubJob)}`)
+    const updateTemplate = path.join(work, 'windows-update.pkr.hcl')
+    const updateSource = `${hostname}/plugins/${organizationName}/windows-update`
+    writeFileSync(updateTemplate, `packer {\n  required_plugins {\n    windows-update = {\n      source  = "${updateSource}"\n      version = "0.16.10"\n    }\n  }\n}\n`)
+    const update = await command(packer, ['init', updateTemplate], { env: packerEnv }).then(
+      (result) => ({ ok: true, output: `${result.stdout}${result.stderr}` }),
+      (err) => ({ ok: false, output: `${err.stdout ?? ''}${err.stderr ?? ''}${err.message}` }),
+    )
+    assert.ok(update.ok, `packer init of the GitHub-imported plugin failed:\n${update.output}`)
+    process.stdout.write(`ASSERT imported rgl/packer-plugin-windows-update v0.16.10 from GitHub and installed it with packer init from ${updateSource}\n`)
   })
 
   await t.test('the encrypted keyring rotates without losing retained payloads', {

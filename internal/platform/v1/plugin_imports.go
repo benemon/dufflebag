@@ -17,6 +17,7 @@ import (
 type PluginCatalogue interface {
 	Plugins(ctx context.Context) ([]string, error)
 	Versions(ctx context.Context, product, after string) ([]pluginimport.UpstreamVersion, string, error)
+	Resolve(ctx context.Context, link string) (pluginimport.GitHubRelease, error)
 }
 
 var platformPattern = regexp.MustCompile(`^[a-z0-9]+_[a-z0-9]+$`)
@@ -215,9 +216,11 @@ func (s *server) CreatePluginImport(
 	}
 	audited.actor(caller)
 	body := request.Body
-	if body == nil || !pluginimport.ValidProduct(body.Product) || len(body.Versions) == 0 || len(body.Versions) > 50 || !validPlatforms(body.Platforms) {
+	validSource := body != nil && ((body.Source == PluginImportRequestSourceReleasesHashicorp && pluginimport.ValidProduct(body.Product)) ||
+		(body.Source == PluginImportRequestSourceGithub && pluginimport.ValidRepository(body.Product)))
+	if !validSource || len(body.Versions) == 0 || len(body.Versions) > 50 || !validPlatforms(body.Platforms) {
 		audited.failed("invalid_request")
-		return badRequestResponse{message: "an import needs a packer-plugin product, 1 to 50 versions and 1 to 32 distinct OS_ARCH platforms"}, nil
+		return badRequestResponse{message: "an import needs a packer-plugin product (or owner/packer-plugin-<name> repository for github), 1 to 50 versions and 1 to 32 distinct OS_ARCH platforms"}, nil
 	}
 	tenant := store.ParseOrganizationTenant(organizationID)
 	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
@@ -284,4 +287,61 @@ func renderPluginImport(job store.PluginImport) (PluginImport, error) {
 		return PluginImport{}, err
 	}
 	return rendered, nil
+}
+
+func (s *server) ResolveGithubRelease(
+	ctx context.Context, request ResolveGithubReleaseRequestObject,
+) (ResolveGithubReleaseResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	if request.Body == nil {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "release_url is required"}, nil
+	}
+	release, err := s.catalogue.Resolve(ctx, request.Body.ReleaseUrl)
+	switch {
+	case errors.Is(err, pluginimport.ErrNotAReleaseLink):
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "the link must be https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag> or .../releases/latest"}, nil
+	case errors.Is(err, pluginimport.ErrUpstreamNotFound):
+		audited.failed("not_found")
+		return ResolveGithubRelease404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "no public release at that link"}}, nil
+	case errors.Is(err, pluginimport.ErrGitHubRateLimited):
+		audited.failed("rate_limited")
+		return ResolveGithubRelease502JSONResponse{Message: err.Error()}, nil
+	case err != nil:
+		audited.failed("upstream_unavailable")
+		return ResolveGithubRelease502JSONResponse{Message: "GitHub could not be reached"}, nil
+	}
+	rendered := GithubRelease{
+		Repository: release.Repository, Name: release.Name, Tag: release.Tag, Version: release.Version,
+		Prerelease: release.Prerelease, Platforms: release.Platforms, HasChecksum: release.HasChecksum,
+	}
+	if rendered.Platforms == nil {
+		rendered.Platforms = []string{}
+	}
+	plugins, err := s.repository.ListPlugins(ctx, store.ParseOrganizationTenant(organizationID))
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	for _, held := range plugins {
+		if held.Name == release.Name && held.Source != (store.PluginSource{Kind: "github", Repository: release.Repository}) {
+			source := renderPluginSource(held.Source)
+			rendered.HeldBy = &source
+		}
+	}
+	audited.succeeded(organizationID, "")
+	return ResolveGithubRelease200JSONResponse(rendered), nil
 }

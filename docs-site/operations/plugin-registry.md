@@ -67,6 +67,25 @@ Browsing and importing make dufflebag call `api.releases.hashicorp.com` and
 `releases.hashicorp.com`, so they need outbound HTTPS to both; serving plugins
 to Packer never does. Browsing and importing require `publisher`.
 
+## Import from a GitHub release
+
+Community plugins published as GitHub releases are imported from their link:
+
+1. Open **Plugins** and choose **Import from GitHub**.
+2. Paste a release link, `https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag>`
+   or `.../releases/latest`, and choose **Resolve**. dufflebag shows the plugin,
+   version, tag and platforms it found. A `latest` link is resolved to its tag
+   now, and the import uses that tag even if a newer release appears.
+3. Choose platforms and **Import**. The import's page shows the outcome.
+
+The release must be public and must include a SHA256SUMS asset; a release
+without one cannot be verified or served. GitHub releases carry no key
+dufflebag can check, so a signature asset is kept as published but not
+verified. Resolving and importing call the GitHub API without credentials,
+which allows 60 calls an hour per egress address; when that is spent, the
+refusal names the time it resets. Downloads of release files do not count
+against it.
+
 ## Upload a plugin version
 
 A version is uploaded as its release files:

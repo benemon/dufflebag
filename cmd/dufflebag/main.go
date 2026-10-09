@@ -256,13 +256,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	pluginUpstream := pluginimport.NewUpstream(pluginimport.NewHTTPClient(), "https://api.releases.hashicorp.com", "https://releases.hashicorp.com")
+	pluginHTTP := pluginimport.NewHTTPClient()
+	pluginUpstream := pluginimport.NewUpstream(pluginHTTP, "https://api.releases.hashicorp.com", "https://releases.hashicorp.com")
+	pluginGitHub := pluginimport.NewGitHub(pluginHTTP, "https://api.github.com")
 	importCtx, cancelImports := context.WithCancel(context.Background())
 	defer cancelImports()
 	// Imports store files, so a deployment without object storage queues jobs
 	// that wait until it is configured rather than failing every version.
 	if objects != nil {
-		go pluginimport.NewWorker(repository, pluginimport.NewImporter(pluginUpstream, pluginKeyring, repository), 5*time.Second, logger).Run(importCtx)
+		go pluginimport.NewWorker(repository, pluginimport.NewImporter(pluginUpstream, pluginGitHub, pluginKeyring, repository), 5*time.Second, logger).Run(importCtx)
 	}
 
 	// One process, two surfaces. In HCP these are separate hosts — auth at
@@ -321,7 +323,7 @@ func main() {
 	<-webhookDispatcher.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes, pluginUpstream,
+		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes, pluginimport.Catalogue{Upstream: pluginUpstream, GitHub: pluginGitHub},
 	)
 	applicationHandler := composeHandler(
 		broker,

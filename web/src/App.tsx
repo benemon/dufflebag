@@ -20,6 +20,7 @@ import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
 import { PluginDetail } from './screens/PluginDetail'
+import { PluginGithub } from './screens/PluginGithub'
 import { PluginHashicorp } from './screens/PluginHashicorp'
 import { PluginImportJob } from './screens/PluginImportJob'
 import { PluginUpload } from './screens/PluginUpload'
@@ -115,6 +116,7 @@ function Authenticated({
         <Route path="/plugin-registry" element={<Plugins />} />
         <Route path="/plugin-registry/upload" element={<PluginUpload />} />
         <Route path="/plugin-registry/hashicorp" element={<PluginHashicorp />} />
+        <Route path="/plugin-registry/github" element={<PluginGithub />} />
         <Route path="/plugin-registry/imports/:id" element={<PluginImportJob />} />
         <Route path="/plugin-registry/:name" element={<PluginDetail />} />
         <Route path="/principals" element={<Principals />} />

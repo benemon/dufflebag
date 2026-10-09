@@ -495,12 +495,15 @@ func (e PluginImportPlatformOutcomeOutcome) Valid() bool {
 
 // Defines values for PluginImportRequestSource.
 const (
+	PluginImportRequestSourceGithub            PluginImportRequestSource = "github"
 	PluginImportRequestSourceReleasesHashicorp PluginImportRequestSource = "releases-hashicorp"
 )
 
 // Valid indicates whether the value is a known member of the PluginImportRequestSource enum.
 func (e PluginImportRequestSource) Valid() bool {
 	switch e {
+	case PluginImportRequestSourceGithub:
+		return true
 	case PluginImportRequestSourceReleasesHashicorp:
 		return true
 	default:
@@ -1073,6 +1076,23 @@ type Error struct {
 	Message string  `json:"message"`
 }
 
+// GithubRelease defines model for GithubRelease.
+type GithubRelease struct {
+	// HasChecksum A release without a SHA256SUMS asset cannot be imported.
+	HasChecksum bool `json:"has_checksum"`
+
+	// HeldBy Where a plugin's versions come from. Metadata only; never part of its address.
+	HeldBy     *PluginSource `json:"held_by,omitempty"`
+	Name       string        `json:"name"`
+	Platforms  []string      `json:"platforms"`
+	Prerelease bool          `json:"prerelease"`
+
+	// Repository owner/packer-plugin-<name>
+	Repository string `json:"repository"`
+	Tag        string `json:"tag"`
+	Version    string `json:"version"`
+}
+
 // HashicorpPlugin defines model for HashicorpPlugin.
 type HashicorpPlugin struct {
 	// HeldBy Where a plugin's versions come from. Metadata only; never part of its address.
@@ -1380,10 +1400,14 @@ type PluginImportPlatformOutcomeOutcome string
 
 // PluginImportRequest defines model for PluginImportRequest.
 type PluginImportRequest struct {
-	Platforms []string                  `json:"platforms"`
-	Product   string                    `json:"product"`
-	Source    PluginImportRequestSource `json:"source"`
-	Versions  []string                  `json:"versions"`
+	Platforms []string `json:"platforms"`
+
+	// Product For releases-hashicorp, the product (packer-plugin-amazon); for github, the repository (owner/packer-plugin-git).
+	Product string                    `json:"product"`
+	Source  PluginImportRequestSource `json:"source"`
+
+	// Versions For releases-hashicorp, versions; for github, release tags as a resolve returned them.
+	Versions []string `json:"versions"`
 }
 
 // PluginImportRequestSource defines model for PluginImportRequest.Source.
@@ -1786,6 +1810,11 @@ type CreateOrganizationJSONBody struct {
 	Name string `json:"name"`
 }
 
+// ResolveGithubReleaseJSONBody defines parameters for ResolveGithubRelease.
+type ResolveGithubReleaseJSONBody struct {
+	ReleaseUrl string `json:"release_url"`
+}
+
 // ListHashicorpPluginVersionsParams defines parameters for ListHashicorpPluginVersions.
 type ListHashicorpPluginVersionsParams struct {
 	// After The next cursor of the previous page.
@@ -1868,6 +1897,9 @@ type CreateAuditTargetJSONRequestBody = AuditTargetCreate
 
 // CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
 type CreateOrganizationJSONRequestBody CreateOrganizationJSONBody
+
+// ResolveGithubReleaseJSONRequestBody defines body for ResolveGithubRelease for application/json ContentType.
+type ResolveGithubReleaseJSONRequestBody ResolveGithubReleaseJSONBody
 
 // SetPluginDefaultPlatformsJSONRequestBody defines body for SetPluginDefaultPlatforms for application/json ContentType.
 type SetPluginDefaultPlatformsJSONRequestBody = PluginPlatformList
@@ -2200,6 +2232,28 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResolveGithubReleaseWithBody Resolve a GitHub release link to an exact tag
+	//
+	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+	// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+	// GitHub API use allows 60 calls an hour per egress address.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+	ResolveGithubReleaseWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
+	//
+	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+	// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+	// GitHub API use allows 60 calls an hour per egress address.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+	ResolveGithubRelease(ctx context.Context, organizationId OrganizationId, body ResolveGithubReleaseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
 	//
@@ -3234,6 +3288,48 @@ func (c *Client) GetOrganization(ctx context.Context, organizationId Organizatio
 // Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 func (c *Client) GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResolveGithubReleaseWithBody Resolve a GitHub release link to an exact tag
+//
+// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+// GitHub API use allows 60 calls an hour per egress address.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+func (c *Client) ResolveGithubReleaseWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResolveGithubReleaseRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ResolveGithubRelease Resolve a GitHub release link to an exact tag
+//
+// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+// GitHub API use allows 60 calls an hour per egress address.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+func (c *Client) ResolveGithubRelease(ctx context.Context, organizationId OrganizationId, body ResolveGithubReleaseJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewResolveGithubReleaseRequest(c.Server, organizationId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5066,6 +5162,53 @@ func NewGetPluginRegistryRequest(server string, organizationId OrganizationId) (
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewResolveGithubReleaseRequest calls the generic ResolveGithubRelease builder with application/json body
+func NewResolveGithubReleaseRequest(server string, organizationId OrganizationId, body ResolveGithubReleaseJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewResolveGithubReleaseRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewResolveGithubReleaseRequestWithBody constructs an http.Request for the ResolveGithubRelease method, with any body, and a specified content type
+func NewResolveGithubReleaseRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/catalogue/github/resolve", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -7700,6 +7843,28 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginRegistryResponse, error)
 
+	// ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
+	//
+	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+	// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+	// GitHub API use allows 60 calls an hour per egress address.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+	ResolveGithubReleaseWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResolveGithubReleaseResponse, error)
+
+	// ResolveGithubReleaseWithResponse Resolve a GitHub release link to an exact tag
+	//
+	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+	// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+	// GitHub API use allows 60 calls an hour per egress address.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+	ResolveGithubReleaseWithResponse(ctx context.Context, organizationId OrganizationId, body ResolveGithubReleaseJSONRequestBody, reqEditors ...RequestEditorFn) (*ResolveGithubReleaseResponse, error)
+
 	// ListHashicorpPluginsWithResponse Packer plugins published on releases.hashicorp.com
 	//
 	// Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
@@ -9296,6 +9461,82 @@ func (r GetPluginRegistryResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetPluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ResolveGithubReleaseResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *GithubRelease
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON502 the response for an HTTP 502 `application/json` response
+	JSON502 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON200() *GithubRelease {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON502 returns the response for an HTTP 502 `application/json` response
+func (r ResolveGithubReleaseResponse) GetJSON502() *Error {
+	return r.JSON502
+}
+
+// GetBody returns the raw response body bytes
+func (r ResolveGithubReleaseResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ResolveGithubReleaseResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ResolveGithubReleaseResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ResolveGithubReleaseResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -13122,6 +13363,40 @@ func (c *ClientWithResponses) GetPluginRegistryWithResponse(ctx context.Context,
 	return ParseGetPluginRegistryResponse(rsp)
 }
 
+// ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
+//
+// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+// GitHub API use allows 60 calls an hour per egress address.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+func (c *ClientWithResponses) ResolveGithubReleaseWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ResolveGithubReleaseResponse, error) {
+	rsp, err := c.ResolveGithubReleaseWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResolveGithubReleaseResponse(rsp)
+}
+
+// ResolveGithubReleaseWithResponse Resolve a GitHub release link to an exact tag
+//
+// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+// latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+// GitHub API use allows 60 calls an hour per egress address.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve (the `ResolveGithubRelease` operationId).
+func (c *ClientWithResponses) ResolveGithubReleaseWithResponse(ctx context.Context, organizationId OrganizationId, body ResolveGithubReleaseJSONRequestBody, reqEditors ...RequestEditorFn) (*ResolveGithubReleaseResponse, error) {
+	rsp, err := c.ResolveGithubRelease(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseResolveGithubReleaseResponse(rsp)
+}
+
 // ListHashicorpPluginsWithResponse Packer plugins published on releases.hashicorp.com
 //
 // Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
@@ -14941,6 +15216,67 @@ func ParseGetPluginRegistryResponse(rsp *http.Response) (*GetPluginRegistryRespo
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseResolveGithubReleaseResponse parses an HTTP response from a ResolveGithubReleaseWithResponse call
+func ParseResolveGithubReleaseResponse(rsp *http.Response) (*ResolveGithubReleaseResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ResolveGithubReleaseResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest GithubRelease
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
 
 	}
 
@@ -17739,6 +18075,9 @@ type ServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
+	ResolveGithubRelease(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp)
 	ListHashicorpPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -18128,6 +18467,32 @@ func (siw *ServerInterfaceWrapper) GetPluginRegistry(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ResolveGithubRelease operation middleware
+func (siw *ServerInterfaceWrapper) ResolveGithubRelease(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ResolveGithubRelease(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20175,6 +20540,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/default-platforms", wrapper.SetPluginDefaultPlatforms)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.CreatePluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.GetPluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
@@ -20967,6 +21333,99 @@ func (response GetPluginRegistry404JSONResponse) VisitGetPluginRegistryResponse(
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubReleaseRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *ResolveGithubReleaseJSONRequestBody
+}
+
+type ResolveGithubReleaseResponseObject interface {
+	VisitResolveGithubReleaseResponse(w http.ResponseWriter) error
+}
+
+type ResolveGithubRelease200JSONResponse GithubRelease
+
+func (response ResolveGithubRelease200JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubRelease400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ResolveGithubRelease400JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubRelease401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ResolveGithubRelease401JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubRelease403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ResolveGithubRelease403JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubRelease404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ResolveGithubRelease404JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ResolveGithubRelease502JSONResponse Error
+
+func (response ResolveGithubRelease502JSONResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -24882,6 +25341,9 @@ type StrictServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(ctx context.Context, request GetPluginRegistryRequestObject) (GetPluginRegistryResponseObject, error)
+	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
+	ResolveGithubRelease(ctx context.Context, request ResolveGithubReleaseRequestObject) (ResolveGithubReleaseResponseObject, error)
 	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp)
 	ListHashicorpPlugins(ctx context.Context, request ListHashicorpPluginsRequestObject) (ListHashicorpPluginsResponseObject, error)
@@ -25397,6 +25859,39 @@ func (sh *strictHandler) GetPluginRegistry(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetPluginRegistryResponseObject); ok {
 		if err := validResponse.VisitGetPluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ResolveGithubRelease operation middleware
+func (sh *strictHandler) ResolveGithubRelease(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ResolveGithubReleaseRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body ResolveGithubReleaseJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ResolveGithubRelease(ctx, request.(ResolveGithubReleaseRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ResolveGithubRelease")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ResolveGithubReleaseResponseObject); ok {
+		if err := validResponse.VisitResolveGithubReleaseResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -1,0 +1,87 @@
+{
+ "tag_name": "v0.6.3",
+ "prerelease": false,
+ "draft": false,
+ "assets": [
+  {
+   "name": "packer-plugin-git_v0.6.3_SHA256SUMS",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_SHA256SUMS",
+   "size": 1574
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_SHA256SUMS.sig",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_SHA256SUMS.sig",
+   "size": 566
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_darwin_amd64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_darwin_amd64.zip",
+   "size": 6980510
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_darwin_arm64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_darwin_arm64.zip",
+   "size": 6572704
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_freebsd_386.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_freebsd_386.zip",
+   "size": 6360209
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_freebsd_amd64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_freebsd_amd64.zip",
+   "size": 6834048
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_freebsd_arm.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_freebsd_arm.zip",
+   "size": 6535394
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_freebsd_arm64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_freebsd_arm64.zip",
+   "size": 6253925
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_linux_386.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_linux_386.zip",
+   "size": 6375608
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_linux_amd64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_linux_amd64.zip",
+   "size": 6836485
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_linux_arm.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_linux_arm.zip",
+   "size": 6541642
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip",
+   "size": 6259751
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_windows_386.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_windows_386.zip",
+   "size": 6707474
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_windows_amd64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_windows_amd64.zip",
+   "size": 7074773
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_windows_arm.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_windows_arm.zip",
+   "size": 6731376
+  },
+  {
+   "name": "packer-plugin-git_v0.6.3_x5.0_windows_arm64.zip",
+   "browser_download_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/packer-plugin-git_v0.6.3_x5.0_windows_arm64.zip",
+   "size": 6380580
+  }
+ ]
+}
