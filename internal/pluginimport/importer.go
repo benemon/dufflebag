@@ -43,16 +43,18 @@ type Repository interface {
 	ListPluginVersions(context.Context, store.OrganizationTenant, string) (store.PluginSource, []store.PluginVersionSummary, error)
 }
 
-// Importer mirrors versions from releases.hashicorp.com.
+// Importer mirrors versions from releases.hashicorp.com and GitHub releases.
 type Importer struct {
 	upstream   *Upstream
+	github     *GitHub
 	keyring    openpgp.EntityList
 	repository Repository
 }
 
-// NewImporter verifies every SHA256SUMS against keyring before storing it.
-func NewImporter(upstream *Upstream, keyring openpgp.EntityList, repository Repository) *Importer {
-	return &Importer{upstream: upstream, keyring: keyring, repository: repository}
+// NewImporter verifies every releases.hashicorp.com SHA256SUMS against
+// keyring before storing it; GitHub releases carry no key to check.
+func NewImporter(upstream *Upstream, github *GitHub, keyring openpgp.EntityList, repository Repository) *Importer {
+	return &Importer{upstream: upstream, github: github, keyring: keyring, repository: repository}
 }
 
 // The signature to verify is the one named for the pinned key's short ID;
@@ -69,8 +71,9 @@ func signatureFor(keyring openpgp.EntityList, names []string) string {
 	return ""
 }
 
-// ImportVersion mirrors one version's selected platforms. It never returns
-// an error: every failure is the version's recorded outcome.
+// ImportVersion mirrors one releases.hashicorp.com version's selected
+// platforms. It never returns an error: every failure is the version's
+// recorded outcome.
 func (i *Importer) ImportVersion(
 	ctx context.Context, tenant store.OrganizationTenant, product, version string, platforms []string,
 ) VersionOutcome {
@@ -81,14 +84,10 @@ func (i *Importer) ImportVersion(
 	if !ValidProduct(product) {
 		return failed("%s is not a Packer plugin product", product)
 	}
-	_, existing, err := i.repository.ListPluginVersions(ctx, tenant, name)
-	if err != nil && !errors.Is(err, registry.ErrNotFound) {
+	if mirrored, err := i.mirrored(ctx, tenant, name, version); err != nil {
 		return failed("read the registry: %v", err)
-	}
-	for _, mirrored := range existing {
-		if mirrored.Version == version {
-			return VersionOutcome{Version: version, Outcome: OutcomeAlreadyMirrored}
-		}
+	} else if mirrored {
+		return VersionOutcome{Version: version, Outcome: OutcomeAlreadyMirrored}
 	}
 
 	files, err := i.upstream.release(ctx, product, version)
@@ -117,6 +116,122 @@ func (i *Importer) ImportVersion(
 		}
 	}
 
+	zips := map[string]asset{}
+	for _, b := range files.Builds {
+		zips[b.OS+"_"+b.Arch] = asset{name: b.Filename, url: i.upstream.fileURL(product, version, b.Filename)}
+	}
+	return i.publish(ctx, tenant, fetched{
+		name: name, version: version, source: store.PluginSource{Kind: "releases-hashicorp", Repository: product},
+		sums: sums, sumsName: files.Shasums, signature: signature, signatureName: signatureName, manifest: manifest,
+		zips: zips, platforms: platforms,
+	})
+}
+
+// ImportGitHubVersion mirrors one public GitHub release's selected platforms.
+// Its signature, if any, is stored verbatim and never verified (ADR-0027 D11).
+func (i *Importer) ImportGitHubVersion(
+	ctx context.Context, tenant store.OrganizationTenant, repository, tag string, platforms []string,
+) VersionOutcome {
+	failed := func(format string, args ...any) VersionOutcome {
+		return VersionOutcome{Version: strings.TrimPrefix(tag, "v"), Outcome: OutcomeFailed, Error: fmt.Sprintf(format, args...)}
+	}
+	if !ValidRepository(repository) {
+		return failed("%s is not an owner/packer-plugin-<name> repository", repository)
+	}
+	release, err := i.github.Release(ctx, repository, tag)
+	if err != nil {
+		return failed("%v", err)
+	}
+	if mirrored, err := i.mirrored(ctx, tenant, release.Name, release.Version); err != nil {
+		return failed("read the registry: %v", err)
+	} else if mirrored {
+		return VersionOutcome{Version: release.Version, Outcome: OutcomeAlreadyMirrored}
+	}
+	var sumsName, signatureName string
+	for name := range release.assets {
+		switch {
+		case strings.HasSuffix(name, "_SHA256SUMS"):
+			if sumsName != "" {
+				return failed("the release has more than one SHA256SUMS asset")
+			}
+			sumsName = name
+		case strings.HasSuffix(name, "_SHA256SUMS.sig"):
+			signatureName = name
+		}
+	}
+	if sumsName == "" {
+		return failed("the release has no SHA256SUMS asset, so it cannot be verified or served")
+	}
+	sums, err := i.upstream.fetchSmall(ctx, release.assets[sumsName], 1<<20)
+	if err != nil {
+		return failed("%v", err)
+	}
+	var signature []byte
+	if signatureName != "" {
+		if signature, err = i.upstream.fetchSmall(ctx, release.assets[signatureName], 1<<20); err != nil {
+			return failed("%v", err)
+		}
+	}
+	var manifest []byte
+	if manifestName := plugin.ManifestName(release.Name, release.Version); strings.Contains(string(sums), "  "+manifestName) {
+		url, ok := release.assets[manifestName]
+		if !ok {
+			return failed("SHA256SUMS lists %s, but the release has no such asset", manifestName)
+		}
+		if manifest, err = i.upstream.fetchSmall(ctx, url, 1<<20); err != nil {
+			return failed("%v", err)
+		}
+	}
+	zips := map[string]asset{}
+	for name, url := range release.assets {
+		if m := zipPlatform.FindStringSubmatch(name); m != nil {
+			zips[m[1]+"_"+m[2]] = asset{name: name, url: url}
+		}
+	}
+	return i.publish(ctx, tenant, fetched{
+		name: release.Name, version: release.Version, source: store.PluginSource{Kind: "github", Repository: repository},
+		sums: sums, sumsName: sumsName, signature: signature, signatureName: signatureName, manifest: manifest,
+		zips: zips, platforms: platforms,
+	})
+}
+
+func (i *Importer) mirrored(ctx context.Context, tenant store.OrganizationTenant, name, version string) (bool, error) {
+	_, existing, err := i.repository.ListPluginVersions(ctx, tenant, name)
+	if errors.Is(err, registry.ErrNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	for _, mirrored := range existing {
+		if mirrored.Version == version {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+type asset struct{ name, url string }
+
+// fetched is a version's metadata, already fetched and, where its source
+// allows, verified; publish downloads its zips and stores it.
+type fetched struct {
+	name, version string
+	source        store.PluginSource
+	sums          []byte
+	sumsName      string
+	signature     []byte
+	signatureName string
+	manifest      []byte
+	zips          map[string]asset
+	platforms     []string
+}
+
+func (i *Importer) publish(ctx context.Context, tenant store.OrganizationTenant, release fetched) VersionOutcome {
+	name, version := release.name, release.version
+	failed := func(format string, args ...any) VersionOutcome {
+		return VersionOutcome{Version: version, Outcome: OutcomeFailed, Error: fmt.Sprintf(format, args...)}
+	}
 	outcome := VersionOutcome{Version: version}
 	var uploaded []plugin.UploadedZip
 	blobs := map[string]store.PluginBlob{}
@@ -127,23 +242,18 @@ func (i *Importer) ImportVersion(
 			_ = os.Remove(file.Name())
 		}
 	}()
-	for _, platform := range platforms {
-		var found *build
-		for index := range files.Builds {
-			if files.Builds[index].OS+"_"+files.Builds[index].Arch == platform {
-				found = &files.Builds[index]
-			}
-		}
-		if found == nil {
+	for _, platform := range release.platforms {
+		found, ok := release.zips[platform]
+		if !ok {
 			outcome.Platforms = append(outcome.Platforms, PlatformOutcome{Platform: platform, Outcome: OutcomeFailed, Error: "not published upstream"})
 			continue
 		}
 		file, err := os.CreateTemp("", "dufflebag-import-*")
 		if err != nil {
-			return failed("spool %s: %v", found.Filename, err)
+			return failed("spool %s: %v", found.name, err)
 		}
 		temporary = append(temporary, file)
-		digest, size, err := i.upstream.download(ctx, i.upstream.fileURL(product, version, found.Filename), file)
+		digest, size, err := i.upstream.download(ctx, found.url, file)
 		if err != nil {
 			outcome.Platforms = append(outcome.Platforms, PlatformOutcome{Platform: platform, Outcome: OutcomeFailed, Error: err.Error()})
 			continue
@@ -157,8 +267,8 @@ func (i *Importer) ImportVersion(
 		for _, entry := range archive.File {
 			entries = append(entries, entry.Name)
 		}
-		uploaded = append(uploaded, plugin.UploadedZip{Filename: found.Filename, SHA256: digest, Entries: entries})
-		blobs[found.Filename] = store.PluginBlob{Filename: found.Filename, SHA256: digest, Body: file, Size: size}
+		uploaded = append(uploaded, plugin.UploadedZip{Filename: found.name, SHA256: digest, Entries: entries})
+		blobs[found.name] = store.PluginBlob{Filename: found.name, SHA256: digest, Body: file, Size: size}
 		outcome.Platforms = append(outcome.Platforms, PlatformOutcome{Platform: platform, Outcome: OutcomeImported})
 	}
 	if len(uploaded) == 0 {
@@ -166,22 +276,21 @@ func (i *Importer) ImportVersion(
 		return outcome
 	}
 
-	verified, err := plugin.Verify(plugin.Upload{Name: name, Version: version, Sums: sums, Manifest: manifest, Zips: uploaded})
+	verified, err := plugin.Verify(plugin.Upload{Name: name, Version: version, Sums: release.sums, Manifest: release.manifest, Zips: uploaded})
 	if err != nil {
 		outcome.Outcome, outcome.Error = OutcomeFailed, strings.TrimPrefix(err.Error(), registry.ErrInvalid.Error()+": ")
 		return outcome
 	}
 	input := store.PluginVersionInput{
-		Name: name, Version: version, Protocol: verified.Protocol,
-		Source: store.PluginSource{Kind: "releases-hashicorp", Repository: product},
-		Sums:   newBlob(files.Shasums, sums),
-		Signature: func() *store.PluginBlob {
-			blob := newBlob(signatureName, signature)
-			return &blob
-		}(),
+		Name: name, Version: version, Protocol: verified.Protocol, Source: release.source,
+		Sums: newBlob(release.sumsName, release.sums),
 	}
-	if manifest != nil {
-		blob := newBlob(plugin.ManifestName(name, version), manifest)
+	if release.signature != nil {
+		blob := newBlob(release.signatureName, release.signature)
+		input.Signature = &blob
+	}
+	if release.manifest != nil {
+		blob := newBlob(plugin.ManifestName(name, version), release.manifest)
 		input.Manifest = &blob
 	}
 	for _, listed := range verified.Listed {

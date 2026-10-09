@@ -617,6 +617,11 @@ func (response badRequestResponse) VisitCreatePluginImportResponse(w http.Respon
 	return nil
 }
 
+func (response badRequestResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
 func (response badRequestResponse) VisitCreateProjectResponse(w http.ResponseWriter) error {
 	writeError(w, http.StatusBadRequest, Error{Message: response.message})
 	return nil

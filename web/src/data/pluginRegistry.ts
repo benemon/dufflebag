@@ -234,3 +234,24 @@ export async function setDefaultPlatforms(token: string, organizationID: string,
 }
 
 export const terminalImportStates = new Set(['succeeded', 'partially_succeeded', 'failed'])
+
+export type GithubRelease = {
+  repository: string
+  name: string
+  tag: string
+  version: string
+  prerelease: boolean
+  platforms: string[]
+  has_checksum: boolean
+  held_by?: PluginSource
+}
+
+export function resolveGithubRelease(token: string, organizationID: string, releaseURL: string): Promise<GithubRelease> {
+  return platformPost<GithubRelease>(token, path(organizationID, 'catalogue/github/resolve'), { release_url: releaseURL })
+}
+
+export function createGithubImport(
+  token: string, organizationID: string, repository: string, tag: string, platforms: string[],
+): Promise<PluginImport> {
+  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'github', product: repository, versions: [tag], platforms })
+}

@@ -77,12 +77,15 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
   host: string
   onOpen: (name: string) => void
 }) {
-  const name = job?.product.replace(/^packer-plugin-/, '') ?? ''
+  const name = job?.product.replace(/^.*packer-plugin-/, '') ?? ''
   const imported = job?.outcomes.filter((o) => o.outcome === 'imported').map((o) => o.version) ?? []
   const newest = imported.at(-1)
   return (
     <>
-      <ScreenHeader title={job ? `Import ${name}` : 'Import'} description={job ? <>{stateLabel[job.state]} from releases.hashicorp.com</> : undefined} />
+      <ScreenHeader
+        title={job ? `Import ${name}` : 'Import'}
+        description={job ? <>{stateLabel[job.state]} from {job.source === 'github' ? `GitHub (${job.product})` : 'releases.hashicorp.com'}</> : undefined}
+      />
       <PageSection variant="secondary" isFilled>
         {failure ? <Alert variant="danger" isInline title="The import could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         {!job && !failure ? <Spinner aria-label="Loading import…" /> : null}
@@ -92,8 +95,9 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
             <Table aria-label="Import outcomes" variant="compact">
               <Thead><Tr><Th>Version</Th><Th>Outcome</Th><Th>Detail</Th></Tr></Thead>
               <Tbody>
-                {job.versions.map((version) => {
-                  const outcome = job.outcomes.find((o) => o.version === version)
+                {job.versions.map((version, index) => {
+                  // Outcomes are recorded in request order; a GitHub job requests tags, its outcomes name versions.
+                  const outcome = job.outcomes[index]
                   return (
                     <Fragment key={version}>
                       <Tr>

@@ -104,7 +104,7 @@ func TestImportVersionVerifiesThenPublishesTheSelectedPlatforms(t *testing.T) {
 	key := signer(t)
 	server := upstreamRelease(t, key, false)
 	repository := &fakeRepository{}
-	importer := NewImporter(NewUpstream(server.Client(), server.URL, server.URL), openpgp.EntityList{key}, repository)
+	importer := NewImporter(NewUpstream(server.Client(), server.URL, server.URL), nil, openpgp.EntityList{key}, repository)
 
 	outcome := importer.ImportVersion(context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0",
 		[]string{"linux_amd64", "windows_amd64"})
@@ -141,7 +141,7 @@ func TestImportVersionRefusesWhatTheKeyDidNotSign(t *testing.T) {
 	} {
 		t.Run(name, func(t *testing.T) {
 			repository := &fakeRepository{}
-			importer := NewImporter(NewUpstream(tc.server.Client(), tc.server.URL, tc.server.URL), tc.keyring, repository)
+			importer := NewImporter(NewUpstream(tc.server.Client(), tc.server.URL, tc.server.URL), nil, tc.keyring, repository)
 			outcome := importer.ImportVersion(context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0", []string{"linux_amd64"})
 			if outcome.Outcome != OutcomeFailed || !strings.Contains(outcome.Error, tc.want) || len(repository.published) != 0 {
 				t.Fatalf("outcome = %+v, published = %d; want a failure containing %q and nothing stored", outcome, len(repository.published), tc.want)
@@ -154,7 +154,7 @@ func TestImportVersionSkipsAMirroredVersionWithoutFetching(t *testing.T) {
 	requests := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { requests++ }))
 	t.Cleanup(server.Close)
-	importer := NewImporter(NewUpstream(server.Client(), server.URL, server.URL), openpgp.EntityList{signer(t)}, &fakeRepository{existing: []string{"1.0.0"}})
+	importer := NewImporter(NewUpstream(server.Client(), server.URL, server.URL), nil, openpgp.EntityList{signer(t)}, &fakeRepository{existing: []string{"1.0.0"}})
 	outcome := importer.ImportVersion(context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0", []string{"linux_amd64"})
 	if outcome.Outcome != OutcomeAlreadyMirrored || requests != 0 {
 		t.Fatalf("outcome = %+v after %d upstream requests", outcome, requests)

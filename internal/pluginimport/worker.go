@@ -82,10 +82,13 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	}
 	for _, version := range job.Request.Versions {
 		var outcome VersionOutcome
-		if job.Request.SourceKind != "releases-hashicorp" {
-			outcome = VersionOutcome{Version: version, Outcome: OutcomeFailed, Error: "imports from " + job.Request.SourceKind + " are not supported yet"}
-		} else {
+		switch job.Request.SourceKind {
+		case "releases-hashicorp":
 			outcome = w.importer.ImportVersion(ctx, job.Tenant, job.Request.Product, version, job.Request.Platforms)
+		case "github":
+			outcome = w.importer.ImportGitHubVersion(ctx, job.Tenant, job.Request.Product, version, job.Request.Platforms)
+		default:
+			outcome = VersionOutcome{Version: version, Outcome: OutcomeFailed, Error: "unknown import source " + job.Request.SourceKind}
 		}
 		outcomes = append(outcomes, outcome)
 		record(StateRunning)

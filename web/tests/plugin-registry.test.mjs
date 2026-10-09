@@ -29,6 +29,8 @@ let restorePluginVersion
 let deletePluginVersion
 let PluginHashicorpView
 let PluginImportJobView
+let PluginGithubView
+let createGithubImport
 let createPluginImport
 
 before(async () => {
@@ -50,12 +52,13 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    revokePluginVersion, restorePluginVersion, deletePluginVersion, createPluginImport,
+    revokePluginVersion, restorePluginVersion, deletePluginVersion, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
+  ;({ PluginGithubView } = await vite.ssrLoadModule('/src/screens/PluginGithub.tsx'))
 })
 
 after(async () => { await vite.close() })
@@ -63,7 +66,7 @@ after(async () => { await vite.close() })
 const props = (over = {}) => ({
   organizationName: 'acme', callerRole: 'maintainer', host: 'dufflebag.example.com',
   registry: { enabled: false, exposed: false }, plugins: [], loading: false, failure: null,
-  onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {},
+  onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {}, onImportGithub: () => {},
   defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], onSetDefaultPlatforms: async () => {},
   onRefresh: async () => {}, onEnable: async () => {}, onExpose: async () => {},
   onUnexpose: async () => {}, onDisable: async () => {}, ...over,
@@ -421,4 +424,46 @@ test('an import is queued with the selected versions and platforms', async () =>
     path: '/api/v1/organizations/org/plugin-registry/imports', method: 'POST',
     body: { source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3'], platforms: ['linux_amd64'] },
   })
+})
+
+const githubView = (release, link = 'https://github.com/ethanmdavidson/packer-plugin-git/releases/latest') =>
+  renderToStaticMarkup(React.createElement(PluginGithubView, {
+    link, release, preselected: ['linux_amd64'], failure: null, busy: false,
+    onLinkChange: () => {}, onResolve: () => {}, onImport: () => {},
+  }))
+const gitRelease = {
+  repository: 'ethanmdavidson/packer-plugin-git', name: 'git', tag: 'v0.6.3', version: '0.6.3', prerelease: false,
+  platforms: ['darwin_arm64', 'linux_amd64'], has_checksum: true,
+}
+
+test('a resolved GitHub release shows what was inferred, pinned to its tag', () => {
+  const html = githubView(gitRelease)
+  assert.match(html, /git · 0\.6\.3/)
+  assert.match(html, /tag v0\.6\.3, the latest release now\. The import uses this tag/)
+  assert.match(html, /Import git 0\.6\.3 · 1 platforms/)
+})
+
+test('a GitHub release without SHA256SUMS or under a held name cannot be imported', () => {
+  const unsummed = githubView({ ...gitRelease, has_checksum: false })
+  assert.match(unsummed, /no SHA256SUMS asset/)
+  assert.doesNotMatch(unsummed, /Import git/)
+  const held = githubView({ ...gitRelease, held_by: { kind: 'releases-hashicorp', repository: 'packer-plugin-git' } })
+  assert.match(held, /git is held by another source/)
+  assert.match(held, /freed once every git version is removed, and revoked versions still count/)
+  assert.doesNotMatch(held, /Import git/)
+})
+
+test('a GitHub import sends the repository and the pinned tag', async () => {
+  const originalFetch = globalThis.fetch
+  let body
+  globalThis.fetch = async (_path, options) => {
+    body = JSON.parse(options.body)
+    return new Response(JSON.stringify({ id: 'job' }), { status: 202, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await createGithubImport('token', 'org', 'ethanmdavidson/packer-plugin-git', 'v0.6.3', ['linux_amd64'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(body, { source: 'github', product: 'ethanmdavidson/packer-plugin-git', versions: ['v0.6.3'], platforms: ['linux_amd64'] })
 })

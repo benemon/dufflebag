@@ -771,6 +771,42 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: resolveGithubRelease
+      summary: Resolve a GitHub release link to an exact tag
+      description: |
+        Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
+        latest is resolved here, once, and the import sends the tag. Requires `publisher`. Unauthenticated
+        GitHub API use allows 60 calls an hour per egress address.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                release_url: { type: string }
+              required: [release_url]
+      responses:
+        "200":
+          description: The release.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/GithubRelease" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: GitHub could not be reached, or its rate limit is spent (the message names the reset time).
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/imports:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -2691,12 +2727,31 @@ components:
         mirrored: { type: boolean }
       required: [version, created_at, prerelease, platforms, mirrored]
 
+    GithubRelease:
+      type: object
+      properties:
+        repository: { type: string, description: "owner/packer-plugin-<name>" }
+        name: { type: string }
+        tag: { type: string }
+        version: { type: string }
+        prerelease: { type: boolean }
+        platforms: { type: array, items: { type: string } }
+        has_checksum: { type: boolean, description: A release without a SHA256SUMS asset cannot be imported. }
+        held_by: { $ref: "#/components/schemas/PluginSource" }
+      required: [repository, name, tag, version, prerelease, platforms, has_checksum]
+
     PluginImportRequest:
       type: object
       properties:
-        source: { type: string, enum: [releases-hashicorp] }
-        product: { type: string }
-        versions: { type: array, minItems: 1, items: { type: string } }
+        source: { type: string, enum: [releases-hashicorp, github] }
+        product:
+          type: string
+          description: For releases-hashicorp, the product (packer-plugin-amazon); for github, the repository (owner/packer-plugin-git).
+        versions:
+          type: array
+          minItems: 1
+          description: For releases-hashicorp, versions; for github, release tags as a resolve returned them.
+          items: { type: string }
         platforms: { type: array, minItems: 1, items: { type: string } }
       required: [source, product, versions, platforms]
 
