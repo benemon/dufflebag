@@ -1523,6 +1523,7 @@ type Unauthorized = Error
 
 // CreateOrganizationJSONBody defines parameters for CreateOrganization.
 type CreateOrganizationJSONBody struct {
+	// Name A lowercase RFC 1123 DNS label using letters, digits and hyphens, with no leading or trailing hyphen.
 	Name string `json:"name"`
 }
 

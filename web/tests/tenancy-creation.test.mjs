@@ -16,6 +16,7 @@ const gapScreenSources = ['Versions.tsx', 'Version.tsx', 'Build.tsx'].map((scree
 
 let vite
 let TenancyForm
+let organizationNameError
 let TenancyModalView
 let TenancyGapEmptyState
 let CreateTenancyButton
@@ -33,7 +34,8 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ TenancyForm } = await vite.ssrLoadModule('/src/components/TenancyForm.tsx'))
+  ;({ TenancyForm, organizationNameError } =
+    await vite.ssrLoadModule('/src/components/TenancyForm.tsx'))
   ;({
     TenancyModalView, TenancyGapEmptyState, CreateTenancyButton, projectCreationRefusal,
     refreshThenSelect,
@@ -60,10 +62,24 @@ test('wizard project and tenancy modal share TenancyForm', () => {
     kind: 'project', formID: 'project', submitLabel: 'Create project',
     submitting: false, footer: 'modal', onSubmit: async () => {}, onCancel: () => {},
   }))
-  assert.match(organization, /Contains projects and their principals\. The name cannot be changed later\./)
+  assert.match(organization, /lowercase RFC 1123 DNS label/)
+  assert.match(organization, /1 to 63 characters using lowercase letters, digits and hyphens/)
+  assert.match(organization, /no leading or trailing hyphen/)
   assert.match(project, /Scopes buckets, principals and channels\. The name cannot be changed later\./)
   for (const markup of [organization, project]) {
     assert.match(markup, /<button[^>]*disabled[^>]*>/)
+  }
+})
+
+test('organization names use lowercase RFC 1123 DNS labels', () => {
+  for (const name of ['acme', 'a', 'a-b', 'a'.repeat(63)]) {
+    assert.equal(organizationNameError(name), null, name)
+  }
+  for (const name of [
+    'Acme', 'Acme Corp', 'acme/x', '-acme', 'acme-', 'a.b', 'a_b',
+    'a'.repeat(64), '', 'acmé',
+  ]) {
+    assert.match(organizationNameError(name), /lowercase RFC 1123 DNS label/, name)
   }
 })
 
