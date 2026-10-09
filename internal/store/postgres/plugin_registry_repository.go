@@ -143,6 +143,9 @@ func (r *Repository) UnexposePluginRegistry(
 	return PluginRegistry{Enabled: true, Exposed: exposed}, nil
 }
 
+// DisablePluginRegistry removes the registry and everything in it. The row
+// lock holds off a concurrent expose until the rows are gone; blobs follow
+// the commit so a failure can only orphan them.
 func (r *Repository) DisablePluginRegistry(ctx context.Context, tenant OrganizationTenant) error {
 	tx, q, err := r.beginOrganization(ctx, tenant)
 	if err != nil {
@@ -150,7 +153,7 @@ func (r *Repository) DisablePluginRegistry(ctx context.Context, tenant Organizat
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if _, err := q.DisablePluginRegistry(ctx, tenant.OrganizationID); errors.Is(err, sql.ErrNoRows) {
+	if _, err := q.LockUnexposedPluginRegistry(ctx, tenant.OrganizationID); errors.Is(err, sql.ErrNoRows) {
 		exposed, getErr := q.GetPluginRegistry(ctx, tenant.OrganizationID)
 		if errors.Is(getErr, sql.ErrNoRows) {
 			return ErrPluginRegistryNotEnabled
@@ -163,11 +166,25 @@ func (r *Repository) DisablePluginRegistry(ctx context.Context, tenant Organizat
 		}
 		return ErrPluginRegistryNotEnabled
 	} else if err != nil {
+		return fmt.Errorf("lock plugin registry: %w", err)
+	}
+	keys, err := q.ListPluginObjectKeys(ctx, tenant.OrganizationID)
+	if err != nil {
+		return fmt.Errorf("list plugin objects: %w", err)
+	}
+	if err := q.DeletePluginVersions(ctx, tenant.OrganizationID); err != nil {
+		return fmt.Errorf("delete plugin versions: %w", err)
+	}
+	if err := q.DeletePlugins(ctx, tenant.OrganizationID); err != nil {
+		return fmt.Errorf("delete plugins: %w", err)
+	}
+	if _, err := q.DisablePluginRegistry(ctx, tenant.OrganizationID); err != nil {
 		return fmt.Errorf("disable plugin registry: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit disable plugin registry: %w", err)
 	}
+	r.deletePluginObjects(ctx, keys)
 	return nil
 }
 

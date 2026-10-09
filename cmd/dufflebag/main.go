@@ -118,6 +118,14 @@ func main() {
 		}
 		maxRequestBodyBytes = parsed
 	}
+	pluginUploadBytes := platform.DefaultPluginUploadBytes
+	if configured := os.Getenv("DFBG_PLUGIN_MAX_UPLOAD_BYTES"); configured != "" {
+		parsed, err := strconv.ParseInt(configured, 10, 64)
+		if err != nil || parsed <= 0 {
+			log.Fatal("DFBG_PLUGIN_MAX_UPLOAD_BYTES must be a positive integer")
+		}
+		pluginUploadBytes = parsed
+	}
 	// TLS is not optional for a real client: hcp-sdk-go rejects any auth URL
 	// whose scheme is not https (config/hcp.go), so a plaintext listener cannot
 	// serve the token endpoint to the SDK at all. Both are required together —
@@ -299,7 +307,7 @@ func main() {
 	<-webhookDispatcher.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropRuntime, webhookService, build,
+		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes,
 	)
 	applicationHandler := composeHandler(
 		broker,

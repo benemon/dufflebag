@@ -69,7 +69,7 @@ func TestWebhookEndpointsRequireMaintainerOnRoleAndTenancyAxes(t *testing.T) {
 	for _, operation := range webhookOperationCases() {
 		handler := newHandlerWithServices(
 			bagDropProjectRepository(), &fakeInstanceRepository{}, foreign, foreign, testLogger(),
-			nil, nil, nil, nil, nil, &fakeWebhookService{}, BuildInfo{}, time.Now,
+			nil, nil, nil, nil, nil, &fakeWebhookService{}, BuildInfo{}, DefaultPluginUploadBytes, time.Now,
 		)
 		audited, trail := auditedPlatform(t, handler)
 		response := call(t, audited, operation.method, operation.path, operation.body, testToken)
@@ -106,7 +106,7 @@ func webhookHandler(role identity.Role, service WebhookService) http.Handler {
 	actor := pinIdentity{id: "actor-" + string(role), role: role, scope: scope}
 	return newHandlerWithServices(
 		bagDropProjectRepository(), &fakeInstanceRepository{}, actor, actor, testLogger(),
-		nil, nil, nil, nil, nil, service, BuildInfo{}, func() time.Time { return initTestTime },
+		nil, nil, nil, nil, nil, service, BuildInfo{}, DefaultPluginUploadBytes, func() time.Time { return initTestTime },
 	)
 }
 

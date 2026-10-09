@@ -43,6 +43,9 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"ExposePluginRegistry":      {"plugin_registry.expose", "plugin_registry", "organizationId"},
 		"UnexposePluginRegistry":    {"plugin_registry.unexpose", "plugin_registry", "organizationId"},
 		"DisablePluginRegistry":     {"plugin_registry.disable", "plugin_registry", "organizationId"},
+		"ListPlugins":               {"plugin.list", "plugin_collection", "organizationId"},
+		"ListPluginVersions":        {"plugin.version.list", "plugin", "pluginName"},
+		"PublishPluginVersion":      {"plugin.version.publish", "plugin_version", "version"},
 		"ListProjects":              {"project.list", "project_collection", ""},
 		"CreateProject":             {"project.create", "project", ""},
 		"GetProject":                {"project.read", "project", "projectId"},
@@ -115,9 +118,15 @@ func TestPlatformDescriptorRoutesCrossCheckStrictOperationIDs(t *testing.T) {
 				"{fingerprint}", "01K00000000000000000000000F",
 				"{targetId}", "cccccccc-dddd-4eee-8fff-000000000000",
 				"{webhookId}", "dddddddd-eeee-4fff-8000-111111111111",
+				"{pluginName}", "amazon",
+				"{version}", "1.8.2",
 			).Replace(descriptor.path)
 			request := httptest.NewRequest(descriptor.method, path, strings.NewReader("{}"))
 			request.Header.Set("Content-Type", "application/json")
+			if expectedOperationID == "PublishPluginVersion" {
+				request = httptest.NewRequest(descriptor.method, path, strings.NewReader("--x--\r\n"))
+				request.Header.Set("Content-Type", "multipart/form-data; boundary=x")
+			}
 			Handler(strict).ServeHTTP(httptest.NewRecorder(), request)
 			if gotOperationID != expectedOperationID {
 				t.Fatalf("descriptor %s %s reached strict operation %q, want %q", descriptor.method, descriptor.path, gotOperationID, expectedOperationID)

@@ -37,6 +37,9 @@ type PlatformRepository interface {
 	ExposePluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
 	UnexposePluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
 	DisablePluginRegistry(context.Context, store.OrganizationTenant) error
+	PublishPluginVersion(context.Context, store.OrganizationTenant, store.PluginVersionInput) error
+	ListPlugins(context.Context, store.OrganizationTenant) ([]store.PluginSummary, error)
+	ListPluginVersions(context.Context, store.OrganizationTenant, string) (store.PluginSource, []store.PluginVersionSummary, error)
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
 	CreateProject(context.Context, store.Project) (*store.Project, error)
 	GetProject(context.Context, string, string) (*store.Project, error)
@@ -168,10 +171,11 @@ func NewHandler(
 	auth Authenticator, principals Principals, logger *slog.Logger,
 	auditTargets AuditTargetRepository, auditBroker AuditTargetBroker,
 	encryption EncryptionService, scanner Scanner, bagDrop BagDropService, webhooks WebhookService, build BuildInfo,
+	pluginUploadLimit int64,
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger,
-		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, time.Now,
+		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, pluginUploadLimit, time.Now,
 	)
 }
 
@@ -218,7 +222,7 @@ func newHandlerWithBuildAndAudit(
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger, auditTargets, auditBroker,
-		encryption, scanner, nil, nil, build, now,
+		encryption, scanner, nil, nil, build, DefaultPluginUploadBytes, now,
 	)
 }
 
@@ -228,7 +232,7 @@ func newHandlerWithBagDrop(
 	bagDrop BagDropService, now func() time.Time,
 ) http.Handler {
 	return newHandlerWithServices(
-		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, now,
+		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, DefaultPluginUploadBytes, now,
 	)
 }
 
@@ -245,6 +249,7 @@ func newHandlerWithServices(
 	bagDrop BagDropService,
 	webhooks WebhookService,
 	build BuildInfo,
+	pluginUploadLimit int64,
 	now func() time.Time,
 ) http.Handler {
 	s := &server{
@@ -313,7 +318,7 @@ func newHandlerWithServices(
 	// Authentication wraps everything, so a route added later is protected
 	// without anyone remembering to protect it. Initialization is the single
 	// exception and is named in the middleware rather than left implicit.
-	return withDescriptors(authenticate(auth, principals, now, routed))
+	return withDescriptors(authenticate(auth, principals, now, withPluginUpload(pluginUploadLimit, routed)))
 }
 
 func (s *server) ListOrganizations(

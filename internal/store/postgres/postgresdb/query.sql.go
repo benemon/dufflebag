@@ -698,6 +698,24 @@ func (q *Queries) DeletePin(ctx context.Context, name string) error {
 	return err
 }
 
+const deletePluginVersions = `-- name: DeletePluginVersions :exec
+DELETE FROM plugin_versions WHERE organization_id = $1
+`
+
+func (q *Queries) DeletePluginVersions(ctx context.Context, organizationID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deletePluginVersions, organizationID)
+	return err
+}
+
+const deletePlugins = `-- name: DeletePlugins :exec
+DELETE FROM plugins WHERE organization_id = $1
+`
+
+func (q *Queries) DeletePlugins(ctx context.Context, organizationID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deletePlugins, organizationID)
+	return err
+}
+
 const deletePrincipal = `-- name: DeletePrincipal :execrows
 DELETE FROM principals
 WHERE id = $1
@@ -1110,6 +1128,30 @@ func (q *Queries) GetPin(ctx context.Context, name string) (GetPinRow, error) {
 	return i, err
 }
 
+const getPlugin = `-- name: GetPlugin :one
+SELECT id, source_kind, source_repository
+FROM plugins
+WHERE organization_id = $1 AND name = $2
+`
+
+type GetPluginParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+}
+
+type GetPluginRow struct {
+	ID               uuid.UUID      `json:"id"`
+	SourceKind       string         `json:"source_kind"`
+	SourceRepository sql.NullString `json:"source_repository"`
+}
+
+func (q *Queries) GetPlugin(ctx context.Context, arg GetPluginParams) (GetPluginRow, error) {
+	row := q.db.QueryRowContext(ctx, getPlugin, arg.OrganizationID, arg.Name)
+	var i GetPluginRow
+	err := row.Scan(&i.ID, &i.SourceKind, &i.SourceRepository)
+	return i, err
+}
+
 const getPluginRegistry = `-- name: GetPluginRegistry :one
 SELECT exposed
 FROM plugin_registries
@@ -1477,6 +1519,109 @@ func (q *Queries) InsertPin(ctx context.Context, arg InsertPinParams) error {
 		arg.BucketName,
 	)
 	return err
+}
+
+const insertPlugin = `-- name: InsertPlugin :one
+INSERT INTO plugins (id, organization_id, name, source_kind, source_repository)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (organization_id, name) DO NOTHING
+RETURNING id
+`
+
+type InsertPluginParams struct {
+	ID               uuid.UUID      `json:"id"`
+	OrganizationID   uuid.UUID      `json:"organization_id"`
+	Name             string         `json:"name"`
+	SourceKind       string         `json:"source_kind"`
+	SourceRepository sql.NullString `json:"source_repository"`
+}
+
+func (q *Queries) InsertPlugin(ctx context.Context, arg InsertPluginParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, insertPlugin,
+		arg.ID,
+		arg.OrganizationID,
+		arg.Name,
+		arg.SourceKind,
+		arg.SourceRepository,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const insertPluginFile = `-- name: InsertPluginFile :exec
+INSERT INTO plugin_files (organization_id, version_id, filename, os, arch, sha256, size, object_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+`
+
+type InsertPluginFileParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	VersionID      uuid.UUID `json:"version_id"`
+	Filename       string    `json:"filename"`
+	Os             string    `json:"os"`
+	Arch           string    `json:"arch"`
+	Sha256         string    `json:"sha256"`
+	Size           int64     `json:"size"`
+	ObjectKey      string    `json:"object_key"`
+}
+
+func (q *Queries) InsertPluginFile(ctx context.Context, arg InsertPluginFileParams) error {
+	_, err := q.db.ExecContext(ctx, insertPluginFile,
+		arg.OrganizationID,
+		arg.VersionID,
+		arg.Filename,
+		arg.Os,
+		arg.Arch,
+		arg.Sha256,
+		arg.Size,
+		arg.ObjectKey,
+	)
+	return err
+}
+
+const insertPluginVersion = `-- name: InsertPluginVersion :one
+INSERT INTO plugin_versions (
+    id, organization_id, plugin_id, version, protocol_version, listed_platforms,
+    sums_key, sums_size, signature_key, signature_size, manifest_key, manifest_size
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (plugin_id, version) DO NOTHING
+RETURNING id
+`
+
+type InsertPluginVersionParams struct {
+	ID              uuid.UUID      `json:"id"`
+	OrganizationID  uuid.UUID      `json:"organization_id"`
+	PluginID        uuid.UUID      `json:"plugin_id"`
+	Version         string         `json:"version"`
+	ProtocolVersion sql.NullString `json:"protocol_version"`
+	ListedPlatforms []string       `json:"listed_platforms"`
+	SumsKey         string         `json:"sums_key"`
+	SumsSize        int64          `json:"sums_size"`
+	SignatureKey    sql.NullString `json:"signature_key"`
+	SignatureSize   sql.NullInt64  `json:"signature_size"`
+	ManifestKey     sql.NullString `json:"manifest_key"`
+	ManifestSize    sql.NullInt64  `json:"manifest_size"`
+}
+
+func (q *Queries) InsertPluginVersion(ctx context.Context, arg InsertPluginVersionParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, insertPluginVersion,
+		arg.ID,
+		arg.OrganizationID,
+		arg.PluginID,
+		arg.Version,
+		arg.ProtocolVersion,
+		pq.Array(arg.ListedPlatforms),
+		arg.SumsKey,
+		arg.SumsSize,
+		arg.SignatureKey,
+		arg.SignatureSize,
+		arg.ManifestKey,
+		arg.ManifestSize,
+	)
+	var id uuid.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const listArtifactsByBucketBuilds = `-- name: ListArtifactsByBucketBuilds :many
@@ -1871,6 +2016,144 @@ func (q *Queries) ListPlatformPrincipals(ctx context.Context) ([]Principal, erro
 			&i.Role,
 			&i.IntegrityMac,
 			&i.BucketID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPluginObjectKeys = `-- name: ListPluginObjectKeys :many
+SELECT sums_key::text AS object_key FROM plugin_versions WHERE plugin_versions.organization_id = $1
+UNION ALL
+SELECT signature_key::text FROM plugin_versions WHERE plugin_versions.organization_id = $1 AND signature_key IS NOT NULL
+UNION ALL
+SELECT manifest_key::text FROM plugin_versions WHERE plugin_versions.organization_id = $1 AND manifest_key IS NOT NULL
+UNION ALL
+SELECT plugin_files.object_key FROM plugin_files WHERE plugin_files.organization_id = $1
+`
+
+func (q *Queries) ListPluginObjectKeys(ctx context.Context, organizationID uuid.UUID) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listPluginObjectKeys, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPluginVersions = `-- name: ListPluginVersions :many
+SELECT
+    plugin_versions.version,
+    plugin_versions.revoked,
+    plugin_versions.listed_platforms,
+    plugin_versions.created_at,
+    COALESCE(
+        array_agg(plugin_files.os || '_' || plugin_files.arch ORDER BY plugin_files.os, plugin_files.arch)
+            FILTER (WHERE plugin_files.filename IS NOT NULL),
+        '{}'
+    )::text[] AS stored_platforms
+FROM plugin_versions
+LEFT JOIN plugin_files ON plugin_files.version_id = plugin_versions.id
+WHERE plugin_versions.plugin_id = $1
+GROUP BY plugin_versions.id
+`
+
+type ListPluginVersionsRow struct {
+	Version         string    `json:"version"`
+	Revoked         bool      `json:"revoked"`
+	ListedPlatforms []string  `json:"listed_platforms"`
+	CreatedAt       time.Time `json:"created_at"`
+	StoredPlatforms []string  `json:"stored_platforms"`
+}
+
+func (q *Queries) ListPluginVersions(ctx context.Context, pluginID uuid.UUID) ([]ListPluginVersionsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPluginVersions, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPluginVersionsRow
+	for rows.Next() {
+		var i ListPluginVersionsRow
+		if err := rows.Scan(
+			&i.Version,
+			&i.Revoked,
+			pq.Array(&i.ListedPlatforms),
+			&i.CreatedAt,
+			pq.Array(&i.StoredPlatforms),
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPlugins = `-- name: ListPlugins :many
+SELECT
+    plugins.name,
+    plugins.source_kind,
+    plugins.source_repository,
+    COALESCE(
+        array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL AND NOT plugin_versions.revoked),
+        '{}'
+    )::text[] AS published_versions
+FROM plugins
+LEFT JOIN plugin_versions ON plugin_versions.plugin_id = plugins.id
+WHERE plugins.organization_id = $1
+GROUP BY plugins.id
+ORDER BY plugins.name
+`
+
+type ListPluginsRow struct {
+	Name              string         `json:"name"`
+	SourceKind        string         `json:"source_kind"`
+	SourceRepository  sql.NullString `json:"source_repository"`
+	PublishedVersions []string       `json:"published_versions"`
+}
+
+func (q *Queries) ListPlugins(ctx context.Context, organizationID uuid.UUID) ([]ListPluginsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPlugins, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPluginsRow
+	for rows.Next() {
+		var i ListPluginsRow
+		if err := rows.Scan(
+			&i.Name,
+			&i.SourceKind,
+			&i.SourceRepository,
+			pq.Array(&i.PublishedVersions),
 		); err != nil {
 			return nil, err
 		}
@@ -2499,6 +2782,20 @@ func (q *Queries) LockRootPrincipalDeletion(ctx context.Context) error {
 	return err
 }
 
+const lockUnexposedPluginRegistry = `-- name: LockUnexposedPluginRegistry :one
+SELECT organization_id
+FROM plugin_registries
+WHERE organization_id = $1 AND exposed = false
+FOR UPDATE
+`
+
+func (q *Queries) LockUnexposedPluginRegistry(ctx context.Context, organizationID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, lockUnexposedPluginRegistry, organizationID)
+	var organization_id uuid.UUID
+	err := row.Scan(&organization_id)
+	return organization_id, err
+}
+
 const markBagDropAssociationAttempt = `-- name: MarkBagDropAssociationAttempt :one
 UPDATE bagdrop_associations
 SET first_attempted_at = COALESCE(first_attempted_at, $2),
@@ -2542,6 +2839,28 @@ func (q *Queries) NextVersionSequence(ctx context.Context, bucketID string) (int
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const pluginVersionExists = `-- name: PluginVersionExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM plugin_versions
+    JOIN plugins ON plugins.id = plugin_versions.plugin_id
+    WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+)
+`
+
+type PluginVersionExistsParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+func (q *Queries) PluginVersionExists(ctx context.Context, arg PluginVersionExistsParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, pluginVersionExists, arg.OrganizationID, arg.Name, arg.Version)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
 }
 
 const pruneWebhookDeliveries = `-- name: PruneWebhookDeliveries :exec

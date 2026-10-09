@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile as execFileCb, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import {
   appendFileSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync,
   rmSync, statfsSync, statSync, symlinkSync, writeFileSync, writeSync,
@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { zstdCompressSync } from 'node:zlib'
+import { crc32, zstdCompressSync } from 'node:zlib'
 
 import puppeteer from 'puppeteer-core'
 
@@ -361,6 +361,38 @@ const buttonDisabled = (text) =>
     },
     text,
   )
+
+// A stored (uncompressed) zip holding one file, shaped like a goreleaser
+// plugin release: the binary inside carries the protocol in its name.
+function storedZip(entryName, content) {
+  const name = Buffer.from(entryName)
+  const data = Buffer.from(content)
+  const sum = crc32(data)
+  const local = Buffer.alloc(30)
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4)
+  local.writeUInt32LE(sum, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22)
+  local.writeUInt16LE(name.length, 26)
+  const central = Buffer.alloc(46)
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6)
+  central.writeUInt32LE(sum, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24)
+  central.writeUInt16LE(name.length, 28)
+  const end = Buffer.alloc(22)
+  const centralOffset = local.length + name.length + data.length
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10)
+  end.writeUInt32LE(central.length + name.length, 12); end.writeUInt32LE(centralOffset, 16)
+  return Buffer.concat([local, name, data, central, name, end])
+}
+
+function pluginReleaseFiles() {
+  const directory = mkdtempSync(join(tmpdir(), 'dufflebag-smoke-plugin-'))
+  const zipName = 'packer-plugin-probe_v1.0.0_x5.0_linux_amd64.zip'
+  const zip = storedZip('packer-plugin-probe_v1.0.0_x5.0_linux_amd64', 'binary')
+  const digest = (data) => createHash('sha256').update(data).digest('hex')
+  const sums = `${digest(zip)}  ${zipName}\n${'0'.repeat(64)}  packer-plugin-probe_v1.0.0_x5.0_darwin_arm64.zip\n`
+  writeFileSync(join(directory, zipName), zip)
+  writeFileSync(join(directory, 'packer-plugin-probe_v1.0.0_SHA256SUMS'), sums)
+  return [join(directory, 'packer-plugin-probe_v1.0.0_SHA256SUMS'), join(directory, zipName)]
+}
 
 async function freePort() {
   return new Promise((resolve, reject) => {
@@ -885,7 +917,22 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Enable the registry')
     await waitForText('The registry is enabled but not exposed')
     await waitForText("Packer can't reach plugins until the registry is exposed.")
-    await waitForText('No plugins yet.')
+    await waitForText('No plugins mirrored yet')
+
+    await clickByText('button', 'Upload plugin files')
+    await waitForText('Upload one version of a plugin built in-house')
+    const chooser = await page.waitForSelector('input[aria-label="Choose plugin files"]')
+    await chooser.uploadFile(...pluginReleaseFiles())
+    await waitForText('probe · 1.0.0')
+    await clickByText('button', 'Upload probe 1.0.0')
+    await waitForText(`/plugins/${wizardOrganizationName}/probe 1.0.0`)
+    await waitForText("Packer can't resolve this template stanza until the registry is exposed.")
+    await clickByText('button', 'Open the plugin')
+    await waitForText('Pinned to the newest available version, 1.0.0.')
+    assert.equal(await page.$eval('td[data-label="linux_amd64"]', (cell) => cell.innerText.trim()), '●')
+    assert.equal(await page.$eval('td[data-label="darwin_arm64"]', (cell) => cell.innerText.trim()), '○')
+    await clickByText('a', 'Plugins')
+    await waitForText(`${wizardOrganizationName}/probe`)
 
     await clickByText('button', 'Expose')
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')

@@ -1146,6 +1146,19 @@ export async function platformPut<T>(token: string, path: string, body?: unknown
   return (await request<T>(token, 'PUT', `${PLATFORM_BASE}${path}`, body)) as T
 }
 
+export async function platformPutForm<T>(token: string, path: string, form: FormData): Promise<T> {
+  const response = await fetch(`${PLATFORM_BASE}${path}`, {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}` },
+    body: form,
+  })
+  if (!response.ok) {
+    const failure = await failureMessage(response, path)
+    throw new ApiError(response.status, failure.message, failure.reason)
+  }
+  return (await response.json()) as T
+}
+
 export async function platformPatch<T>(token: string, path: string, body: unknown): Promise<T> {
   return (await request<T>(token, 'PATCH', `${PLATFORM_BASE}${path}`, body)) as T
 }

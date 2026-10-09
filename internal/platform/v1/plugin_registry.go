@@ -10,9 +10,9 @@ import (
 )
 
 func (s *server) admitPluginRegistryMutation(
-	ctx context.Context, organizationID string,
+	ctx context.Context, required identity.Role, organizationID string,
 ) (*identity.Principal, refusal, error) {
-	caller, refused := authorizeTenancy(ctx, identity.RoleMaintainer, organizationID, "")
+	caller, refused := authorizeTenancy(ctx, required, organizationID, "")
 	if refused != permitted {
 		return nil, refused, nil
 	}
@@ -60,7 +60,7 @@ func (s *server) EnablePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, organizationID)
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -89,7 +89,7 @@ func (s *server) ExposePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, organizationID)
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -121,7 +121,7 @@ func (s *server) UnexposePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, organizationID)
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -153,7 +153,7 @@ func (s *server) DisablePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, organizationID)
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err

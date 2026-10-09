@@ -514,6 +514,11 @@ type fakeTenancyRepository struct {
 	deleteOrganizationErr error
 	pluginRegistry        store.PluginRegistry
 	pluginRegistryErr     error
+	publishedPlugins      []store.PluginVersionInput
+	publishedSums         [][]byte
+	publishPluginErr      error
+	plugins               []store.PluginSummary
+	pluginVersions        map[string][]store.PluginVersionSummary
 	listProjectsErr       error
 	createProjectErr      error
 	getProjectErr         error
@@ -637,6 +642,43 @@ func (r *fakeTenancyRepository) UnexposePluginRegistry(
 	}
 	r.pluginRegistry.Exposed = false
 	return r.pluginRegistry, nil
+}
+
+func (r *fakeTenancyRepository) PublishPluginVersion(
+	_ context.Context, _ store.OrganizationTenant, input store.PluginVersionInput,
+) error {
+	if r.publishPluginErr != nil {
+		return r.publishPluginErr
+	}
+	if !r.pluginRegistry.Enabled {
+		return store.ErrPluginRegistryNotEnabled
+	}
+	if _, err := input.Sums.Body.Seek(0, io.SeekStart); err != nil {
+		return err
+	}
+	sums, err := io.ReadAll(input.Sums.Body)
+	if err != nil {
+		return err
+	}
+	r.publishedSums = append(r.publishedSums, sums)
+	r.publishedPlugins = append(r.publishedPlugins, input)
+	return nil
+}
+
+func (r *fakeTenancyRepository) ListPlugins(
+	context.Context, store.OrganizationTenant,
+) ([]store.PluginSummary, error) {
+	return r.plugins, r.pluginRegistryErr
+}
+
+func (r *fakeTenancyRepository) ListPluginVersions(
+	_ context.Context, _ store.OrganizationTenant, name string,
+) (store.PluginSource, []store.PluginVersionSummary, error) {
+	versions, ok := r.pluginVersions[name]
+	if !ok {
+		return store.PluginSource{}, nil, registry.ErrNotFound
+	}
+	return store.PluginSource{Kind: "upload"}, versions, nil
 }
 
 func (r *fakeTenancyRepository) DisablePluginRegistry(

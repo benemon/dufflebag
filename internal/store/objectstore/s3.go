@@ -116,6 +116,32 @@ func Key(organizationID, projectID, buildID, name string, data []byte) string {
 	)
 }
 
+// PluginKey returns the immutable, organization-qualified key for one plugin
+// file. Plugins belong to an organization, not a project, so the p segment
+// stands where SBOM keys carry a project ID.
+func PluginKey(organizationID, name, version, filename, digest string) string {
+	identitySum := sha256.Sum256([]byte(name + "\x00" + version + "\x00" + filename))
+	return fmt.Sprintf(
+		"t/%s/p/%s/%s",
+		strings.ReplaceAll(organizationID, "-", ""),
+		hex.EncodeToString(identitySum[:16]),
+		digest,
+	)
+}
+
+// PutFile stores size bytes read from body. The SDK seeks body to sign the
+// payload and to retry, so it must be seekable rather than a stream.
+func (s *Store) PutFile(ctx context.Context, key string, body io.ReadSeeker, size int64) error {
+	_, err := s.client.PutObject(ctx, &s3.PutObjectInput{
+		Bucket: &s.bucket, Key: &key, Body: body, ContentLength: &size,
+	})
+	s.observe(err)
+	if err != nil {
+		return fmt.Errorf("put object %q: %w", key, err)
+	}
+	return nil
+}
+
 func (s *Store) Put(ctx context.Context, key string, data []byte) error {
 	return s.put(ctx, key, data, "")
 }

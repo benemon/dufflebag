@@ -5,6 +5,8 @@ package postgres_test
 import (
 	"database/sql"
 	"net/url"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -34,8 +36,8 @@ func TestMigrationsRoundTrip(t *testing.T) {
 	if err := admin.QueryRow("SELECT version, dirty FROM schema_migrations").Scan(&version, &dirty); err != nil {
 		t.Fatal(err)
 	}
-	if version != 6 || dirty {
-		t.Fatalf("migration state = version %d dirty %v, want version 6 clean", version, dirty)
+	if want := latestMigration(t); version != want || dirty {
+		t.Fatalf("migration state = version %d dirty %v, want version %d clean", version, dirty, want)
 	}
 
 	driver, err := migratepostgres.WithInstance(admin, &migratepostgres.Config{})
@@ -166,4 +168,21 @@ func TestOrganizationNameMigrationRefusesNonConformingRows(t *testing.T) {
 	if invalidRows != 2 {
 		t.Fatalf("non-conforming rows after refused migration = %d, want 2", invalidRows)
 	}
+}
+
+func latestMigration(t *testing.T) int {
+	t.Helper()
+	files, err := filepath.Glob("migrations/*.up.sql")
+	if err != nil || len(files) == 0 {
+		t.Fatalf("list migrations: %v", err)
+	}
+	latest := 0
+	for _, file := range files {
+		number, err := strconv.Atoi(strings.SplitN(filepath.Base(file), "_", 2)[0])
+		if err != nil {
+			t.Fatalf("migration %s has no numeric prefix", file)
+		}
+		latest = max(latest, number)
+	}
+	return latest
 }

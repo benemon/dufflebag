@@ -19,6 +19,8 @@ import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
+import { PluginDetail } from './screens/PluginDetail'
+import { PluginUpload } from './screens/PluginUpload'
 import { Plugins } from './screens/Plugins'
 import {
   CreateTenancyButton, TenancyModal, projectCreationRefusal,
@@ -52,7 +54,8 @@ function Authenticated({
   const {
     state, self, restoring, selectedOrganization, selectedProject, projectsLoading, projectFailure,
   } = useAuth()
-  const organizationRoute = useLocation().pathname === '/plugins'
+  const { pathname } = useLocation()
+  const organizationRoute = pathname === '/plugins' || pathname.startsWith('/plugins/')
   // While the boot exchange asks whether a session survived the reload,
   // showing the sign-in screen would flash a state that may be about to be
   // untrue. Hold the page on an explicit state until the answer is in — it is
@@ -108,6 +111,8 @@ function Authenticated({
         <Route path="/" element={<Landing />} />
         <Route path="/buckets" element={<Buckets />} />
         <Route path="/plugins" element={<Plugins />} />
+        <Route path="/plugins/upload" element={<PluginUpload />} />
+        <Route path="/plugins/:name" element={<PluginDetail />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />

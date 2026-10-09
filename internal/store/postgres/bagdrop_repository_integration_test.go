@@ -502,7 +502,7 @@ func TestBagDropReconcileTriggerIntegration(t *testing.T) {
 	handler := platform.NewHandler(
 		repository, repository, auditAPIAuthenticator{principalID: principal.ID, secretID: secretID},
 		auditAPIPrincipals{principal: principal}, logger, repository, broker,
-		nil, nil, bagDropRuntime, nil, platform.BuildInfo{},
+		nil, nil, bagDropRuntime, nil, platform.BuildInfo{}, platform.DefaultPluginUploadBytes,
 	)
 	call := func(project string) *httptest.ResponseRecorder {
 		request := httptest.NewRequest(http.MethodPost,
@@ -522,7 +522,7 @@ func TestBagDropReconcileTriggerIntegration(t *testing.T) {
 	unavailable := platform.NewHandler(
 		repository, repository, auditAPIAuthenticator{principalID: principal.ID, secretID: secretID},
 		auditAPIPrincipals{principal: principal}, logger, repository, broker,
-		nil, nil, service, nil, platform.BuildInfo{},
+		nil, nil, service, nil, platform.BuildInfo{}, platform.DefaultPluginUploadBytes,
 	)
 	request := httptest.NewRequest(http.MethodPost,
 		"/api/v1/organizations/"+orgA+"/projects/"+projectA+"/bagdrop/reconcile", nil)
