@@ -40,6 +40,8 @@ type PlatformRepository interface {
 	PublishPluginVersion(context.Context, store.OrganizationTenant, store.PluginVersionInput) error
 	ListPlugins(context.Context, store.OrganizationTenant) ([]store.PluginSummary, error)
 	ListPluginVersions(context.Context, store.OrganizationTenant, string) (store.PluginSource, []store.PluginVersionSummary, error)
+	SetPluginVersionRevoked(context.Context, store.OrganizationTenant, string, string, bool) error
+	DeletePluginVersion(context.Context, store.OrganizationTenant, string, string) error
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
 	CreateProject(context.Context, store.Project) (*store.Project, error)
 	GetProject(context.Context, string, string) (*store.Project, error)

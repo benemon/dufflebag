@@ -7,6 +7,7 @@ import {
   mkdirSync,
   readFileSync,
   readdirSync,
+  rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -736,6 +737,18 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     const served = readPlaneRecords().map((line) => JSON.parse(line)).filter((record) => record.kind === 'response')
     assert.ok(served.some((record) => record.reason === 'served' && record.target_id.endsWith(zipName)), 'the zip download left no audit record')
     process.stdout.write(`ASSERT stock Packer v${major}.${minor}.${patch} installed ${source} 0.6.3 from dufflebag; ${served.length} audited read-plane responses\n`)
+
+    // Packer skips a plugin it already has, so the install is cleared between runs.
+    const versionPath = `${registryPath}/plugins/git/versions/0.6.3`
+    await api(rootToken, 'POST', `${versionPath}/revoke`)
+    rmSync(pluginDirectory, { recursive: true, force: true })
+    const revoked = await init()
+    assert.equal(revoked.ok, false, 'packer init installed a revoked plugin version')
+    assert.match(revoked.output, /returned status 404/)
+    await api(rootToken, 'POST', `${versionPath}/restore`)
+    const restored = await init()
+    assert.ok(restored.ok, `packer init failed after the version was restored:\n${restored.output}`)
+    process.stdout.write('ASSERT a revoked plugin version is refused to packer init and served again once restored\n')
   })
 
   await t.test('the encrypted keyring rotates without losing retained payloads', {

@@ -412,3 +412,96 @@ func (u *pluginUpload) spool(part *multipart.Part) (*spooledFile, error) {
 	}
 	return &spooledFile{filename: part.FileName(), file: file, digest: hex.EncodeToString(hash.Sum(nil)), size: size}, nil
 }
+
+func (s *server) RevokePluginVersion(
+	ctx context.Context, request RevokePluginVersionRequestObject,
+) (RevokePluginVersionResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	err = s.repository.SetPluginVersionRevoked(ctx, store.ParseOrganizationTenant(organizationID), request.PluginName, request.Version, true)
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		audited.failed("not_found")
+		return RevokePluginVersion404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "plugin version not found"}}, nil
+	case errors.Is(err, store.ErrPluginVersionRevoked):
+		audited.failed("already_revoked")
+		return RevokePluginVersion409JSONResponse{Message: "plugin version is already revoked"}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(organizationID, "revoked")
+	return RevokePluginVersion204Response{}, nil
+}
+
+func (s *server) RestorePluginVersion(
+	ctx context.Context, request RestorePluginVersionRequestObject,
+) (RestorePluginVersionResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	err = s.repository.SetPluginVersionRevoked(ctx, store.ParseOrganizationTenant(organizationID), request.PluginName, request.Version, false)
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		audited.failed("not_found")
+		return RestorePluginVersion404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "plugin version not found"}}, nil
+	case errors.Is(err, store.ErrPluginVersionNotRevoked):
+		audited.failed("not_revoked")
+		return RestorePluginVersion409JSONResponse{Message: "plugin version is not revoked"}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(organizationID, "restored")
+	return RestorePluginVersion204Response{}, nil
+}
+
+func (s *server) DeletePluginVersion(
+	ctx context.Context, request DeletePluginVersionRequestObject,
+) (DeletePluginVersionResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	err = s.repository.DeletePluginVersion(ctx, store.ParseOrganizationTenant(organizationID), request.PluginName, request.Version)
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		audited.failed("not_found")
+		return DeletePluginVersion404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "plugin version not found"}}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(organizationID, "deleted")
+	return DeletePluginVersion204Response{}, nil
+}

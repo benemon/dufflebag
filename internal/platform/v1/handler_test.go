@@ -665,6 +665,37 @@ func (r *fakeTenancyRepository) PublishPluginVersion(
 	return nil
 }
 
+func (r *fakeTenancyRepository) SetPluginVersionRevoked(
+	_ context.Context, _ store.OrganizationTenant, name, version string, revoked bool,
+) error {
+	for i, candidate := range r.pluginVersions[name] {
+		if candidate.Version != version {
+			continue
+		}
+		if candidate.Revoked == revoked {
+			if revoked {
+				return store.ErrPluginVersionRevoked
+			}
+			return store.ErrPluginVersionNotRevoked
+		}
+		r.pluginVersions[name][i].Revoked = revoked
+		return nil
+	}
+	return registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) DeletePluginVersion(
+	_ context.Context, _ store.OrganizationTenant, name, version string,
+) error {
+	for i, candidate := range r.pluginVersions[name] {
+		if candidate.Version == version {
+			r.pluginVersions[name] = append(r.pluginVersions[name][:i], r.pluginVersions[name][i+1:]...)
+			return nil
+		}
+	}
+	return registry.ErrNotFound
+}
+
 func (r *fakeTenancyRepository) ListPlugins(
 	context.Context, store.OrganizationTenant,
 ) ([]store.PluginSummary, error) {

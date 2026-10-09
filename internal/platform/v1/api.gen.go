@@ -2056,6 +2056,14 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions (the `ListPluginVersions` operationId).
 	ListPluginVersions(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// DeletePluginVersion Remove a plugin version and its files
+	//
+	// Terminal. Removing a plugin's last version removes the plugin, which frees its name for another
+	// source; a revoked version still holds it. Requires `publisher`.
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `DeletePluginVersion` operationId).
+	DeletePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// PublishPluginVersionWithBody Publish one plugin version from uploaded files
 	//
 	// One multipart request carries the version's complete file set; everything is verified before
@@ -2068,6 +2076,20 @@ type ClientInterface interface {
 	//
 	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `PublishPluginVersion` operationId).
 	PublishPluginVersionWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RestorePluginVersion Serve a revoked plugin version again
+	//
+	// Requires `publisher`.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore (the `RestorePluginVersion` operationId).
+	RestorePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RevokePluginVersion Stop serving a plugin version; restorable
+	//
+	// Packer gets 404 for every file of a revoked version. Its bytes are kept. Requires `publisher`.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
+	RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	//
@@ -3065,6 +3087,24 @@ func (c *Client) ListPluginVersions(ctx context.Context, organizationId Organiza
 	return c.Client.Do(req)
 }
 
+// DeletePluginVersion Remove a plugin version and its files
+//
+// Terminal. Removing a plugin's last version removes the plugin, which frees its name for another
+// source; a revoked version still holds it. Requires `publisher`.
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `DeletePluginVersion` operationId).
+func (c *Client) DeletePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeletePluginVersionRequest(c.Server, organizationId, pluginName, version)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // PublishPluginVersionWithBody Publish one plugin version from uploaded files
 //
 // One multipart request carries the version's complete file set; everything is verified before
@@ -3078,6 +3118,40 @@ func (c *Client) ListPluginVersions(ctx context.Context, organizationId Organiza
 // Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `PublishPluginVersion` operationId).
 func (c *Client) PublishPluginVersionWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewPublishPluginVersionRequestWithBody(c.Server, organizationId, pluginName, version, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RestorePluginVersion Serve a revoked plugin version again
+//
+// Requires `publisher`.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore (the `RestorePluginVersion` operationId).
+func (c *Client) RestorePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRestorePluginVersionRequest(c.Server, organizationId, pluginName, version)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RevokePluginVersion Stop serving a plugin version; restorable
+//
+// Packer gets 404 for every file of a revoked version. Its bytes are kept. Requires `publisher`.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
+func (c *Client) RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRevokePluginVersionRequest(c.Server, organizationId, pluginName, version)
 	if err != nil {
 		return nil, err
 	}
@@ -4797,6 +4871,54 @@ func NewListPluginVersionsRequest(server string, organizationId OrganizationId, 
 	return req, nil
 }
 
+// NewDeletePluginVersionRequest constructs an http.Request for the DeletePluginVersion method
+func NewDeletePluginVersionRequest(server string, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "version", version, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/versions/%s", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewPublishPluginVersionRequestWithBody constructs an http.Request for the PublishPluginVersion method, with any body, and a specified content type
 func NewPublishPluginVersionRequestWithBody(server string, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, contentType string, body io.Reader) (*http.Request, error) {
 	var err error
@@ -4843,6 +4965,102 @@ func NewPublishPluginVersionRequestWithBody(server string, organizationId Organi
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRestorePluginVersionRequest constructs an http.Request for the RestorePluginVersion method
+func NewRestorePluginVersionRequest(server string, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "version", version, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/versions/%s/restore", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewRevokePluginVersionRequest constructs an http.Request for the RevokePluginVersion method
+func NewRevokePluginVersionRequest(server string, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam2 string
+
+	pathParam2, err = runtime.StyleParamWithOptions("simple", false, "version", version, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/versions/%s/revoke", pathParam0, pathParam1, pathParam2)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -6872,6 +7090,16 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions (the `ListPluginVersions` operationId).
 	ListPluginVersionsWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*ListPluginVersionsResponse, error)
 
+	// DeletePluginVersionWithResponse Remove a plugin version and its files
+	//
+	// Terminal. Removing a plugin's last version removes the plugin, which frees its name for another
+	// source; a revoked version still holds it. Requires `publisher`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `DeletePluginVersion` operationId).
+	DeletePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*DeletePluginVersionResponse, error)
+
 	// PublishPluginVersionWithBodyWithResponse Publish one plugin version from uploaded files
 	//
 	// One multipart request carries the version's complete file set; everything is verified before
@@ -6884,6 +7112,24 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `PublishPluginVersion` operationId).
 	PublishPluginVersionWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*PublishPluginVersionResponse, error)
+
+	// RestorePluginVersionWithResponse Serve a revoked plugin version again
+	//
+	// Requires `publisher`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore (the `RestorePluginVersion` operationId).
+	RestorePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RestorePluginVersionResponse, error)
+
+	// RevokePluginVersionWithResponse Stop serving a plugin version; restorable
+	//
+	// Packer gets 404 for every file of a revoked version. Its bytes are kept. Requires `publisher`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
+	RevokePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RevokePluginVersionResponse, error)
 
 	// UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
 	//
@@ -8653,6 +8899,61 @@ func (r ListPluginVersionsResponse) ContentType() string {
 	return ""
 }
 
+type DeletePluginVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeletePluginVersionResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeletePluginVersionResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeletePluginVersionResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r DeletePluginVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeletePluginVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeletePluginVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeletePluginVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type PublishPluginVersionResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8737,6 +9038,130 @@ func (r PublishPluginVersionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r PublishPluginVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RestorePluginVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RestorePluginVersionResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RestorePluginVersionResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RestorePluginVersionResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RestorePluginVersionResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r RestorePluginVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RestorePluginVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RestorePluginVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RestorePluginVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RevokePluginVersionResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RevokePluginVersionResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RevokePluginVersionResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RevokePluginVersionResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RevokePluginVersionResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r RevokePluginVersionResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RevokePluginVersionResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RevokePluginVersionResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RevokePluginVersionResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11628,6 +12053,22 @@ func (c *ClientWithResponses) ListPluginVersionsWithResponse(ctx context.Context
 	return ParseListPluginVersionsResponse(rsp)
 }
 
+// DeletePluginVersionWithResponse Remove a plugin version and its files
+//
+// Terminal. Removing a plugin's last version removes the plugin, which frees its name for another
+// source; a revoked version still holds it. Requires `publisher`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version} (the `DeletePluginVersion` operationId).
+func (c *ClientWithResponses) DeletePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*DeletePluginVersionResponse, error) {
+	rsp, err := c.DeletePluginVersion(ctx, organizationId, pluginName, version, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeletePluginVersionResponse(rsp)
+}
+
 // PublishPluginVersionWithBodyWithResponse Publish one plugin version from uploaded files
 //
 // One multipart request carries the version's complete file set; everything is verified before
@@ -11645,6 +12086,36 @@ func (c *ClientWithResponses) PublishPluginVersionWithBodyWithResponse(ctx conte
 		return nil, err
 	}
 	return ParsePublishPluginVersionResponse(rsp)
+}
+
+// RestorePluginVersionWithResponse Serve a revoked plugin version again
+//
+// Requires `publisher`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore (the `RestorePluginVersion` operationId).
+func (c *ClientWithResponses) RestorePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RestorePluginVersionResponse, error) {
+	rsp, err := c.RestorePluginVersion(ctx, organizationId, pluginName, version, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRestorePluginVersionResponse(rsp)
+}
+
+// RevokePluginVersionWithResponse Stop serving a plugin version; restorable
+//
+// Packer gets 404 for every file of a revoked version. Its bytes are kept. Requires `publisher`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
+func (c *ClientWithResponses) RevokePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RevokePluginVersionResponse, error) {
+	rsp, err := c.RevokePluginVersion(ctx, organizationId, pluginName, version, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRevokePluginVersionResponse(rsp)
 }
 
 // UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
@@ -13462,6 +13933,49 @@ func ParseListPluginVersionsResponse(rsp *http.Response) (*ListPluginVersionsRes
 	return response, nil
 }
 
+// ParseDeletePluginVersionResponse parses an HTTP response from a DeletePluginVersionWithResponse call
+func ParseDeletePluginVersionResponse(rsp *http.Response) (*DeletePluginVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeletePluginVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParsePublishPluginVersionResponse parses an HTTP response from a PublishPluginVersionWithResponse call
 func ParsePublishPluginVersionResponse(rsp *http.Response) (*PublishPluginVersionResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13531,6 +14045,106 @@ func ParsePublishPluginVersionResponse(rsp *http.Response) (*PublishPluginVersio
 			return nil, err
 		}
 		response.JSON503 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRestorePluginVersionResponse parses an HTTP response from a RestorePluginVersionWithResponse call
+func ParseRestorePluginVersionResponse(rsp *http.Response) (*RestorePluginVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RestorePluginVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRevokePluginVersionResponse parses an HTTP response from a RevokePluginVersionWithResponse call
+func ParseRevokePluginVersionResponse(rsp *http.Response) (*RevokePluginVersionResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RevokePluginVersionResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -15563,9 +16177,18 @@ type ServerInterface interface {
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
+	// DeletePluginVersion Remove a plugin version and its files
+	// (DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version})
+	DeletePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
 	// PublishPluginVersion Publish one plugin version from uploaded files
 	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version})
 	PublishPluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
+	// RestorePluginVersion Serve a revoked plugin version again
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore)
+	RestorePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
+	// RevokePluginVersion Stop serving a plugin version; restorable
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
+	RevokePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
 	UnexposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -16058,6 +16681,50 @@ func (siw *ServerInterfaceWrapper) ListPluginVersions(w http.ResponseWriter, r *
 	handler.ServeHTTP(w, r)
 }
 
+// DeletePluginVersion operation middleware
+func (siw *ServerInterfaceWrapper) DeletePluginVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version PluginVersionNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePluginVersion(w, r, organizationId, pluginName, version)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // PublishPluginVersion operation middleware
 func (siw *ServerInterfaceWrapper) PublishPluginVersion(w http.ResponseWriter, r *http.Request) {
 
@@ -16093,6 +16760,94 @@ func (siw *ServerInterfaceWrapper) PublishPluginVersion(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.PublishPluginVersion(w, r, organizationId, pluginName, version)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RestorePluginVersion operation middleware
+func (siw *ServerInterfaceWrapper) RestorePluginVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version PluginVersionNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RestorePluginVersion(w, r, organizationId, pluginName, version)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RevokePluginVersion operation middleware
+func (siw *ServerInterfaceWrapper) RevokePluginVersion(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "version" -------------
+	var version PluginVersionNumber
+
+	err = runtime.BindStyledParameterWithOptions("simple", "version", r.PathValue("version"), &version, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "version", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RevokePluginVersion(w, r, organizationId, pluginName, version)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -17633,7 +18388,10 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/disable", wrapper.DisablePluginRegistry)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions", wrapper.ListPluginVersions)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.DeletePluginVersion)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.PublishPluginVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke", wrapper.RevokePluginVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore", wrapper.RestorePluginVersion)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.CreateProject)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}", wrapper.DeleteProject)
@@ -18753,6 +19511,66 @@ func (response ListPluginVersions404JSONResponse) VisitListPluginVersionsRespons
 	return err
 }
 
+type DeletePluginVersionRequestObject struct {
+	OrganizationId OrganizationId      `json:"organizationId"`
+	PluginName     PluginName          `json:"pluginName"`
+	Version        PluginVersionNumber `json:"version"`
+}
+
+type DeletePluginVersionResponseObject interface {
+	VisitDeletePluginVersionResponse(w http.ResponseWriter) error
+}
+
+type DeletePluginVersion204Response struct {
+}
+
+func (response DeletePluginVersion204Response) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePluginVersion401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeletePluginVersion401JSONResponse) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginVersion403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeletePluginVersion403JSONResponse) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginVersion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeletePluginVersion404JSONResponse) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type PublishPluginVersionRequestObject struct {
 	OrganizationId OrganizationId      `json:"organizationId"`
 	PluginName     PluginName          `json:"pluginName"`
@@ -18872,6 +19690,154 @@ func (response PublishPluginVersion503JSONResponse) VisitPublishPluginVersionRes
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(503)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePluginVersionRequestObject struct {
+	OrganizationId OrganizationId      `json:"organizationId"`
+	PluginName     PluginName          `json:"pluginName"`
+	Version        PluginVersionNumber `json:"version"`
+}
+
+type RestorePluginVersionResponseObject interface {
+	VisitRestorePluginVersionResponse(w http.ResponseWriter) error
+}
+
+type RestorePluginVersion204Response struct {
+}
+
+func (response RestorePluginVersion204Response) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RestorePluginVersion401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response RestorePluginVersion401JSONResponse) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePluginVersion403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RestorePluginVersion403JSONResponse) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePluginVersion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RestorePluginVersion404JSONResponse) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RestorePluginVersion409JSONResponse Error
+
+func (response RestorePluginVersion409JSONResponse) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokePluginVersionRequestObject struct {
+	OrganizationId OrganizationId      `json:"organizationId"`
+	PluginName     PluginName          `json:"pluginName"`
+	Version        PluginVersionNumber `json:"version"`
+}
+
+type RevokePluginVersionResponseObject interface {
+	VisitRevokePluginVersionResponse(w http.ResponseWriter) error
+}
+
+type RevokePluginVersion204Response struct {
+}
+
+func (response RevokePluginVersion204Response) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type RevokePluginVersion401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response RevokePluginVersion401JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokePluginVersion403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RevokePluginVersion403JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokePluginVersion404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RevokePluginVersion404JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RevokePluginVersion409JSONResponse Error
+
+func (response RevokePluginVersion409JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -21675,9 +22641,18 @@ type StrictServerInterface interface {
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(ctx context.Context, request ListPluginVersionsRequestObject) (ListPluginVersionsResponseObject, error)
+	// DeletePluginVersion Remove a plugin version and its files
+	// (DELETE /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version})
+	DeletePluginVersion(ctx context.Context, request DeletePluginVersionRequestObject) (DeletePluginVersionResponseObject, error)
 	// PublishPluginVersion Publish one plugin version from uploaded files
 	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version})
 	PublishPluginVersion(ctx context.Context, request PublishPluginVersionRequestObject) (PublishPluginVersionResponseObject, error)
+	// RestorePluginVersion Serve a revoked plugin version again
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore)
+	RestorePluginVersion(ctx context.Context, request RestorePluginVersionRequestObject) (RestorePluginVersionResponseObject, error)
+	// RevokePluginVersion Stop serving a plugin version; restorable
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
+	RevokePluginVersion(ctx context.Context, request RevokePluginVersionRequestObject) (RevokePluginVersionResponseObject, error)
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
 	UnexposePluginRegistry(ctx context.Context, request UnexposePluginRegistryRequestObject) (UnexposePluginRegistryResponseObject, error)
@@ -22286,6 +23261,34 @@ func (sh *strictHandler) ListPluginVersions(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// DeletePluginVersion operation middleware
+func (sh *strictHandler) DeletePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) {
+	var request DeletePluginVersionRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+	request.Version = version
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePluginVersion(ctx, request.(DeletePluginVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePluginVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePluginVersionResponseObject); ok {
+		if err := validResponse.VisitDeletePluginVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // PublishPluginVersion operation middleware
 func (sh *strictHandler) PublishPluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) {
 	var request PublishPluginVersionRequestObject
@@ -22314,6 +23317,62 @@ func (sh *strictHandler) PublishPluginVersion(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(PublishPluginVersionResponseObject); ok {
 		if err := validResponse.VisitPublishPluginVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RestorePluginVersion operation middleware
+func (sh *strictHandler) RestorePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) {
+	var request RestorePluginVersionRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+	request.Version = version
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RestorePluginVersion(ctx, request.(RestorePluginVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RestorePluginVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RestorePluginVersionResponseObject); ok {
+		if err := validResponse.VisitRestorePluginVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RevokePluginVersion operation middleware
+func (sh *strictHandler) RevokePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber) {
+	var request RevokePluginVersionRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+	request.Version = version
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RevokePluginVersion(ctx, request.(RevokePluginVersionRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RevokePluginVersion")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RevokePluginVersionResponseObject); ok {
+		if err := validResponse.VisitRevokePluginVersionResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

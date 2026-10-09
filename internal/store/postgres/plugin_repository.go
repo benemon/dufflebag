@@ -292,3 +292,76 @@ func (r *Repository) deletePluginObjects(ctx context.Context, keys []string) {
 		}
 	}
 }
+
+var (
+	ErrPluginVersionRevoked    = errors.New("plugin version already revoked")
+	ErrPluginVersionNotRevoked = errors.New("plugin version not revoked")
+)
+
+// SetPluginVersionRevoked revokes or restores one version. Revoked versions
+// keep their bytes and their plugin's name; only serving stops.
+func (r *Repository) SetPluginVersionRevoked(
+	ctx context.Context, tenant OrganizationTenant, name, version string, revoked bool,
+) error {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = q.SetPluginVersionRevoked(ctx, postgresdb.SetPluginVersionRevokedParams{
+		OrganizationID: tenant.OrganizationID, Name: name, Version: version, Revoked: revoked,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		current, getErr := q.GetPluginVersionRevoked(ctx, postgresdb.GetPluginVersionRevokedParams{
+			OrganizationID: tenant.OrganizationID, Name: name, Version: version,
+		})
+		switch {
+		case errors.Is(getErr, sql.ErrNoRows):
+			return fmt.Errorf("%w: plugin version %s %s", registry.ErrNotFound, name, version)
+		case getErr != nil:
+			return fmt.Errorf("get plugin version: %w", getErr)
+		case current:
+			return ErrPluginVersionRevoked
+		default:
+			return ErrPluginVersionNotRevoked
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("set plugin version revoked: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit plugin version revocation: %w", err)
+	}
+	return nil
+}
+
+// DeletePluginVersion removes one version and its files. Removing a plugin's
+// last version removes the plugin, which frees its name for another source
+// (ADR-0027 A8).
+func (r *Repository) DeletePluginVersion(ctx context.Context, tenant OrganizationTenant, name, version string) error {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	where := postgresdb.ListPluginVersionObjectKeysParams{OrganizationID: tenant.OrganizationID, Name: name, Version: version}
+	keys, err := q.ListPluginVersionObjectKeys(ctx, where)
+	if err != nil {
+		return fmt.Errorf("list plugin version objects: %w", err)
+	}
+	pluginID, err := q.DeletePluginVersion(ctx, postgresdb.DeletePluginVersionParams(where))
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: plugin version %s %s", registry.ErrNotFound, name, version)
+	}
+	if err != nil {
+		return fmt.Errorf("delete plugin version: %w", err)
+	}
+	if err := q.DeletePluginIfEmpty(ctx, pluginID); err != nil {
+		return fmt.Errorf("delete empty plugin: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit plugin version deletion: %w", err)
+	}
+	r.deletePluginObjects(ctx, keys)
+	return nil
+}

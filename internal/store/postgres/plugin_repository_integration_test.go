@@ -213,3 +213,68 @@ func TestServedPluginFilesFollowExposureAndRevocation(t *testing.T) {
 		t.Fatalf("revoked sums = %v, want ErrNotFound", err)
 	}
 }
+
+func TestPluginVersionRevokeRestoreAndDeleteFreeTheName(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	ctx := context.Background()
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseOrganizationTenant(orgA)
+	upload := store.PluginSource{Kind: "upload"}
+	github := store.PluginSource{Kind: "github", Repository: "someone/packer-plugin-probe"}
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ExposePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	version := pluginVersion("1.0.0", upload)
+	if err := repository.PublishPluginVersion(ctx, tenant, version); err != nil {
+		t.Fatal(err)
+	}
+	var organization string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM organizations WHERE id = $1`, orgA).Scan(&organization); err != nil {
+		t.Fatal(err)
+	}
+	served := func() error {
+		_, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedSums, "")
+		return err
+	}
+
+	if err := repository.SetPluginVersionRevoked(ctx, tenant, "probe", "1.0.0", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := served(); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("revoked version served: %v", err)
+	}
+	if err := repository.SetPluginVersionRevoked(ctx, tenant, "probe", "1.0.0", true); !errors.Is(err, store.ErrPluginVersionRevoked) {
+		t.Fatalf("second revoke = %v", err)
+	}
+	var held store.HeldSourceError
+	if err := repository.PublishPluginVersion(ctx, tenant, pluginVersion("2.0.0", github)); !errors.As(err, &held) {
+		t.Fatalf("publish from another source while only a revoked version exists = %v, want HeldSourceError", err)
+	}
+	if err := repository.SetPluginVersionRevoked(ctx, tenant, "probe", "1.0.0", false); err != nil {
+		t.Fatal(err)
+	}
+	if err := served(); err != nil {
+		t.Fatalf("restored version not served: %v", err)
+	}
+	if err := repository.SetPluginVersionRevoked(ctx, tenant, "probe", "1.0.0", false); !errors.Is(err, store.ErrPluginVersionNotRevoked) {
+		t.Fatalf("restore of a served version = %v", err)
+	}
+
+	if err := repository.DeletePluginVersion(ctx, tenant, "probe", "1.0.0"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := objects.Get(ctx, objectstore.PluginKey(orgA, "probe", "1.0.0", version.Zips[0].Filename, version.Zips[0].SHA256)); err == nil {
+		t.Fatal("deleted version's zip is still stored")
+	}
+	if err := repository.DeletePluginVersion(ctx, tenant, "probe", "1.0.0"); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("second delete = %v, want ErrNotFound", err)
+	}
+	if err := repository.PublishPluginVersion(ctx, tenant, pluginVersion("2.0.0", github)); err != nil {
+		t.Fatalf("publish from another source after the last version was removed = %v, want the name freed", err)
+	}
+}

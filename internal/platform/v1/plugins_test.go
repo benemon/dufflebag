@@ -262,3 +262,53 @@ func TestListPluginsAndVersions(t *testing.T) {
 		t.Fatalf("absent plugin = %d, want 404", response.Code)
 	}
 }
+
+func versionRepository(revoked bool) *fakeTenancyRepository {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.pluginVersions = map[string][]store.PluginVersionSummary{"probe": {{Version: "1.0.0", Revoked: revoked}}}
+	return repository
+}
+
+func TestPluginVersionRevokeRestoreAndDelete(t *testing.T) {
+	path := func(suffix string) string {
+		return "/api/v1/organizations/" + testOrgID + "/plugin-registry/plugins/probe/versions/" + suffix
+	}
+	for _, tc := range []struct {
+		name, method, path string
+		revoked            bool
+		status             int
+		reason             string
+	}{
+		{"revoke", http.MethodPost, path("1.0.0/revoke"), false, http.StatusNoContent, "revoked"},
+		{"revoke twice", http.MethodPost, path("1.0.0/revoke"), true, http.StatusConflict, "already_revoked"},
+		{"restore", http.MethodPost, path("1.0.0/restore"), true, http.StatusNoContent, "restored"},
+		{"restore a served version", http.MethodPost, path("1.0.0/restore"), false, http.StatusConflict, "not_revoked"},
+		{"delete", http.MethodDelete, path("1.0.0"), false, http.StatusNoContent, "deleted"},
+		{"delete a revoked version", http.MethodDelete, path("1.0.0"), true, http.StatusNoContent, "deleted"},
+		{"revoke unknown", http.MethodPost, path("9.9.9/revoke"), false, http.StatusNotFound, "not_found"},
+		{"delete unknown", http.MethodDelete, path("9.9.9"), false, http.StatusNotFound, "not_found"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repository := versionRepository(tc.revoked)
+			handler, trail := auditedPlatform(t, publisherHandler(repository, identity.RolePublisher))
+			response := call(t, handler, tc.method, tc.path, nil, testToken)
+			if response.Code != tc.status {
+				t.Fatalf("status = %d %s, want %d", response.Code, response.Body.String(), tc.status)
+			}
+			assertPlatformAudit(t, trail.response(t), map[string]any{"reason": tc.reason})
+		})
+	}
+	for _, role := range []identity.Role{identity.RoleReader, identity.RoleBuilder} {
+		for _, request := range []struct{ method, path string }{
+			{http.MethodPost, path("1.0.0/revoke")}, {http.MethodPost, path("1.0.0/restore")}, {http.MethodDelete, path("1.0.0")},
+		} {
+			t.Run(string(role)+" "+request.method+" "+request.path, func(t *testing.T) {
+				repository := versionRepository(false)
+				response := call(t, publisherHandler(repository, role), request.method, request.path, nil, testToken)
+				if response.Code != http.StatusForbidden || len(repository.pluginVersions["probe"]) != 1 || repository.pluginVersions["probe"][0].Revoked {
+					t.Fatalf("status = %d, versions = %+v; want 403 and nothing changed", response.Code, repository.pluginVersions["probe"])
+				}
+			})
+		}
+	}
+}

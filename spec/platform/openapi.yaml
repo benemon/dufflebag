@@ -755,6 +755,60 @@ paths:
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [plugin-registry]
+      operationId: deletePluginVersion
+      summary: Remove a plugin version and its files
+      description: |
+        Terminal. Removing a plugin's last version removes the plugin, which frees its name for another
+        source; a revoked version still holds it. Requires `publisher`.
+      responses:
+        "204": { description: Removed. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+      - $ref: "#/components/parameters/PluginVersionNumber"
+    post:
+      tags: [plugin-registry]
+      operationId: revokePluginVersion
+      summary: Stop serving a plugin version; restorable
+      description: Packer gets 404 for every file of a revoked version. Its bytes are kept. Requires `publisher`.
+      responses:
+        "204": { description: Revoked. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Already revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+      - $ref: "#/components/parameters/PluginVersionNumber"
+    post:
+      tags: [plugin-registry]
+      operationId: restorePluginVersion
+      summary: Serve a revoked plugin version again
+      description: Requires `publisher`.
+      responses:
+        "204": { description: Restored. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Not revoked.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
 
   /api/v1/organizations/{organizationId}/projects:
     parameters:

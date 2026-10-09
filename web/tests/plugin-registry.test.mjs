@@ -24,6 +24,9 @@ let PluginDetailView
 let PluginUploadView
 let listPlugins
 let publishPluginVersion
+let revokePluginVersion
+let restorePluginVersion
+let deletePluginVersion
 
 before(async () => {
   vite = await createServer({
@@ -44,6 +47,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUpload, templateStanza, listPlugins, publishPluginVersion,
+    revokePluginVersion, restorePluginVersion, deletePluginVersion,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -232,6 +236,7 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   const detail = (registry) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {},
     detail: { name: 'git', source: { kind: 'upload' }, versions: [{
       version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z',
       listed_platforms: [{ os: 'linux', arch: 'arm64' }, { os: 'darwin', arch: 'arm64' }],
@@ -284,4 +289,46 @@ test('publishing sends a multipart PUT to the version path', async () => {
   assert.equal(sent.options.method, 'PUT')
   assert.deepEqual([...sent.options.body.keys()], ['sha256sums', 'zips'])
   assert.equal(sent.options.body.get('zips').name, 'packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')
+})
+
+test('version rows offer revoke or restore and removal to publishers only', () => {
+  const view = (callerRole, revoked) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {},
+    detail: { name: 'git', source: { kind: 'upload' }, versions: [{
+      version: '0.6.3', revoked, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
+    }] },
+  }))
+  const served = view('publisher', false)
+  assert.match(served, />Revoke</)
+  assert.match(served, />Remove version</)
+  const revoked = view('publisher', true)
+  assert.match(revoked, />Restore</)
+  assert.match(revoked, />Revoked</)
+  assert.doesNotMatch(revoked, /Template stanza/)
+  const reader = view('reader', false)
+  assert.doesNotMatch(reader, />Revoke</)
+  assert.doesNotMatch(reader, />Remove version</)
+})
+
+test('revoke, restore and remove use the version paths', async () => {
+  const originalFetch = globalThis.fetch
+  const requests = []
+  globalThis.fetch = async (path, options) => {
+    requests.push(`${options.method} ${path}`)
+    return new Response(null, { status: 204 })
+  }
+  try {
+    await revokePluginVersion('token', 'org', 'git', '0.6.3')
+    await restorePluginVersion('token', 'org', 'git', '0.6.3')
+    await deletePluginVersion('token', 'org', 'git', '0.6.3')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(requests, [
+    'POST /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3/revoke',
+    'POST /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3/restore',
+    'DELETE /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3',
+  ])
 })

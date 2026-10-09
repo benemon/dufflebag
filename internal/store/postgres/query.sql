@@ -958,3 +958,49 @@ WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.ver
 
 -- name: GetServedPluginZip :one
 SELECT object_key, size FROM plugin_files WHERE version_id = $1 AND filename = $2;
+
+-- name: SetPluginVersionRevoked :one
+UPDATE plugin_versions
+SET revoked = $4
+FROM plugins
+WHERE plugins.id = plugin_versions.plugin_id
+  AND plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+  AND plugin_versions.revoked = NOT $4
+RETURNING plugin_versions.version;
+
+-- name: GetPluginVersionRevoked :one
+SELECT plugin_versions.revoked
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3;
+
+-- name: ListPluginVersionObjectKeys :many
+SELECT plugin_versions.sums_key::text AS object_key
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+UNION ALL
+SELECT plugin_versions.signature_key::text
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3 AND plugin_versions.signature_key IS NOT NULL
+UNION ALL
+SELECT plugin_versions.manifest_key::text
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3 AND plugin_versions.manifest_key IS NOT NULL
+UNION ALL
+SELECT plugin_files.object_key
+FROM plugin_files
+JOIN plugin_versions ON plugin_versions.id = plugin_files.version_id
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3;
+
+-- name: DeletePluginVersion :one
+DELETE FROM plugin_versions
+USING plugins
+WHERE plugins.id = plugin_versions.plugin_id
+  AND plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+RETURNING plugin_versions.plugin_id;
+
+-- name: DeletePluginIfEmpty :exec
+DELETE FROM plugins
+WHERE plugins.id = $1
+  AND NOT EXISTS (SELECT 1 FROM plugin_versions WHERE plugin_versions.plugin_id = $1);

@@ -698,6 +698,38 @@ func (q *Queries) DeletePin(ctx context.Context, name string) error {
 	return err
 }
 
+const deletePluginIfEmpty = `-- name: DeletePluginIfEmpty :exec
+DELETE FROM plugins
+WHERE plugins.id = $1
+  AND NOT EXISTS (SELECT 1 FROM plugin_versions WHERE plugin_versions.plugin_id = $1)
+`
+
+func (q *Queries) DeletePluginIfEmpty(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, deletePluginIfEmpty, id)
+	return err
+}
+
+const deletePluginVersion = `-- name: DeletePluginVersion :one
+DELETE FROM plugin_versions
+USING plugins
+WHERE plugins.id = plugin_versions.plugin_id
+  AND plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+RETURNING plugin_versions.plugin_id
+`
+
+type DeletePluginVersionParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+func (q *Queries) DeletePluginVersion(ctx context.Context, arg DeletePluginVersionParams) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, deletePluginVersion, arg.OrganizationID, arg.Name, arg.Version)
+	var plugin_id uuid.UUID
+	err := row.Scan(&plugin_id)
+	return plugin_id, err
+}
+
 const deletePluginVersions = `-- name: DeletePluginVersions :exec
 DELETE FROM plugin_versions WHERE organization_id = $1
 `
@@ -1174,6 +1206,26 @@ func (q *Queries) GetPluginRegistry(ctx context.Context, organizationID uuid.UUI
 	var exposed bool
 	err := row.Scan(&exposed)
 	return exposed, err
+}
+
+const getPluginVersionRevoked = `-- name: GetPluginVersionRevoked :one
+SELECT plugin_versions.revoked
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+`
+
+type GetPluginVersionRevokedParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+func (q *Queries) GetPluginVersionRevoked(ctx context.Context, arg GetPluginVersionRevokedParams) (bool, error) {
+	row := q.db.QueryRowContext(ctx, getPluginVersionRevoked, arg.OrganizationID, arg.Name, arg.Version)
+	var revoked bool
+	err := row.Scan(&revoked)
+	return revoked, err
 }
 
 const getPrincipalByClientID = `-- name: GetPrincipalByClientID :one
@@ -2119,6 +2171,55 @@ SELECT plugin_files.object_key FROM plugin_files WHERE plugin_files.organization
 
 func (q *Queries) ListPluginObjectKeys(ctx context.Context, organizationID uuid.UUID) ([]string, error) {
 	rows, err := q.db.QueryContext(ctx, listPluginObjectKeys, organizationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var object_key string
+		if err := rows.Scan(&object_key); err != nil {
+			return nil, err
+		}
+		items = append(items, object_key)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPluginVersionObjectKeys = `-- name: ListPluginVersionObjectKeys :many
+SELECT plugin_versions.sums_key::text AS object_key
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+UNION ALL
+SELECT plugin_versions.signature_key::text
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3 AND plugin_versions.signature_key IS NOT NULL
+UNION ALL
+SELECT plugin_versions.manifest_key::text
+FROM plugin_versions JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3 AND plugin_versions.manifest_key IS NOT NULL
+UNION ALL
+SELECT plugin_files.object_key
+FROM plugin_files
+JOIN plugin_versions ON plugin_versions.id = plugin_files.version_id
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+`
+
+type ListPluginVersionObjectKeysParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+func (q *Queries) ListPluginVersionObjectKeys(ctx context.Context, arg ListPluginVersionObjectKeysParams) ([]string, error) {
+	rows, err := q.db.QueryContext(ctx, listPluginVersionObjectKeys, arg.OrganizationID, arg.Name, arg.Version)
 	if err != nil {
 		return nil, err
 	}
@@ -3373,6 +3474,35 @@ type SetBuildIntegrityMACParams struct {
 func (q *Queries) SetBuildIntegrityMAC(ctx context.Context, arg SetBuildIntegrityMACParams) error {
 	_, err := q.db.ExecContext(ctx, setBuildIntegrityMAC, arg.ID, arg.IntegrityMac)
 	return err
+}
+
+const setPluginVersionRevoked = `-- name: SetPluginVersionRevoked :one
+UPDATE plugin_versions
+SET revoked = $4
+FROM plugins
+WHERE plugins.id = plugin_versions.plugin_id
+  AND plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+  AND plugin_versions.revoked = NOT $4
+RETURNING plugin_versions.version
+`
+
+type SetPluginVersionRevokedParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+	Revoked        bool      `json:"revoked"`
+}
+
+func (q *Queries) SetPluginVersionRevoked(ctx context.Context, arg SetPluginVersionRevokedParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, setPluginVersionRevoked,
+		arg.OrganizationID,
+		arg.Name,
+		arg.Version,
+		arg.Revoked,
+	)
+	var version string
+	err := row.Scan(&version)
+	return version, err
 }
 
 const setVersionIntegrityMAC = `-- name: SetVersionIntegrityMAC :exec

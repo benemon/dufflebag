@@ -78,6 +78,21 @@ upload may take up to 30 minutes. A reverse proxy in front of dufflebag applies
 its own limits: an OpenShift route times out after 30 seconds unless the
 `haproxy.router.openshift.io/timeout` annotation raises it.
 
+## Revoke, restore and remove a version
+
+On the plugin's page, a publisher can act on each version:
+
+- **Revoke** stops serving the version. Packer gets 404 for each of its files,
+  and the files are kept. A template pinned to that version fails until it is
+  restored.
+- **Restore** serves a revoked version again.
+- **Remove version** deletes the version and its files. It cannot be undone.
+  Removing a plugin's last version removes the plugin, and its name can then
+  be used by another source. A revoked version still holds the name.
+
+The API equivalents are `POST .../versions/{version}/revoke`,
+`POST .../versions/{version}/restore` and `DELETE .../versions/{version}`.
+
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag
