@@ -519,6 +519,8 @@ type fakeTenancyRepository struct {
 	publishPluginErr      error
 	plugins               []store.PluginSummary
 	pluginVersions        map[string][]store.PluginVersionSummary
+	imports               []store.PluginImport
+	defaultPlatforms      []string
 	listProjectsErr       error
 	createProjectErr      error
 	getProjectErr         error
@@ -694,6 +696,40 @@ func (r *fakeTenancyRepository) DeletePluginVersion(
 		}
 	}
 	return registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) CreatePluginImport(
+	_ context.Context, _ store.OrganizationTenant, request store.PluginImportRequest,
+) (uuid.UUID, error) {
+	if !r.pluginRegistry.Enabled {
+		return uuid.Nil, store.ErrPluginRegistryNotEnabled
+	}
+	r.imports = append(r.imports, store.PluginImport{ID: uuid.New(), Request: request, State: "queued", Outcomes: []byte("[]"), CreatedAt: initTestTime})
+	return r.imports[len(r.imports)-1].ID, nil
+}
+
+func (r *fakeTenancyRepository) GetPluginImport(_ context.Context, _ store.OrganizationTenant, id uuid.UUID) (store.PluginImport, error) {
+	for _, job := range r.imports {
+		if job.ID == id {
+			return job, nil
+		}
+	}
+	return store.PluginImport{}, registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error) {
+	if !r.pluginRegistry.Enabled {
+		return nil, store.ErrPluginRegistryNotEnabled
+	}
+	return r.defaultPlatforms, nil
+}
+
+func (r *fakeTenancyRepository) SetPluginRegistryDefaultPlatforms(_ context.Context, _ store.OrganizationTenant, platforms []string) ([]string, error) {
+	if !r.pluginRegistry.Enabled {
+		return nil, store.ErrPluginRegistryNotEnabled
+	}
+	r.defaultPlatforms = platforms
+	return platforms, nil
 }
 
 func (r *fakeTenancyRepository) ListPlugins(

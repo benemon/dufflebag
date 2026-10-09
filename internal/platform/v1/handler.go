@@ -42,6 +42,10 @@ type PlatformRepository interface {
 	ListPluginVersions(context.Context, store.OrganizationTenant, string) (store.PluginSource, []store.PluginVersionSummary, error)
 	SetPluginVersionRevoked(context.Context, store.OrganizationTenant, string, string, bool) error
 	DeletePluginVersion(context.Context, store.OrganizationTenant, string, string) error
+	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest) (uuid.UUID, error)
+	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
+	PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error)
+	SetPluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant, []string) ([]string, error)
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
 	CreateProject(context.Context, store.Project) (*store.Project, error)
 	GetProject(context.Context, string, string) (*store.Project, error)
@@ -159,6 +163,7 @@ type server struct {
 	encryption   EncryptionService
 	bagDrop      BagDropService
 	webhooks     WebhookService
+	catalogue    PluginCatalogue
 	// scanner is nil on deployments with no adapter configured, which is the
 	// ordinary posture rather than a fault.
 	scanner       Scanner
@@ -173,11 +178,11 @@ func NewHandler(
 	auth Authenticator, principals Principals, logger *slog.Logger,
 	auditTargets AuditTargetRepository, auditBroker AuditTargetBroker,
 	encryption EncryptionService, scanner Scanner, bagDrop BagDropService, webhooks WebhookService, build BuildInfo,
-	pluginUploadLimit int64,
+	pluginUploadLimit int64, catalogue PluginCatalogue,
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger,
-		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, pluginUploadLimit, time.Now,
+		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, pluginUploadLimit, catalogue, time.Now,
 	)
 }
 
@@ -224,7 +229,7 @@ func newHandlerWithBuildAndAudit(
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger, auditTargets, auditBroker,
-		encryption, scanner, nil, nil, build, DefaultPluginUploadBytes, now,
+		encryption, scanner, nil, nil, build, DefaultPluginUploadBytes, nil, now,
 	)
 }
 
@@ -234,7 +239,7 @@ func newHandlerWithBagDrop(
 	bagDrop BagDropService, now func() time.Time,
 ) http.Handler {
 	return newHandlerWithServices(
-		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, DefaultPluginUploadBytes, now,
+		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, DefaultPluginUploadBytes, nil, now,
 	)
 }
 
@@ -252,9 +257,11 @@ func newHandlerWithServices(
 	webhooks WebhookService,
 	build BuildInfo,
 	pluginUploadLimit int64,
+	catalogue PluginCatalogue,
 	now func() time.Time,
 ) http.Handler {
 	s := &server{
+		catalogue:    catalogue,
 		repository:   repository,
 		instance:     instance,
 		auth:         auth,
@@ -596,6 +603,16 @@ type badRequestResponse struct {
 }
 
 func (response badRequestResponse) VisitCreateOrganizationResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
 	writeError(w, http.StatusBadRequest, Error{Message: response.message})
 	return nil
 }

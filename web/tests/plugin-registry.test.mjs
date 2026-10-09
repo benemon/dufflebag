@@ -27,6 +27,9 @@ let publishPluginVersion
 let revokePluginVersion
 let restorePluginVersion
 let deletePluginVersion
+let PluginHashicorpView
+let PluginImportJobView
+let createPluginImport
 
 before(async () => {
   vite = await createServer({
@@ -47,10 +50,12 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    revokePluginVersion, restorePluginVersion, deletePluginVersion,
+    revokePluginVersion, restorePluginVersion, deletePluginVersion, createPluginImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
+  ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
+  ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
 })
 
 after(async () => { await vite.close() })
@@ -58,7 +63,8 @@ after(async () => { await vite.close() })
 const props = (over = {}) => ({
   organizationName: 'acme', callerRole: 'maintainer', host: 'dufflebag.example.com',
   registry: { enabled: false, exposed: false }, plugins: [], loading: false, failure: null,
-  onOpenPlugin: () => {}, onUpload: () => {},
+  onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {},
+  defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], onSetDefaultPlatforms: async () => {},
   onRefresh: async () => {}, onEnable: async () => {}, onExpose: async () => {},
   onUnexpose: async () => {}, onDisable: async () => {}, ...over,
 })
@@ -343,4 +349,76 @@ test('revoke, restore and remove use the version paths', async () => {
     'POST /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3/restore',
     'DELETE /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3',
   ])
+})
+
+test('the registry settings show the default platforms and the catalogue offers HashiCorp to publishers', () => {
+  const html = render({ registry: { enabled: true, exposed: false } })
+  assert.match(html, /value="linux_amd64, linux_arm64, darwin_arm64"/)
+  assert.match(html, /Save default platforms/)
+  assert.match(html, /Browse HashiCorp/)
+  assert.doesNotMatch(render({ callerRole: 'reader', registry: { enabled: true, exposed: false } }), /Browse HashiCorp/)
+})
+
+test('browsing HashiCorp marks held names and mirrored versions', () => {
+  const html = renderToStaticMarkup(React.createElement(PluginHashicorpView, {
+    plugins: [
+      { product: 'packer-plugin-amazon', name: 'amazon', mirrored_versions: 1 },
+      { product: 'packer-plugin-docker', name: 'docker', mirrored_versions: 0, held_by: { kind: 'github', repository: 'acme-infra/packer-plugin-docker' } },
+    ],
+    selected: { product: 'packer-plugin-amazon', name: 'amazon', mirrored_versions: 1 },
+    versions: [
+      { version: '1.8.3', created_at: '2026-10-07T08:42:46Z', prerelease: false, state: 'supported', platforms: ['linux_amd64'], mirrored: false },
+      { version: '1.8.2', created_at: '2026-07-13T08:13:00Z', prerelease: false, platforms: ['linux_amd64'], mirrored: true },
+      { version: '1.9.0-beta.1', created_at: '2026-10-08T00:00:00Z', prerelease: true, platforms: ['linux_amd64'], mirrored: false },
+    ],
+    hasMore: true, preselected: ['linux_amd64'], failure: null, busy: false,
+    onChoose: () => {}, onMore: () => {}, onImport: () => {},
+  }))
+  assert.match(html, /Held by GitHub \(acme-infra\/packer-plugin-docker\)/)
+  assert.match(html, /freed once every version is removed/)
+  assert.match(html, />Mirrored</)
+  assert.match(html, /1\.8\.3/)
+  assert.doesNotMatch(html, /1\.9\.0-beta\.1/)
+  assert.match(html, /Load older releases/)
+})
+
+test('an import job shows each version\'s outcome and failed platforms', () => {
+  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, {
+    job: {
+      id: 'job', source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3', '1.8.2', '1.8.1'],
+      platforms: ['linux_amd64', 'windows_386'], state: 'partially_succeeded', created_at: '2026-10-09T00:00:00Z',
+      outcomes: [
+        { version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'failed', error: 'not published upstream' }] },
+        { version: '1.8.2', outcome: 'already_mirrored' },
+        { version: '1.8.1', outcome: 'failed', error: 'SHA256SUMS signature does not verify against the HashiCorp key' },
+      ],
+    },
+    registry: { enabled: true, exposed: false }, failure: null, organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
+  }))
+  assert.match(html, /Partially succeeded/)
+  assert.match(html, /Imported/)
+  assert.match(html, /Already mirrored/)
+  assert.match(html, /windows_386 failed/)
+  assert.match(html, /not published upstream/)
+  assert.match(html, /does not verify against the HashiCorp key/)
+  assert.match(html, /version = &quot;1\.8\.3&quot;/)
+  assert.match(html, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+})
+
+test('an import is queued with the selected versions and platforms', async () => {
+  const originalFetch = globalThis.fetch
+  let sent
+  globalThis.fetch = async (path, options) => {
+    sent = { path, method: options.method, body: JSON.parse(options.body) }
+    return new Response(JSON.stringify({ id: 'job' }), { status: 202, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await createPluginImport('token', 'org', 'packer-plugin-amazon', ['1.8.3'], ['linux_amd64'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(sent, {
+    path: '/api/v1/organizations/org/plugin-registry/imports', method: 'POST',
+    body: { source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3'], platforms: ['linux_amd64'] },
+  })
 })

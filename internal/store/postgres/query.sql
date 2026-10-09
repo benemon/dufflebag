@@ -1004,3 +1004,38 @@ RETURNING plugin_versions.plugin_id;
 DELETE FROM plugins
 WHERE plugins.id = $1
   AND NOT EXISTS (SELECT 1 FROM plugin_versions WHERE plugin_versions.plugin_id = $1);
+
+-- name: GetPluginRegistryDefaultPlatforms :one
+SELECT default_platforms FROM plugin_registries WHERE organization_id = $1;
+
+-- name: SetPluginRegistryDefaultPlatforms :one
+UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
+RETURNING default_platforms;
+
+-- name: InsertPluginImport :exec
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
+VALUES ($1, $2, $3, $4, $5, $6);
+
+-- name: GetPluginImport :one
+SELECT id, source_kind, product, versions, platforms, state, outcomes, created_at, finished_at
+FROM plugin_imports WHERE organization_id = $1 AND id = $2;
+
+-- name: ClaimPluginImport :one
+SELECT id, source_kind, product, versions, platforms
+FROM plugin_imports
+WHERE organization_id = $1
+  AND (state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => sqlc.arg(stale_seconds)::float8)))
+ORDER BY created_at
+FOR UPDATE SKIP LOCKED LIMIT 1;
+
+-- name: MarkPluginImportRunning :exec
+UPDATE plugin_imports SET state = 'running', claimed_at = now(), outcomes = '[]' WHERE id = $1;
+
+-- name: RecordPluginImport :exec
+UPDATE plugin_imports
+SET state = $2, outcomes = $3, claimed_at = now(),
+    finished_at = CASE WHEN $2 IN ('succeeded', 'partially_succeeded', 'failed') THEN now() END
+WHERE id = $1;
+
+-- name: ListOrganizationIDs :many
+SELECT id FROM organizations ORDER BY id;

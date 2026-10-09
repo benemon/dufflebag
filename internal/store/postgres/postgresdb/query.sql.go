@@ -26,6 +26,41 @@ func (q *Queries) BagDropBucketExists(ctx context.Context, name string) (bool, e
 	return exists, err
 }
 
+const claimPluginImport = `-- name: ClaimPluginImport :one
+SELECT id, source_kind, product, versions, platforms
+FROM plugin_imports
+WHERE organization_id = $1
+  AND (state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => $2::float8)))
+ORDER BY created_at
+FOR UPDATE SKIP LOCKED LIMIT 1
+`
+
+type ClaimPluginImportParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	StaleSeconds   float64   `json:"stale_seconds"`
+}
+
+type ClaimPluginImportRow struct {
+	ID         uuid.UUID `json:"id"`
+	SourceKind string    `json:"source_kind"`
+	Product    string    `json:"product"`
+	Versions   []string  `json:"versions"`
+	Platforms  []string  `json:"platforms"`
+}
+
+func (q *Queries) ClaimPluginImport(ctx context.Context, arg ClaimPluginImportParams) (ClaimPluginImportRow, error) {
+	row := q.db.QueryRowContext(ctx, claimPluginImport, arg.OrganizationID, arg.StaleSeconds)
+	var i ClaimPluginImportRow
+	err := row.Scan(
+		&i.ID,
+		&i.SourceKind,
+		&i.Product,
+		pq.Array(&i.Versions),
+		pq.Array(&i.Platforms),
+	)
+	return i, err
+}
+
 const completeVersion = `-- name: CompleteVersion :one
 UPDATE versions
 SET complete = true, sequence = $2, updated_at = $3
@@ -1195,6 +1230,45 @@ func (q *Queries) GetPlugin(ctx context.Context, arg GetPluginParams) (GetPlugin
 	return i, err
 }
 
+const getPluginImport = `-- name: GetPluginImport :one
+SELECT id, source_kind, product, versions, platforms, state, outcomes, created_at, finished_at
+FROM plugin_imports WHERE organization_id = $1 AND id = $2
+`
+
+type GetPluginImportParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ID             uuid.UUID `json:"id"`
+}
+
+type GetPluginImportRow struct {
+	ID         uuid.UUID       `json:"id"`
+	SourceKind string          `json:"source_kind"`
+	Product    string          `json:"product"`
+	Versions   []string        `json:"versions"`
+	Platforms  []string        `json:"platforms"`
+	State      string          `json:"state"`
+	Outcomes   json.RawMessage `json:"outcomes"`
+	CreatedAt  time.Time       `json:"created_at"`
+	FinishedAt sql.NullTime    `json:"finished_at"`
+}
+
+func (q *Queries) GetPluginImport(ctx context.Context, arg GetPluginImportParams) (GetPluginImportRow, error) {
+	row := q.db.QueryRowContext(ctx, getPluginImport, arg.OrganizationID, arg.ID)
+	var i GetPluginImportRow
+	err := row.Scan(
+		&i.ID,
+		&i.SourceKind,
+		&i.Product,
+		pq.Array(&i.Versions),
+		pq.Array(&i.Platforms),
+		&i.State,
+		&i.Outcomes,
+		&i.CreatedAt,
+		&i.FinishedAt,
+	)
+	return i, err
+}
+
 const getPluginRegistry = `-- name: GetPluginRegistry :one
 SELECT exposed
 FROM plugin_registries
@@ -1206,6 +1280,17 @@ func (q *Queries) GetPluginRegistry(ctx context.Context, organizationID uuid.UUI
 	var exposed bool
 	err := row.Scan(&exposed)
 	return exposed, err
+}
+
+const getPluginRegistryDefaultPlatforms = `-- name: GetPluginRegistryDefaultPlatforms :one
+SELECT default_platforms FROM plugin_registries WHERE organization_id = $1
+`
+
+func (q *Queries) GetPluginRegistryDefaultPlatforms(ctx context.Context, organizationID uuid.UUID) ([]string, error) {
+	row := q.db.QueryRowContext(ctx, getPluginRegistryDefaultPlatforms, organizationID)
+	var default_platforms []string
+	err := row.Scan(pq.Array(&default_platforms))
+	return default_platforms, err
 }
 
 const getPluginVersionRevoked = `-- name: GetPluginVersionRevoked :one
@@ -1708,6 +1793,32 @@ func (q *Queries) InsertPluginFile(ctx context.Context, arg InsertPluginFilePara
 	return err
 }
 
+const insertPluginImport = `-- name: InsertPluginImport :exec
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
+VALUES ($1, $2, $3, $4, $5, $6)
+`
+
+type InsertPluginImportParams struct {
+	ID             uuid.UUID `json:"id"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+	SourceKind     string    `json:"source_kind"`
+	Product        string    `json:"product"`
+	Versions       []string  `json:"versions"`
+	Platforms      []string  `json:"platforms"`
+}
+
+func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImportParams) error {
+	_, err := q.db.ExecContext(ctx, insertPluginImport,
+		arg.ID,
+		arg.OrganizationID,
+		arg.SourceKind,
+		arg.Product,
+		pq.Array(arg.Versions),
+		pq.Array(arg.Platforms),
+	)
+	return err
+}
+
 const insertPluginVersion = `-- name: InsertPluginVersion :one
 INSERT INTO plugin_versions (
     id, organization_id, plugin_id, version, protocol_version, listed_platforms,
@@ -2039,6 +2150,33 @@ func (q *Queries) ListKeyringEntries(ctx context.Context) ([]Keyring, error) {
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationIDs = `-- name: ListOrganizationIDs :many
+SELECT id FROM organizations ORDER BY id
+`
+
+func (q *Queries) ListOrganizationIDs(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -3006,6 +3144,15 @@ func (q *Queries) MarkBagDropAssociationAttempt(ctx context.Context, arg MarkBag
 	return i, err
 }
 
+const markPluginImportRunning = `-- name: MarkPluginImportRunning :exec
+UPDATE plugin_imports SET state = 'running', claimed_at = now(), outcomes = '[]' WHERE id = $1
+`
+
+func (q *Queries) MarkPluginImportRunning(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, markPluginImportRunning, id)
+	return err
+}
+
 const nextVersionSequence = `-- name: NextVersionSequence :one
 SELECT coalesce(max(sequence), 0)::integer + 1
 FROM versions
@@ -3182,6 +3329,24 @@ type RecordInitializationParams struct {
 
 func (q *Queries) RecordInitialization(ctx context.Context, arg RecordInitializationParams) error {
 	_, err := q.db.ExecContext(ctx, recordInitialization, arg.InitializedAt, arg.RecoveryDigest, arg.RecoveryThreshold)
+	return err
+}
+
+const recordPluginImport = `-- name: RecordPluginImport :exec
+UPDATE plugin_imports
+SET state = $2, outcomes = $3, claimed_at = now(),
+    finished_at = CASE WHEN $2 IN ('succeeded', 'partially_succeeded', 'failed') THEN now() END
+WHERE id = $1
+`
+
+type RecordPluginImportParams struct {
+	ID       uuid.UUID       `json:"id"`
+	State    string          `json:"state"`
+	Outcomes json.RawMessage `json:"outcomes"`
+}
+
+func (q *Queries) RecordPluginImport(ctx context.Context, arg RecordPluginImportParams) error {
+	_, err := q.db.ExecContext(ctx, recordPluginImport, arg.ID, arg.State, arg.Outcomes)
 	return err
 }
 
@@ -3474,6 +3639,23 @@ type SetBuildIntegrityMACParams struct {
 func (q *Queries) SetBuildIntegrityMAC(ctx context.Context, arg SetBuildIntegrityMACParams) error {
 	_, err := q.db.ExecContext(ctx, setBuildIntegrityMAC, arg.ID, arg.IntegrityMac)
 	return err
+}
+
+const setPluginRegistryDefaultPlatforms = `-- name: SetPluginRegistryDefaultPlatforms :one
+UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
+RETURNING default_platforms
+`
+
+type SetPluginRegistryDefaultPlatformsParams struct {
+	OrganizationID   uuid.UUID `json:"organization_id"`
+	DefaultPlatforms []string  `json:"default_platforms"`
+}
+
+func (q *Queries) SetPluginRegistryDefaultPlatforms(ctx context.Context, arg SetPluginRegistryDefaultPlatformsParams) ([]string, error) {
+	row := q.db.QueryRowContext(ctx, setPluginRegistryDefaultPlatforms, arg.OrganizationID, pq.Array(arg.DefaultPlatforms))
+	var default_platforms []string
+	err := row.Scan(pq.Array(&default_platforms))
+	return default_platforms, err
 }
 
 const setPluginVersionRevoked = `-- name: SetPluginVersionRevoked :one

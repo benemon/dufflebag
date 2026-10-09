@@ -229,7 +229,7 @@ func TestPublishPluginVersionRefusesAnOversizedUpload(t *testing.T) {
 	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
 	actor := testRoles{role: identity.RolePublisher, scope: identity.Scope{OrganizationID: uuid.MustParse(testOrgID)}}
 	handler := newHandlerWithServices(repository, &fakeInstanceRepository{}, testAuth{}, actor, testLogger(),
-		nil, nil, nil, nil, nil, nil, BuildInfo{}, 1024, func() time.Time { return initTestTime })
+		nil, nil, nil, nil, nil, nil, BuildInfo{}, 1024, nil, func() time.Time { return initTestTime })
 	large := uploadPart{"zips", "packer-plugin-probe_v1.0.0_x5.0_linux_amd64.zip", bytes.Repeat([]byte("x"), 4096)}
 	response := publishRequest(t, handler, "1.0.0", sumsFor(large), large)
 	if response.Code != http.StatusRequestEntityTooLarge || len(repository.publishedPlugins) != 0 {

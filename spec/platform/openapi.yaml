@@ -657,6 +657,171 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/default-platforms:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginDefaultPlatforms
+      summary: Platforms a first import of a plugin selects
+      responses:
+        "200":
+          description: Default platforms.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginPlatformList" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [plugin-registry]
+      operationId: setPluginDefaultPlatforms
+      summary: Replace the platforms a first import selects
+      description: Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PluginPlatformList" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginPlatformList" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: listHashicorpPlugins
+      summary: Packer plugins published on releases.hashicorp.com
+      description: Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
+      responses:
+        "200":
+          description: Plugins.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items: { $ref: "#/components/schemas/HashicorpPlugin" }
+                required: [plugins]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: releases.hashicorp.com could not be reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - name: product
+        in: path
+        required: true
+        schema: { type: string, pattern: '^packer-plugin-[a-z0-9]+(-[a-z0-9]+)*$' }
+      - name: after
+        in: query
+        required: false
+        description: The next cursor of the previous page.
+        schema: { type: string }
+    get:
+      tags: [plugin-registry]
+      operationId: listHashicorpPluginVersions
+      summary: One page of a plugin's releases, newest first
+      description: Requires `publisher`.
+      responses:
+        "200":
+          description: Versions.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  versions:
+                    type: array
+                    items: { $ref: "#/components/schemas/HashicorpPluginVersion" }
+                  next: { type: string, description: Cursor for the next page; absent on the last. }
+                required: [versions]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "502":
+          description: releases.hashicorp.com could not be reached.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/imports:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: createPluginImport
+      summary: Queue an import of plugin versions from releases.hashicorp.com
+      description: |
+        Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+        signing key before storing anything (ADR-0027 A3).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PluginImportRequest" }
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginImport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - name: importId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginImport
+      summary: An import job and the outcome of each version
+      responses:
+        "200":
+          description: The job.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginImport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/plugins:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -2496,6 +2661,79 @@ components:
           type: array
           items: { $ref: "#/components/schemas/PluginVersion" }
       required: [name, source, versions]
+
+    PluginPlatformList:
+      type: object
+      properties:
+        platforms:
+          type: array
+          items: { type: string, pattern: '^[a-z0-9]+_[a-z0-9]+$' }
+      required: [platforms]
+
+    HashicorpPlugin:
+      type: object
+      properties:
+        product: { type: string, description: "e.g. packer-plugin-amazon" }
+        name: { type: string, description: "e.g. amazon" }
+        mirrored_versions: { type: integer, minimum: 0 }
+        held_by: { $ref: "#/components/schemas/PluginSource" }
+      required: [product, name, mirrored_versions]
+
+    HashicorpPluginVersion:
+      type: object
+      properties:
+        version: { type: string }
+        created_at: { type: string, format: date-time }
+        prerelease: { type: boolean }
+        state: { type: string, description: "The release's lifecycle state, for example supported." }
+        changelog: { type: string }
+        platforms: { type: array, items: { type: string } }
+        mirrored: { type: boolean }
+      required: [version, created_at, prerelease, platforms, mirrored]
+
+    PluginImportRequest:
+      type: object
+      properties:
+        source: { type: string, enum: [releases-hashicorp] }
+        product: { type: string }
+        versions: { type: array, minItems: 1, items: { type: string } }
+        platforms: { type: array, minItems: 1, items: { type: string } }
+      required: [source, product, versions, platforms]
+
+    PluginImportPlatformOutcome:
+      type: object
+      properties:
+        platform: { type: string }
+        outcome: { type: string, enum: [imported, failed] }
+        error: { type: string }
+      required: [platform, outcome]
+
+    PluginImportVersionOutcome:
+      type: object
+      properties:
+        version: { type: string }
+        outcome: { type: string, enum: [imported, already_mirrored, failed] }
+        error: { type: string }
+        platforms:
+          type: array
+          items: { $ref: "#/components/schemas/PluginImportPlatformOutcome" }
+      required: [version, outcome]
+
+    PluginImport:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        source: { type: string }
+        product: { type: string }
+        versions: { type: array, items: { type: string } }
+        platforms: { type: array, items: { type: string } }
+        state: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed] }
+        created_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        outcomes:
+          type: array
+          items: { $ref: "#/components/schemas/PluginImportVersionOutcome" }
+      required: [id, source, product, versions, platforms, state, created_at, outcomes]
 
     TemplateStanza:
       type: object

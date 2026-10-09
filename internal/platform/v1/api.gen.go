@@ -448,21 +448,102 @@ func (e KeyringEntryPurpose) Valid() bool {
 	}
 }
 
+// Defines values for PluginImportState.
+const (
+	PluginImportStateFailed             PluginImportState = "failed"
+	PluginImportStatePartiallySucceeded PluginImportState = "partially_succeeded"
+	PluginImportStateQueued             PluginImportState = "queued"
+	PluginImportStateRunning            PluginImportState = "running"
+	PluginImportStateSucceeded          PluginImportState = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the PluginImportState enum.
+func (e PluginImportState) Valid() bool {
+	switch e {
+	case PluginImportStateFailed:
+		return true
+	case PluginImportStatePartiallySucceeded:
+		return true
+	case PluginImportStateQueued:
+		return true
+	case PluginImportStateRunning:
+		return true
+	case PluginImportStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginImportPlatformOutcomeOutcome.
+const (
+	PluginImportPlatformOutcomeOutcomeFailed   PluginImportPlatformOutcomeOutcome = "failed"
+	PluginImportPlatformOutcomeOutcomeImported PluginImportPlatformOutcomeOutcome = "imported"
+)
+
+// Valid indicates whether the value is a known member of the PluginImportPlatformOutcomeOutcome enum.
+func (e PluginImportPlatformOutcomeOutcome) Valid() bool {
+	switch e {
+	case PluginImportPlatformOutcomeOutcomeFailed:
+		return true
+	case PluginImportPlatformOutcomeOutcomeImported:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginImportRequestSource.
+const (
+	PluginImportRequestSourceReleasesHashicorp PluginImportRequestSource = "releases-hashicorp"
+)
+
+// Valid indicates whether the value is a known member of the PluginImportRequestSource enum.
+func (e PluginImportRequestSource) Valid() bool {
+	switch e {
+	case PluginImportRequestSourceReleasesHashicorp:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginImportVersionOutcomeOutcome.
+const (
+	PluginImportVersionOutcomeOutcomeAlreadyMirrored PluginImportVersionOutcomeOutcome = "already_mirrored"
+	PluginImportVersionOutcomeOutcomeFailed          PluginImportVersionOutcomeOutcome = "failed"
+	PluginImportVersionOutcomeOutcomeImported        PluginImportVersionOutcomeOutcome = "imported"
+)
+
+// Valid indicates whether the value is a known member of the PluginImportVersionOutcomeOutcome enum.
+func (e PluginImportVersionOutcomeOutcome) Valid() bool {
+	switch e {
+	case PluginImportVersionOutcomeOutcomeAlreadyMirrored:
+		return true
+	case PluginImportVersionOutcomeOutcomeFailed:
+		return true
+	case PluginImportVersionOutcomeOutcomeImported:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginSourceKind.
 const (
-	Github            PluginSourceKind = "github"
-	ReleasesHashicorp PluginSourceKind = "releases-hashicorp"
-	Upload            PluginSourceKind = "upload"
+	PluginSourceKindGithub            PluginSourceKind = "github"
+	PluginSourceKindReleasesHashicorp PluginSourceKind = "releases-hashicorp"
+	PluginSourceKindUpload            PluginSourceKind = "upload"
 )
 
 // Valid indicates whether the value is a known member of the PluginSourceKind enum.
 func (e PluginSourceKind) Valid() bool {
 	switch e {
-	case Github:
+	case PluginSourceKindGithub:
 		return true
-	case ReleasesHashicorp:
+	case PluginSourceKindReleasesHashicorp:
 		return true
-	case Upload:
+	case PluginSourceKindUpload:
 		return true
 	default:
 		return false
@@ -992,6 +1073,32 @@ type Error struct {
 	Message string  `json:"message"`
 }
 
+// HashicorpPlugin defines model for HashicorpPlugin.
+type HashicorpPlugin struct {
+	// HeldBy Where a plugin's versions come from. Metadata only; never part of its address.
+	HeldBy           *PluginSource `json:"held_by,omitempty"`
+	MirroredVersions int           `json:"mirrored_versions"`
+
+	// Name e.g. amazon
+	Name string `json:"name"`
+
+	// Product e.g. packer-plugin-amazon
+	Product string `json:"product"`
+}
+
+// HashicorpPluginVersion defines model for HashicorpPluginVersion.
+type HashicorpPluginVersion struct {
+	Changelog  *string   `json:"changelog,omitempty"`
+	CreatedAt  time.Time `json:"created_at"`
+	Mirrored   bool      `json:"mirrored"`
+	Platforms  []string  `json:"platforms"`
+	Prerelease bool      `json:"prerelease"`
+
+	// State The release's lifecycle state, for example supported.
+	State   *string `json:"state,omitempty"`
+	Version string  `json:"version"`
+}
+
 // Health defines model for Health.
 type Health struct {
 	// Audit Aggregate audit state: `disabled` means no targets are configured;
@@ -1245,10 +1352,63 @@ type Plugin struct {
 	Source PluginSource `json:"source"`
 }
 
+// PluginImport defines model for PluginImport.
+type PluginImport struct {
+	CreatedAt  time.Time                    `json:"created_at"`
+	FinishedAt *time.Time                   `json:"finished_at,omitempty"`
+	Id         openapi_types.UUID           `json:"id"`
+	Outcomes   []PluginImportVersionOutcome `json:"outcomes"`
+	Platforms  []string                     `json:"platforms"`
+	Product    string                       `json:"product"`
+	Source     string                       `json:"source"`
+	State      PluginImportState            `json:"state"`
+	Versions   []string                     `json:"versions"`
+}
+
+// PluginImportState defines model for PluginImport.State.
+type PluginImportState string
+
+// PluginImportPlatformOutcome defines model for PluginImportPlatformOutcome.
+type PluginImportPlatformOutcome struct {
+	Error    *string                            `json:"error,omitempty"`
+	Outcome  PluginImportPlatformOutcomeOutcome `json:"outcome"`
+	Platform string                             `json:"platform"`
+}
+
+// PluginImportPlatformOutcomeOutcome defines model for PluginImportPlatformOutcome.Outcome.
+type PluginImportPlatformOutcomeOutcome string
+
+// PluginImportRequest defines model for PluginImportRequest.
+type PluginImportRequest struct {
+	Platforms []string                  `json:"platforms"`
+	Product   string                    `json:"product"`
+	Source    PluginImportRequestSource `json:"source"`
+	Versions  []string                  `json:"versions"`
+}
+
+// PluginImportRequestSource defines model for PluginImportRequest.Source.
+type PluginImportRequestSource string
+
+// PluginImportVersionOutcome defines model for PluginImportVersionOutcome.
+type PluginImportVersionOutcome struct {
+	Error     *string                           `json:"error,omitempty"`
+	Outcome   PluginImportVersionOutcomeOutcome `json:"outcome"`
+	Platforms *[]PluginImportPlatformOutcome    `json:"platforms,omitempty"`
+	Version   string                            `json:"version"`
+}
+
+// PluginImportVersionOutcomeOutcome defines model for PluginImportVersionOutcome.Outcome.
+type PluginImportVersionOutcomeOutcome string
+
 // PluginPlatform defines model for PluginPlatform.
 type PluginPlatform struct {
 	Arch string `json:"arch"`
 	Os   string `json:"os"`
+}
+
+// PluginPlatformList defines model for PluginPlatformList.
+type PluginPlatformList struct {
+	Platforms []string `json:"platforms"`
 }
 
 // PluginRegistry defines model for PluginRegistry.
@@ -1626,6 +1786,12 @@ type CreateOrganizationJSONBody struct {
 	Name string `json:"name"`
 }
 
+// ListHashicorpPluginVersionsParams defines parameters for ListHashicorpPluginVersions.
+type ListHashicorpPluginVersionsParams struct {
+	// After The next cursor of the previous page.
+	After *string `form:"after,omitempty" json:"after,omitempty"`
+}
+
 // PublishPluginVersionMultipartBody defines parameters for PublishPluginVersion.
 type PublishPluginVersionMultipartBody struct {
 	Manifest      *openapi_types.File  `json:"manifest,omitempty"`
@@ -1702,6 +1868,12 @@ type CreateAuditTargetJSONRequestBody = AuditTargetCreate
 
 // CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
 type CreateOrganizationJSONRequestBody CreateOrganizationJSONBody
+
+// SetPluginDefaultPlatformsJSONRequestBody defines body for SetPluginDefaultPlatforms for application/json ContentType.
+type SetPluginDefaultPlatformsJSONRequestBody = PluginPlatformList
+
+// CreatePluginImportJSONRequestBody defines body for CreatePluginImport for application/json ContentType.
+type CreatePluginImportJSONRequestBody = PluginImportRequest
 
 // PublishPluginVersionMultipartRequestBody defines body for PublishPluginVersion for multipart/form-data ContentType.
 type PublishPluginVersionMultipartRequestBody PublishPluginVersionMultipartBody
@@ -2029,6 +2201,43 @@ type ClientInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
+	//
+	// Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp (the `ListHashicorpPlugins` operationId).
+	ListHashicorpPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListHashicorpPluginVersions One page of a plugin's releases, newest first
+	//
+	// Requires `publisher`.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product} (the `ListHashicorpPluginVersions` operationId).
+	ListHashicorpPluginVersions(ctx context.Context, organizationId OrganizationId, product string, params *ListHashicorpPluginVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginDefaultPlatforms Platforms a first import of a plugin selects
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `GetPluginDefaultPlatforms` operationId).
+	GetPluginDefaultPlatforms(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPluginDefaultPlatformsWithBody Replace the platforms a first import selects
+	//
+	// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+	SetPluginDefaultPlatformsWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPluginDefaultPlatforms Replace the platforms a first import selects
+	//
+	// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+	SetPluginDefaultPlatforms(ctx context.Context, organizationId OrganizationId, body SetPluginDefaultPlatformsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// DisablePluginRegistry Disable and delete the organization plugin registry
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
@@ -2043,6 +2252,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
 	ExposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePluginImportWithBody Queue an import of plugin versions from releases.hashicorp.com
+	//
+	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+	// signing key before storing anything (ADR-0027 A3).
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+	CreatePluginImportWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
+	//
+	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+	// signing key before storing anything (ADR-0027 A3).
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+	CreatePluginImport(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginImport An import job and the outcome of each version
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `GetPluginImport` operationId).
+	GetPluginImport(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPlugins List the organization's plugins
 	//
@@ -3010,6 +3244,93 @@ func (c *Client) GetPluginRegistry(ctx context.Context, organizationId Organizat
 	return c.Client.Do(req)
 }
 
+// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
+//
+// Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp (the `ListHashicorpPlugins` operationId).
+func (c *Client) ListHashicorpPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListHashicorpPluginsRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListHashicorpPluginVersions One page of a plugin's releases, newest first
+//
+// Requires `publisher`.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product} (the `ListHashicorpPluginVersions` operationId).
+func (c *Client) ListHashicorpPluginVersions(ctx context.Context, organizationId OrganizationId, product string, params *ListHashicorpPluginVersionsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListHashicorpPluginVersionsRequest(c.Server, organizationId, product, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginDefaultPlatforms Platforms a first import of a plugin selects
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `GetPluginDefaultPlatforms` operationId).
+func (c *Client) GetPluginDefaultPlatforms(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginDefaultPlatformsRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetPluginDefaultPlatformsWithBody Replace the platforms a first import selects
+//
+// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+func (c *Client) SetPluginDefaultPlatformsWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginDefaultPlatformsRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetPluginDefaultPlatforms Replace the platforms a first import selects
+//
+// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+func (c *Client) SetPluginDefaultPlatforms(ctx context.Context, organizationId OrganizationId, body SetPluginDefaultPlatformsJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginDefaultPlatformsRequest(c.Server, organizationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // DisablePluginRegistry Disable and delete the organization plugin registry
 //
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
@@ -3045,6 +3366,61 @@ func (c *Client) EnablePluginRegistry(ctx context.Context, organizationId Organi
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
 func (c *Client) ExposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewExposePluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreatePluginImportWithBody Queue an import of plugin versions from releases.hashicorp.com
+//
+// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+// signing key before storing anything (ADR-0027 A3).
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+func (c *Client) CreatePluginImportWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePluginImportRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
+//
+// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+// signing key before storing anything (ADR-0027 A3).
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+func (c *Client) CreatePluginImport(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreatePluginImportRequest(c.Server, organizationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginImport An import job and the outcome of each version
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `GetPluginImport` operationId).
+func (c *Client) GetPluginImport(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginImportRequest(c.Server, organizationId, importId)
 	if err != nil {
 		return nil, err
 	}
@@ -4694,6 +5070,189 @@ func NewGetPluginRegistryRequest(server string, organizationId OrganizationId) (
 	return req, nil
 }
 
+// NewListHashicorpPluginsRequest constructs an http.Request for the ListHashicorpPlugins method
+func NewListHashicorpPluginsRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/catalogue/hashicorp", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListHashicorpPluginVersionsRequest constructs an http.Request for the ListHashicorpPluginVersions method
+func NewListHashicorpPluginVersionsRequest(server string, organizationId OrganizationId, product string, params *ListHashicorpPluginVersionsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "product", product, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/catalogue/hashicorp/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.After != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "after", *params.After, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginDefaultPlatformsRequest constructs an http.Request for the GetPluginDefaultPlatforms method
+func NewGetPluginDefaultPlatformsRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/default-platforms", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetPluginDefaultPlatformsRequest calls the generic SetPluginDefaultPlatforms builder with application/json body
+func NewSetPluginDefaultPlatformsRequest(server string, organizationId OrganizationId, body SetPluginDefaultPlatformsJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetPluginDefaultPlatformsRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewSetPluginDefaultPlatformsRequestWithBody constructs an http.Request for the SetPluginDefaultPlatforms method, with any body, and a specified content type
+func NewSetPluginDefaultPlatformsRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/default-platforms", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewDisablePluginRegistryRequest constructs an http.Request for the DisablePluginRegistry method
 func NewDisablePluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
 	var err error
@@ -4789,6 +5348,94 @@ func NewExposePluginRegistryRequest(server string, organizationId OrganizationId
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreatePluginImportRequest calls the generic CreatePluginImport builder with application/json body
+func NewCreatePluginImportRequest(server string, organizationId OrganizationId, body CreatePluginImportJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreatePluginImportRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewCreatePluginImportRequestWithBody constructs an http.Request for the CreatePluginImport method, with any body, and a specified content type
+func NewCreatePluginImportRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/imports", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewGetPluginImportRequest constructs an http.Request for the GetPluginImport method
+func NewGetPluginImportRequest(server string, organizationId OrganizationId, importId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "importId", importId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/imports/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -7053,6 +7700,49 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginRegistryResponse, error)
 
+	// ListHashicorpPluginsWithResponse Packer plugins published on releases.hashicorp.com
+	//
+	// Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp (the `ListHashicorpPlugins` operationId).
+	ListHashicorpPluginsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListHashicorpPluginsResponse, error)
+
+	// ListHashicorpPluginVersionsWithResponse One page of a plugin's releases, newest first
+	//
+	// Requires `publisher`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product} (the `ListHashicorpPluginVersions` operationId).
+	ListHashicorpPluginVersionsWithResponse(ctx context.Context, organizationId OrganizationId, product string, params *ListHashicorpPluginVersionsParams, reqEditors ...RequestEditorFn) (*ListHashicorpPluginVersionsResponse, error)
+
+	// GetPluginDefaultPlatformsWithResponse Platforms a first import of a plugin selects
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `GetPluginDefaultPlatforms` operationId).
+	GetPluginDefaultPlatformsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginDefaultPlatformsResponse, error)
+
+	// SetPluginDefaultPlatformsWithBodyWithResponse Replace the platforms a first import selects
+	//
+	// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+	SetPluginDefaultPlatformsWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginDefaultPlatformsResponse, error)
+
+	// SetPluginDefaultPlatformsWithResponse Replace the platforms a first import selects
+	//
+	// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+	SetPluginDefaultPlatformsWithResponse(ctx context.Context, organizationId OrganizationId, body SetPluginDefaultPlatformsJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginDefaultPlatformsResponse, error)
+
 	// DisablePluginRegistryWithResponse Disable and delete the organization plugin registry
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -7073,6 +7763,33 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
 	ExposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExposePluginRegistryResponse, error)
+
+	// CreatePluginImportWithBodyWithResponse Queue an import of plugin versions from releases.hashicorp.com
+	//
+	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+	// signing key before storing anything (ADR-0027 A3).
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+	CreatePluginImportWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePluginImportResponse, error)
+
+	// CreatePluginImportWithResponse Queue an import of plugin versions from releases.hashicorp.com
+	//
+	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+	// signing key before storing anything (ADR-0027 A3).
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+	CreatePluginImportWithResponse(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePluginImportResponse, error)
+
+	// GetPluginImportWithResponse An import job and the outcome of each version
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `GetPluginImport` operationId).
+	GetPluginImportWithResponse(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetPluginImportResponse, error)
 
 	// ListPluginsWithResponse List the organization's plugins
 	//
@@ -8585,6 +9302,294 @@ func (r GetPluginRegistryResponse) ContentType() string {
 	return ""
 }
 
+type ListHashicorpPluginsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Plugins []HashicorpPlugin `json:"plugins"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON502 the response for an HTTP 502 `application/json` response
+	JSON502 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListHashicorpPluginsResponse) GetJSON200() *struct {
+	Plugins []HashicorpPlugin `json:"plugins"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListHashicorpPluginsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListHashicorpPluginsResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListHashicorpPluginsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON502 returns the response for an HTTP 502 `application/json` response
+func (r ListHashicorpPluginsResponse) GetJSON502() *Error {
+	return r.JSON502
+}
+
+// GetBody returns the raw response body bytes
+func (r ListHashicorpPluginsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListHashicorpPluginsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListHashicorpPluginsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListHashicorpPluginsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListHashicorpPluginVersionsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		// Next Cursor for the next page; absent on the last.
+		Next     *string                  `json:"next,omitempty"`
+		Versions []HashicorpPluginVersion `json:"versions"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON502 the response for an HTTP 502 `application/json` response
+	JSON502 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListHashicorpPluginVersionsResponse) GetJSON200() *struct {
+	// Next Cursor for the next page; absent on the last.
+	Next     *string                  `json:"next,omitempty"`
+	Versions []HashicorpPluginVersion `json:"versions"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListHashicorpPluginVersionsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListHashicorpPluginVersionsResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListHashicorpPluginVersionsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON502 returns the response for an HTTP 502 `application/json` response
+func (r ListHashicorpPluginVersionsResponse) GetJSON502() *Error {
+	return r.JSON502
+}
+
+// GetBody returns the raw response body bytes
+func (r ListHashicorpPluginVersionsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListHashicorpPluginVersionsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListHashicorpPluginVersionsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListHashicorpPluginVersionsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginDefaultPlatformsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginPlatformList
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginDefaultPlatformsResponse) GetJSON200() *PluginPlatformList {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginDefaultPlatformsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginDefaultPlatformsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetPluginDefaultPlatformsResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginDefaultPlatformsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginDefaultPlatformsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginDefaultPlatformsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginDefaultPlatformsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetPluginDefaultPlatformsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginPlatformList
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON200() *PluginPlatformList {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SetPluginDefaultPlatformsResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r SetPluginDefaultPlatformsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetPluginDefaultPlatformsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetPluginDefaultPlatformsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetPluginDefaultPlatformsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type DisablePluginRegistryResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -8779,6 +9784,137 @@ func (r ExposePluginRegistryResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ExposePluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreatePluginImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *PluginImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r CreatePluginImportResponse) GetJSON202() *PluginImport {
+	return r.JSON202
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreatePluginImportResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreatePluginImportResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreatePluginImportResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreatePluginImportResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreatePluginImportResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r CreatePluginImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreatePluginImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreatePluginImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreatePluginImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginImport
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginImportResponse) GetJSON200() *PluginImport {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginImportResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginImportResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginImportResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -11986,6 +13122,79 @@ func (c *ClientWithResponses) GetPluginRegistryWithResponse(ctx context.Context,
 	return ParseGetPluginRegistryResponse(rsp)
 }
 
+// ListHashicorpPluginsWithResponse Packer plugins published on releases.hashicorp.com
+//
+// Requires `publisher`, because reading it makes dufflebag call releases.hashicorp.com.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp (the `ListHashicorpPlugins` operationId).
+func (c *ClientWithResponses) ListHashicorpPluginsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListHashicorpPluginsResponse, error) {
+	rsp, err := c.ListHashicorpPlugins(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListHashicorpPluginsResponse(rsp)
+}
+
+// ListHashicorpPluginVersionsWithResponse One page of a plugin's releases, newest first
+//
+// Requires `publisher`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product} (the `ListHashicorpPluginVersions` operationId).
+func (c *ClientWithResponses) ListHashicorpPluginVersionsWithResponse(ctx context.Context, organizationId OrganizationId, product string, params *ListHashicorpPluginVersionsParams, reqEditors ...RequestEditorFn) (*ListHashicorpPluginVersionsResponse, error) {
+	rsp, err := c.ListHashicorpPluginVersions(ctx, organizationId, product, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListHashicorpPluginVersionsResponse(rsp)
+}
+
+// GetPluginDefaultPlatformsWithResponse Platforms a first import of a plugin selects
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `GetPluginDefaultPlatforms` operationId).
+func (c *ClientWithResponses) GetPluginDefaultPlatformsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginDefaultPlatformsResponse, error) {
+	rsp, err := c.GetPluginDefaultPlatforms(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginDefaultPlatformsResponse(rsp)
+}
+
+// SetPluginDefaultPlatformsWithBodyWithResponse Replace the platforms a first import selects
+//
+// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+func (c *ClientWithResponses) SetPluginDefaultPlatformsWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginDefaultPlatformsResponse, error) {
+	rsp, err := c.SetPluginDefaultPlatformsWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginDefaultPlatformsResponse(rsp)
+}
+
+// SetPluginDefaultPlatformsWithResponse Replace the platforms a first import selects
+//
+// Requires `maintainer`. Each platform is OS_ARCH, for example linux_amd64.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms (the `SetPluginDefaultPlatforms` operationId).
+func (c *ClientWithResponses) SetPluginDefaultPlatformsWithResponse(ctx context.Context, organizationId OrganizationId, body SetPluginDefaultPlatformsJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginDefaultPlatformsResponse, error) {
+	rsp, err := c.SetPluginDefaultPlatforms(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginDefaultPlatformsResponse(rsp)
+}
+
 // DisablePluginRegistryWithResponse Disable and delete the organization plugin registry
 //
 // Returns a wrapper object for the known response body format(s).
@@ -12023,6 +13232,51 @@ func (c *ClientWithResponses) ExposePluginRegistryWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseExposePluginRegistryResponse(rsp)
+}
+
+// CreatePluginImportWithBodyWithResponse Queue an import of plugin versions from releases.hashicorp.com
+//
+// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+// signing key before storing anything (ADR-0027 A3).
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+func (c *ClientWithResponses) CreatePluginImportWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreatePluginImportResponse, error) {
+	rsp, err := c.CreatePluginImportWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePluginImportResponse(rsp)
+}
+
+// CreatePluginImportWithResponse Queue an import of plugin versions from releases.hashicorp.com
+//
+// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
+// signing key before storing anything (ADR-0027 A3).
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
+func (c *ClientWithResponses) CreatePluginImportWithResponse(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePluginImportResponse, error) {
+	rsp, err := c.CreatePluginImport(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreatePluginImportResponse(rsp)
+}
+
+// GetPluginImportWithResponse An import job and the outcome of each version
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `GetPluginImport` operationId).
+func (c *ClientWithResponses) GetPluginImportWithResponse(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*GetPluginImportResponse, error) {
+	rsp, err := c.GetPluginImport(ctx, organizationId, importId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginImportResponse(rsp)
 }
 
 // ListPluginsWithResponse List the organization's plugins
@@ -13693,6 +14947,228 @@ func ParseGetPluginRegistryResponse(rsp *http.Response) (*GetPluginRegistryRespo
 	return response, nil
 }
 
+// ParseListHashicorpPluginsResponse parses an HTTP response from a ListHashicorpPluginsWithResponse call
+func ParseListHashicorpPluginsResponse(rsp *http.Response) (*ListHashicorpPluginsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListHashicorpPluginsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Plugins []HashicorpPlugin `json:"plugins"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListHashicorpPluginVersionsResponse parses an HTTP response from a ListHashicorpPluginVersionsWithResponse call
+func ParseListHashicorpPluginVersionsResponse(rsp *http.Response) (*ListHashicorpPluginVersionsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListHashicorpPluginVersionsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			// Next Cursor for the next page; absent on the last.
+			Next     *string                  `json:"next,omitempty"`
+			Versions []HashicorpPluginVersion `json:"versions"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 502:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON502 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginDefaultPlatformsResponse parses an HTTP response from a GetPluginDefaultPlatformsWithResponse call
+func ParseGetPluginDefaultPlatformsResponse(rsp *http.Response) (*GetPluginDefaultPlatformsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginDefaultPlatformsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginPlatformList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetPluginDefaultPlatformsResponse parses an HTTP response from a SetPluginDefaultPlatformsWithResponse call
+func ParseSetPluginDefaultPlatformsResponse(rsp *http.Response) (*SetPluginDefaultPlatformsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetPluginDefaultPlatformsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginPlatformList
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseDisablePluginRegistryResponse parses an HTTP response from a DisablePluginRegistryWithResponse call
 func ParseDisablePluginRegistryResponse(rsp *http.Response) (*DisablePluginRegistryResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -13845,6 +15321,107 @@ func ParseExposePluginRegistryResponse(rsp *http.Response) (*ExposePluginRegistr
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreatePluginImportResponse parses an HTTP response from a CreatePluginImportWithResponse call
+func ParseCreatePluginImportResponse(rsp *http.Response) (*CreatePluginImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreatePluginImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest PluginImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginImportResponse parses an HTTP response from a GetPluginImportWithResponse call
+func ParseGetPluginImportResponse(rsp *http.Response) (*GetPluginImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
 
 	}
 
@@ -16162,6 +17739,18 @@ type ServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp)
+	ListHashicorpPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ListHashicorpPluginVersions One page of a plugin's releases, newest first
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product})
+	ListHashicorpPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, product string, params ListHashicorpPluginVersionsParams)
+	// GetPluginDefaultPlatforms Platforms a first import of a plugin selects
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms)
+	GetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// SetPluginDefaultPlatforms Replace the platforms a first import selects
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms)
+	SetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// DisablePluginRegistry Disable and delete the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/disable)
 	DisablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -16171,6 +17760,12 @@ type ServerInterface interface {
 	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
 	ExposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
+	CreatePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// GetPluginImport An import job and the outcome of each version
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
+	GetPluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, importId openapi_types.UUID)
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -16542,6 +18137,135 @@ func (siw *ServerInterfaceWrapper) GetPluginRegistry(w http.ResponseWriter, r *h
 	handler.ServeHTTP(w, r)
 }
 
+// ListHashicorpPlugins operation middleware
+func (siw *ServerInterfaceWrapper) ListHashicorpPlugins(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHashicorpPlugins(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListHashicorpPluginVersions operation middleware
+func (siw *ServerInterfaceWrapper) ListHashicorpPluginVersions(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "product" -------------
+	var product string
+
+	err = runtime.BindStyledParameterWithOptions("simple", "product", r.PathValue("product"), &product, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "product", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListHashicorpPluginVersionsParams
+
+	// ------------- Optional query parameter "after" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "after", r.URL.Query(), &params.After, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "after"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "after", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListHashicorpPluginVersions(w, r, organizationId, product, params)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginDefaultPlatforms operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginDefaultPlatforms(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPluginDefaultPlatforms operation middleware
+func (siw *ServerInterfaceWrapper) SetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPluginDefaultPlatforms(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // DisablePluginRegistry operation middleware
 func (siw *ServerInterfaceWrapper) DisablePluginRegistry(w http.ResponseWriter, r *http.Request) {
 
@@ -16611,6 +18335,67 @@ func (siw *ServerInterfaceWrapper) ExposePluginRegistry(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExposePluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreatePluginImport operation middleware
+func (siw *ServerInterfaceWrapper) CreatePluginImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreatePluginImport(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginImport operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "importId" -------------
+	var importId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", r.PathValue("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "importId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginImport(w, r, organizationId, importId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -18386,6 +20171,12 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/expose", wrapper.ExposePluginRegistry)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/unexpose", wrapper.UnexposePluginRegistry)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/disable", wrapper.DisablePluginRegistry)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/default-platforms", wrapper.GetPluginDefaultPlatforms)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/default-platforms", wrapper.SetPluginDefaultPlatforms)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.CreatePluginImport)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.GetPluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions", wrapper.ListPluginVersions)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.DeletePluginVersion)
@@ -19180,6 +20971,327 @@ func (response GetPluginRegistry404JSONResponse) VisitGetPluginRegistryResponse(
 	return err
 }
 
+type ListHashicorpPluginsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type ListHashicorpPluginsResponseObject interface {
+	VisitListHashicorpPluginsResponse(w http.ResponseWriter) error
+}
+
+type ListHashicorpPlugins200JSONResponse struct {
+	Plugins []HashicorpPlugin `json:"plugins"`
+}
+
+func (response ListHashicorpPlugins200JSONResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPlugins401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListHashicorpPlugins401JSONResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPlugins403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListHashicorpPlugins403JSONResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPlugins404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListHashicorpPlugins404JSONResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPlugins502JSONResponse Error
+
+func (response ListHashicorpPlugins502JSONResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPluginVersionsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Product        string         `json:"product"`
+	Params         ListHashicorpPluginVersionsParams
+}
+
+type ListHashicorpPluginVersionsResponseObject interface {
+	VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error
+}
+
+type ListHashicorpPluginVersions200JSONResponse struct {
+	// Next Cursor for the next page; absent on the last.
+	Next     *string                  `json:"next,omitempty"`
+	Versions []HashicorpPluginVersion `json:"versions"`
+}
+
+func (response ListHashicorpPluginVersions200JSONResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPluginVersions401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListHashicorpPluginVersions401JSONResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPluginVersions403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListHashicorpPluginVersions403JSONResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPluginVersions404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListHashicorpPluginVersions404JSONResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListHashicorpPluginVersions502JSONResponse Error
+
+func (response ListHashicorpPluginVersions502JSONResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(502)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDefaultPlatformsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type GetPluginDefaultPlatformsResponseObject interface {
+	VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error
+}
+
+type GetPluginDefaultPlatforms200JSONResponse PluginPlatformList
+
+func (response GetPluginDefaultPlatforms200JSONResponse) VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDefaultPlatforms401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginDefaultPlatforms401JSONResponse) VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDefaultPlatforms404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPluginDefaultPlatforms404JSONResponse) VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDefaultPlatforms409JSONResponse Error
+
+func (response GetPluginDefaultPlatforms409JSONResponse) VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatformsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *SetPluginDefaultPlatformsJSONRequestBody
+}
+
+type SetPluginDefaultPlatformsResponseObject interface {
+	VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error
+}
+
+type SetPluginDefaultPlatforms200JSONResponse PluginPlatformList
+
+func (response SetPluginDefaultPlatforms200JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatforms400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetPluginDefaultPlatforms400JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatforms401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SetPluginDefaultPlatforms401JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatforms403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetPluginDefaultPlatforms403JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatforms404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetPluginDefaultPlatforms404JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginDefaultPlatforms409JSONResponse Error
+
+func (response SetPluginDefaultPlatforms409JSONResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type DisablePluginRegistryRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 }
@@ -19404,6 +21516,150 @@ func (response ExposePluginRegistry409JSONResponse) VisitExposePluginRegistryRes
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImportRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *CreatePluginImportJSONRequestBody
+}
+
+type CreatePluginImportResponseObject interface {
+	VisitCreatePluginImportResponse(w http.ResponseWriter) error
+}
+
+type CreatePluginImport202JSONResponse PluginImport
+
+func (response CreatePluginImport202JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImport400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreatePluginImport400JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImport401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response CreatePluginImport401JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImport403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreatePluginImport403JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImport404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreatePluginImport404JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreatePluginImport409JSONResponse Error
+
+func (response CreatePluginImport409JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginImportRequestObject struct {
+	OrganizationId OrganizationId     `json:"organizationId"`
+	ImportId       openapi_types.UUID `json:"importId"`
+}
+
+type GetPluginImportResponseObject interface {
+	VisitGetPluginImportResponse(w http.ResponseWriter) error
+}
+
+type GetPluginImport200JSONResponse PluginImport
+
+func (response GetPluginImport200JSONResponse) VisitGetPluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginImport401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginImport401JSONResponse) VisitGetPluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginImport404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPluginImport404JSONResponse) VisitGetPluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -22626,6 +24882,18 @@ type StrictServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(ctx context.Context, request GetPluginRegistryRequestObject) (GetPluginRegistryResponseObject, error)
+	// ListHashicorpPlugins Packer plugins published on releases.hashicorp.com
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp)
+	ListHashicorpPlugins(ctx context.Context, request ListHashicorpPluginsRequestObject) (ListHashicorpPluginsResponseObject, error)
+	// ListHashicorpPluginVersions One page of a plugin's releases, newest first
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product})
+	ListHashicorpPluginVersions(ctx context.Context, request ListHashicorpPluginVersionsRequestObject) (ListHashicorpPluginVersionsResponseObject, error)
+	// GetPluginDefaultPlatforms Platforms a first import of a plugin selects
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/default-platforms)
+	GetPluginDefaultPlatforms(ctx context.Context, request GetPluginDefaultPlatformsRequestObject) (GetPluginDefaultPlatformsResponseObject, error)
+	// SetPluginDefaultPlatforms Replace the platforms a first import selects
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/default-platforms)
+	SetPluginDefaultPlatforms(ctx context.Context, request SetPluginDefaultPlatformsRequestObject) (SetPluginDefaultPlatformsResponseObject, error)
 	// DisablePluginRegistry Disable and delete the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/disable)
 	DisablePluginRegistry(ctx context.Context, request DisablePluginRegistryRequestObject) (DisablePluginRegistryResponseObject, error)
@@ -22635,6 +24903,12 @@ type StrictServerInterface interface {
 	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
 	ExposePluginRegistry(ctx context.Context, request ExposePluginRegistryRequestObject) (ExposePluginRegistryResponseObject, error)
+	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
+	CreatePluginImport(ctx context.Context, request CreatePluginImportRequestObject) (CreatePluginImportResponseObject, error)
+	// GetPluginImport An import job and the outcome of each version
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
+	GetPluginImport(ctx context.Context, request GetPluginImportRequestObject) (GetPluginImportResponseObject, error)
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error)
@@ -23130,6 +25404,119 @@ func (sh *strictHandler) GetPluginRegistry(w http.ResponseWriter, r *http.Reques
 	}
 }
 
+// ListHashicorpPlugins operation middleware
+func (sh *strictHandler) ListHashicorpPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ListHashicorpPluginsRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListHashicorpPlugins(ctx, request.(ListHashicorpPluginsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListHashicorpPlugins")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListHashicorpPluginsResponseObject); ok {
+		if err := validResponse.VisitListHashicorpPluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListHashicorpPluginVersions operation middleware
+func (sh *strictHandler) ListHashicorpPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, product string, params ListHashicorpPluginVersionsParams) {
+	var request ListHashicorpPluginVersionsRequestObject
+
+	request.OrganizationId = organizationId
+	request.Product = product
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListHashicorpPluginVersions(ctx, request.(ListHashicorpPluginVersionsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListHashicorpPluginVersions")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListHashicorpPluginVersionsResponseObject); ok {
+		if err := validResponse.VisitListHashicorpPluginVersionsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginDefaultPlatforms operation middleware
+func (sh *strictHandler) GetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request GetPluginDefaultPlatformsRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginDefaultPlatforms(ctx, request.(GetPluginDefaultPlatformsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginDefaultPlatforms")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginDefaultPlatformsResponseObject); ok {
+		if err := validResponse.VisitGetPluginDefaultPlatformsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetPluginDefaultPlatforms operation middleware
+func (sh *strictHandler) SetPluginDefaultPlatforms(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request SetPluginDefaultPlatformsRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body SetPluginDefaultPlatformsJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetPluginDefaultPlatforms(ctx, request.(SetPluginDefaultPlatformsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetPluginDefaultPlatforms")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetPluginDefaultPlatformsResponseObject); ok {
+		if err := validResponse.VisitSetPluginDefaultPlatformsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // DisablePluginRegistry operation middleware
 func (sh *strictHandler) DisablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
 	var request DisablePluginRegistryRequestObject
@@ -23201,6 +25588,66 @@ func (sh *strictHandler) ExposePluginRegistry(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ExposePluginRegistryResponseObject); ok {
 		if err := validResponse.VisitExposePluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreatePluginImport operation middleware
+func (sh *strictHandler) CreatePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request CreatePluginImportRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body CreatePluginImportJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreatePluginImport(ctx, request.(CreatePluginImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreatePluginImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreatePluginImportResponseObject); ok {
+		if err := validResponse.VisitCreatePluginImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginImport operation middleware
+func (sh *strictHandler) GetPluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, importId openapi_types.UUID) {
+	var request GetPluginImportRequestObject
+
+	request.OrganizationId = organizationId
+	request.ImportId = importId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginImport(ctx, request.(GetPluginImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginImportResponseObject); ok {
+		if err := validResponse.VisitGetPluginImportResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -405,6 +405,24 @@ func (response refusalResponse) VisitRestorePluginVersionResponse(w http.Respons
 func (response refusalResponse) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitGetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitSetPluginDefaultPlatformsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitListHashicorpPluginsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitListHashicorpPluginVersionsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitGetPluginImportResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
