@@ -32,6 +32,11 @@ type PlatformRepository interface {
 	CreateOrganization(context.Context, store.Organization) (*store.Organization, error)
 	GetOrganization(context.Context, string) (*store.Organization, error)
 	DeleteOrganization(context.Context, string) error
+	GetPluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
+	EnablePluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
+	ExposePluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
+	UnexposePluginRegistry(context.Context, store.OrganizationTenant) (store.PluginRegistry, error)
+	DisablePluginRegistry(context.Context, store.OrganizationTenant) error
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
 	CreateProject(context.Context, store.Project) (*store.Project, error)
 	GetProject(context.Context, string, string) (*store.Project, error)
@@ -417,7 +422,7 @@ func (s *server) DeleteOrganization(
 	}
 	if errors.Is(err, registry.ErrConflict) {
 		return DeleteOrganization409JSONResponse{
-			Message: "organization still has projects or organization-scoped principals",
+			Message: "organization still has projects, organization-scoped principals, or a plugin registry",
 		}, nil
 	}
 	if err != nil {

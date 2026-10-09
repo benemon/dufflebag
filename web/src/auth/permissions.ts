@@ -35,6 +35,8 @@ export const ACTION_REQUIREMENTS = {
   managePrincipals: 'maintainer',
   // internal/platform/v1/bagdrop.go:16's admitBagDrop authorizes RoleMaintainer.
   configureBagDrop: 'maintainer',
+  // internal/platform/v1/plugin_registry.go authorizes registry mutations at organization RoleMaintainer.
+  configurePluginRegistry: 'maintainer',
   // internal/platform/v1/webhooks.go uses admitBagDrop's maintainer disclosure funnel.
   configureWebhooks: 'maintainer',
 } as const satisfies Record<string, Role>
@@ -44,6 +46,8 @@ export type ConsoleAction = keyof typeof ACTION_REQUIREMENTS
 export const NAV_REQUIREMENTS = {
   // internal/compat/hcp2023/handler.go's route table authorizes registry reads at reader.
   buckets: 'reader',
+  // internal/platform/v1/plugin_registry.go authorizes registry reads at RoleReader.
+  plugins: 'reader',
   // internal/platform/v1/handler.go:621 authorizes ListPrincipals at maintainer.
   principals: 'maintainer',
   // internal/platform/v1/audit_targets.go:20 authorizes ListAuditTargets at root.

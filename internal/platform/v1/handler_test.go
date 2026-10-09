@@ -227,7 +227,7 @@ func TestTenancyHandlerErrorsUsePlatformShape(t *testing.T) {
 			path:       "/api/v1/organizations/" + testOrganizationID,
 			repository: &fakeTenancyRepository{deleteOrganizationErr: registry.ErrConflict},
 			status:     http.StatusConflict,
-			message:    "organization still has projects or organization-scoped principals",
+			message:    "organization still has projects, organization-scoped principals, or a plugin registry",
 		},
 		{
 			name:       "duplicate project",
@@ -512,6 +512,8 @@ type fakeTenancyRepository struct {
 	createOrganizationErr error
 	getOrganizationErr    error
 	deleteOrganizationErr error
+	pluginRegistry        store.PluginRegistry
+	pluginRegistryErr     error
 	listProjectsErr       error
 	createProjectErr      error
 	getProjectErr         error
@@ -584,6 +586,73 @@ func (r *fakeTenancyRepository) GetOrganization(
 
 func (r *fakeTenancyRepository) DeleteOrganization(context.Context, string) error {
 	return r.deleteOrganizationErr
+}
+
+func (r *fakeTenancyRepository) GetPluginRegistry(
+	context.Context, store.OrganizationTenant,
+) (store.PluginRegistry, error) {
+	return r.pluginRegistry, r.pluginRegistryErr
+}
+
+func (r *fakeTenancyRepository) EnablePluginRegistry(
+	context.Context, store.OrganizationTenant,
+) (store.PluginRegistry, error) {
+	if r.pluginRegistryErr != nil {
+		return store.PluginRegistry{}, r.pluginRegistryErr
+	}
+	if r.pluginRegistry.Enabled {
+		return store.PluginRegistry{}, store.ErrPluginRegistryAlreadyEnabled
+	}
+	r.pluginRegistry = store.PluginRegistry{Enabled: true}
+	return r.pluginRegistry, nil
+}
+
+func (r *fakeTenancyRepository) ExposePluginRegistry(
+	context.Context, store.OrganizationTenant,
+) (store.PluginRegistry, error) {
+	if r.pluginRegistryErr != nil {
+		return store.PluginRegistry{}, r.pluginRegistryErr
+	}
+	if !r.pluginRegistry.Enabled {
+		return store.PluginRegistry{}, store.ErrPluginRegistryNotEnabled
+	}
+	if r.pluginRegistry.Exposed {
+		return store.PluginRegistry{}, store.ErrPluginRegistryAlreadyExposed
+	}
+	r.pluginRegistry.Exposed = true
+	return r.pluginRegistry, nil
+}
+
+func (r *fakeTenancyRepository) UnexposePluginRegistry(
+	context.Context, store.OrganizationTenant,
+) (store.PluginRegistry, error) {
+	if r.pluginRegistryErr != nil {
+		return store.PluginRegistry{}, r.pluginRegistryErr
+	}
+	if !r.pluginRegistry.Enabled {
+		return store.PluginRegistry{}, store.ErrPluginRegistryNotEnabled
+	}
+	if !r.pluginRegistry.Exposed {
+		return store.PluginRegistry{}, store.ErrPluginRegistryNotExposed
+	}
+	r.pluginRegistry.Exposed = false
+	return r.pluginRegistry, nil
+}
+
+func (r *fakeTenancyRepository) DisablePluginRegistry(
+	context.Context, store.OrganizationTenant,
+) error {
+	if r.pluginRegistryErr != nil {
+		return r.pluginRegistryErr
+	}
+	if !r.pluginRegistry.Enabled {
+		return store.ErrPluginRegistryNotEnabled
+	}
+	if r.pluginRegistry.Exposed {
+		return store.ErrPluginRegistryStillExposed
+	}
+	r.pluginRegistry = store.PluginRegistry{}
+	return nil
 }
 
 func (r *fakeTenancyRepository) ListProjectsForPrincipal(

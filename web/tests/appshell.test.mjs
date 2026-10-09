@@ -30,7 +30,7 @@ after(async () => {
   await vite.close()
 })
 
-const labels = ['Registry', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
+const labels = ['Registry', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
 const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
 const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
@@ -43,7 +43,7 @@ const screenHeaderSource = readFileSync(
 )
 const headerScreenSources = [
   'Principals', 'Audit', 'Webhooks', 'Versions', 'Version', 'Instance', 'Encryption',
-  'BagDrop',
+  'BagDrop', 'Plugins',
 ].map((name) => [
   name,
   readFileSync(new URL(`../src/screens/${name}.tsx`, import.meta.url), 'utf8'),
@@ -61,11 +61,11 @@ const view = (role, pathname = '/', over = {}) => renderToStaticMarkup(React.cre
 
 test('the shell renders only navigation the caller can use', () => {
   for (const [role, expected] of [
-    [null, ['Registry', 'Bag Drop', 'Instance']],
-    ['reader', ['Registry', 'Bag Drop', 'Instance']],
-    ['builder', ['Registry', 'Bag Drop', 'Instance']],
-    ['publisher', ['Registry', 'Bag Drop', 'Instance']],
-    ['maintainer', ['Registry', 'Principals', 'Bag Drop', 'Webhooks', 'Instance']],
+    [null, ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
+    ['reader', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
+    ['builder', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
+    ['publisher', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
+    ['maintainer', ['Registry', 'Plugins', 'Principals', 'Bag Drop', 'Webhooks', 'Instance']],
     ['root', labels],
   ]) {
     const markup = view(role)
@@ -87,7 +87,7 @@ test('router links carry PatternFly native current navigation state', () => {
     /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
   )
   assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
-  for (const destination of ['/buckets', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+  for (const destination of ['/buckets', '/plugins', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
 })
@@ -140,6 +140,7 @@ test('the landing routes by scope while bucket detail routes keep their paths', 
   // lands in its one bucket (the Landing component encodes the split).
   assert.match(appSource, /<Route path="\/" element=\{<Landing \/>\}/)
   assert.match(appSource, /<Route path="\/buckets" element=\{<Buckets \/>\}/)
+  assert.match(appSource, /<Route path="\/plugins" element=\{<Plugins \/>\}/)
   assert.match(appSource, /Navigate to="\/buckets" replace/)
   assert.match(appSource, /claims.bucketID/)
   assert.match(appSource, /path="\/buckets\/:bucket"/)

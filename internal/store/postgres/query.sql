@@ -26,6 +26,13 @@ deleted AS (
       AND NOT EXISTS (
           SELECT 1 FROM projects WHERE organization_id = $1
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM principals
+          WHERE organization_id = $1 AND project_id IS NULL
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM plugin_registries WHERE organization_id = $1
+      )
     RETURNING id
 )
 SELECT CASE
@@ -33,6 +40,34 @@ SELECT CASE
     WHEN EXISTS (SELECT 1 FROM target) THEN 'conflict'
     ELSE 'not_found'
 END AS result;
+
+-- name: GetPluginRegistry :one
+SELECT exposed
+FROM plugin_registries
+WHERE organization_id = $1;
+
+-- name: EnablePluginRegistry :one
+INSERT INTO plugin_registries (organization_id)
+VALUES ($1)
+ON CONFLICT DO NOTHING
+RETURNING exposed;
+
+-- name: ExposePluginRegistry :one
+UPDATE plugin_registries
+SET exposed = true, exposed_at = now()
+WHERE organization_id = $1 AND exposed = false
+RETURNING exposed;
+
+-- name: UnexposePluginRegistry :one
+UPDATE plugin_registries
+SET exposed = false, exposed_at = NULL
+WHERE organization_id = $1 AND exposed = true
+RETURNING exposed;
+
+-- name: DisablePluginRegistry :one
+DELETE FROM plugin_registries
+WHERE organization_id = $1 AND exposed = false
+RETURNING organization_id;
 
 -- name: ListProjects :many
 SELECT id, organization_id, name, created_at

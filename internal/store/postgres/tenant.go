@@ -31,3 +31,25 @@ func BeginTenant(ctx context.Context, db *sql.DB, organizationID, projectID, buc
 	}
 	return tx, nil
 }
+
+// BeginOrganizationTenant starts a transaction scoped to one organization.
+// Project and bucket settings are cleared so project-scoped policies match no row.
+func BeginOrganizationTenant(ctx context.Context, db *sql.DB, organizationID string) (*sql.Tx, error) {
+	if organizationID == "" {
+		return nil, fmt.Errorf("set organization tenant: organization is required")
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin organization tenant transaction: %w", err)
+	}
+
+	if _, err := tx.ExecContext(
+		ctx,
+		`SELECT set_config('app.tenant_org', $1, true), set_config('app.tenant_project', '', true), set_config('app.tenant_bucket', '', true)`,
+		organizationID,
+	); err != nil {
+		_ = tx.Rollback()
+		return nil, fmt.Errorf("set organization tenant: %w", err)
+	}
+	return tx, nil
+}

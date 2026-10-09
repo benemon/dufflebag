@@ -33,13 +33,13 @@ test('each role gets the nested console action snapshot declared by the server',
       'createProjects',
       'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels',
       'manageRestrictedChannels', 'deleteBuckets',
-      'managePrincipals', 'configureBagDrop', 'configureWebhooks',
+      'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
     'createOrganizations', 'createProjects', 'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions',
     'manageChannels', 'manageRestrictedChannels', 'deleteBuckets', 'configureAudit',
-    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configureWebhooks',
+    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'configureWebhooks',
   ])
   assert.deepEqual(allowedActions(null), [])
 })
@@ -100,12 +100,12 @@ test('deleteBuckets permission mapping requires publisher', () => {
 
 test('each role gets the navigation snapshot declared by the server', () => {
   for (const [role, expected] of [
-    [null, ['buckets', 'bagdrop', 'instance']],
-    ['reader', ['buckets', 'bagdrop', 'instance']],
-    ['builder', ['buckets', 'bagdrop', 'instance']],
-    ['publisher', ['buckets', 'bagdrop', 'instance']],
-    ['maintainer', ['buckets', 'principals', 'bagdrop', 'webhooks', 'instance']],
-    ['root', ['buckets', 'principals', 'audit', 'encryption', 'bagdrop', 'webhooks', 'instance']],
+    [null, ['buckets', 'plugins', 'bagdrop', 'instance']],
+    ['reader', ['buckets', 'plugins', 'bagdrop', 'instance']],
+    ['builder', ['buckets', 'plugins', 'bagdrop', 'instance']],
+    ['publisher', ['buckets', 'plugins', 'bagdrop', 'instance']],
+    ['maintainer', ['buckets', 'plugins', 'principals', 'bagdrop', 'webhooks', 'instance']],
+    ['root', ['buckets', 'plugins', 'principals', 'audit', 'encryption', 'bagdrop', 'webhooks', 'instance']],
   ]) {
     assert.deepEqual(visibleNavItems(role), expected, String(role))
   }

@@ -37,6 +37,8 @@ tags:
     description: Service principals and their secrets.
   - name: pins
     description: Per-project pinned buckets.
+  - name: plugin-registry
+    description: Organization plugin registry lifecycle.
   - name: findings
     description: Stored vulnerability finding summaries.
   - name: bagdrop
@@ -541,16 +543,116 @@ paths:
       operationId: deleteOrganization
       summary: Delete an empty organization
       description: |
-        Refused while the organization still contains projects. Deleting a
-        tenant is not an operation that should cascade silently through a
-        registry's contents.
+        Refused while the organization still contains projects, organization-scoped
+        principals, or an enabled plugin registry. Deleting a tenant is not an
+        operation that should cascade silently through a registry's contents.
       responses:
         "204": { description: Deleted }
         "401": { $ref: "#/components/responses/Unauthorized" }
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "409":
-          description: Still contains projects.
+          description: Still contains projects, organization-scoped principals, or a plugin registry.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginRegistry
+      summary: Read the organization plugin registry lifecycle state
+      responses:
+        "200":
+          description: Current state, including disabled when the registry was never enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginRegistry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/enable:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: enablePluginRegistry
+      summary: Enable the organization plugin registry
+      responses:
+        "201":
+          description: Enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginRegistry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Already enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/expose:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: exposePluginRegistry
+      summary: Expose the organization plugin registry for anonymous reads
+      responses:
+        "200":
+          description: Exposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginRegistry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Not enabled or already exposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/unexpose:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: unexposePluginRegistry
+      summary: Stop anonymous reads from the organization plugin registry
+      responses:
+        "200":
+          description: Unexposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginRegistry" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Not enabled or not exposed.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/disable:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: disablePluginRegistry
+      summary: Disable and delete the organization plugin registry
+      responses:
+        "204": { description: Disabled. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: Not enabled, or still exposed and must be unexposed first.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
@@ -2172,6 +2274,13 @@ components:
         name: { type: string }
         created_at: { type: string, format: date-time }
       required: [id, name, created_at]
+
+    PluginRegistry:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        exposed: { type: boolean }
+      required: [enabled, exposed]
 
     Project:
       type: object

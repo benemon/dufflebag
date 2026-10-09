@@ -119,7 +119,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// catch, and the only hook that proves isolation comes from RLS rather
 	// than from application predicates.
 	rlsTables := []string{
-		"buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+		"plugin_registries", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "build_findings_summary", "version_findings_summary", "pending_scans",
@@ -221,6 +221,39 @@ func TestTenantIsolation(t *testing.T) {
 	insertAggregate(t, ctx, db, orgA, projectA, "a")
 	insertAggregate(t, ctx, db, orgB, projectB, "b")
 	insertBucketAggregate(t, ctx, db, orgA, projectA, "c", 2)
+	repository := store.NewRepository(db)
+	if _, err := repository.EnablePluginRegistry(ctx, store.ParseOrganizationTenant(orgA)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.EnablePluginRegistry(ctx, store.ParseOrganizationTenant(orgB)); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("plugin_registries", func(t *testing.T) {
+		tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM plugin_registries").Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 {
+			t.Fatalf("plugin_registries exposed %d rows to %s; want exactly its own row", count, orgA)
+		}
+		var visible bool
+		if err := tx.QueryRowContext(
+			ctx,
+			"SELECT EXISTS (SELECT 1 FROM plugin_registries WHERE organization_id = $1)",
+			orgB,
+		).Scan(&visible); err != nil {
+			t.Fatal(err)
+		}
+		if visible {
+			t.Fatalf("%s can read another organization's plugin registry", orgA)
+		}
+	})
 
 	bucketTables := []string{
 		"versions", "channels", "builds", "artifacts", "channel_assignments",
@@ -339,6 +372,26 @@ func TestTenantIsolation(t *testing.T) {
 		if err := tx.Commit(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestOrganizationTenantCannotReadProjectRows(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	insertBucketAggregate(t, ctx, db, orgA, projectA, "a", 1)
+
+	tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	var count int
+	if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM buckets").Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Fatalf("organization transaction exposed %d project rows; want zero", count)
 	}
 }
 

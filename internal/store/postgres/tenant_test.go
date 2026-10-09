@@ -26,6 +26,14 @@ func TestBeginTenantRequiresBothIDs(t *testing.T) {
 	}
 }
 
+func TestBeginOrganizationTenantRequiresOrganization(t *testing.T) {
+	tx, err := BeginOrganizationTenant(context.Background(), nil, "")
+	if err == nil {
+		_ = tx.Rollback()
+		t.Fatal("BeginOrganizationTenant accepted an empty organization")
+	}
+}
+
 // ADR-0017's backstop: a handler that never passed authorization holds a denied
 // tenant, and no repository operation may resolve one. Every operation funnels
 // through begin, so the refusal is asserted there — and against a nil db, so
@@ -45,6 +53,24 @@ func TestBeginRefusesADeniedOrMalformedTenant(t *testing.T) {
 			_, _, err := repository.begin(context.Background(), tc.tenant)
 			if !errors.Is(err, registry.ErrNotFound) {
 				t.Fatalf("begin = %v, want ErrNotFound", err)
+			}
+		})
+	}
+}
+
+func TestBeginOrganizationRefusesADeniedOrMalformedTenant(t *testing.T) {
+	repository := NewRepository(nil)
+	for _, tc := range []struct {
+		name   string
+		tenant OrganizationTenant
+	}{
+		{"denied", DeniedOrganizationTenant()},
+		{"malformed", ParseOrganizationTenant("not-a-uuid")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := repository.beginOrganization(context.Background(), tc.tenant)
+			if !errors.Is(err, registry.ErrNotFound) {
+				t.Fatalf("beginOrganization = %v, want ErrNotFound", err)
 			}
 		})
 	}

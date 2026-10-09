@@ -167,6 +167,13 @@ type Pin struct {
 	BucketID       string    `json:"bucket_id"`
 }
 
+type PluginRegistry struct {
+	OrganizationID uuid.UUID    `json:"organization_id"`
+	Exposed        bool         `json:"exposed"`
+	EnabledAt      time.Time    `json:"enabled_at"`
+	ExposedAt      sql.NullTime `json:"exposed_at"`
+}
+
 type Principal struct {
 	ID             string         `json:"id"`
 	Name           string         `json:"name"`

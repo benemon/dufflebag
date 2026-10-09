@@ -3,6 +3,7 @@ sql:
   - engine: postgresql
     schema:
       - internal/store/postgres/migrations/000001_baseline.up.sql
+      - internal/store/postgres/migrations/000006_plugin_registries.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:
