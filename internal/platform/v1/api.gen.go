@@ -1211,6 +1211,12 @@ type Pin struct {
 	PinnedBy *string `json:"pinned_by,omitempty"`
 }
 
+// PluginRegistry defines model for PluginRegistry.
+type PluginRegistry struct {
+	Enabled bool `json:"enabled"`
+	Exposed bool `json:"exposed"`
+}
+
 // Principal defines model for Principal.
 type Principal struct {
 	// BucketId The bound bucket's ULID. Omitted for project-or-wider scope.
@@ -1902,9 +1908,9 @@ type ClientInterface interface {
 
 	// DeleteOrganization Delete an empty organization
 	//
-	// Refused while the organization still contains projects. Deleting a
-	// tenant is not an operation that should cascade silently through a
-	// registry's contents.
+	// Refused while the organization still contains projects, organization-scoped
+	// principals, or an enabled plugin registry. Deleting a tenant is not an
+	// operation that should cascade silently through a registry's contents.
 	//
 	// Corresponds with DELETE /api/v1/organizations/{organizationId} (the `DeleteOrganization` operationId).
 	DeleteOrganization(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
@@ -1913,6 +1919,31 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId} (the `GetOrganization` operationId).
 	GetOrganization(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginRegistry Read the organization plugin registry lifecycle state
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
+	GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DisablePluginRegistry Disable and delete the organization plugin registry
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
+	DisablePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// EnablePluginRegistry Enable the organization plugin registry
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/enable (the `EnablePluginRegistry` operationId).
+	EnablePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
+	ExposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose (the `UnexposePluginRegistry` operationId).
+	UnexposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListProjects List projects in an organization
 	//
@@ -2781,9 +2812,9 @@ func (c *Client) CreateOrganization(ctx context.Context, body CreateOrganization
 
 // DeleteOrganization Delete an empty organization
 //
-// Refused while the organization still contains projects. Deleting a
-// tenant is not an operation that should cascade silently through a
-// registry's contents.
+// Refused while the organization still contains projects, organization-scoped
+// principals, or an enabled plugin registry. Deleting a tenant is not an
+// operation that should cascade silently through a registry's contents.
 //
 // Corresponds with DELETE /api/v1/organizations/{organizationId} (the `DeleteOrganization` operationId).
 func (c *Client) DeleteOrganization(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -2803,6 +2834,81 @@ func (c *Client) DeleteOrganization(ctx context.Context, organizationId Organiza
 // Corresponds with GET /api/v1/organizations/{organizationId} (the `GetOrganization` operationId).
 func (c *Client) GetOrganization(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetOrganizationRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginRegistry Read the organization plugin registry lifecycle state
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
+func (c *Client) GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DisablePluginRegistry Disable and delete the organization plugin registry
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
+func (c *Client) DisablePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDisablePluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// EnablePluginRegistry Enable the organization plugin registry
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/enable (the `EnablePluginRegistry` operationId).
+func (c *Client) EnablePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewEnablePluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
+func (c *Client) ExposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExposePluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose (the `UnexposePluginRegistry` operationId).
+func (c *Client) UnexposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUnexposePluginRegistryRequest(c.Server, organizationId)
 	if err != nil {
 		return nil, err
 	}
@@ -4289,6 +4395,176 @@ func NewGetOrganizationRequest(server string, organizationId OrganizationId) (*h
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginRegistryRequest constructs an http.Request for the GetPluginRegistry method
+func NewGetPluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDisablePluginRegistryRequest constructs an http.Request for the DisablePluginRegistry method
+func NewDisablePluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/disable", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewEnablePluginRegistryRequest constructs an http.Request for the EnablePluginRegistry method
+func NewEnablePluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/enable", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExposePluginRegistryRequest constructs an http.Request for the ExposePluginRegistry method
+func NewExposePluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/expose", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUnexposePluginRegistryRequest constructs an http.Request for the UnexposePluginRegistry method
+func NewUnexposePluginRegistryRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/unexpose", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -6227,9 +6503,9 @@ type ClientWithResponsesInterface interface {
 
 	// DeleteOrganizationWithResponse Delete an empty organization
 	//
-	// Refused while the organization still contains projects. Deleting a
-	// tenant is not an operation that should cascade silently through a
-	// registry's contents.
+	// Refused while the organization still contains projects, organization-scoped
+	// principals, or an enabled plugin registry. Deleting a tenant is not an
+	// operation that should cascade silently through a registry's contents.
 	//
 	// Returns a wrapper object for the known response body format(s).
 	//
@@ -6242,6 +6518,41 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId} (the `GetOrganization` operationId).
 	GetOrganizationWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetOrganizationResponse, error)
+
+	// GetPluginRegistryWithResponse Read the organization plugin registry lifecycle state
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
+	GetPluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginRegistryResponse, error)
+
+	// DisablePluginRegistryWithResponse Disable and delete the organization plugin registry
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
+	DisablePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*DisablePluginRegistryResponse, error)
+
+	// EnablePluginRegistryWithResponse Enable the organization plugin registry
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/enable (the `EnablePluginRegistry` operationId).
+	EnablePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*EnablePluginRegistryResponse, error)
+
+	// ExposePluginRegistryWithResponse Expose the organization plugin registry for anonymous reads
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
+	ExposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExposePluginRegistryResponse, error)
+
+	// UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose (the `UnexposePluginRegistry` operationId).
+	UnexposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*UnexposePluginRegistryResponse, error)
 
 	// ListProjectsWithResponse List projects in an organization
 	//
@@ -7629,6 +7940,330 @@ func (r GetOrganizationResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetOrganizationResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginRegistryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginRegistry
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginRegistryResponse) GetJSON200() *PluginRegistry {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginRegistryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginRegistryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginRegistryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginRegistryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginRegistryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DisablePluginRegistryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DisablePluginRegistryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DisablePluginRegistryResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DisablePluginRegistryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DisablePluginRegistryResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DisablePluginRegistryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DisablePluginRegistryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DisablePluginRegistryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DisablePluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type EnablePluginRegistryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *PluginRegistry
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r EnablePluginRegistryResponse) GetJSON201() *PluginRegistry {
+	return r.JSON201
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r EnablePluginRegistryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r EnablePluginRegistryResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r EnablePluginRegistryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r EnablePluginRegistryResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r EnablePluginRegistryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r EnablePluginRegistryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r EnablePluginRegistryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r EnablePluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ExposePluginRegistryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginRegistry
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ExposePluginRegistryResponse) GetJSON200() *PluginRegistry {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ExposePluginRegistryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ExposePluginRegistryResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ExposePluginRegistryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ExposePluginRegistryResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r ExposePluginRegistryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExposePluginRegistryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExposePluginRegistryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExposePluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UnexposePluginRegistryResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginRegistry
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UnexposePluginRegistryResponse) GetJSON200() *PluginRegistry {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r UnexposePluginRegistryResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UnexposePluginRegistryResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UnexposePluginRegistryResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UnexposePluginRegistryResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r UnexposePluginRegistryResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UnexposePluginRegistryResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UnexposePluginRegistryResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UnexposePluginRegistryResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -10343,9 +10978,9 @@ func (c *ClientWithResponses) CreateOrganizationWithResponse(ctx context.Context
 
 // DeleteOrganizationWithResponse Delete an empty organization
 //
-// Refused while the organization still contains projects. Deleting a
-// tenant is not an operation that should cascade silently through a
-// registry's contents.
+// Refused while the organization still contains projects, organization-scoped
+// principals, or an enabled plugin registry. Deleting a tenant is not an
+// operation that should cascade silently through a registry's contents.
 //
 // Returns a wrapper object for the known response body format(s).
 //
@@ -10369,6 +11004,71 @@ func (c *ClientWithResponses) GetOrganizationWithResponse(ctx context.Context, o
 		return nil, err
 	}
 	return ParseGetOrganizationResponse(rsp)
+}
+
+// GetPluginRegistryWithResponse Read the organization plugin registry lifecycle state
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
+func (c *ClientWithResponses) GetPluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginRegistryResponse, error) {
+	rsp, err := c.GetPluginRegistry(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginRegistryResponse(rsp)
+}
+
+// DisablePluginRegistryWithResponse Disable and delete the organization plugin registry
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/disable (the `DisablePluginRegistry` operationId).
+func (c *ClientWithResponses) DisablePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*DisablePluginRegistryResponse, error) {
+	rsp, err := c.DisablePluginRegistry(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDisablePluginRegistryResponse(rsp)
+}
+
+// EnablePluginRegistryWithResponse Enable the organization plugin registry
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/enable (the `EnablePluginRegistry` operationId).
+func (c *ClientWithResponses) EnablePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*EnablePluginRegistryResponse, error) {
+	rsp, err := c.EnablePluginRegistry(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseEnablePluginRegistryResponse(rsp)
+}
+
+// ExposePluginRegistryWithResponse Expose the organization plugin registry for anonymous reads
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
+func (c *ClientWithResponses) ExposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExposePluginRegistryResponse, error) {
+	rsp, err := c.ExposePluginRegistry(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExposePluginRegistryResponse(rsp)
+}
+
+// UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose (the `UnexposePluginRegistry` operationId).
+func (c *ClientWithResponses) UnexposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*UnexposePluginRegistryResponse, error) {
+	rsp, err := c.UnexposePluginRegistry(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUnexposePluginRegistryResponse(rsp)
 }
 
 // ListProjectsWithResponse List projects in an organization
@@ -11887,6 +12587,258 @@ func ParseGetOrganizationResponse(rsp *http.Response) (*GetOrganizationResponse,
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginRegistryResponse parses an HTTP response from a GetPluginRegistryWithResponse call
+func ParseGetPluginRegistryResponse(rsp *http.Response) (*GetPluginRegistryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginRegistryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginRegistry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDisablePluginRegistryResponse parses an HTTP response from a DisablePluginRegistryWithResponse call
+func ParseDisablePluginRegistryResponse(rsp *http.Response) (*DisablePluginRegistryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DisablePluginRegistryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseEnablePluginRegistryResponse parses an HTTP response from a EnablePluginRegistryWithResponse call
+func ParseEnablePluginRegistryResponse(rsp *http.Response) (*EnablePluginRegistryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &EnablePluginRegistryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest PluginRegistry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseExposePluginRegistryResponse parses an HTTP response from a ExposePluginRegistryWithResponse call
+func ParseExposePluginRegistryResponse(rsp *http.Response) (*ExposePluginRegistryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExposePluginRegistryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginRegistry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUnexposePluginRegistryResponse parses an HTTP response from a UnexposePluginRegistryWithResponse call
+func ParseUnexposePluginRegistryResponse(rsp *http.Response) (*UnexposePluginRegistryResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UnexposePluginRegistryResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginRegistry
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -13847,6 +14799,21 @@ type ServerInterface interface {
 	// GetOrganization Get an organization
 	// (GET /api/v1/organizations/{organizationId})
 	GetOrganization(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// GetPluginRegistry Read the organization plugin registry lifecycle state
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
+	GetPluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// DisablePluginRegistry Disable and delete the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/disable)
+	DisablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// EnablePluginRegistry Enable the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/enable)
+	EnablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
+	ExposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
+	UnexposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// ListProjects List projects in an organization
 	// (GET /api/v1/organizations/{organizationId}/projects)
 	ListProjects(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -14162,6 +15129,136 @@ func (siw *ServerInterfaceWrapper) GetOrganization(w http.ResponseWriter, r *htt
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetOrganization(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginRegistry operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginRegistry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DisablePluginRegistry operation middleware
+func (siw *ServerInterfaceWrapper) DisablePluginRegistry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DisablePluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// EnablePluginRegistry operation middleware
+func (siw *ServerInterfaceWrapper) EnablePluginRegistry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.EnablePluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExposePluginRegistry operation middleware
+func (siw *ServerInterfaceWrapper) ExposePluginRegistry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExposePluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UnexposePluginRegistry operation middleware
+func (siw *ServerInterfaceWrapper) UnexposePluginRegistry(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UnexposePluginRegistry(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -15669,6 +16766,11 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations", wrapper.CreateOrganization)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}", wrapper.DeleteOrganization)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}", wrapper.GetOrganization)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry", wrapper.GetPluginRegistry)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/enable", wrapper.EnablePluginRegistry)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/expose", wrapper.ExposePluginRegistry)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/unexpose", wrapper.UnexposePluginRegistry)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/disable", wrapper.DisablePluginRegistry)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.CreateProject)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}", wrapper.DeleteProject)
@@ -16403,6 +17505,362 @@ func (response GetOrganization404JSONResponse) VisitGetOrganizationResponse(w ht
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRegistryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type GetPluginRegistryResponseObject interface {
+	VisitGetPluginRegistryResponse(w http.ResponseWriter) error
+}
+
+type GetPluginRegistry200JSONResponse PluginRegistry
+
+func (response GetPluginRegistry200JSONResponse) VisitGetPluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRegistry401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginRegistry401JSONResponse) VisitGetPluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginRegistry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPluginRegistry404JSONResponse) VisitGetPluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisablePluginRegistryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type DisablePluginRegistryResponseObject interface {
+	VisitDisablePluginRegistryResponse(w http.ResponseWriter) error
+}
+
+type DisablePluginRegistry204Response struct {
+}
+
+func (response DisablePluginRegistry204Response) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DisablePluginRegistry401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DisablePluginRegistry401JSONResponse) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisablePluginRegistry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DisablePluginRegistry403JSONResponse) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisablePluginRegistry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DisablePluginRegistry404JSONResponse) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DisablePluginRegistry409JSONResponse Error
+
+func (response DisablePluginRegistry409JSONResponse) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnablePluginRegistryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type EnablePluginRegistryResponseObject interface {
+	VisitEnablePluginRegistryResponse(w http.ResponseWriter) error
+}
+
+type EnablePluginRegistry201JSONResponse PluginRegistry
+
+func (response EnablePluginRegistry201JSONResponse) VisitEnablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnablePluginRegistry401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response EnablePluginRegistry401JSONResponse) VisitEnablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnablePluginRegistry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response EnablePluginRegistry403JSONResponse) VisitEnablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnablePluginRegistry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response EnablePluginRegistry404JSONResponse) VisitEnablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type EnablePluginRegistry409JSONResponse Error
+
+func (response EnablePluginRegistry409JSONResponse) VisitEnablePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExposePluginRegistryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type ExposePluginRegistryResponseObject interface {
+	VisitExposePluginRegistryResponse(w http.ResponseWriter) error
+}
+
+type ExposePluginRegistry200JSONResponse PluginRegistry
+
+func (response ExposePluginRegistry200JSONResponse) VisitExposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExposePluginRegistry401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ExposePluginRegistry401JSONResponse) VisitExposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExposePluginRegistry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ExposePluginRegistry403JSONResponse) VisitExposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExposePluginRegistry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExposePluginRegistry404JSONResponse) VisitExposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExposePluginRegistry409JSONResponse Error
+
+func (response ExposePluginRegistry409JSONResponse) VisitExposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnexposePluginRegistryRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type UnexposePluginRegistryResponseObject interface {
+	VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error
+}
+
+type UnexposePluginRegistry200JSONResponse PluginRegistry
+
+func (response UnexposePluginRegistry200JSONResponse) VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnexposePluginRegistry401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response UnexposePluginRegistry401JSONResponse) VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnexposePluginRegistry403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UnexposePluginRegistry403JSONResponse) VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnexposePluginRegistry404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UnexposePluginRegistry404JSONResponse) VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UnexposePluginRegistry409JSONResponse Error
+
+func (response UnexposePluginRegistry409JSONResponse) VisitUnexposePluginRegistryResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -19110,6 +20568,21 @@ type StrictServerInterface interface {
 	// GetOrganization Get an organization
 	// (GET /api/v1/organizations/{organizationId})
 	GetOrganization(ctx context.Context, request GetOrganizationRequestObject) (GetOrganizationResponseObject, error)
+	// GetPluginRegistry Read the organization plugin registry lifecycle state
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
+	GetPluginRegistry(ctx context.Context, request GetPluginRegistryRequestObject) (GetPluginRegistryResponseObject, error)
+	// DisablePluginRegistry Disable and delete the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/disable)
+	DisablePluginRegistry(ctx context.Context, request DisablePluginRegistryRequestObject) (DisablePluginRegistryResponseObject, error)
+	// EnablePluginRegistry Enable the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/enable)
+	EnablePluginRegistry(ctx context.Context, request EnablePluginRegistryRequestObject) (EnablePluginRegistryResponseObject, error)
+	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
+	ExposePluginRegistry(ctx context.Context, request ExposePluginRegistryRequestObject) (ExposePluginRegistryResponseObject, error)
+	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
+	UnexposePluginRegistry(ctx context.Context, request UnexposePluginRegistryRequestObject) (UnexposePluginRegistryResponseObject, error)
 	// ListProjects List projects in an organization
 	// (GET /api/v1/organizations/{organizationId}/projects)
 	ListProjects(ctx context.Context, request ListProjectsRequestObject) (ListProjectsResponseObject, error)
@@ -19551,6 +21024,136 @@ func (sh *strictHandler) GetOrganization(w http.ResponseWriter, r *http.Request,
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetOrganizationResponseObject); ok {
 		if err := validResponse.VisitGetOrganizationResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginRegistry operation middleware
+func (sh *strictHandler) GetPluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request GetPluginRegistryRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginRegistry(ctx, request.(GetPluginRegistryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginRegistry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginRegistryResponseObject); ok {
+		if err := validResponse.VisitGetPluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DisablePluginRegistry operation middleware
+func (sh *strictHandler) DisablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request DisablePluginRegistryRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DisablePluginRegistry(ctx, request.(DisablePluginRegistryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DisablePluginRegistry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DisablePluginRegistryResponseObject); ok {
+		if err := validResponse.VisitDisablePluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// EnablePluginRegistry operation middleware
+func (sh *strictHandler) EnablePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request EnablePluginRegistryRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.EnablePluginRegistry(ctx, request.(EnablePluginRegistryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "EnablePluginRegistry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(EnablePluginRegistryResponseObject); ok {
+		if err := validResponse.VisitEnablePluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExposePluginRegistry operation middleware
+func (sh *strictHandler) ExposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ExposePluginRegistryRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExposePluginRegistry(ctx, request.(ExposePluginRegistryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExposePluginRegistry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExposePluginRegistryResponseObject); ok {
+		if err := validResponse.VisitExposePluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UnexposePluginRegistry operation middleware
+func (sh *strictHandler) UnexposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request UnexposePluginRegistryRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UnexposePluginRegistry(ctx, request.(UnexposePluginRegistryRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UnexposePluginRegistry")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UnexposePluginRegistryResponseObject); ok {
+		if err := validResponse.VisitUnexposePluginRegistryResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

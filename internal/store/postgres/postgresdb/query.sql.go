@@ -664,6 +664,13 @@ deleted AS (
       AND NOT EXISTS (
           SELECT 1 FROM projects WHERE organization_id = $1
       )
+      AND NOT EXISTS (
+          SELECT 1 FROM principals
+          WHERE organization_id = $1 AND project_id IS NULL
+      )
+      AND NOT EXISTS (
+          SELECT 1 FROM plugin_registries WHERE organization_id = $1
+      )
     RETURNING id
 )
 SELECT CASE
@@ -806,6 +813,19 @@ func (q *Queries) DisableBagDrop(ctx context.Context, updatedAt time.Time) (Bagd
 	return i, err
 }
 
+const disablePluginRegistry = `-- name: DisablePluginRegistry :one
+DELETE FROM plugin_registries
+WHERE organization_id = $1 AND exposed = false
+RETURNING organization_id
+`
+
+func (q *Queries) DisablePluginRegistry(ctx context.Context, organizationID uuid.UUID) (uuid.UUID, error) {
+	row := q.db.QueryRowContext(ctx, disablePluginRegistry, organizationID)
+	var organization_id uuid.UUID
+	err := row.Scan(&organization_id)
+	return organization_id, err
+}
+
 const enableBagDrop = `-- name: EnableBagDrop :one
 UPDATE bagdrop_configs
 SET enabled = true, last_verification = $1, last_verified_at = $2, updated_at = $2
@@ -833,6 +853,20 @@ func (q *Queries) EnableBagDrop(ctx context.Context, arg EnableBagDropParams) (B
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const enablePluginRegistry = `-- name: EnablePluginRegistry :one
+INSERT INTO plugin_registries (organization_id)
+VALUES ($1)
+ON CONFLICT DO NOTHING
+RETURNING exposed
+`
+
+func (q *Queries) EnablePluginRegistry(ctx context.Context, organizationID uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, enablePluginRegistry, organizationID)
+	var exposed bool
+	err := row.Scan(&exposed)
+	return exposed, err
 }
 
 const enqueueWebhookEvent = `-- name: EnqueueWebhookEvent :exec
@@ -894,6 +928,20 @@ func (q *Queries) EnqueueWebhookEvent(ctx context.Context, arg EnqueueWebhookEve
 		arg.Payload,
 	)
 	return err
+}
+
+const exposePluginRegistry = `-- name: ExposePluginRegistry :one
+UPDATE plugin_registries
+SET exposed = true, exposed_at = now()
+WHERE organization_id = $1 AND exposed = false
+RETURNING exposed
+`
+
+func (q *Queries) ExposePluginRegistry(ctx context.Context, organizationID uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, exposePluginRegistry, organizationID)
+	var exposed bool
+	err := row.Scan(&exposed)
+	return exposed, err
 }
 
 const getBagDropConfig = `-- name: GetBagDropConfig :one
@@ -1060,6 +1108,19 @@ func (q *Queries) GetPin(ctx context.Context, name string) (GetPinRow, error) {
 	var i GetPinRow
 	err := row.Scan(&i.BucketName, &i.PinnedAt, &i.PinnedBy)
 	return i, err
+}
+
+const getPluginRegistry = `-- name: GetPluginRegistry :one
+SELECT exposed
+FROM plugin_registries
+WHERE organization_id = $1
+`
+
+func (q *Queries) GetPluginRegistry(ctx context.Context, organizationID uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, getPluginRegistry, organizationID)
+	var exposed bool
+	err := row.Scan(&exposed)
+	return exposed, err
 }
 
 const getPrincipalByClientID = `-- name: GetPrincipalByClientID :one
@@ -2923,6 +2984,20 @@ type TouchSecretLastUsedParams struct {
 func (q *Queries) TouchSecretLastUsed(ctx context.Context, arg TouchSecretLastUsedParams) error {
 	_, err := q.db.ExecContext(ctx, touchSecretLastUsed, arg.ID, arg.LastUsedAt)
 	return err
+}
+
+const unexposePluginRegistry = `-- name: UnexposePluginRegistry :one
+UPDATE plugin_registries
+SET exposed = false, exposed_at = NULL
+WHERE organization_id = $1 AND exposed = true
+RETURNING exposed
+`
+
+func (q *Queries) UnexposePluginRegistry(ctx context.Context, organizationID uuid.UUID) (bool, error) {
+	row := q.db.QueryRowContext(ctx, unexposePluginRegistry, organizationID)
+	var exposed bool
+	err := row.Scan(&exposed)
+	return exposed, err
 }
 
 const unrevokeInheritedVersion = `-- name: UnrevokeInheritedVersion :one

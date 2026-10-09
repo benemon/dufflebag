@@ -149,8 +149,13 @@ func (r *Repository) GetOrganization(ctx context.Context, id string) (*Organizat
 }
 
 func (r *Repository) DeleteOrganization(ctx context.Context, id string) error {
+	tx, err := BeginOrganizationTenant(ctx, r.db, id)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var result string
-	err := r.db.QueryRowContext(ctx, `
+	err = tx.QueryRowContext(ctx, `
 		WITH target AS (
 			SELECT id FROM organizations WHERE id = $1
 		),
@@ -163,6 +168,9 @@ func (r *Repository) DeleteOrganization(ctx context.Context, id string) error {
 			  AND NOT EXISTS (
 				  SELECT 1 FROM principals
 				  WHERE organization_id = $1 AND project_id IS NULL
+			  )
+			  AND NOT EXISTS (
+				  SELECT 1 FROM plugin_registries WHERE organization_id = $1
 			  )
 			RETURNING id
 		)
@@ -177,6 +185,9 @@ func (r *Repository) DeleteOrganization(ctx context.Context, id string) error {
 	}
 	switch result {
 	case "deleted":
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit delete organization: %w", err)
+		}
 		return nil
 	case "conflict":
 		return fmt.Errorf("delete organization: %w", registry.ErrConflict)

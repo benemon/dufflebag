@@ -844,10 +844,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Sign out')
     assert.doesNotMatch(await bodyText(), /Log in/)
     await until('all root navigation items to appear', async () =>
-      (await globalNavItems()).length === 7)
+      (await globalNavItems()).length === 8)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -876,6 +876,36 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await page.reload({ waitUntil: 'networkidle0' })
     await waitForText('Sign out')
     assert.doesNotMatch(await bodyText(), /Log in/)
+  })
+
+  await t.test('plugin registry lifecycle is operable through the console', async () => {
+    await clickByText('a', 'Plugins')
+    await waitForText("The plugin registry isn't enabled")
+    await waitForText(`Enable it to mirror Packer plugins for ${wizardOrganizationName}`)
+    await clickByText('button', 'Enable the registry')
+    await waitForText('The registry is enabled but not exposed')
+    await waitForText("Packer can't reach plugins until the registry is exposed.")
+    await waitForText('No plugins yet.')
+
+    await clickByText('button', 'Expose')
+    await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
+    await clickInModal('Expose registry')
+    await waitForText('The registry is exposed')
+    assert.equal(await buttonDisabled('Disable registry'), true)
+    await waitForText('Unexpose the registry first before disabling it.')
+
+    await clickByText('button', 'Unexpose')
+    await waitForText('In-flight packer init fails when the registry is unexposed.')
+    await clickInModal('Unexpose registry')
+    await waitForText('The registry is enabled but not exposed')
+    assert.equal(await buttonDisabled('Disable registry'), false)
+
+    await clickByText('button', 'Disable registry')
+    await waitForText('All plugin data is destroyed when the registry is disabled.')
+    await typeToConfirm(wizardOrganizationName)
+    await clickInModal('Disable registry')
+    await waitForText("The plugin registry isn't enabled")
+    await clickByText('a', 'Buckets')
   })
 
   await t.test('the header names the tenancy the wizard created, never a fixture', async () => {
@@ -2926,7 +2956,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       const toggle = await pickerValue('#tenant-project')
       return toggle === 'acme / widgets'
     })
-    assert.deepEqual(await globalNavItems(), ['Buckets', 'Bag Drop', 'Instance'])
+    assert.deepEqual(await globalNavItems(), ['Buckets', 'Plugins', 'Bag Drop', 'Instance'])
     // It can read its project's bucket…
     await choosePickerOption('#tenant-bucket', 'smoke-images')
     await waitForText('Bucket details')

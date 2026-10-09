@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState } from 'react'
-import { Navigate, Outlet, Route, Routes } from 'react-router'
+import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
 import {
   Alert, Content, EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
   Spinner,
@@ -19,6 +19,7 @@ import { Audit } from './screens/Audit'
 import { Encryption } from './screens/Encryption'
 import { BagDrop } from './screens/BagDrop'
 import { Webhooks } from './screens/Webhooks'
+import { Plugins } from './screens/Plugins'
 import {
   CreateTenancyButton, TenancyModal, projectCreationRefusal,
 } from './components/TenancyCreation'
@@ -51,6 +52,7 @@ function Authenticated({
   const {
     state, self, restoring, selectedOrganization, selectedProject, projectsLoading, projectFailure,
   } = useAuth()
+  const organizationRoute = useLocation().pathname === '/plugins'
   // While the boot exchange asks whether a session survived the reload,
   // showing the sign-in screen would flash a state that may be about to be
   // untrue. Hold the page on an explicit state until the answer is in — it is
@@ -70,7 +72,7 @@ function Authenticated({
   // A tenancy-scoped session keeps its gates, because for it a missing project
   // is a settled fact about the token rather than a choice not yet made.
   const platform = state.claims.organizationID === null
-  if (!platform && projectsLoading) {
+  if (!platform && !organizationRoute && projectsLoading) {
     return (
       <AppShell theme={theme} onThemeChange={onThemeChange}>
         <PageSection>
@@ -80,14 +82,14 @@ function Authenticated({
       </AppShell>
     )
   }
-  if (!platform && projectFailure) {
+  if (!platform && !organizationRoute && projectFailure) {
     return (
       <AppShell theme={theme} onThemeChange={onThemeChange}>
         <ProjectLoadFailure failure={projectFailure} />
       </AppShell>
     )
   }
-  if (!platform && !selectedProject) {
+  if (!platform && !organizationRoute && !selectedProject) {
     return (
       <AppShell theme={theme} onThemeChange={onThemeChange}>
         <PageSection>
@@ -105,6 +107,7 @@ function Authenticated({
       <Route element={<ShellRoute theme={theme} onThemeChange={onThemeChange} />}>
         <Route path="/" element={<Landing />} />
         <Route path="/buckets" element={<Buckets />} />
+        <Route path="/plugins" element={<Plugins />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />
