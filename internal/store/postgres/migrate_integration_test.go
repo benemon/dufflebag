@@ -117,7 +117,7 @@ func TestOrganizationNameMigrationRefusesNonConformingRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := migrator.Steps(-1); err != nil {
+	if err := migrator.Migrate(4); err != nil {
 		t.Fatalf("return to schema version 4: %v", err)
 	}
 	if _, err := admin.Exec(`
