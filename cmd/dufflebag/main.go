@@ -27,6 +27,7 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/keyring"
 	platform "github.com/benemon/dufflebag/internal/platform/v1"
+	"github.com/benemon/dufflebag/internal/pluginimport"
 	"github.com/benemon/dufflebag/internal/pluginread"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
@@ -251,6 +252,18 @@ func main() {
 	if scannerService != nil {
 		go scannerService.Run(scannerCtx)
 	}
+	pluginKeyring, err := pluginimport.HashiCorpKeyring()
+	if err != nil {
+		log.Fatal(err)
+	}
+	pluginUpstream := pluginimport.NewUpstream(pluginimport.NewHTTPClient(), "https://api.releases.hashicorp.com", "https://releases.hashicorp.com")
+	importCtx, cancelImports := context.WithCancel(context.Background())
+	defer cancelImports()
+	// Imports store files, so a deployment without object storage queues jobs
+	// that wait until it is configured rather than failing every version.
+	if objects != nil {
+		go pluginimport.NewWorker(repository, pluginimport.NewImporter(pluginUpstream, pluginKeyring, repository), 5*time.Second, logger).Run(importCtx)
+	}
 
 	// One process, two surfaces. In HCP these are separate hosts — auth at
 	// HCP_AUTH_URL, the registry at HCP_API_ADDRESS — and keeping them on
@@ -308,7 +321,7 @@ func main() {
 	<-webhookDispatcher.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes,
+		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes, pluginUpstream,
 	)
 	applicationHandler := composeHandler(
 		broker,

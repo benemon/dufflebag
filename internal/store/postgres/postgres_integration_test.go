@@ -120,7 +120,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// catch, and the only hook that proves isolation comes from RLS rather
 	// than from application predicates.
 	rlsTables := []string{
-		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "build_findings_summary", "version_findings_summary", "pending_scans",
@@ -232,7 +232,7 @@ func TestTenantIsolation(t *testing.T) {
 
 	seedPluginRows(t, ctx, db, orgA)
 	seedPluginRows(t, ctx, db, orgB)
-	for _, table := range []string{"plugin_registries", "plugins", "plugin_versions", "plugin_files"} {
+	for _, table := range []string{"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports"} {
 		t.Run(table, func(t *testing.T) {
 			tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
 			if err != nil {
@@ -848,6 +848,8 @@ func seedPluginRows(t *testing.T, ctx context.Context, db *sql.DB, organization 
 			VALUES ($1, $2, $3, '1.0.0', '{linux_amd64}', 'k', 1)`, []any{versionID, organization, pluginID}},
 		{`INSERT INTO plugin_files (organization_id, version_id, filename, os, arch, sha256, size, object_key)
 			VALUES ($1, $2, 'f.zip', 'linux', 'amd64', 'd', 1, 'k')`, []any{organization, versionID}},
+		{`INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
+			VALUES ($1, $2, 'releases-hashicorp', 'packer-plugin-probe', '{1.0.0}', '{linux_amd64}')`, []any{uuid.NewString(), organization}},
 	} {
 		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed plugin rows for %s: %v", organization, err)

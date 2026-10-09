@@ -187,11 +187,26 @@ type PluginFile struct {
 	ObjectKey      string    `json:"object_key"`
 }
 
+type PluginImport struct {
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	SourceKind     string          `json:"source_kind"`
+	Product        string          `json:"product"`
+	Versions       []string        `json:"versions"`
+	Platforms      []string        `json:"platforms"`
+	State          string          `json:"state"`
+	Outcomes       json.RawMessage `json:"outcomes"`
+	CreatedAt      time.Time       `json:"created_at"`
+	ClaimedAt      sql.NullTime    `json:"claimed_at"`
+	FinishedAt     sql.NullTime    `json:"finished_at"`
+}
+
 type PluginRegistry struct {
-	OrganizationID uuid.UUID    `json:"organization_id"`
-	Exposed        bool         `json:"exposed"`
-	EnabledAt      time.Time    `json:"enabled_at"`
-	ExposedAt      sql.NullTime `json:"exposed_at"`
+	OrganizationID   uuid.UUID    `json:"organization_id"`
+	Exposed          bool         `json:"exposed"`
+	EnabledAt        time.Time    `json:"enabled_at"`
+	ExposedAt        sql.NullTime `json:"exposed_at"`
+	DefaultPlatforms []string     `json:"default_platforms"`
 }
 
 type PluginVersion struct {

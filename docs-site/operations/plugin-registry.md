@@ -27,8 +27,8 @@ and Packer cannot reach it until a maintainer exposes it.
 | Action | Role at the organization |
 |---|---|
 | View the registry and its plugins | `reader` |
-| Upload a plugin version | `publisher` |
-| Enable, expose, unexpose or disable the registry | `maintainer` |
+| Upload, import, revoke, restore or remove plugin versions | `publisher` |
+| Enable, expose, unexpose or disable the registry; set default platforms | `maintainer` |
 
 Packer itself presents no credential. Exposure is what grants it access.
 
@@ -42,6 +42,30 @@ Packer itself presents no credential. Exposure is what grants it access.
 **Unexpose** removes that access immediately; any `packer init` in progress
 fails. **Disable registry** deletes every plugin and file in the registry. It is
 refused while the registry is exposed, so unexpose first.
+
+## Import from releases.hashicorp.com
+
+HashiCorp's own Packer plugins are imported rather than uploaded:
+
+1. Open **Plugins** and choose **Browse HashiCorp**. The list shows each plugin
+   HashiCorp publishes, how many of its versions you mirror, and any plugin
+   whose name is held by another source.
+2. Choose a plugin, then the versions to import. Prereleases are hidden unless
+   you show them.
+3. Choose platforms. A plugin you already mirror preselects the platforms it
+   has; a first import preselects the organization's default platforms, which
+   a maintainer sets in **Registry settings**.
+4. Choose **Import**. The import runs in the background and its page shows the
+   outcome of each version, with any platform that failed.
+
+Before storing a version, dufflebag verifies its SHA256SUMS against HashiCorp's
+release-signing key (fingerprint `C874 011F 0AB4 0511 0D02 1055 3436 5D94 72D7 468F`).
+A version whose signature does not verify is not imported. A version you
+already mirror is reported as already mirrored and left unchanged.
+
+Browsing and importing make dufflebag call `api.releases.hashicorp.com` and
+`releases.hashicorp.com`, so they need outbound HTTPS to both; serving plugins
+to Packer never does. Browsing and importing require `publisher`.
 
 ## Upload a plugin version
 

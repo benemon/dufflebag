@@ -1,4 +1,4 @@
-import { platformDelete, platformGet, platformPost, platformPutForm } from '../api/client'
+import { platformDelete, platformGet, platformPost, platformPut, platformPutForm } from '../api/client'
 
 export type PluginRegistry = {
   enabled: boolean
@@ -169,3 +169,68 @@ export async function restorePluginVersion(token: string, organizationID: string
 export async function deletePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
   await platformDelete(token, versionPath(organizationID, name, version))
 }
+
+export type HashicorpPlugin = { product: string; name: string; mirrored_versions: number; held_by?: PluginSource }
+
+export type HashicorpPluginVersion = {
+  version: string
+  created_at: string
+  prerelease: boolean
+  state?: string
+  changelog?: string
+  platforms: string[]
+  mirrored: boolean
+}
+
+export type ImportPlatformOutcome = { platform: string; outcome: 'imported' | 'failed'; error?: string }
+
+export type ImportVersionOutcome = {
+  version: string
+  outcome: 'imported' | 'already_mirrored' | 'failed'
+  error?: string
+  platforms?: ImportPlatformOutcome[]
+}
+
+export type PluginImport = {
+  id: string
+  source: string
+  product: string
+  versions: string[]
+  platforms: string[]
+  state: 'queued' | 'running' | 'succeeded' | 'partially_succeeded' | 'failed'
+  created_at: string
+  finished_at?: string
+  outcomes: ImportVersionOutcome[]
+}
+
+export async function listHashicorpPlugins(token: string, organizationID: string): Promise<HashicorpPlugin[]> {
+  const body = await platformGet<{ plugins?: HashicorpPlugin[] }>(token, path(organizationID, 'catalogue/hashicorp'))
+  return body.plugins ?? []
+}
+
+export function listHashicorpPluginVersions(
+  token: string, organizationID: string, product: string, after?: string,
+): Promise<{ versions: HashicorpPluginVersion[]; next?: string }> {
+  const query = after ? `?after=${encodeURIComponent(after)}` : ''
+  return platformGet(token, path(organizationID, `catalogue/hashicorp/${encodeURIComponent(product)}${query}`))
+}
+
+export function createPluginImport(
+  token: string, organizationID: string, product: string, versions: string[], platforms: string[],
+): Promise<PluginImport> {
+  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'releases-hashicorp', product, versions, platforms })
+}
+
+export function getPluginImport(token: string, organizationID: string, id: string): Promise<PluginImport> {
+  return platformGet<PluginImport>(token, path(organizationID, `imports/${encodeURIComponent(id)}`))
+}
+
+export async function getDefaultPlatforms(token: string, organizationID: string): Promise<string[]> {
+  return (await platformGet<{ platforms: string[] }>(token, path(organizationID, 'default-platforms'))).platforms
+}
+
+export async function setDefaultPlatforms(token: string, organizationID: string, platforms: string[]): Promise<string[]> {
+  return (await platformPut<{ platforms: string[] }>(token, path(organizationID, 'default-platforms'), { platforms })).platforms
+}
+
+export const terminalImportStates = new Set(['succeeded', 'partially_succeeded', 'failed'])

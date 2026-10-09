@@ -749,6 +749,27 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     const restored = await init()
     assert.ok(restored.ok, `packer init failed after the version was restored:\n${restored.output}`)
     process.stdout.write('ASSERT a revoked plugin version is refused to packer init and served again once restored\n')
+
+    // A real import: releases.hashicorp.com's packer-plugin-amazon 1.8.2, its
+    // SHA256SUMS verified against HashiCorp's pinned signing key.
+    const queued = await api(rootToken, 'POST', `${registryPath}/imports`, {
+      source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.2'], platforms: [`linux_${arch}`],
+    })
+    let job = queued
+    await until('the amazon import to finish', async () => {
+      job = await api(rootToken, 'GET', `${registryPath}/imports/${queued.id}`)
+      return ['succeeded', 'partially_succeeded', 'failed'].includes(job.state)
+    }, 10 * 60 * 1000, 2000)
+    assert.equal(job.state, 'succeeded', `amazon import: ${JSON.stringify(job)}`)
+    const amazonTemplate = path.join(work, 'amazon.pkr.hcl')
+    const amazonSource = `${hostname}/plugins/${organizationName}/amazon`
+    writeFileSync(amazonTemplate, `packer {\n  required_plugins {\n    amazon = {\n      source  = "${amazonSource}"\n      version = "1.8.2"\n    }\n  }\n}\n`)
+    const amazon = await command(packer, ['init', amazonTemplate], { env: packerEnv }).then(
+      (result) => ({ ok: true, output: `${result.stdout}${result.stderr}` }),
+      (err) => ({ ok: false, output: `${err.stdout ?? ''}${err.stderr ?? ''}${err.message}` }),
+    )
+    assert.ok(amazon.ok, `packer init of the imported amazon plugin failed:\n${amazon.output}`)
+    process.stdout.write(`ASSERT imported packer-plugin-amazon 1.8.2 from releases.hashicorp.com (signature verified) and installed it with packer init from ${amazonSource}\n`)
   })
 
   await t.test('the encrypted keyring rotates without losing retained payloads', {

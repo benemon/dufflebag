@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, EmptyState,
   EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, Modal, ModalBody, ModalFooter,
-  ModalHeader, PageSection, SearchInput, Spinner, Toolbar, ToolbarContent, ToolbarItem,
+  ModalHeader, PageSection, SearchInput, Spinner, TextInput, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate } from 'react-router'
@@ -13,8 +13,8 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
-  disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
-  listPlugins, sourceLabel, unexposePluginRegistry, type Plugin, type PluginRegistry,
+  disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginRegistry,
+  listPlugins, setDefaultPlatforms, sourceLabel, unexposePluginRegistry, type Plugin, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 
@@ -26,6 +26,7 @@ export function Plugins() {
   const navigate = useNavigate()
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [plugins, setPlugins] = useState<Plugin[]>([])
+  const [defaultPlatforms, setDefaultPlatformsState] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -39,6 +40,7 @@ export function Plugins() {
     try {
       const next = await getPluginRegistry(token, organizationID)
       setPlugins(next.enabled ? await listPlugins(token, organizationID) : [])
+      setDefaultPlatformsState(next.enabled ? await getDefaultPlatforms(token, organizationID) : [])
       setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
@@ -64,6 +66,11 @@ export function Plugins() {
       plugins={plugins}
       onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onUpload={() => navigate('/plugin-registry/upload')}
+      onBrowse={() => navigate('/plugin-registry/hashicorp')}
+      defaultPlatforms={defaultPlatforms}
+      onSetDefaultPlatforms={async (platforms) => {
+        setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
+      }}
       loading={loading}
       failure={failure}
       onRefresh={reload}
@@ -100,6 +107,9 @@ type PluginRegistryViewProps = {
   plugins: Plugin[]
   onOpenPlugin: (name: string) => void
   onUpload: () => void
+  onBrowse: () => void
+  defaultPlatforms: string[]
+  onSetDefaultPlatforms: (platforms: string[]) => Promise<void>
   loading: boolean
   failure: string | null
   onRefresh: () => void | Promise<void>
@@ -175,8 +185,8 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 }
 
 function EnabledRegistry({
-  organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload,
-  canConfigure, busy, run, onExpose, onUnexpose, onDisable,
+  organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload, onBrowse,
+  defaultPlatforms, onSetDefaultPlatforms, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
 }: PluginRegistryViewProps & {
   canConfigure: boolean
   busy: boolean
@@ -203,7 +213,7 @@ function EnabledRegistry({
       <PluginCatalogue
         organizationName={organizationName} host={host} plugins={plugins}
         canPublish={permitsAction(callerRole, 'publishPlugin')}
-        onOpenPlugin={onOpenPlugin} onUpload={onUpload}
+        onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse}
       />
       {canConfigure ? (
         <Card aria-label="Registry settings">
@@ -225,6 +235,10 @@ function EnabledRegistry({
               >Disable registry</Button>
             </ActionGroup>
             {exposed ? <Content component="p">Unexpose the registry first before disabling it.</Content> : null}
+            <DefaultPlatformsEditor
+              platforms={defaultPlatforms} busy={busy}
+              onSave={(platforms) => void run(() => onSetDefaultPlatforms(platforms))}
+            />
           </CardBody>
         </Card>
       ) : null}
@@ -324,7 +338,7 @@ export function PluginRegistryConfirmationView({
 }
 
 export function PluginCatalogue({
-  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload,
+  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload, onBrowse,
 }: {
   organizationName: string
   host: string
@@ -332,9 +346,15 @@ export function PluginCatalogue({
   canPublish: boolean
   onOpenPlugin: (name: string) => void
   onUpload: () => void
+  onBrowse: () => void
 }) {
   const [filter, setFilter] = useState('')
-  const upload = canPublish ? <Button variant="primary" onClick={onUpload}>Upload plugin files</Button> : null
+  const upload = canPublish ? (
+    <>
+      <Button variant="primary" onClick={onBrowse}>Browse HashiCorp</Button>{' '}
+      <Button variant="secondary" onClick={onUpload}>Upload plugin files</Button>
+    </>
+  ) : null
   if (plugins.length === 0) {
     return (
       <EmptyState titleText="No plugins mirrored yet" headingLevel="h2">
@@ -382,6 +402,27 @@ export function PluginCatalogue({
         </Tbody>
       </Table>
       {shown.length === 0 ? <Content component="p">No plugins match “{filter}”.</Content> : null}
+    </>
+  )
+}
+
+export function DefaultPlatformsEditor({ platforms, busy, onSave }: {
+  platforms: string[]
+  busy: boolean
+  onSave: (platforms: string[]) => void
+}) {
+  const [draft, setDraft] = useState(platforms.join(', '))
+  useEffect(() => { setDraft(platforms.join(', ')) }, [platforms])
+  const parsed = draft.split(',').map((platform) => platform.trim()).filter(Boolean)
+  return (
+    <>
+      <Content component="p">
+        Default platforms, used when a plugin is first imported. Later imports keep the platforms the plugin already has.
+      </Content>
+      <TextInput aria-label="Default platforms" value={draft} onChange={(_event, value) => setDraft(value)} />
+      <Button variant="secondary" isDisabled={busy || parsed.length === 0 || parsed.join(', ') === platforms.join(', ')} onClick={() => onSave(parsed)}>
+        Save default platforms
+      </Button>
     </>
   )
 }
