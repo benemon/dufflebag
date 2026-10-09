@@ -69,6 +69,90 @@ DELETE FROM plugin_registries
 WHERE organization_id = $1 AND exposed = false
 RETURNING organization_id;
 
+-- name: LockUnexposedPluginRegistry :one
+SELECT organization_id
+FROM plugin_registries
+WHERE organization_id = $1 AND exposed = false
+FOR UPDATE;
+
+-- name: ListPluginObjectKeys :many
+SELECT sums_key::text AS object_key FROM plugin_versions WHERE plugin_versions.organization_id = $1
+UNION ALL
+SELECT signature_key::text FROM plugin_versions WHERE plugin_versions.organization_id = $1 AND signature_key IS NOT NULL
+UNION ALL
+SELECT manifest_key::text FROM plugin_versions WHERE plugin_versions.organization_id = $1 AND manifest_key IS NOT NULL
+UNION ALL
+SELECT plugin_files.object_key FROM plugin_files WHERE plugin_files.organization_id = $1;
+
+-- name: DeletePluginVersions :exec
+DELETE FROM plugin_versions WHERE organization_id = $1;
+
+-- name: DeletePlugins :exec
+DELETE FROM plugins WHERE organization_id = $1;
+
+-- name: GetPlugin :one
+SELECT id, source_kind, source_repository
+FROM plugins
+WHERE organization_id = $1 AND name = $2;
+
+-- name: InsertPlugin :one
+INSERT INTO plugins (id, organization_id, name, source_kind, source_repository)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (organization_id, name) DO NOTHING
+RETURNING id;
+
+-- name: PluginVersionExists :one
+SELECT EXISTS (
+    SELECT 1
+    FROM plugin_versions
+    JOIN plugins ON plugins.id = plugin_versions.plugin_id
+    WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+);
+
+-- name: InsertPluginVersion :one
+INSERT INTO plugin_versions (
+    id, organization_id, plugin_id, version, protocol_version, listed_platforms,
+    sums_key, sums_size, signature_key, signature_size, manifest_key, manifest_size
+)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+ON CONFLICT (plugin_id, version) DO NOTHING
+RETURNING id;
+
+-- name: InsertPluginFile :exec
+INSERT INTO plugin_files (organization_id, version_id, filename, os, arch, sha256, size, object_key)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8);
+
+-- name: ListPlugins :many
+SELECT
+    plugins.name,
+    plugins.source_kind,
+    plugins.source_repository,
+    COALESCE(
+        array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL AND NOT plugin_versions.revoked),
+        '{}'
+    )::text[] AS published_versions
+FROM plugins
+LEFT JOIN plugin_versions ON plugin_versions.plugin_id = plugins.id
+WHERE plugins.organization_id = $1
+GROUP BY plugins.id
+ORDER BY plugins.name;
+
+-- name: ListPluginVersions :many
+SELECT
+    plugin_versions.version,
+    plugin_versions.revoked,
+    plugin_versions.listed_platforms,
+    plugin_versions.created_at,
+    COALESCE(
+        array_agg(plugin_files.os || '_' || plugin_files.arch ORDER BY plugin_files.os, plugin_files.arch)
+            FILTER (WHERE plugin_files.filename IS NOT NULL),
+        '{}'
+    )::text[] AS stored_platforms
+FROM plugin_versions
+LEFT JOIN plugin_files ON plugin_files.version_id = plugin_versions.id
+WHERE plugin_versions.plugin_id = $1
+GROUP BY plugin_versions.id;
+
 -- name: ListProjects :many
 SELECT id, organization_id, name, created_at
 FROM projects

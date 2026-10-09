@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, EmptyState,
-  EmptyStateActions, EmptyStateBody, EmptyStateFooter, Modal, ModalBody, ModalFooter,
-  ModalHeader, PageSection, Spinner,
+  EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, Modal, ModalBody, ModalFooter,
+  ModalHeader, PageSection, SearchInput, Spinner, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
+import { useNavigate } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -12,7 +14,7 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
-  unexposePluginRegistry, type PluginRegistry,
+  listPlugins, sourceLabel, unexposePluginRegistry, type Plugin, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 
@@ -21,7 +23,9 @@ export function Plugins() {
   const { tenant } = useTenant()
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? null
   const token = state?.token ?? ''
+  const navigate = useNavigate()
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
+  const [plugins, setPlugins] = useState<Plugin[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -33,7 +37,9 @@ export function Plugins() {
     }
     setLoading(true)
     try {
-      setRegistry(await getPluginRegistry(token, organizationID))
+      const next = await getPluginRegistry(token, organizationID)
+      setPlugins(next.enabled ? await listPlugins(token, organizationID) : [])
+      setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
       if (signOutIfUnauthorized(error, signOut)) return
@@ -53,7 +59,11 @@ export function Plugins() {
     <PluginRegistryView
       organizationName={tenant.organization}
       callerRole={self?.role ?? null}
+      host={window.location.host}
       registry={registry}
+      plugins={plugins}
+      onOpenPlugin={(name) => navigate(`/plugins/${encodeURIComponent(name)}`)}
+      onUpload={() => navigate('/plugins/upload')}
       loading={loading}
       failure={failure}
       onRefresh={reload}
@@ -72,6 +82,7 @@ export function Plugins() {
       onDisable={async () => {
         await disablePluginRegistry(token, organizationID)
         setRegistry({ enabled: false, exposed: false })
+        setPlugins([])
       }}
     />
   )
@@ -84,7 +95,11 @@ export function pluginRegistryErrorMessage(error: unknown, fallback: string): st
 type PluginRegistryViewProps = {
   organizationName: string
   callerRole: Role | null
+  host: string
   registry: PluginRegistry | null
+  plugins: Plugin[]
+  onOpenPlugin: (name: string) => void
+  onUpload: () => void
   loading: boolean
   failure: string | null
   onRefresh: () => void | Promise<void>
@@ -160,7 +175,8 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 }
 
 function EnabledRegistry({
-  organizationName, registry, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
+  organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload,
+  canConfigure, busy, run, onExpose, onUnexpose, onDisable,
 }: PluginRegistryViewProps & {
   canConfigure: boolean
   busy: boolean
@@ -184,7 +200,11 @@ function EnabledRegistry({
           <Content component="p">Packer can't reach plugins until the registry is exposed.</Content>
         </Alert>
       )}
-      <EmptyState titleText="No plugins yet." headingLevel="h2" />
+      <PluginCatalogue
+        organizationName={organizationName} host={host} plugins={plugins}
+        canPublish={permitsAction(callerRole, 'publishPlugin')}
+        onOpenPlugin={onOpenPlugin} onUpload={onUpload}
+      />
       {canConfigure ? (
         <Card aria-label="Registry settings">
           <CardTitle>Registry settings</CardTitle>
@@ -299,6 +319,69 @@ export function PluginRegistryConfirmationView({
         <Button variant="primary" isLoading={busy} isDisabled={busy} onClick={onConfirm}>{verb}</Button>
         <Button variant="link" isDisabled={busy} onClick={onCancel}>Cancel</Button>
       </ModalFooter>
+    </>
+  )
+}
+
+export function PluginCatalogue({
+  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload,
+}: {
+  organizationName: string
+  host: string
+  plugins: Plugin[]
+  canPublish: boolean
+  onOpenPlugin: (name: string) => void
+  onUpload: () => void
+}) {
+  const [filter, setFilter] = useState('')
+  const upload = canPublish ? <Button variant="primary" onClick={onUpload}>Upload plugin files</Button> : null
+  if (plugins.length === 0) {
+    return (
+      <EmptyState titleText="No plugins mirrored yet" headingLevel="h2">
+        <EmptyStateBody>
+          Mirror a Packer plugin here and packer init resolves it from dufflebag instead of the internet.
+          Each plugin comes from one source.
+        </EmptyStateBody>
+        {upload ? <EmptyStateFooter><EmptyStateActions>{upload}</EmptyStateActions></EmptyStateFooter> : null}
+      </EmptyState>
+    )
+  }
+  const shown = plugins.filter((plugin) => plugin.name.includes(filter.trim().toLowerCase()))
+  return (
+    <>
+      <Content component="p">
+        Packer plugins mirrored for {organizationName}. packer init resolves them from {host}/plugins/{organizationName}.
+      </Content>
+      <Toolbar>
+        <ToolbarContent>
+          <ToolbarItem>
+            <SearchInput
+              aria-label="Filter plugins by name" placeholder="Filter by name" value={filter}
+              onChange={(_event, value) => setFilter(value)} onClear={() => setFilter('')}
+            />
+          </ToolbarItem>
+          {upload ? <ToolbarItem>{upload}</ToolbarItem> : null}
+        </ToolbarContent>
+      </Toolbar>
+      <Table aria-label="Plugins" variant="compact">
+        <Thead>
+          <Tr><Th>Name</Th><Th>Source</Th><Th>Newest mirrored</Th><Th>Versions</Th></Tr>
+        </Thead>
+        <Tbody>
+          {shown.map((plugin) => (
+            <Tr key={plugin.name}>
+              <Td dataLabel="Name">
+                <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>
+                <Content component="small"> {organizationName}/{plugin.name}</Content>
+              </Td>
+              <Td dataLabel="Source"><Label isCompact>{sourceLabel(plugin.source)}</Label></Td>
+              <Td dataLabel="Newest mirrored">{plugin.newest_version ?? 'None available'}</Td>
+              <Td dataLabel="Versions">{plugin.published_versions}</Td>
+            </Tr>
+          ))}
+        </Tbody>
+      </Table>
+      {shown.length === 0 ? <Content component="p">No plugins match “{filter}”.</Content> : null}
     </>
   )
 }

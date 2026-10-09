@@ -37,6 +37,8 @@ export const ACTION_REQUIREMENTS = {
   configureBagDrop: 'maintainer',
   // internal/platform/v1/plugin_registry.go authorizes registry mutations at organization RoleMaintainer.
   configurePluginRegistry: 'maintainer',
+  // internal/platform/v1/plugins.go authorizes publishing at organization RolePublisher.
+  publishPlugin: 'publisher',
   // internal/platform/v1/webhooks.go uses admitBagDrop's maintainer disclosure funnel.
   configureWebhooks: 'maintainer',
 } as const satisfies Record<string, Role>

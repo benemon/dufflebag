@@ -15,6 +15,7 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/google/uuid"
 	_ "github.com/jackc/pgx/v5/stdlib"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 )
@@ -119,7 +120,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// catch, and the only hook that proves isolation comes from RLS rather
 	// than from application predicates.
 	rlsTables := []string{
-		"plugin_registries", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "build_findings_summary", "version_findings_summary", "pending_scans",
@@ -229,31 +230,35 @@ func TestTenantIsolation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	t.Run("plugin_registries", func(t *testing.T) {
-		tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer func() { _ = tx.Rollback() }()
-		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM plugin_registries").Scan(&count); err != nil {
-			t.Fatal(err)
-		}
-		if count != 1 {
-			t.Fatalf("plugin_registries exposed %d rows to %s; want exactly its own row", count, orgA)
-		}
-		var visible bool
-		if err := tx.QueryRowContext(
-			ctx,
-			"SELECT EXISTS (SELECT 1 FROM plugin_registries WHERE organization_id = $1)",
-			orgB,
-		).Scan(&visible); err != nil {
-			t.Fatal(err)
-		}
-		if visible {
-			t.Fatalf("%s can read another organization's plugin registry", orgA)
-		}
-	})
+	seedPluginRows(t, ctx, db, orgA)
+	seedPluginRows(t, ctx, db, orgB)
+	for _, table := range []string{"plugin_registries", "plugins", "plugin_versions", "plugin_files"} {
+		t.Run(table, func(t *testing.T) {
+			tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer func() { _ = tx.Rollback() }()
+			var count int
+			if err := tx.QueryRowContext(ctx, "SELECT count(*) FROM "+table).Scan(&count); err != nil {
+				t.Fatal(err)
+			}
+			if count != 1 {
+				t.Fatalf("%s exposed %d rows to %s; want exactly its own row", table, count, orgA)
+			}
+			var visible bool
+			if err := tx.QueryRowContext(
+				ctx,
+				"SELECT EXISTS (SELECT 1 FROM "+table+" WHERE organization_id = $1)",
+				orgB,
+			).Scan(&visible); err != nil {
+				t.Fatal(err)
+			}
+			if visible {
+				t.Fatalf("%s can read another organization's %s", orgA, table)
+			}
+		})
+	}
 
 	bucketTables := []string{
 		"versions", "channels", "builds", "artifacts", "channel_assignments",
@@ -821,5 +826,34 @@ func TestAssertRLSAppliesRefusesAPrivilegedRole(t *testing.T) {
 
 	if err := store.AssertRLSApplies(ctx, bypassDB); err == nil {
 		t.Fatal("a BYPASSRLS role was accepted; row-level security would not apply")
+	}
+}
+
+// seedPluginRows writes one plugin, version and file for organization through
+// its own tenant, as the repository would.
+func seedPluginRows(t *testing.T, ctx context.Context, db *sql.DB, organization string) {
+	t.Helper()
+	tx, err := store.BeginOrganizationTenant(ctx, db, organization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	pluginID, versionID := uuid.NewString(), uuid.NewString()
+	for _, statement := range []struct {
+		query string
+		args  []any
+	}{
+		{`INSERT INTO plugins (id, organization_id, name, source_kind) VALUES ($1, $2, 'probe', 'upload')`, []any{pluginID, organization}},
+		{`INSERT INTO plugin_versions (id, organization_id, plugin_id, version, listed_platforms, sums_key, sums_size)
+			VALUES ($1, $2, $3, '1.0.0', '{linux_amd64}', 'k', 1)`, []any{versionID, organization, pluginID}},
+		{`INSERT INTO plugin_files (organization_id, version_id, filename, os, arch, sha256, size, object_key)
+			VALUES ($1, $2, 'f.zip', 'linux', 'amd64', 'd', 1, 'k')`, []any{organization, versionID}},
+	} {
+		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
+			t.Fatalf("seed plugin rows for %s: %v", organization, err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 }

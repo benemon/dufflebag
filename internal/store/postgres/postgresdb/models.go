@@ -167,11 +167,48 @@ type Pin struct {
 	BucketID       string    `json:"bucket_id"`
 }
 
+type Plugin struct {
+	ID               uuid.UUID      `json:"id"`
+	OrganizationID   uuid.UUID      `json:"organization_id"`
+	Name             string         `json:"name"`
+	SourceKind       string         `json:"source_kind"`
+	SourceRepository sql.NullString `json:"source_repository"`
+	CreatedAt        time.Time      `json:"created_at"`
+}
+
+type PluginFile struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	VersionID      uuid.UUID `json:"version_id"`
+	Filename       string    `json:"filename"`
+	Os             string    `json:"os"`
+	Arch           string    `json:"arch"`
+	Sha256         string    `json:"sha256"`
+	Size           int64     `json:"size"`
+	ObjectKey      string    `json:"object_key"`
+}
+
 type PluginRegistry struct {
 	OrganizationID uuid.UUID    `json:"organization_id"`
 	Exposed        bool         `json:"exposed"`
 	EnabledAt      time.Time    `json:"enabled_at"`
 	ExposedAt      sql.NullTime `json:"exposed_at"`
+}
+
+type PluginVersion struct {
+	ID              uuid.UUID      `json:"id"`
+	OrganizationID  uuid.UUID      `json:"organization_id"`
+	PluginID        uuid.UUID      `json:"plugin_id"`
+	Version         string         `json:"version"`
+	Revoked         bool           `json:"revoked"`
+	ProtocolVersion sql.NullString `json:"protocol_version"`
+	ListedPlatforms []string       `json:"listed_platforms"`
+	SumsKey         string         `json:"sums_key"`
+	SumsSize        int64          `json:"sums_size"`
+	SignatureKey    sql.NullString `json:"signature_key"`
+	SignatureSize   sql.NullInt64  `json:"signature_size"`
+	ManifestKey     sql.NullString `json:"manifest_key"`
+	ManifestSize    sql.NullInt64  `json:"manifest_size"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 type Principal struct {

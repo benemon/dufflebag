@@ -657,6 +657,105 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: listPlugins
+      summary: List the organization's plugins
+      description: Empty when the registry is not enabled.
+      responses:
+        "200":
+          description: Plugins, by name.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  plugins:
+                    type: array
+                    items: { $ref: "#/components/schemas/Plugin" }
+                required: [plugins]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+    get:
+      tags: [plugin-registry]
+      operationId: listPluginVersions
+      summary: List a plugin's versions and the platforms each one serves
+      responses:
+        "200":
+          description: The plugin and its versions, newest first.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginVersions" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+      - $ref: "#/components/parameters/PluginVersionNumber"
+    put:
+      tags: [plugin-registry]
+      operationId: publishPluginVersion
+      summary: Publish one plugin version from uploaded files
+      description: |
+        One multipart request carries the version's complete file set; everything is verified before
+        anything is stored, and any failure stores nothing (ADR-0027). SHA256SUMS and its signature are
+        stored and served verbatim. Every uploaded zip must be listed in SHA256SUMS with a matching
+        digest; listed zips may be absent. A manifest listed in SHA256SUMS must be uploaded. Versions are
+        immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 512 MiB).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                sha256sums: { type: string, format: binary }
+                sha256sums_sig: { type: string, format: binary }
+                manifest: { type: string, format: binary }
+                zips:
+                  type: array
+                  items: { type: string, format: binary }
+              required: [sha256sums, zips]
+      responses:
+        "201":
+          description: Published.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PublishedPluginVersion" }
+        "400":
+          description: The file set failed verification; the message names the first offending file.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled, the version exists, or another source holds the name.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: The request exceeds DFBG_PLUGIN_MAX_UPLOAD_BYTES.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "503":
+          description: Object storage is not configured or not reachable.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/projects:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -1667,6 +1766,18 @@ components:
       required: true
       description: ULID.
       schema: { type: string }
+    PluginName:
+      name: pluginName
+      in: path
+      required: true
+      description: The final component of the plugin's source address.
+      schema: { type: string, pattern: '^[a-z0-9]+(-[a-z0-9]+)*$', maxLength: 63 }
+    PluginVersionNumber:
+      name: version
+      in: path
+      required: true
+      description: A semantic version without a v prefix or build metadata.
+      schema: { type: string }
     WebhookId:
       name: webhookId
       in: path
@@ -2281,6 +2392,72 @@ components:
         enabled: { type: boolean }
         exposed: { type: boolean }
       required: [enabled, exposed]
+
+    PluginSource:
+      type: object
+      description: Where a plugin's versions come from. Metadata only; never part of its address.
+      properties:
+        kind: { type: string, enum: [upload, releases-hashicorp, github] }
+        repository: { type: string, description: For github, owner/packer-plugin-name. }
+      required: [kind]
+
+    Plugin:
+      type: object
+      properties:
+        name: { type: string }
+        source: { $ref: "#/components/schemas/PluginSource" }
+        published_versions: { type: integer, minimum: 0 }
+        newest_version: { type: string, description: The newest version that is not revoked. Absent when there is none. }
+      required: [name, source, published_versions]
+
+    PluginPlatform:
+      type: object
+      properties:
+        os: { type: string }
+        arch: { type: string }
+      required: [os, arch]
+
+    PluginVersion:
+      type: object
+      properties:
+        version: { type: string }
+        revoked: { type: boolean }
+        created_at: { type: string, format: date-time }
+        listed_platforms:
+          type: array
+          description: Platforms the version's SHA256SUMS lists.
+          items: { $ref: "#/components/schemas/PluginPlatform" }
+        stored_platforms:
+          type: array
+          description: Platforms the registry holds a zip for. Listed platforms missing here are not served.
+          items: { $ref: "#/components/schemas/PluginPlatform" }
+      required: [version, revoked, created_at, listed_platforms, stored_platforms]
+
+    PluginVersions:
+      type: object
+      properties:
+        name: { type: string }
+        source: { $ref: "#/components/schemas/PluginSource" }
+        versions:
+          type: array
+          items: { $ref: "#/components/schemas/PluginVersion" }
+      required: [name, source, versions]
+
+    TemplateStanza:
+      type: object
+      description: The required_plugins entry a Packer template uses to install this version from dufflebag.
+      properties:
+        source: { type: string }
+        version: { type: string }
+        hcl: { type: string }
+      required: [source, version, hcl]
+
+    PublishedPluginVersion:
+      type: object
+      properties:
+        version: { $ref: "#/components/schemas/PluginVersion" }
+        stanza: { $ref: "#/components/schemas/TemplateStanza" }
+      required: [version, stanza]
 
     Project:
       type: object

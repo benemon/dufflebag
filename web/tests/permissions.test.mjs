@@ -25,7 +25,7 @@ test('each role gets the nested console action snapshot declared by the server',
   assert.deepEqual(allowedActions('builder'), ['pinBuckets', 'createBuckets'])
   assert.deepEqual(
     allowedActions('publisher'),
-    ['pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets'],
+    ['pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels', 'deleteBuckets', 'publishPlugin'],
   )
   assert.deepEqual(
     allowedActions('maintainer'),
@@ -33,13 +33,13 @@ test('each role gets the nested console action snapshot declared by the server',
       'createProjects',
       'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions', 'manageChannels',
       'manageRestrictedChannels', 'deleteBuckets',
-      'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'configureWebhooks',
+      'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'publishPlugin', 'configureWebhooks',
     ],
   )
   assert.deepEqual(allowedActions('root'), [
     'createOrganizations', 'createProjects', 'pinBuckets', 'createBuckets', 'revokeVersions', 'deleteVersions',
     'manageChannels', 'manageRestrictedChannels', 'deleteBuckets', 'configureAudit',
-    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'configureWebhooks',
+    'manageEncryption', 'managePrincipals', 'configureBagDrop', 'configurePluginRegistry', 'publishPlugin', 'configureWebhooks',
   ])
   assert.deepEqual(allowedActions(null), [])
 })

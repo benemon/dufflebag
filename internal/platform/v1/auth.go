@@ -387,6 +387,15 @@ func (response refusalResponse) VisitUnexposePluginRegistryResponse(w http.Respo
 func (response refusalResponse) VisitDisablePluginRegistryResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitListPluginsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitListPluginVersionsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitPublishPluginVersionResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
