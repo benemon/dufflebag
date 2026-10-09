@@ -35,7 +35,7 @@ export function PluginUpload() {
     <PluginUploadView
       registry={registry} plan={plan} busy={busy} failure={failure} result={result}
       onChoose={(files) => { setResult(null); setFailure(null); setPlan(files.length ? planPluginUpload(files) : null) }}
-      onOpen={(name) => navigate(`/plugins/${encodeURIComponent(name)}`)}
+      onOpen={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onSubmit={async () => {
         if (plan?.kind !== 'ready' || !organizationID) return
         setBusy(true)

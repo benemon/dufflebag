@@ -6,6 +6,7 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
+  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs'
@@ -157,7 +158,7 @@ function request(method, requestPath, body, headers = {}) {
   return new Promise((resolve, reject) => {
     const encoded = body === undefined
       ? undefined
-      : typeof body === 'string' ? body : JSON.stringify(body)
+      : typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)
     const req = https.request({
       hostname,
       port: serverPort,
@@ -667,6 +668,75 @@ test('stock Packer publishes registry metadata with paired file audit records', 
   const downloadedDocument = JSON.parse(downloadedSBOM.bytes.toString('utf8'))
   assert.equal(downloadedDocument.SPDXID, generatedSBOM.SPDXID, 'download is not the uploaded SBOM document')
   assert.deepEqual(downloadedDocument, generatedSBOM, 'download must be byte-faithful to the generated document')
+
+  await t.test('stock Packer installs a plugin only once the registry is exposed; older Packer refuses locally', async () => {
+    const [, major, minor, patch] = (await command(packer, ['version'])).stdout.match(/Packer v(\d+)\.(\d+)\.(\d+)/).map(Number)
+    const remoteGetter = major > 1 || minor > 16 || (minor === 16 && patch >= 1)
+    const registryPath = `/api/v1/organizations/${organization.id}/plugin-registry`
+    await api(rootToken, 'POST', `${registryPath}/enable`)
+
+    // Real producer artifacts, fetched as Packer itself would have: packer-plugin-git
+    // 0.6.3's goreleaser release on GitHub.
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch]
+    const release = 'https://github.com/ethanmdavidson/packer-plugin-git/releases/download/v0.6.3/'
+    const sumsName = 'packer-plugin-git_v0.6.3_SHA256SUMS'
+    const zipName = `packer-plugin-git_v0.6.3_x5.0_linux_${arch}.zip`
+    const download = async (name) => Buffer.from(await (await fetch(release + name)).arrayBuffer())
+    const boundary = `dufflebag-${randomBytes(8).toString('hex')}`
+    const part = (field, name, data) => Buffer.concat([
+      Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="${field}"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`),
+      data, Buffer.from('\r\n'),
+    ])
+    const form = Buffer.concat([
+      part('sha256sums', sumsName, await download(sumsName)),
+      part('zips', zipName, await download(zipName)),
+      Buffer.from(`--${boundary}--\r\n`),
+    ])
+    const uploaded = await request('PUT', `${registryPath}/plugins/git/versions/0.6.3`, form, {
+      Authorization: `Bearer ${rootToken}`,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    })
+    assert.equal(uploaded.status, 201, `plugin upload answered ${uploaded.status}: ${uploaded.body}`)
+    process.stdout.write(`ASSERT plugin published: ${uploaded.json.stanza.source} 0.6.3\n`)
+
+    // A plugin source address cannot carry a port, so Packer always dials 443.
+    const forwarder = `dufflebag-packer-e2e-443-${process.pid}`
+    await command(docker, ['run', '-d', '--rm', '--name', forwarder, '--network', 'host', 'alpine/socat',
+      'TCP-LISTEN:443,fork,reuseaddr', `TCP:127.0.0.1:${serverPort}`])
+    t.after(() => command(docker, ['rm', '-f', forwarder]).catch(() => {}))
+    const source = `${hostname}/plugins/${organizationName}/git`
+    const pluginTemplate = path.join(work, 'plugin.pkr.hcl')
+    writeFileSync(pluginTemplate, `packer {\n  required_plugins {\n    git = {\n      source  = "${source}"\n      version = "0.6.3"\n    }\n  }\n}\n`)
+    const readPlaneRecords = () => readFileSync(auditFile, 'utf8').split('\n').filter((line) => line.includes('"route_id":"root.plugins"'))
+    const init = () => command(packer, ['init', pluginTemplate], { env: packerEnv }).then(
+      (result) => ({ ok: true, output: `${result.stdout}${result.stderr}` }),
+      (err) => ({ ok: false, output: `${err.stdout ?? ''}${err.stderr ?? ''}${err.message}` }),
+    )
+
+    if (!remoteGetter) {
+      await api(rootToken, 'POST', `${registryPath}/expose`)
+      const before = readPlaneRecords().length
+      const refused = await init()
+      assert.equal(refused.ok, false, 'Packer before 1.16.1 installed a plugin from a non-GitHub source')
+      assert.match(refused.output, /doesn't appear to be a valid "github.com" source address/)
+      assert.equal(readPlaneRecords().length, before, 'Packer before 1.16.1 reached the read plane')
+      process.stdout.write(`ASSERT Packer v${major}.${minor}.${patch} refuses ${source} locally, zero read-plane requests\n`)
+      return
+    }
+
+    const unexposed = await init()
+    assert.equal(unexposed.ok, false, 'packer init installed a plugin from an unexposed registry')
+    assert.match(unexposed.output, /returned status 404/)
+    await api(rootToken, 'POST', `${registryPath}/expose`)
+    const installed = await init()
+    assert.ok(installed.ok, `packer init failed against the exposed registry:\n${installed.output}`)
+    const pluginDirectory = path.join(configHome, 'packer', 'plugins', hostname, 'plugins', organizationName, 'git')
+    const binaries = readdirSync(pluginDirectory).filter((name) => name.startsWith('packer-plugin-git_v0.6.3_x5.0_') && !name.endsWith('SUM'))
+    assert.equal(binaries.length, 1, `no installed plugin binary in ${pluginDirectory}: ${readdirSync(pluginDirectory)}`)
+    const served = readPlaneRecords().map((line) => JSON.parse(line)).filter((record) => record.kind === 'response')
+    assert.ok(served.some((record) => record.reason === 'served' && record.target_id.endsWith(zipName)), 'the zip download left no audit record')
+    process.stdout.write(`ASSERT stock Packer v${major}.${minor}.${patch} installed ${source} 0.6.3 from dufflebag; ${served.length} audited read-plane responses\n`)
+  })
 
   await t.test('the encrypted keyring rotates without losing retained payloads', {
     skip: encrypted ? false : 'requires DFBG_KEY_PROVIDER and the lab Vault environment',

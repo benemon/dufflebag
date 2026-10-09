@@ -86,9 +86,27 @@ func refuse(file, format string, args ...any) error {
 	return fmt.Errorf("%w: %s: %s", registry.ErrInvalid, file, fmt.Sprintf(format, args...))
 }
 
-// manifestName is the manifest filename Packer requests for a version.
-func manifestName(name, version string) string {
+// ManifestName is the manifest filename Packer requests for a version.
+func ManifestName(name, version string) string {
 	return fmt.Sprintf("packer-plugin-%s_%s_manifest.json", name, version)
+}
+
+// SumsName is the SHA256SUMS filename Packer requests for a version. The
+// stored file keeps whatever name the publisher gave it; this is its address.
+func SumsName(name, version string) string {
+	return fmt.Sprintf("packer-plugin-%s_%s_SHA256SUMS", name, version)
+}
+
+// SignatureName is the detached signature's address beside SumsName.
+func SignatureName(name, version string) string {
+	return SumsName(name, version) + ".sig"
+}
+
+// RenderManifest is the manifest served when the publisher supplied none, in
+// the shape releases.hashicorp.com publishes. Packer reads only
+// metadata.protocol_version (remote/getter.go resolveProtocolVersion).
+func RenderManifest(protocol string) []byte {
+	return []byte(fmt.Sprintf("{\n  \"version\": \"1\",\n  \"metadata\": {\n    \"protocol_version\": %q\n  }\n}", protocol))
 }
 
 // parseSums parses a SHA256SUMS file in sha256sum's output format.
@@ -113,7 +131,7 @@ func parseSums(name, version string, data []byte) (Sums, error) {
 			return Sums{}, refuse(file, "%s is listed twice", filename)
 		}
 		seenFiles[filename] = true
-		if filename == manifestName(name, version) {
+		if filename == ManifestName(name, version) {
 			sums.ManifestSHA256 = digest
 			continue
 		}
@@ -167,7 +185,7 @@ func Verify(upload Upload) (Verified, error) {
 	manifestProtocol := ""
 	if upload.Manifest != nil {
 		if sums.ManifestSHA256 != "" && sha256Hex(upload.Manifest) != sums.ManifestSHA256 {
-			return Verified{}, refuse(manifestName(upload.Name, upload.Version), "digest does not match SHA256SUMS")
+			return Verified{}, refuse(ManifestName(upload.Name, upload.Version), "digest does not match SHA256SUMS")
 		}
 		var manifest struct {
 			Metadata struct {
@@ -176,11 +194,11 @@ func Verify(upload Upload) (Verified, error) {
 		}
 		if err := json.NewDecoder(bytes.NewReader(upload.Manifest)).Decode(&manifest); err != nil ||
 			!protocolPattern.MatchString(manifest.Metadata.ProtocolVersion) {
-			return Verified{}, refuse(manifestName(upload.Name, upload.Version), "has no metadata.protocol_version")
+			return Verified{}, refuse(ManifestName(upload.Name, upload.Version), "has no metadata.protocol_version")
 		}
 		manifestProtocol = manifest.Metadata.ProtocolVersion
 	} else if sums.ManifestSHA256 != "" {
-		return Verified{}, refuse(manifestName(upload.Name, upload.Version), "SHA256SUMS lists it, so it must be uploaded")
+		return Verified{}, refuse(ManifestName(upload.Name, upload.Version), "SHA256SUMS lists it, so it must be uploaded")
 	}
 
 	seen := map[string]bool{}

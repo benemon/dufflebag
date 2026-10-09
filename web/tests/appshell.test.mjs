@@ -87,7 +87,7 @@ test('router links carry PatternFly native current navigation state', () => {
     /<a(?=[^>]*href="\/audit")(?=[^>]*aria-current="page")(?=[^>]*class="[^"]*pf-v6-c-nav__link pf-m-current[^"]*")[^>]*>/,
   )
   assert.doesNotMatch(markup, /class="[^"]*\bnv\b/)
-  for (const destination of ['/buckets', '/plugins', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
+  for (const destination of ['/buckets', '/plugin-registry', '/principals', '/audit', '/encryption', '/bagdrop', '/webhooks', '/instance']) {
     assert.match(markup, new RegExp(`<a[^>]*href="${destination}"`), `${destination} is not a focusable link`)
   }
 })
@@ -140,7 +140,7 @@ test('the landing routes by scope while bucket detail routes keep their paths', 
   // lands in its one bucket (the Landing component encodes the split).
   assert.match(appSource, /<Route path="\/" element=\{<Landing \/>\}/)
   assert.match(appSource, /<Route path="\/buckets" element=\{<Buckets \/>\}/)
-  assert.match(appSource, /<Route path="\/plugins" element=\{<Plugins \/>\}/)
+  assert.match(appSource, /<Route path="\/plugin-registry" element=\{<Plugins \/>\}/)
   assert.match(appSource, /Navigate to="\/buckets" replace/)
   assert.match(appSource, /claims.bucketID/)
   assert.match(appSource, /path="\/buckets\/:bucket"/)

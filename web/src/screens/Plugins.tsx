@@ -62,8 +62,8 @@ export function Plugins() {
       host={window.location.host}
       registry={registry}
       plugins={plugins}
-      onOpenPlugin={(name) => navigate(`/plugins/${encodeURIComponent(name)}`)}
-      onUpload={() => navigate('/plugins/upload')}
+      onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
+      onUpload={() => navigate('/plugin-registry/upload')}
       loading={loading}
       failure={failure}
       onRefresh={reload}

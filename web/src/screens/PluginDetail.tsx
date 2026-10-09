@@ -54,7 +54,7 @@ export function PluginDetail() {
       name={name} organizationName={tenant.organization} host={window.location.host}
       callerRole={self?.role ?? null} registry={registry} detail={detail}
       loading={loading} failure={failure} onRefresh={reload}
-      onUpload={() => navigate('/plugins/upload')}
+      onUpload={() => navigate('/plugin-registry/upload')}
     />
   )
 }

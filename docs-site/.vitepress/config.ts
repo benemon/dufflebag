@@ -44,6 +44,7 @@ const sidebar = [
       { text: 'Versions', link: '/operations/versions' },
       { text: 'Channels', link: '/operations/channels' },
       { text: 'Builds', link: '/operations/builds' },
+      { text: 'Plugin registry', link: '/operations/plugin-registry' },
     ],
   },
   {

@@ -8,6 +8,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
@@ -121,5 +123,93 @@ func TestPluginVersionWritesNoRowWhenItsBytesCannotBeStored(t *testing.T) {
 	plugins, err := repository.ListPlugins(ctx, tenant)
 	if err != nil || len(plugins) != 0 {
 		t.Fatalf("plugins after a failed blob write = %+v, %v; want none", plugins, err)
+	}
+}
+
+func TestServedPluginFilesFollowExposureAndRevocation(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	ctx := context.Background()
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseOrganizationTenant(orgA)
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	version := pluginVersion("1.0.0", store.PluginSource{Kind: "upload"})
+	version.Protocol = "5.0"
+	if err := repository.PublishPluginVersion(ctx, tenant, version); err != nil {
+		t.Fatal(err)
+	}
+	var organization string
+	if err := db.QueryRowContext(ctx, `SELECT name FROM organizations WHERE id = $1`, orgA).Scan(&organization); err != nil {
+		t.Fatal(err)
+	}
+	zip := version.Zips[0].Filename
+
+	if _, err := repository.ServedPluginVersions(ctx, organization, "probe"); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("unexposed index = %v, want ErrNotFound", err)
+	}
+	if _, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedZip, zip); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("unexposed zip = %v, want ErrNotFound", err)
+	}
+	if _, err := repository.ExposePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := repository.ServedPluginVersions(ctx, organization, "probe")
+	if err != nil || len(versions) != 1 || versions[0] != "1.0.0" {
+		t.Fatalf("exposed index = %v, %v", versions, err)
+	}
+	served, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedZip, zip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := repository.OpenPluginObject(ctx, served.ObjectKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	streamed, _ := io.ReadAll(body)
+	_ = body.Close()
+	if string(streamed) != "zip for 1.0.0" || served.Size != int64(len(streamed)) {
+		t.Fatalf("streamed zip = %q size %d", streamed, served.Size)
+	}
+	manifest, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedManifest, "")
+	if err != nil || !strings.Contains(string(manifest.Content), `"protocol_version": "5.0"`) {
+		t.Fatalf("rendered manifest = %q, %v", manifest.Content, err)
+	}
+	for name, read := range map[string]func() error{
+		"absent signature": func() error {
+			_, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedSignature, "")
+			return err
+		},
+		"zip not uploaded": func() error {
+			_, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedZip, "packer-plugin-probe_v1.0.0_x5.0_darwin_arm64.zip")
+			return err
+		},
+		"unknown organization": func() error {
+			_, err := repository.ServedPluginVersions(ctx, "nobody", "probe")
+			return err
+		},
+	} {
+		if err := read(); !errors.Is(err, registry.ErrNotFound) {
+			t.Fatalf("%s = %v, want ErrNotFound", name, err)
+		}
+	}
+
+	revoke, err := store.BeginOrganizationTenant(ctx, db, orgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := revoke.ExecContext(ctx, `UPDATE plugin_versions SET revoked = true`); err != nil {
+		t.Fatal(err)
+	}
+	if err := revoke.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ServedPluginVersions(ctx, organization, "probe"); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("index with every version revoked = %v, want ErrNotFound", err)
+	}
+	if _, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedSums, ""); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("revoked sums = %v, want ErrNotFound", err)
 	}
 }

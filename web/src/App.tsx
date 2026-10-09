@@ -55,7 +55,7 @@ function Authenticated({
     state, self, restoring, selectedOrganization, selectedProject, projectsLoading, projectFailure,
   } = useAuth()
   const { pathname } = useLocation()
-  const organizationRoute = pathname === '/plugins' || pathname.startsWith('/plugins/')
+  const organizationRoute = pathname === '/plugin-registry' || pathname.startsWith('/plugin-registry/')
   // While the boot exchange asks whether a session survived the reload,
   // showing the sign-in screen would flash a state that may be about to be
   // untrue. Hold the page on an explicit state until the answer is in — it is
@@ -110,9 +110,9 @@ function Authenticated({
       <Route element={<ShellRoute theme={theme} onThemeChange={onThemeChange} />}>
         <Route path="/" element={<Landing />} />
         <Route path="/buckets" element={<Buckets />} />
-        <Route path="/plugins" element={<Plugins />} />
-        <Route path="/plugins/upload" element={<PluginUpload />} />
-        <Route path="/plugins/:name" element={<PluginDetail />} />
+        <Route path="/plugin-registry" element={<Plugins />} />
+        <Route path="/plugin-registry/upload" element={<PluginUpload />} />
+        <Route path="/plugin-registry/:name" element={<PluginDetail />} />
         <Route path="/principals" element={<Principals />} />
         <Route path="/audit" element={<Audit />} />
         <Route path="/encryption" element={<Encryption />} />

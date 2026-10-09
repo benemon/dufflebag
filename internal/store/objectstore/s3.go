@@ -196,6 +196,18 @@ func (s *Store) Get(ctx context.Context, key string) ([]byte, error) {
 	return data, nil
 }
 
+// Open streams one object. The caller closes it; the store's health is
+// observed on open, since a body failure arrives after the caller has
+// started its own response.
+func (s *Store) Open(ctx context.Context, key string) (io.ReadCloser, error) {
+	object, err := s.client.GetObject(ctx, &s3.GetObjectInput{Bucket: &s.bucket, Key: &key})
+	s.observe(err)
+	if err != nil {
+		return nil, fmt.Errorf("get object %q: %w", key, err)
+	}
+	return object.Body, nil
+}
+
 // TranscriptKey returns the immutable, tenant-qualified key for one scan-run
 // transcript. The x segment keeps transcripts apart from SBOM values.
 func TranscriptKey(organizationID, projectID, runID string, data []byte) string {

@@ -27,6 +27,7 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/identity"
 	"github.com/benemon/dufflebag/internal/keyring"
 	platform "github.com/benemon/dufflebag/internal/platform/v1"
+	"github.com/benemon/dufflebag/internal/pluginread"
 	"github.com/benemon/dufflebag/internal/scan"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -261,7 +262,7 @@ func main() {
 	build := platform.BuildInfo{
 		Version:     normalizedBuildValue(version, "dev"),
 		Commit:      normalizedBuildValue(commit, "unknown"),
-		APIVersions: mountedAPIVersions(rootRoutes(nil, nil, nil, nil)),
+		APIVersions: mountedAPIVersions(rootRoutes(nil, nil, nil, nil, nil)),
 	}
 	// A typed nil pointer would satisfy the interface and make every scanner
 	// check look configured, so the nil stays untyped until a service exists.
@@ -316,6 +317,7 @@ func main() {
 		packer,
 		resourceManager,
 		platformPlane,
+		pluginread.NewHandler(repository, logger),
 	)
 	metricsRegistry := prometheus.NewRegistry()
 	// Metrics are deliberately outside admission and audit. They see every
@@ -764,6 +766,7 @@ const (
 	rootRoutePlatform        = "root.platform"
 	rootRouteNotFound        = "root.not_found"
 	rootRouteConsole         = "root.console"
+	rootRoutePlugins         = "root.plugins"
 	rootRouteRedirect        = "root.redirect"
 	rootRouteUnhandled       = "root.unhandled"
 )
@@ -853,10 +856,10 @@ func composeHandler(
 	broker *audit.Broker,
 	hmacKey func() (string, []byte),
 	token tokenPlane,
-	packer, resourceManager, platformPlane http.Handler,
+	packer, resourceManager, platformPlane, plugins http.Handler,
 ) *composedHandler {
 	router := &rootRouter{mux: http.NewServeMux()}
-	for _, route := range rootRoutes(token, packer, resourceManager, platformPlane) {
+	for _, route := range rootRoutes(token, packer, resourceManager, platformPlane, plugins) {
 		router.mux.Handle(route.pattern, &describedHandler{
 			descriptor: route.descriptor,
 			next:       route.handler,
@@ -875,7 +878,7 @@ func composeHandler(
 	}
 }
 
-func rootRoutes(token, packer, resourceManager, platformPlane http.Handler) []rootRoute {
+func rootRoutes(token, packer, resourceManager, platformPlane, plugins http.Handler) []rootRoute {
 	return []rootRoute{
 		newRootRoute(hcpauth.TokenPath, rootRouteToken, identity.AuditOperationTokenIssue, "access_token", "", token),
 		newRootRoute(hcpauth.TokenPath+"/", rootRouteNotFound, "request.not_found", "request", "", http.NotFoundHandler()),
@@ -891,6 +894,9 @@ func rootRoutes(token, packer, resourceManager, platformPlane http.Handler) []ro
 		// Session routes carry the credential in a cookie or mint one into it.
 		newRootRoute(platform.SessionPath, rootRouteSession, "session.request", "session", platform.SessionPath, platformPlane),
 		newVersionedRootRoute("/api/v1/", "/api/v1", rootRoutePlatform, "platform.request", platformPlane),
+		// Packer's remote getter has no credential; exposure is the grant, and
+		// every read is audited and fails closed (ADR-0027 D8).
+		newRootRoute(pluginread.Prefix, rootRoutePlugins, "plugin.read", "plugin_file", "", plugins),
 		// Closed API subtrees must not become successful console HTML responses.
 		newRootRoute("/sys/init/", rootRouteNotFound, "request.not_found", "request", "", http.NotFoundHandler()),
 		newRootRoute(platform.RecoveryPath+"/", rootRouteNotFound, "request.not_found", "request", "", http.NotFoundHandler()),
