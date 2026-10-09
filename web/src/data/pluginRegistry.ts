@@ -1,4 +1,4 @@
-import { platformGet, platformPost, platformPutForm } from '../api/client'
+import { platformDelete, platformGet, platformPost, platformPutForm } from '../api/client'
 
 export type PluginRegistry = {
   enabled: boolean
@@ -141,4 +141,21 @@ export function planPluginUpload<F extends NamedFile>(files: F[]): UploadPlan<F>
   const [name = ''] = names
   const [version = ''] = versions
   return { kind: 'ready', name, version, files: planned }
+}
+
+function versionPath(organizationID: string, name: string, version: string, action = ''): string {
+  const base = `plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
+  return path(organizationID, action === '' ? base : `${base}/${action}`)
+}
+
+export async function revokePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
+  await platformPost<null>(token, versionPath(organizationID, name, version, 'revoke'))
+}
+
+export async function restorePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
+  await platformPost<null>(token, versionPath(organizationID, name, version, 'restore'))
+}
+
+export async function deletePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
+  await platformDelete(token, versionPath(organizationID, name, version))
 }

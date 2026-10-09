@@ -11,11 +11,11 @@ import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  getPluginRegistry, listPluginVersions, sourceLabel, templateStanza,
-  type PluginRegistry, type PluginVersions,
+  deletePluginVersion, getPluginRegistry, listPluginVersions, restorePluginVersion, revokePluginVersion,
+  sourceLabel, templateStanza, type PluginRegistry, type PluginVersions,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
-import { pluginRegistryErrorMessage } from './Plugins'
+import { PluginRegistryConfirmation, pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginDetail() {
   const { name = '' } = useParams()
@@ -28,6 +28,8 @@ export function PluginDetail() {
   const [detail, setDetail] = useState<PluginVersions | null>(null)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [actionFailure, setActionFailure] = useState<string | null>(null)
 
   const reload = useCallback(async () => {
     if (!organizationID || token === '') return
@@ -47,6 +49,24 @@ export function PluginDetail() {
     }
   }, [name, organizationID, signOut, token])
 
+  const act = (work: (version: string) => Promise<void>, removesPlugin = false) => async (version: string) => {
+    setBusy(true)
+    setActionFailure(null)
+    try {
+      await work(version)
+      if (removesPlugin) {
+        navigate('/plugin-registry')
+        return
+      }
+      await reload()
+    } catch (error: unknown) {
+      if (signOutIfUnauthorized(error, signOut)) return
+      setActionFailure(pluginRegistryErrorMessage(error, 'The action failed.'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   useEffect(() => { void reload() }, [reload])
 
   return (
@@ -55,12 +75,20 @@ export function PluginDetail() {
       callerRole={self?.role ?? null} registry={registry} detail={detail}
       loading={loading} failure={failure} onRefresh={reload}
       onUpload={() => navigate('/plugin-registry/upload')}
+      busy={busy} actionFailure={actionFailure}
+      onRevoke={act((version) => revokePluginVersion(token, organizationID ?? '', name, version))}
+      onRestore={act((version) => restorePluginVersion(token, organizationID ?? '', name, version))}
+      onRemove={act(
+        (version) => deletePluginVersion(token, organizationID ?? '', name, version),
+        detail?.versions.length === 1,
+      )}
     />
   )
 }
 
 export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, loading, failure, onRefresh, onUpload,
+  busy, actionFailure, onRevoke, onRestore, onRemove,
 }: {
   name: string
   organizationName: string
@@ -72,7 +100,15 @@ export function PluginDetailView({
   failure: string | null
   onRefresh: () => void | Promise<void>
   onUpload: () => void
+  busy: boolean
+  actionFailure: string | null
+  onRevoke: (version: string) => void
+  onRestore: (version: string) => void
+  onRemove: (version: string) => void
 }) {
+  const [removing, setRemoving] = useState<string | null>(null)
+  const canPublish = permitsAction(callerRole, 'publishPlugin')
+  const lastVersion = detail?.versions.length === 1
   const newest = detail?.versions.find((version) => !version.revoked)
   const platforms = [...new Set(detail?.versions.flatMap((version) =>
     [...version.listed_platforms, ...version.stored_platforms].map((p) => `${p.os}_${p.arch}`)) ?? [])].sort()
@@ -86,6 +122,7 @@ export function PluginDetailView({
         onRefresh={onRefresh} refreshing={loading}
       />
       <PageSection variant="secondary" isFilled>
+        {actionFailure ? <Alert variant="danger" isInline title="The action failed"><Content component="p">{actionFailure}</Content></Alert> : null}
         {failure ? <Alert variant="danger" isInline title="The plugin could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         {loading && !detail ? <><Spinner aria-label="Loading plugin…" /><Content component="p">Loading plugin…</Content></> : null}
         {detail ? (
@@ -105,7 +142,10 @@ export function PluginDetailView({
             </Content>
             <Table aria-label="Versions by platform" variant="compact">
               <Thead>
-                <Tr><Th>Version</Th>{platforms.map((platform) => <Th key={platform}>{platform}</Th>)}</Tr>
+                <Tr>
+                  <Th>Version</Th>{platforms.map((platform) => <Th key={platform}>{platform}</Th>)}
+                  {canPublish ? <Th screenReaderText="Actions" /> : null}
+                </Tr>
               </Thead>
               <Tbody>
                 {detail.versions.map((version) => {
@@ -121,12 +161,33 @@ export function PluginDetailView({
                           {stored.has(platform) ? '●' : listed.has(platform) ? '○' : '–'}
                         </Td>
                       ))}
+                      {canPublish ? (
+                        <Td dataLabel="Actions" isActionCell>
+                          <Button variant="link" isInline isDisabled={busy}
+                            onClick={() => (version.revoked ? onRestore : onRevoke)(version.version)}>
+                            {version.revoked ? 'Restore' : 'Revoke'}
+                          </Button>{' '}
+                          <Button variant="link" isDanger isInline isDisabled={busy} onClick={() => setRemoving(version.version)}>
+                            Remove version
+                          </Button>
+                        </Td>
+                      ) : null}
                     </Tr>
                   )
                 })}
               </Tbody>
             </Table>
           </>
+        ) : null}
+        {removing ? (
+          <PluginRegistryConfirmation
+            title={`Remove ${name} ${removing}?`}
+            body={`Its files are deleted and Packer can no longer install it.${lastVersion
+              ? ` It is ${name}'s last version, so ${name} is removed and its name can be used by another source.` : ''}`}
+            verb="Remove version" busy={busy}
+            onCancel={() => setRemoving(null)}
+            onConfirm={() => { const version = removing; setRemoving(null); onRemove(version) }}
+          />
         ) : null}
       </PageSection>
     </>

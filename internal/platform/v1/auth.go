@@ -396,6 +396,15 @@ func (response refusalResponse) VisitListPluginVersionsResponse(w http.ResponseW
 func (response refusalResponse) VisitPublishPluginVersionResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitRestorePluginVersionResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDeletePluginVersionResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
