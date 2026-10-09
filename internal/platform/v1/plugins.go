@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
+	"net"
 	"net/http"
 	"os"
 	"path"
@@ -239,7 +240,11 @@ func (s *server) PublishPluginVersion(
 	}, nil
 }
 
+// A source address cannot carry a port: Packer always dials 443.
 func renderTemplateStanza(host, organization, name, version string) TemplateStanza {
+	if hostname, _, err := net.SplitHostPort(host); err == nil {
+		host = hostname
+	}
 	source := path.Join(host, "plugins", organization, name)
 	return TemplateStanza{
 		Source: source, Version: version,

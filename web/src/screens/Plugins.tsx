@@ -59,7 +59,7 @@ export function Plugins() {
     <PluginRegistryView
       organizationName={tenant.organization}
       callerRole={self?.role ?? null}
-      host={window.location.host}
+      host={window.location.hostname}
       registry={registry}
       plugins={plugins}
       onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}

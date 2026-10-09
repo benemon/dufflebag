@@ -69,7 +69,7 @@ func publishRequest(t *testing.T, handler http.Handler, version string, parts ..
 	_ = form.Close()
 	request := httptest.NewRequest(http.MethodPut,
 		"/api/v1/organizations/"+testOrgID+"/plugin-registry/plugins/probe/versions/"+version, &body)
-	request.Host = "dufflebag.example.com"
+	request.Host = "dufflebag.example.com:8443"
 	request.Header.Set("Content-Type", form.FormDataContentType())
 	request.Header.Set("Authorization", "Bearer "+testToken)
 	recorder := httptest.NewRecorder()

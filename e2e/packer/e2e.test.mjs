@@ -718,7 +718,7 @@ test('stock Packer publishes registry metadata with paired file audit records', 
       const before = readPlaneRecords().length
       const refused = await init()
       assert.equal(refused.ok, false, 'Packer before 1.16.1 installed a plugin from a non-GitHub source')
-      assert.match(refused.output, /doesn't appear to be a valid "github.com" source address/)
+      assert.match(refused.output, /Invalid github\.com URI "[^"]+": a Github-compatible source must be in the github\.com\/<namespace>\/<name> format/)
       assert.equal(readPlaneRecords().length, before, 'Packer before 1.16.1 reached the read plane')
       process.stdout.write(`ASSERT Packer v${major}.${minor}.${patch} refuses ${source} locally, zero read-plane requests\n`)
       return

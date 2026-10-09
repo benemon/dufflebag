@@ -13,11 +13,12 @@ and Packer cannot reach it until a maintainer exposes it.
   GitHub and refuse a dufflebag source address before sending any request:
 
   ```
-  "dufflebag.example.com/plugins/acme/amazon" doesn't appear to be a valid "github.com" source address; check source and try again.
+  Invalid github.com URI "dufflebag.example.com/plugins/acme/amazon": a Github-compatible source must be in the github.com/<namespace>/<name> format.
   ```
 
 - **dufflebag reachable on port 443.** A plugin source address cannot carry a
-  port, so Packer always connects to port 443 of the host it names.
+  port, so Packer always connects to port 443 of the host it names. The template
+  stanza dufflebag shows names the host without a port.
 - **Object storage.** Plugin files are stored in the deployment's object store.
   See [object storage](../components/object-storage.md).
 
