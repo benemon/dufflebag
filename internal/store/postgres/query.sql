@@ -1013,15 +1013,15 @@ UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
 RETURNING default_platforms;
 
 -- name: InsertPluginImport :exec
-INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
-VALUES ($1, $2, $3, $4, $5, $6);
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes)
+VALUES ($1, $2, $3, $4, $5, $6, $7);
 
 -- name: GetPluginImport :one
-SELECT id, source_kind, product, versions, platforms, state, outcomes, created_at, finished_at
+SELECT id, source_kind, product, versions, platforms, changes, state, outcomes, created_at, finished_at
 FROM plugin_imports WHERE organization_id = $1 AND id = $2;
 
 -- name: ClaimPluginImport :one
-SELECT id, source_kind, product, versions, platforms
+SELECT id, source_kind, product, versions, platforms, changes
 FROM plugin_imports
 WHERE organization_id = $1
   AND (state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => sqlc.arg(stale_seconds)::float8)))
@@ -1039,3 +1039,15 @@ WHERE id = $1;
 
 -- name: ListOrganizationIDs :many
 SELECT id FROM organizations ORDER BY id;
+
+-- name: GetStoredPluginVersion :one
+SELECT plugin_versions.id, plugin_versions.sums_key, plugin_versions.manifest_key, plugin_versions.protocol_version,
+    COALESCE(
+        array_agg(plugin_files.os || '_' || plugin_files.arch) FILTER (WHERE plugin_files.filename IS NOT NULL),
+        '{}'
+    )::text[] AS stored_platforms
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+LEFT JOIN plugin_files ON plugin_files.version_id = plugin_versions.id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+GROUP BY plugin_versions.id;

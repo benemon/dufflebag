@@ -13,12 +13,36 @@ import (
 	"github.com/google/uuid"
 )
 
-// PluginImportRequest is what an operator asked an import to mirror.
+// PluginImportRequest is what an operator asked an import to do: mirror
+// versions on the given platforms, or apply an ordered list of changes.
 type PluginImportRequest struct {
 	SourceKind string
 	Product    string
 	Versions   []string
 	Platforms  []string
+	Changes    []PluginChange
+}
+
+// PluginChange is one change a sync applies to one version.
+type PluginChange struct {
+	Version   string   `json:"version"`
+	Action    string   `json:"action"`
+	Platforms []string `json:"platforms,omitempty"`
+}
+
+func encodeChanges(changes []PluginChange) (json.RawMessage, error) {
+	if changes == nil {
+		changes = []PluginChange{}
+	}
+	return json.Marshal(changes)
+}
+
+func decodeChanges(raw json.RawMessage) ([]PluginChange, error) {
+	var changes []PluginChange
+	if err := json.Unmarshal(raw, &changes); err != nil {
+		return nil, fmt.Errorf("decode plugin import changes: %w", err)
+	}
+	return changes, nil
 }
 
 // PluginImport is a recorded import job.
@@ -53,9 +77,13 @@ func (r *Repository) CreatePluginImport(
 		return uuid.Nil, fmt.Errorf("get plugin registry: %w", err)
 	}
 	id := uuid.New()
+	changes, err := encodeChanges(request.Changes)
+	if err != nil {
+		return uuid.Nil, err
+	}
 	if err := q.InsertPluginImport(ctx, postgresdb.InsertPluginImportParams{
 		ID: id, OrganizationID: tenant.OrganizationID, SourceKind: request.SourceKind,
-		Product: request.Product, Versions: request.Versions, Platforms: request.Platforms,
+		Product: request.Product, Versions: nonNil(request.Versions), Platforms: nonNil(request.Platforms), Changes: changes,
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("insert plugin import: %w", err)
 	}
@@ -79,9 +107,13 @@ func (r *Repository) GetPluginImport(ctx context.Context, tenant OrganizationTen
 	if err != nil {
 		return PluginImport{}, fmt.Errorf("get plugin import: %w", err)
 	}
+	changes, err := decodeChanges(row.Changes)
+	if err != nil {
+		return PluginImport{}, err
+	}
 	job := PluginImport{
 		ID: row.ID, State: row.State, Outcomes: row.Outcomes, CreatedAt: row.CreatedAt,
-		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms},
+		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms, Changes: changes},
 	}
 	if row.FinishedAt.Valid {
 		job.FinishedAt = &row.FinishedAt.Time
@@ -131,9 +163,13 @@ func (r *Repository) claimPluginImportFor(
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("commit plugin import claim: %w", err)
 	}
+	changes, err := decodeChanges(row.Changes)
+	if err != nil {
+		return nil, err
+	}
 	return &ClaimedPluginImport{
 		Tenant: tenant, ID: row.ID,
-		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms},
+		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms, Changes: changes},
 	}, nil
 }
 
@@ -196,4 +232,11 @@ func (r *Repository) SetPluginRegistryDefaultPlatforms(
 		return nil, fmt.Errorf("commit default platforms: %w", err)
 	}
 	return stored, nil
+}
+
+func nonNil(values []string) []string {
+	if values == nil {
+		return []string{}
+	}
+	return values
 }

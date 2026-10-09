@@ -24,6 +24,26 @@ type fakeRepository struct {
 	existing  []string
 	published []store.PluginVersionInput
 	err       error
+	stored    store.StoredPluginVersion
+	added     []store.PluginZip
+	revoked   map[string]bool
+}
+
+func (f *fakeRepository) GetStoredPluginVersion(context.Context, store.OrganizationTenant, string, string) (store.StoredPluginVersion, error) {
+	return f.stored, nil
+}
+
+func (f *fakeRepository) AddPluginZips(_ context.Context, _ store.OrganizationTenant, _, _ string, zips []store.PluginZip) error {
+	f.added = append(f.added, zips...)
+	return nil
+}
+
+func (f *fakeRepository) SetPluginVersionRevoked(_ context.Context, _ store.OrganizationTenant, _, version string, revoked bool) error {
+	if f.revoked == nil {
+		f.revoked = map[string]bool{}
+	}
+	f.revoked[version] = revoked
+	return nil
 }
 
 func (f *fakeRepository) PublishPluginVersion(_ context.Context, _ store.OrganizationTenant, input store.PluginVersionInput) error {
@@ -42,7 +62,7 @@ func (f *fakeRepository) ListPluginVersions(context.Context, store.OrganizationT
 	for _, version := range f.existing {
 		versions = append(versions, store.PluginVersionSummary{Version: version})
 	}
-	return store.PluginSource{Kind: "releases-hashicorp"}, versions, nil
+	return store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-probe"}, versions, nil
 }
 
 // upstreamRelease stands in for releases.hashicorp.com with one goreleaser-
@@ -158,5 +178,58 @@ func TestImportVersionSkipsAMirroredVersionWithoutFetching(t *testing.T) {
 	outcome := importer.ImportVersion(context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0", []string{"linux_amd64"})
 	if outcome.Outcome != OutcomeAlreadyMirrored || requests != 0 {
 		t.Fatalf("outcome = %+v after %d upstream requests", outcome, requests)
+	}
+}
+
+// The stored SHA256SUMS is what the first import verified. Adding a platform
+// later must match it, not whatever the release publishes now.
+func TestSyncAddsAPlatformOnlyWhenTheStoredSumsListIt(t *testing.T) {
+	key := signer(t)
+	server := upstreamRelease(t, key, false)
+	first := &fakeRepository{}
+	upstream := NewUpstream(server.Client(), server.URL, server.URL)
+	if outcome := NewImporter(upstream, nil, openpgp.EntityList{key}, first).ImportVersion(
+		context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0", []string{"linux_amd64"},
+	); outcome.Outcome != OutcomeImported {
+		t.Fatalf("first import = %+v", outcome)
+	}
+	sums, _ := io.ReadAll(first.published[0].Sums.Body)
+	add := store.PluginChange{Version: "1.0.0", Action: "add", Platforms: []string{"linux_amd64"}}
+
+	repository := &fakeRepository{existing: []string{"1.0.0"}, stored: store.StoredPluginVersion{
+		Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-probe"}, Sums: sums,
+	}}
+	outcome := NewImporter(upstream, nil, nil, repository).Sync(context.Background(), store.OrganizationTenant{}, "probe", add)
+	if outcome.Outcome != OutcomeImported || len(repository.added) != 1 || repository.added[0].OS != "linux" || len(repository.published) != 0 {
+		t.Fatalf("add = %+v, added %d zips, published %d versions", outcome, len(repository.added), len(repository.published))
+	}
+
+	changed := &fakeRepository{existing: []string{"1.0.0"}, stored: store.StoredPluginVersion{
+		Source: repository.stored.Source, Sums: []byte(strings.Replace(string(sums), string(sums[:8]), "00000000", 1)),
+	}}
+	outcome = NewImporter(upstream, nil, nil, changed).Sync(context.Background(), store.OrganizationTenant{}, "probe", add)
+	if outcome.Outcome != OutcomeFailed || !strings.Contains(outcome.Error, "digest does not match SHA256SUMS") || len(changed.added) != 0 {
+		t.Fatalf("add against changed sums = %+v, added %d zips", outcome, len(changed.added))
+	}
+
+	held := &fakeRepository{existing: []string{"1.0.0"}, stored: store.StoredPluginVersion{Source: repository.stored.Source, Sums: sums, Stored: []string{"linux_amd64"}}}
+	if outcome := NewImporter(upstream, nil, nil, held).Sync(context.Background(), store.OrganizationTenant{}, "probe", add); outcome.Outcome != OutcomeAlreadyMirrored {
+		t.Fatalf("add of a stored platform = %+v", outcome)
+	}
+}
+
+func TestSyncRevokesAndRestores(t *testing.T) {
+	repository := &fakeRepository{existing: []string{"1.0.0", "1.1.0"}}
+	importer := NewImporter(nil, nil, nil, repository)
+	for _, change := range []struct{ version, action, want string }{
+		{"1.0.0", "revoke", OutcomeRevoked}, {"1.1.0", "restore", OutcomeRestored},
+	} {
+		outcome := importer.Sync(context.Background(), store.OrganizationTenant{}, "probe", store.PluginChange{Version: change.version, Action: change.action})
+		if outcome.Outcome != change.want {
+			t.Fatalf("%s %s = %+v", change.action, change.version, outcome)
+		}
+	}
+	if !repository.revoked["1.0.0"] || repository.revoked["1.1.0"] {
+		t.Fatalf("revoked = %v", repository.revoked)
 	}
 }

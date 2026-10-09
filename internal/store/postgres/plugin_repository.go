@@ -365,3 +365,103 @@ func (r *Repository) DeletePluginVersion(ctx context.Context, tenant Organizatio
 	r.deletePluginObjects(ctx, keys)
 	return nil
 }
+
+// StoredPluginVersion is what a version already holds: its verbatim
+// SHA256SUMS and manifest, the protocol extracted when it had no manifest,
+// and the platforms it has zips for.
+type StoredPluginVersion struct {
+	Source   PluginSource
+	Sums     []byte
+	Manifest []byte
+	Protocol string
+	Stored   []string
+}
+
+// GetStoredPluginVersion reads one version and its stored metadata files.
+func (r *Repository) GetStoredPluginVersion(
+	ctx context.Context, tenant OrganizationTenant, name, version string,
+) (StoredPluginVersion, error) {
+	objects, err := r.objectStore()
+	if err != nil {
+		return StoredPluginVersion{}, err
+	}
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return StoredPluginVersion{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	plugin, err := q.GetPlugin(ctx, postgresdb.GetPluginParams{OrganizationID: tenant.OrganizationID, Name: name})
+	if errors.Is(err, sql.ErrNoRows) {
+		return StoredPluginVersion{}, fmt.Errorf("%w: plugin %s", registry.ErrNotFound, name)
+	}
+	if err != nil {
+		return StoredPluginVersion{}, fmt.Errorf("get plugin: %w", err)
+	}
+	row, err := q.GetStoredPluginVersion(ctx, postgresdb.GetStoredPluginVersionParams{
+		OrganizationID: tenant.OrganizationID, Name: name, Version: version,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return StoredPluginVersion{}, fmt.Errorf("%w: plugin version %s %s", registry.ErrNotFound, name, version)
+	}
+	if err != nil {
+		return StoredPluginVersion{}, fmt.Errorf("get stored plugin version: %w", err)
+	}
+	sums, err := objects.Get(ctx, row.SumsKey)
+	if err != nil {
+		return StoredPluginVersion{}, fmt.Errorf("%w: %v", ErrObjectStorageUnavailable, err)
+	}
+	stored := StoredPluginVersion{
+		Source: sourceOf(plugin.SourceKind, plugin.SourceRepository), Sums: sums,
+		Protocol: row.ProtocolVersion.String, Stored: row.StoredPlatforms,
+	}
+	if row.ManifestKey.Valid {
+		if stored.Manifest, err = objects.Get(ctx, row.ManifestKey.String); err != nil {
+			return StoredPluginVersion{}, fmt.Errorf("%w: %v", ErrObjectStorageUnavailable, err)
+		}
+	}
+	return stored, nil
+}
+
+// AddPluginZips adds verified zips to an existing version (ADR-0027 A7).
+// Blobs land before rows, as for a new version.
+func (r *Repository) AddPluginZips(
+	ctx context.Context, tenant OrganizationTenant, name, version string, zips []PluginZip,
+) error {
+	objects, err := r.objectStore()
+	if err != nil {
+		return err
+	}
+	organizationID := tenant.OrganizationID.String()
+	for _, zip := range zips {
+		if _, err := zip.Body.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("rewind %s: %w", zip.Filename, err)
+		}
+		if err := objects.PutFile(ctx, objectstore.PluginKey(organizationID, name, version, zip.Filename, zip.SHA256), zip.Body, zip.Size); err != nil {
+			return fmt.Errorf("%w: %v", ErrObjectStorageUnavailable, err)
+		}
+	}
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	row, err := q.GetStoredPluginVersion(ctx, postgresdb.GetStoredPluginVersionParams{
+		OrganizationID: tenant.OrganizationID, Name: name, Version: version,
+	})
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: plugin version %s %s", registry.ErrNotFound, name, version)
+	}
+	if err != nil {
+		return fmt.Errorf("get stored plugin version: %w", err)
+	}
+	for _, zip := range zips {
+		if err := q.InsertPluginFile(ctx, postgresdb.InsertPluginFileParams{
+			OrganizationID: tenant.OrganizationID, VersionID: row.ID, Filename: zip.Filename,
+			Os: zip.OS, Arch: zip.Arch, Sha256: zip.SHA256, Size: zip.Size,
+			ObjectKey: objectstore.PluginKey(organizationID, name, version, zip.Filename, zip.SHA256),
+		}); err != nil {
+			return fmt.Errorf("insert plugin file %s: %w", zip.Filename, err)
+		}
+	}
+	return tx.Commit()
+}

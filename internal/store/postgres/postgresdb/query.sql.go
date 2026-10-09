@@ -27,7 +27,7 @@ func (q *Queries) BagDropBucketExists(ctx context.Context, name string) (bool, e
 }
 
 const claimPluginImport = `-- name: ClaimPluginImport :one
-SELECT id, source_kind, product, versions, platforms
+SELECT id, source_kind, product, versions, platforms, changes
 FROM plugin_imports
 WHERE organization_id = $1
   AND (state = 'queued' OR (state = 'running' AND claimed_at < now() - make_interval(secs => $2::float8)))
@@ -41,11 +41,12 @@ type ClaimPluginImportParams struct {
 }
 
 type ClaimPluginImportRow struct {
-	ID         uuid.UUID `json:"id"`
-	SourceKind string    `json:"source_kind"`
-	Product    string    `json:"product"`
-	Versions   []string  `json:"versions"`
-	Platforms  []string  `json:"platforms"`
+	ID         uuid.UUID       `json:"id"`
+	SourceKind string          `json:"source_kind"`
+	Product    string          `json:"product"`
+	Versions   []string        `json:"versions"`
+	Platforms  []string        `json:"platforms"`
+	Changes    json.RawMessage `json:"changes"`
 }
 
 func (q *Queries) ClaimPluginImport(ctx context.Context, arg ClaimPluginImportParams) (ClaimPluginImportRow, error) {
@@ -57,6 +58,7 @@ func (q *Queries) ClaimPluginImport(ctx context.Context, arg ClaimPluginImportPa
 		&i.Product,
 		pq.Array(&i.Versions),
 		pq.Array(&i.Platforms),
+		&i.Changes,
 	)
 	return i, err
 }
@@ -1231,7 +1233,7 @@ func (q *Queries) GetPlugin(ctx context.Context, arg GetPluginParams) (GetPlugin
 }
 
 const getPluginImport = `-- name: GetPluginImport :one
-SELECT id, source_kind, product, versions, platforms, state, outcomes, created_at, finished_at
+SELECT id, source_kind, product, versions, platforms, changes, state, outcomes, created_at, finished_at
 FROM plugin_imports WHERE organization_id = $1 AND id = $2
 `
 
@@ -1246,6 +1248,7 @@ type GetPluginImportRow struct {
 	Product    string          `json:"product"`
 	Versions   []string        `json:"versions"`
 	Platforms  []string        `json:"platforms"`
+	Changes    json.RawMessage `json:"changes"`
 	State      string          `json:"state"`
 	Outcomes   json.RawMessage `json:"outcomes"`
 	CreatedAt  time.Time       `json:"created_at"`
@@ -1261,6 +1264,7 @@ func (q *Queries) GetPluginImport(ctx context.Context, arg GetPluginImportParams
 		&i.Product,
 		pq.Array(&i.Versions),
 		pq.Array(&i.Platforms),
+		&i.Changes,
 		&i.State,
 		&i.Outcomes,
 		&i.CreatedAt,
@@ -1487,6 +1491,46 @@ func (q *Queries) GetServedPluginZip(ctx context.Context, arg GetServedPluginZip
 	row := q.db.QueryRowContext(ctx, getServedPluginZip, arg.VersionID, arg.Filename)
 	var i GetServedPluginZipRow
 	err := row.Scan(&i.ObjectKey, &i.Size)
+	return i, err
+}
+
+const getStoredPluginVersion = `-- name: GetStoredPluginVersion :one
+SELECT plugin_versions.id, plugin_versions.sums_key, plugin_versions.manifest_key, plugin_versions.protocol_version,
+    COALESCE(
+        array_agg(plugin_files.os || '_' || plugin_files.arch) FILTER (WHERE plugin_files.filename IS NOT NULL),
+        '{}'
+    )::text[] AS stored_platforms
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+LEFT JOIN plugin_files ON plugin_files.version_id = plugin_versions.id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+GROUP BY plugin_versions.id
+`
+
+type GetStoredPluginVersionParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+type GetStoredPluginVersionRow struct {
+	ID              uuid.UUID      `json:"id"`
+	SumsKey         string         `json:"sums_key"`
+	ManifestKey     sql.NullString `json:"manifest_key"`
+	ProtocolVersion sql.NullString `json:"protocol_version"`
+	StoredPlatforms []string       `json:"stored_platforms"`
+}
+
+func (q *Queries) GetStoredPluginVersion(ctx context.Context, arg GetStoredPluginVersionParams) (GetStoredPluginVersionRow, error) {
+	row := q.db.QueryRowContext(ctx, getStoredPluginVersion, arg.OrganizationID, arg.Name, arg.Version)
+	var i GetStoredPluginVersionRow
+	err := row.Scan(
+		&i.ID,
+		&i.SumsKey,
+		&i.ManifestKey,
+		&i.ProtocolVersion,
+		pq.Array(&i.StoredPlatforms),
+	)
 	return i, err
 }
 
@@ -1794,17 +1838,18 @@ func (q *Queries) InsertPluginFile(ctx context.Context, arg InsertPluginFilePara
 }
 
 const insertPluginImport = `-- name: InsertPluginImport :exec
-INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
-VALUES ($1, $2, $3, $4, $5, $6)
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes)
+VALUES ($1, $2, $3, $4, $5, $6, $7)
 `
 
 type InsertPluginImportParams struct {
-	ID             uuid.UUID `json:"id"`
-	OrganizationID uuid.UUID `json:"organization_id"`
-	SourceKind     string    `json:"source_kind"`
-	Product        string    `json:"product"`
-	Versions       []string  `json:"versions"`
-	Platforms      []string  `json:"platforms"`
+	ID             uuid.UUID       `json:"id"`
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	SourceKind     string          `json:"source_kind"`
+	Product        string          `json:"product"`
+	Versions       []string        `json:"versions"`
+	Platforms      []string        `json:"platforms"`
+	Changes        json.RawMessage `json:"changes"`
 }
 
 func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImportParams) error {
@@ -1815,6 +1860,7 @@ func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImport
 		arg.Product,
 		pq.Array(arg.Versions),
 		pq.Array(arg.Platforms),
+		arg.Changes,
 	)
 	return err
 }

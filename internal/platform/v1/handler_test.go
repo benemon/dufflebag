@@ -519,6 +519,7 @@ type fakeTenancyRepository struct {
 	publishPluginErr      error
 	plugins               []store.PluginSummary
 	pluginVersions        map[string][]store.PluginVersionSummary
+	pluginSource          store.PluginSource
 	imports               []store.PluginImport
 	defaultPlatforms      []string
 	listProjectsErr       error
@@ -744,6 +745,9 @@ func (r *fakeTenancyRepository) ListPluginVersions(
 	versions, ok := r.pluginVersions[name]
 	if !ok {
 		return store.PluginSource{}, nil, registry.ErrNotFound
+	}
+	if r.pluginSource.Kind != "" {
+		return r.pluginSource, versions, nil
 	}
 	return store.PluginSource{Kind: "upload"}, versions, nil
 }

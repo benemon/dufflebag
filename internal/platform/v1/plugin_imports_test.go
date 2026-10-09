@@ -1,11 +1,13 @@
 package v1
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -183,5 +185,119 @@ func TestResolveGithubRelease(t *testing.T) {
 	github["product"] = "packer-plugin-git"
 	if response := call(t, handler, http.MethodPost, pluginRegistryPath("imports"), github, testToken); response.Code != http.StatusBadRequest {
 		t.Fatalf("github import without an owner = %d, want 400", response.Code)
+	}
+}
+
+func TestSyncPluginQueuesOrderedChanges(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.pluginVersions = map[string][]store.PluginVersionSummary{"amazon": {{Version: "1.8.1"}, {Version: "1.8.2"}}}
+	repository.pluginSource = store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"}
+	handler, trail := auditedPlatform(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{}))
+	sync := pluginRegistryPath("plugins/amazon/sync")
+	changes := []map[string]any{
+		{"version": "1.8.2", "action": "add", "platforms": []string{"linux_arm64"}},
+		{"version": "1.8.1", "action": "revoke"},
+		{"version": "1.8.3", "action": "add", "platforms": []string{"linux_amd64"}},
+	}
+	response := call(t, handler, http.MethodPost, sync, map[string]any{"changes": changes}, testToken)
+	var job PluginImport
+	if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &job) != nil ||
+		job.Source != "releases-hashicorp" || job.Product != "amazon" || len(job.Changes) != 3 || job.Changes[1].Action != Revoke {
+		t.Fatalf("sync = %d %s", response.Code, response.Body.String())
+	}
+	if queued := repository.imports[len(repository.imports)-1].Request; len(queued.Versions) != 0 || queued.Changes[0].Platforms[0] != "linux_arm64" {
+		t.Fatalf("queued request = %+v", queued)
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.sync", "outcome": "success", "reason": "queued"})
+
+	for name, tc := range map[string]struct {
+		change map[string]any
+		text   string
+	}{
+		"platform removal":  {map[string]any{"version": "1.8.2", "action": "revoke", "platforms": []string{"linux_amd64"}}, "a mirrored platform cannot be removed"},
+		"revoke not stored": {map[string]any{"version": "9.9.9", "action": "revoke"}, "which is not stored"},
+		"add no platforms":  {map[string]any{"version": "1.8.2", "action": "add"}, "without 1 to 32 distinct OS_ARCH platforms"},
+		"unknown action":    {map[string]any{"version": "1.8.2", "action": "delete"}, "unknown action"},
+	} {
+		response := call(t, handler, http.MethodPost, sync, map[string]any{"changes": []map[string]any{tc.change}}, testToken)
+		if response.Code != http.StatusBadRequest || !strings.Contains(response.Body.String(), tc.text) {
+			t.Fatalf("%s = %d %s, want 400 containing %q", name, response.Code, response.Body.String(), tc.text)
+		}
+	}
+	twice := []map[string]any{{"version": "1.8.2", "action": "revoke"}, {"version": "1.8.2", "action": "restore"}}
+	if response := call(t, handler, http.MethodPost, sync, map[string]any{"changes": twice}, testToken); response.Code != http.StatusBadRequest {
+		t.Fatalf("one version changed twice = %d", response.Code)
+	}
+
+	repository.pluginSource = store.PluginSource{Kind: "github", Repository: "ethanmdavidson/packer-plugin-amazon"}
+	newVersion := []map[string]any{{"version": "1.8.3", "action": "add", "platforms": []string{"linux_amd64"}}}
+	if response := call(t, handler, http.MethodPost, sync, map[string]any{"changes": newVersion}, testToken); response.Code != http.StatusBadRequest ||
+		!strings.Contains(response.Body.String(), "only releases.hashicorp.com plugins take new versions by sync") {
+		t.Fatalf("new GitHub version by sync = %d %s", response.Code, response.Body.String())
+	}
+	if response := call(t, handler, http.MethodPost, pluginRegistryPath("plugins/nope/sync"), map[string]any{"changes": twice}, testToken); response.Code != http.StatusNotFound {
+		t.Fatalf("unknown plugin = %d", response.Code)
+	}
+	builder := importHandler(identity.RoleBuilder, repository, fakeCatalogue{})
+	if response := call(t, builder, http.MethodPost, sync, map[string]any{"changes": twice[:1]}, testToken); response.Code != http.StatusForbidden {
+		t.Fatalf("builder sync = %d, want 403", response.Code)
+	}
+}
+
+const pluginSyncJobFixture = "../../../web/tests/fixtures/plugin-sync-job.json"
+
+// The console's sync job view is tested against this handler's response for
+// a finished sync, written as a fixture (DUFFLEBAG_UPDATE_FIXTURES=1).
+func TestPluginSyncJobFixtureMatchesTheHandler(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.pluginVersions = map[string][]store.PluginVersionSummary{"amazon": {{Version: "1.8.1", Revoked: true}, {Version: "1.8.2"}}}
+	repository.pluginSource = store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"}
+	handler := importHandler(identity.RolePublisher, repository, fakeCatalogue{})
+	changes := []map[string]any{
+		{"version": "1.8.3", "action": "add", "platforms": []string{"linux_amd64", "windows_386"}},
+		{"version": "1.8.2", "action": "add", "platforms": []string{"linux_arm64"}},
+		{"version": "1.8.1", "action": "restore"},
+	}
+	if response := call(t, handler, http.MethodPost, pluginRegistryPath("plugins/amazon/sync"), map[string]any{"changes": changes}, testToken); response.Code != http.StatusAccepted {
+		t.Fatalf("sync = %d %s", response.Code, response.Body.String())
+	}
+	outcomes, err := json.Marshal([]pluginimport.VersionOutcome{
+		{Version: "1.8.3", Outcome: pluginimport.OutcomeImported, Platforms: []pluginimport.PlatformOutcome{
+			{Platform: "linux_amd64", Outcome: pluginimport.OutcomeImported},
+			{Platform: "windows_386", Outcome: pluginimport.OutcomeFailed, Error: "not published upstream"},
+		}},
+		{Version: "1.8.2", Outcome: pluginimport.OutcomeFailed, Error: "packer-plugin-amazon_1.8.2_linux_arm64.zip: digest does not match SHA256SUMS"},
+		{Version: "1.8.1", Outcome: pluginimport.OutcomeRestored},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := &repository.imports[len(repository.imports)-1]
+	job.State, job.Outcomes, job.FinishedAt = pluginimport.StatePartiallySucceeded, outcomes, &initTestTime
+	response := call(t, handler, http.MethodGet, pluginRegistryPath("imports/"+job.ID.String()), nil, testToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("read = %d %s", response.Code, response.Body.String())
+	}
+	var rendered map[string]any
+	if err := json.Unmarshal(response.Body.Bytes(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	rendered["id"] = "00000000-0000-0000-0000-000000000000"
+	pretty, err := json.MarshalIndent(rendered, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pretty = append(pretty, '\n')
+	if os.Getenv("DUFFLEBAG_UPDATE_FIXTURES") != "" {
+		if err := os.WriteFile(pluginSyncJobFixture, pretty, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture, err := os.ReadFile(pluginSyncJobFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fixture, pretty) {
+		t.Fatalf("web fixture drifted from the handler's response; regenerate with DUFFLEBAG_UPDATE_FIXTURES=1:\n%s", pretty)
 	}
 }

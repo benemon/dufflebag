@@ -66,6 +66,8 @@ const stateLabel = {
 const outcomeLabel = {
   imported: <Label isCompact color="green">Imported</Label>,
   already_mirrored: <Label isCompact color="grey">Already mirrored</Label>,
+  revoked: <Label isCompact color="orange">Revoked</Label>,
+  restored: <Label isCompact color="green">Restored</Label>,
   failed: <Label isCompact color="red">Failed</Label>,
 }
 
@@ -80,34 +82,43 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
   const name = job?.product.replace(/^.*packer-plugin-/, '') ?? ''
   const imported = job?.outcomes.filter((o) => o.outcome === 'imported').map((o) => o.version) ?? []
   const newest = imported.at(-1)
+  const sync = Boolean(job?.changes.length)
+  const rows = sync
+    ? job?.changes.map((c) => ({ version: c.version, detail: c.action === 'add' ? `add ${c.platforms?.join(', ')}` : c.action })) ?? []
+    : job?.versions.map((version) => ({ version, detail: '' })) ?? []
   return (
     <>
       <ScreenHeader
-        title={job ? `Import ${name}` : 'Import'}
-        description={job ? <>{stateLabel[job.state]} from {job.source === 'github' ? `GitHub (${job.product})` : 'releases.hashicorp.com'}</> : undefined}
+        title={job ? `${sync ? 'Sync' : 'Import'} ${name}` : 'Import'}
+        description={job ? (
+          <>{stateLabel[job.state]} {sync ? `${rows.length} ${rows.length === 1 ? 'change' : 'changes'}, applied in order`
+            : `from ${job.source === 'github' ? `GitHub (${job.product})` : 'releases.hashicorp.com'}`}</>
+        ) : undefined}
       />
       <PageSection variant="secondary" isFilled>
         {failure ? <Alert variant="danger" isInline title="The import could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         {!job && !failure ? <Spinner aria-label="Loading import…" /> : null}
         {job ? (
           <>
-            <Content component="p">Platforms: {job.platforms.join(', ')}</Content>
+            {sync ? null : <Content component="p">Platforms: {job.platforms.join(', ')}</Content>}
             <Table aria-label="Import outcomes" variant="compact">
-              <Thead><Tr><Th>Version</Th><Th>Outcome</Th><Th>Detail</Th></Tr></Thead>
+              <Thead><Tr><Th>Version</Th>{sync ? <Th>Change</Th> : null}<Th>Outcome</Th><Th>Detail</Th></Tr></Thead>
               <Tbody>
-                {job.versions.map((version, index) => {
+                {rows.map(({ version, detail }, index) => {
                   // Outcomes are recorded in request order; a GitHub job requests tags, its outcomes name versions.
                   const outcome = job.outcomes[index]
                   return (
                     <Fragment key={version}>
                       <Tr>
                         <Td dataLabel="Version">{version}</Td>
+                        {sync ? <Td dataLabel="Change">{detail}</Td> : null}
                         <Td dataLabel="Outcome">{outcome ? outcomeLabel[outcome.outcome] : <Label isCompact color="grey">Pending</Label>}</Td>
                         <Td dataLabel="Detail">{outcome?.error ?? ''}</Td>
                       </Tr>
                       {outcome?.platforms?.filter((p) => p.outcome === 'failed').map((platform) => (
                         <Tr key={`${version}-${platform.platform}`}>
                           <Td dataLabel="Version" />
+                          {sync ? <Td dataLabel="Change" /> : null}
                           <Td dataLabel="Outcome"><Label isCompact color="red">{platform.platform} failed</Label></Td>
                           <Td dataLabel="Detail">{platform.error ?? ''}</Td>
                         </Tr>
@@ -117,7 +128,7 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
                 })}
               </Tbody>
             </Table>
-            {imported.length ? <Button variant="link" isInline onClick={() => onOpen(name)}>Open {name}</Button> : null}
+            {imported.length || (sync && terminalImportStates.has(job.state)) ? <Button variant="link" isInline onClick={() => onOpen(name)}>Open {name}</Button> : null}
             {newest ? (
               <>
                 <Title headingLevel="h2" size="md">Template stanza</Title>
