@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Button, Checkbox, ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content, Label,
-  List, ListItem, PageSection, Spinner, Title,
+  List, ListItem, PageSection, Spinner, Switch, Title,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -11,9 +11,9 @@ import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions, listPluginVersions, pluginChanges, sourceLabel,
-  syncPlugin, templateStanza, type HashicorpPluginVersion, type PluginChange, type PluginEdit, type PluginRegistry,
-  type PluginVersions,
+  deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions, listPluginVersions, listPlugins, pluginChanges,
+  setPluginUpdateCheck, sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange,
+  type PluginEdit, type PluginRegistry, type PluginVersions,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 import { PluginRegistryConfirmation, pluginRegistryErrorMessage } from './Plugins'
@@ -27,6 +27,7 @@ export function PluginDetail() {
   const token = state?.token ?? ''
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [detail, setDetail] = useState<PluginVersions | null>(null)
+  const [summary, setSummary] = useState<Plugin | null>(null)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
@@ -38,11 +39,12 @@ export function PluginDetail() {
     if (!organizationID || token === '') return
     setLoading(true)
     try {
-      const [nextRegistry, nextDetail] = await Promise.all([
-        getPluginRegistry(token, organizationID), listPluginVersions(token, organizationID, name),
+      const [nextRegistry, nextDetail, plugins] = await Promise.all([
+        getPluginRegistry(token, organizationID), listPluginVersions(token, organizationID, name), listPlugins(token, organizationID),
       ])
       setRegistry(nextRegistry)
       setDetail(nextDetail)
+      setSummary(plugins.find((plugin) => plugin.name === name) ?? null)
       setFailure(null)
     } catch (error: unknown) {
       if (signOutIfUnauthorized(error, signOut)) return
@@ -52,11 +54,11 @@ export function PluginDetail() {
     }
   }, [name, organizationID, signOut, token])
 
-  const act = (work: (version: string) => Promise<void>, removesPlugin = false) => async (version: string) => {
+  const act = <T,>(work: (argument: T) => Promise<void>, removesPlugin = false) => async (argument: T) => {
     setBusy(true)
     setActionFailure(null)
     try {
-      await work(version)
+      await work(argument)
       if (removesPlugin) {
         navigate('/plugin-registry')
         return
@@ -79,7 +81,8 @@ export function PluginDetail() {
       loading={loading} failure={failure} onRefresh={reload}
       onUpload={() => navigate('/plugin-registry/upload')}
       busy={busy} actionFailure={actionFailure}
-      editing={editing} upstream={upstream}
+      editing={editing} upstream={upstream} summary={summary}
+      onToggleUpdates={act((enabled: boolean) => setPluginUpdateCheck(token, organizationID ?? '', name, enabled))}
       onEdit={() => void (async () => {
         setActionFailure(null)
         setUpstream([])
@@ -108,7 +111,7 @@ export function PluginDetail() {
         }
       })()}
       onRemove={act(
-        (version) => deletePluginVersion(token, organizationID ?? '', name, version),
+        (version: string) => deletePluginVersion(token, organizationID ?? '', name, version),
         detail?.versions.length === 1,
       )}
     />
@@ -117,7 +120,7 @@ export function PluginDetail() {
 
 export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, loading, failure, onRefresh, onUpload,
-  busy, actionFailure, editing, upstream, onEdit, onCancelEdit, onSync, onRemove,
+  busy, actionFailure, editing, upstream, summary, onToggleUpdates, onEdit, onCancelEdit, onSync, onRemove,
 }: {
   name: string
   organizationName: string
@@ -133,6 +136,8 @@ export function PluginDetailView({
   actionFailure: string | null
   editing: boolean
   upstream: HashicorpPluginVersion[]
+  summary: Plugin | null
+  onToggleUpdates: (enabled: boolean) => void
   onEdit: () => void
   onCancelEdit: () => void
   onSync: (changes: PluginChange[]) => void
@@ -168,7 +173,12 @@ export function PluginDetailView({
     <>
       <ScreenHeader
         title={name}
-        description={detail ? <Label isCompact>{sourceLabel(detail.source)}</Label> : undefined}
+        description={detail ? (
+          <>
+            <Label isCompact>{sourceLabel(detail.source)}</Label>{' '}
+            {summary?.update_available ? <Label isCompact color="blue">Update available · {summary.update_check.latest}</Label> : null}
+          </>
+        ) : undefined}
         actions={canPublish && detail && !editing ? (
           <>
             {detail.source.kind === 'upload' ? <><Button variant="secondary" onClick={onUpload}>Upload version</Button>{' '}</> : null}
@@ -181,6 +191,7 @@ export function PluginDetailView({
         {actionFailure ? <Alert variant="danger" isInline title="The action failed"><Content component="p">{actionFailure}</Content></Alert> : null}
         {failure ? <Alert variant="danger" isInline title="The plugin could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         {loading && !detail ? <><Spinner aria-label="Loading plugin…" /><Content component="p">Loading plugin…</Content></> : null}
+        {detail && summary && imported ? <UpdateCheck summary={summary} canPublish={canPublish} busy={busy} onToggle={onToggleUpdates} /> : null}
         {detail ? (
           <>
             {newest ? (
@@ -305,6 +316,33 @@ export function PluginDetailView({
           />
         ) : null}
       </PageSection>
+    </>
+  )
+}
+
+function UpdateCheck({ summary, canPublish, busy, onToggle }: {
+  summary: Plugin
+  canPublish: boolean
+  busy: boolean
+  onToggle: (enabled: boolean) => void
+}) {
+  const check = summary.update_check
+  return (
+    <>
+      {canPublish ? (
+        <Switch
+          id="update-check" label="Check for updates" isChecked={check.enabled} isDisabled={busy}
+          onChange={(_event, enabled) => onToggle(enabled)}
+        />
+      ) : <Content component="p">Update checks are {check.enabled ? 'on' : 'off'}.</Content>}
+      {check.enabled ? (
+        <Content component="small">
+          {check.checked_at ? `Last checked ${new Date(check.checked_at).toLocaleString()}` : 'Not checked yet'}
+          {check.latest ? `; newest stable release seen: ${check.latest}` : ''}.
+          {check.error ? ` The last check failed: ${check.error}` : ''}
+          {' '}A check only looks; nothing is imported until you sync.
+        </Content>
+      ) : null}
     </>
   )
 }

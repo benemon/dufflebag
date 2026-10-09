@@ -130,7 +130,16 @@ SELECT
     COALESCE(
         array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL AND NOT plugin_versions.revoked),
         '{}'
-    )::text[] AS published_versions
+    )::text[] AS published_versions,
+    COALESCE(
+        array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL),
+        '{}'
+    )::text[] AS stored_versions,
+    plugins.update_check,
+    plugins.update_checked_at,
+    plugins.update_error,
+    plugins.update_latest,
+    plugins.update_latest_tag
 FROM plugins
 LEFT JOIN plugin_versions ON plugin_versions.plugin_id = plugins.id
 WHERE plugins.organization_id = $1
@@ -1051,3 +1060,26 @@ JOIN plugins ON plugins.id = plugin_versions.plugin_id
 LEFT JOIN plugin_files ON plugin_files.version_id = plugin_versions.id
 WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
 GROUP BY plugin_versions.id;
+
+-- name: SetPluginUpdateCheck :one
+UPDATE plugins SET update_check = $3
+WHERE organization_id = $1 AND name = $2
+RETURNING source_kind;
+
+-- name: ClaimPluginUpdateCheck :one
+UPDATE plugins SET update_checked_at = now()
+WHERE id = (
+    SELECT candidate.id FROM plugins AS candidate
+    WHERE candidate.organization_id = $1
+      AND candidate.update_check
+      AND (sqlc.arg(include_github)::boolean OR candidate.source_kind <> 'github')
+      AND (candidate.update_checked_at IS NULL
+           OR candidate.update_checked_at < now() - make_interval(secs => sqlc.arg(interval_seconds)::float8))
+    ORDER BY candidate.update_checked_at NULLS FIRST
+    FOR UPDATE SKIP LOCKED LIMIT 1
+)
+RETURNING id, name, source_kind, source_repository;
+
+-- name: RecordPluginUpdateCheck :exec
+UPDATE plugins SET update_error = $2, update_latest = COALESCE($3, update_latest), update_latest_tag = COALESCE($4, update_latest_tag)
+WHERE id = $1;

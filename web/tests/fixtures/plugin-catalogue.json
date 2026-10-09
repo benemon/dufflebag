@@ -1,0 +1,60 @@
+{
+  "plugins": [
+    {
+      "name": "amazon",
+      "newest_version": "1.8.2",
+      "published_versions": 1,
+      "source": {
+        "kind": "releases-hashicorp",
+        "repository": "packer-plugin-amazon"
+      },
+      "update_available": true,
+      "update_check": {
+        "checked_at": "2026-07-30T10:00:00Z",
+        "enabled": true,
+        "latest": "1.8.3"
+      }
+    },
+    {
+      "name": "docker",
+      "newest_version": "1.1.4",
+      "published_versions": 1,
+      "source": {
+        "kind": "releases-hashicorp",
+        "repository": "packer-plugin-docker"
+      },
+      "update_available": false,
+      "update_check": {
+        "checked_at": "2026-07-30T10:00:00Z",
+        "enabled": true,
+        "error": "releases.hashicorp.com could not be reached",
+        "latest": "1.1.4"
+      }
+    },
+    {
+      "name": "git",
+      "newest_version": "0.6.3",
+      "published_versions": 1,
+      "source": {
+        "kind": "github",
+        "repository": "ethanmdavidson/packer-plugin-git"
+      },
+      "update_available": false,
+      "update_check": {
+        "enabled": false
+      }
+    },
+    {
+      "name": "probe",
+      "newest_version": "1.0.0",
+      "published_versions": 1,
+      "source": {
+        "kind": "upload"
+      },
+      "update_available": false,
+      "update_check": {
+        "enabled": false
+      }
+    }
+  ]
+}

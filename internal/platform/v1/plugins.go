@@ -84,6 +84,7 @@ func (s *server) ListPlugins(
 		if newest := plugin.Newest(summary.PublishedVersions); newest != "" {
 			rendered.NewestVersion = &newest
 		}
+		rendered.UpdateCheck, rendered.UpdateAvailable = renderUpdateCheck(summary)
 		response.Plugins = append(response.Plugins, rendered)
 	}
 	return response, nil

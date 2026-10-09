@@ -30,6 +30,8 @@ let PluginImportJobView
 let PluginGithubView
 let pluginChanges
 let syncPlugin
+let syncCatalogue
+let setPluginUpdateCheck
 let createGithubImport
 let createPluginImport
 
@@ -52,7 +54,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -67,6 +69,7 @@ const props = (over = {}) => ({
   organizationName: 'acme', callerRole: 'maintainer', host: 'dufflebag.example.com',
   registry: { enabled: false, exposed: false }, plugins: [], loading: false, failure: null,
   onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {}, onImportGithub: () => {},
+  onOpenImport: () => {}, onSyncSelected: async () => [],
   defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], onSetDefaultPlatforms: async () => {},
   onRefresh: async () => {}, onEnable: async () => {}, onExpose: async () => {},
   onUnexpose: async () => {}, onDisable: async () => {}, ...over,
@@ -546,4 +549,60 @@ test('a GitHub import sends the repository and the pinned tag', async () => {
     globalThis.fetch = originalFetch
   }
   assert.deepEqual(body, { source: 'github', product: 'ethanmdavidson/packer-plugin-git', versions: ['v0.6.3'], platforms: ['linux_amd64'] })
+})
+
+// Written by the platform handler (TestPluginCatalogueFixtureMatchesTheHandler).
+const catalogue = JSON.parse(readFileSync(new URL('./fixtures/plugin-catalogue.json', import.meta.url), 'utf8')).plugins
+
+test('the catalogue marks plugins with an update and offers only those for sync', () => {
+  const html = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue })
+  assert.match(html, /Update available · 1\.8\.3/)
+  assert.equal((html.match(/Update available/g) ?? []).length, 1, 'a failed check or a current plugin shows no pill')
+  const box = (name) => html.match(new RegExp(`<input[^>]*aria-label="Select ${name} to sync"[^>]*>`))[0]
+  assert.doesNotMatch(box('amazon'), /disabled/)
+  for (const name of ['docker', 'git', 'probe']) assert.match(box(name), /disabled/, `${name} has no update to sync`)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync selected \(0\)/)
+  const reader = render({ registry: { enabled: true, exposed: true }, callerRole: 'reader', plugins: catalogue })
+  assert.match(reader, /Update available · 1\.8\.3/)
+  assert.doesNotMatch(reader, /Sync selected/)
+})
+
+test('plugin detail shows update checking quietly, with the last failure but no alert', () => {
+  const view = (name, callerRole) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name, organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+    summary: catalogue.find((plugin) => plugin.name === name), onToggleUpdates: () => {},
+    detail: { name, source: catalogue.find((plugin) => plugin.name === name).source, versions: [] },
+  }))
+  const docker = view('docker', 'publisher')
+  assert.match(docker, /Check for updates/)
+  assert.match(docker, /The last check failed: releases\.hashicorp\.com could not be reached/)
+  assert.doesNotMatch(docker, /pf-m-danger|pf-m-warning/, 'a failed check is a quiet state, not an alert')
+  assert.match(view('amazon', 'reader'), /Update checks are on/)
+  assert.match(view('amazon', 'reader'), /Update available · 1\.8\.3/)
+  assert.doesNotMatch(view('probe', 'publisher'), /Check for updates/, 'an upload has no upstream')
+})
+
+test('update checks and catalogue sync use their paths', async () => {
+  const originalFetch = globalThis.fetch
+  const sent = []
+  globalThis.fetch = async (path, options) => {
+    sent.push({ path, method: options.method, body: JSON.parse(options.body) })
+    return path.endsWith('/sync')
+      ? new Response(JSON.stringify({ results: [{ plugin: 'amazon', version: '1.8.3', import_id: 'job' }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+      : new Response(null, { status: 204 })
+  }
+  let results
+  try {
+    await setPluginUpdateCheck('token', 'org', 'amazon', true)
+    results = await syncCatalogue('token', 'org', ['amazon'])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(sent, [
+    { path: '/api/v1/organizations/org/plugin-registry/plugins/amazon/update-check', method: 'PUT', body: { enabled: true } },
+    { path: '/api/v1/organizations/org/plugin-registry/sync', method: 'POST', body: { plugins: ['amazon'] } },
+  ])
+  assert.equal(results[0].import_id, 'job')
 })

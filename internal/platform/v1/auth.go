@@ -430,6 +430,14 @@ func (response refusalResponse) VisitResolveGithubReleaseResponse(w http.Respons
 func (response refusalResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+
+func (response refusalResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

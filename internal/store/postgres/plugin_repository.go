@@ -60,6 +60,18 @@ type PluginSummary struct {
 	Name              string
 	Source            PluginSource
 	PublishedVersions []string
+	StoredVersions    []string
+	Update            PluginUpdateCheck
+}
+
+// PluginUpdateCheck is a plugin's update-check setting and its last result
+// (ADR-0027 A6). Latest is the newest stable upstream version seen.
+type PluginUpdateCheck struct {
+	Enabled   bool
+	CheckedAt *time.Time
+	Error     string
+	Latest    string
+	LatestTag string
 }
 
 // PluginVersionSummary is one version with the platforms its sums list and
@@ -229,10 +241,18 @@ func (r *Repository) ListPlugins(ctx context.Context, tenant OrganizationTenant)
 	}
 	plugins := make([]PluginSummary, 0, len(rows))
 	for _, row := range rows {
-		plugins = append(plugins, PluginSummary{
+		summary := PluginSummary{
 			Name: row.Name, Source: sourceOf(row.SourceKind, row.SourceRepository),
-			PublishedVersions: row.PublishedVersions,
-		})
+			PublishedVersions: row.PublishedVersions, StoredVersions: row.StoredVersions,
+			Update: PluginUpdateCheck{
+				Enabled: row.UpdateCheck, Error: row.UpdateError.String,
+				Latest: row.UpdateLatest.String, LatestTag: row.UpdateLatestTag.String,
+			},
+		}
+		if row.UpdateCheckedAt.Valid {
+			summary.Update.CheckedAt = &row.UpdateCheckedAt.Time
+		}
+		plugins = append(plugins, summary)
 	}
 	return plugins, nil
 }

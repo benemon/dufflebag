@@ -63,6 +63,46 @@ func (q *Queries) ClaimPluginImport(ctx context.Context, arg ClaimPluginImportPa
 	return i, err
 }
 
+const claimPluginUpdateCheck = `-- name: ClaimPluginUpdateCheck :one
+UPDATE plugins SET update_checked_at = now()
+WHERE id = (
+    SELECT candidate.id FROM plugins AS candidate
+    WHERE candidate.organization_id = $1
+      AND candidate.update_check
+      AND ($2::boolean OR candidate.source_kind <> 'github')
+      AND (candidate.update_checked_at IS NULL
+           OR candidate.update_checked_at < now() - make_interval(secs => $3::float8))
+    ORDER BY candidate.update_checked_at NULLS FIRST
+    FOR UPDATE SKIP LOCKED LIMIT 1
+)
+RETURNING id, name, source_kind, source_repository
+`
+
+type ClaimPluginUpdateCheckParams struct {
+	OrganizationID  uuid.UUID `json:"organization_id"`
+	IncludeGithub   bool      `json:"include_github"`
+	IntervalSeconds float64   `json:"interval_seconds"`
+}
+
+type ClaimPluginUpdateCheckRow struct {
+	ID               uuid.UUID      `json:"id"`
+	Name             string         `json:"name"`
+	SourceKind       string         `json:"source_kind"`
+	SourceRepository sql.NullString `json:"source_repository"`
+}
+
+func (q *Queries) ClaimPluginUpdateCheck(ctx context.Context, arg ClaimPluginUpdateCheckParams) (ClaimPluginUpdateCheckRow, error) {
+	row := q.db.QueryRowContext(ctx, claimPluginUpdateCheck, arg.OrganizationID, arg.IncludeGithub, arg.IntervalSeconds)
+	var i ClaimPluginUpdateCheckRow
+	err := row.Scan(
+		&i.ID,
+		&i.Name,
+		&i.SourceKind,
+		&i.SourceRepository,
+	)
+	return i, err
+}
+
 const completeVersion = `-- name: CompleteVersion :one
 UPDATE versions
 SET complete = true, sequence = $2, updated_at = $3
@@ -2487,7 +2527,16 @@ SELECT
     COALESCE(
         array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL AND NOT plugin_versions.revoked),
         '{}'
-    )::text[] AS published_versions
+    )::text[] AS published_versions,
+    COALESCE(
+        array_agg(plugin_versions.version) FILTER (WHERE plugin_versions.id IS NOT NULL),
+        '{}'
+    )::text[] AS stored_versions,
+    plugins.update_check,
+    plugins.update_checked_at,
+    plugins.update_error,
+    plugins.update_latest,
+    plugins.update_latest_tag
 FROM plugins
 LEFT JOIN plugin_versions ON plugin_versions.plugin_id = plugins.id
 WHERE plugins.organization_id = $1
@@ -2500,6 +2549,12 @@ type ListPluginsRow struct {
 	SourceKind        string         `json:"source_kind"`
 	SourceRepository  sql.NullString `json:"source_repository"`
 	PublishedVersions []string       `json:"published_versions"`
+	StoredVersions    []string       `json:"stored_versions"`
+	UpdateCheck       bool           `json:"update_check"`
+	UpdateCheckedAt   sql.NullTime   `json:"update_checked_at"`
+	UpdateError       sql.NullString `json:"update_error"`
+	UpdateLatest      sql.NullString `json:"update_latest"`
+	UpdateLatestTag   sql.NullString `json:"update_latest_tag"`
 }
 
 func (q *Queries) ListPlugins(ctx context.Context, organizationID uuid.UUID) ([]ListPluginsRow, error) {
@@ -2516,6 +2571,12 @@ func (q *Queries) ListPlugins(ctx context.Context, organizationID uuid.UUID) ([]
 			&i.SourceKind,
 			&i.SourceRepository,
 			pq.Array(&i.PublishedVersions),
+			pq.Array(&i.StoredVersions),
+			&i.UpdateCheck,
+			&i.UpdateCheckedAt,
+			&i.UpdateError,
+			&i.UpdateLatest,
+			&i.UpdateLatestTag,
 		); err != nil {
 			return nil, err
 		}
@@ -3396,6 +3457,28 @@ func (q *Queries) RecordPluginImport(ctx context.Context, arg RecordPluginImport
 	return err
 }
 
+const recordPluginUpdateCheck = `-- name: RecordPluginUpdateCheck :exec
+UPDATE plugins SET update_error = $2, update_latest = COALESCE($3, update_latest), update_latest_tag = COALESCE($4, update_latest_tag)
+WHERE id = $1
+`
+
+type RecordPluginUpdateCheckParams struct {
+	ID              uuid.UUID      `json:"id"`
+	UpdateError     sql.NullString `json:"update_error"`
+	UpdateLatest    sql.NullString `json:"update_latest"`
+	UpdateLatestTag sql.NullString `json:"update_latest_tag"`
+}
+
+func (q *Queries) RecordPluginUpdateCheck(ctx context.Context, arg RecordPluginUpdateCheckParams) error {
+	_, err := q.db.ExecContext(ctx, recordPluginUpdateCheck,
+		arg.ID,
+		arg.UpdateError,
+		arg.UpdateLatest,
+		arg.UpdateLatestTag,
+	)
+	return err
+}
+
 const recordWebhookDeliveryAttempt = `-- name: RecordWebhookDeliveryAttempt :one
 UPDATE webhook_deliveries
 SET status = $2, attempt_count = $3,
@@ -3702,6 +3785,25 @@ func (q *Queries) SetPluginRegistryDefaultPlatforms(ctx context.Context, arg Set
 	var default_platforms []string
 	err := row.Scan(pq.Array(&default_platforms))
 	return default_platforms, err
+}
+
+const setPluginUpdateCheck = `-- name: SetPluginUpdateCheck :one
+UPDATE plugins SET update_check = $3
+WHERE organization_id = $1 AND name = $2
+RETURNING source_kind
+`
+
+type SetPluginUpdateCheckParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	UpdateCheck    bool      `json:"update_check"`
+}
+
+func (q *Queries) SetPluginUpdateCheck(ctx context.Context, arg SetPluginUpdateCheckParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, setPluginUpdateCheck, arg.OrganizationID, arg.Name, arg.UpdateCheck)
+	var source_kind string
+	err := row.Scan(&source_kind)
+	return source_kind, err
 }
 
 const setPluginVersionRevoked = `-- name: SetPluginVersionRevoked :one

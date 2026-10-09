@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, EmptyState,
-  EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, Modal, ModalBody, ModalFooter,
+  ActionGroup, Alert, AlertActionCloseButton, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState,
+  EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, List, ListItem, Modal, ModalBody, ModalFooter,
   ModalHeader, PageSection, SearchInput, Spinner, TextInput, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -14,7 +14,8 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginRegistry,
-  listPlugins, setDefaultPlatforms, sourceLabel, unexposePluginRegistry, type Plugin, type PluginRegistry,
+  listPlugins, setDefaultPlatforms, sourceLabel, syncCatalogue, unexposePluginRegistry, type CatalogueSyncResult, type Plugin,
+  type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 
@@ -68,6 +69,12 @@ export function Plugins() {
       onUpload={() => navigate('/plugin-registry/upload')}
       onBrowse={() => navigate('/plugin-registry/hashicorp')}
       onImportGithub={() => navigate('/plugin-registry/github')}
+      onOpenImport={(id) => navigate(`/plugin-registry/imports/${id}`)}
+      onSyncSelected={async (names) => {
+        const results = await syncCatalogue(token, organizationID, names)
+        await reload()
+        return results
+      }}
       defaultPlatforms={defaultPlatforms}
       onSetDefaultPlatforms={async (platforms) => {
         setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
@@ -110,6 +117,8 @@ type PluginRegistryViewProps = {
   onUpload: () => void
   onBrowse: () => void
   onImportGithub: () => void
+  onOpenImport: (id: string) => void
+  onSyncSelected: (names: string[]) => Promise<CatalogueSyncResult[]>
   defaultPlatforms: string[]
   onSetDefaultPlatforms: (platforms: string[]) => Promise<void>
   loading: boolean
@@ -188,7 +197,7 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 
 function EnabledRegistry({
   organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload, onBrowse, onImportGithub,
-  defaultPlatforms, onSetDefaultPlatforms, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
+  onOpenImport, onSyncSelected, defaultPlatforms, onSetDefaultPlatforms, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
 }: PluginRegistryViewProps & {
   canConfigure: boolean
   busy: boolean
@@ -216,6 +225,7 @@ function EnabledRegistry({
         organizationName={organizationName} host={host} plugins={plugins}
         canPublish={permitsAction(callerRole, 'publishPlugin')}
         onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse} onImportGithub={onImportGithub}
+        onOpenImport={onOpenImport} onSyncSelected={onSyncSelected}
       />
       {canConfigure ? (
         <Card aria-label="Registry settings">
@@ -340,7 +350,7 @@ export function PluginRegistryConfirmationView({
 }
 
 export function PluginCatalogue({
-  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload, onBrowse, onImportGithub,
+  organizationName, host, plugins, canPublish, onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onSyncSelected,
 }: {
   organizationName: string
   host: string
@@ -350,8 +360,26 @@ export function PluginCatalogue({
   onUpload: () => void
   onBrowse: () => void
   onImportGithub: () => void
+  onOpenImport: (id: string) => void
+  onSyncSelected: (names: string[]) => Promise<CatalogueSyncResult[]>
 }) {
   const [filter, setFilter] = useState('')
+  const [selected, setSelected] = useState<string[]>([])
+  const [results, setResults] = useState<CatalogueSyncResult[] | null>(null)
+  const [syncing, setSyncing] = useState(false)
+  const [syncFailure, setSyncFailure] = useState<string | null>(null)
+  const sync = async () => {
+    setSyncing(true)
+    setSyncFailure(null)
+    try {
+      setResults(await onSyncSelected(selected))
+      setSelected([])
+    } catch (error: unknown) {
+      setSyncFailure(pluginRegistryErrorMessage(error, 'The sync could not be queued.'))
+    } finally {
+      setSyncing(false)
+    }
+  }
   const upload = canPublish ? (
     <>
       <Button variant="primary" onClick={onBrowse}>Browse HashiCorp</Button>{' '}
@@ -385,21 +413,57 @@ export function PluginCatalogue({
             />
           </ToolbarItem>
           {upload ? <ToolbarItem>{upload}</ToolbarItem> : null}
+          {canPublish ? (
+            <ToolbarItem>
+              <Button variant="secondary" isLoading={syncing} isDisabled={syncing || selected.length === 0} onClick={() => void sync()}>
+                Sync selected ({selected.length})
+              </Button>
+            </ToolbarItem>
+          ) : null}
         </ToolbarContent>
       </Toolbar>
+      {syncFailure ? <Alert variant="danger" isInline title="The sync could not be queued"><Content component="p">{syncFailure}</Content></Alert> : null}
+      {results ? (
+        <Alert variant="info" isInline title="Sync queued" actionClose={<AlertActionCloseButton onClose={() => setResults(null)} />}>
+          <List aria-label="Sync results">
+            {results.map((result) => (
+              <ListItem key={result.plugin}>
+                {result.import_id ? (
+                  <>{result.plugin} {result.version}: <Button variant="link" isInline onClick={() => onOpenImport(result.import_id ?? '')}>view import</Button></>
+                ) : <>{result.plugin}: {result.refused}</>}
+              </ListItem>
+            ))}
+          </List>
+        </Alert>
+      ) : null}
       <Table aria-label="Plugins" variant="compact">
         <Thead>
-          <Tr><Th>Name</Th><Th>Source</Th><Th>Newest mirrored</Th><Th>Versions</Th></Tr>
+          <Tr>
+            {canPublish ? <Th screenReaderText="Select" /> : null}
+            <Th>Name</Th><Th>Source</Th><Th>Newest mirrored</Th><Th>Versions</Th>
+          </Tr>
         </Thead>
         <Tbody>
           {shown.map((plugin) => (
             <Tr key={plugin.name}>
+              {canPublish ? (
+                <Td dataLabel="Select">
+                  <Checkbox
+                    id={`select-${plugin.name}`} aria-label={`Select ${plugin.name} to sync`}
+                    isDisabled={!plugin.update_available} isChecked={selected.includes(plugin.name)}
+                    onChange={(_e, checked) => setSelected(checked ? [...selected, plugin.name] : selected.filter((n) => n !== plugin.name))}
+                  />
+                </Td>
+              ) : null}
               <Td dataLabel="Name">
                 <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>
                 <Content component="small"> {organizationName}/{plugin.name}</Content>
               </Td>
               <Td dataLabel="Source"><Label isCompact>{sourceLabel(plugin.source)}</Label></Td>
-              <Td dataLabel="Newest mirrored">{plugin.newest_version ?? 'None available'}</Td>
+              <Td dataLabel="Newest mirrored">
+                {plugin.newest_version ?? 'None available'}
+                {plugin.update_available ? <> <Label isCompact color="blue">Update available · {plugin.update_check.latest}</Label></> : null}
+              </Td>
               <Td dataLabel="Versions">{plugin.published_versions}</Td>
             </Tr>
           ))}

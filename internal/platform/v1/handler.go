@@ -41,6 +41,7 @@ type PlatformRepository interface {
 	ListPlugins(context.Context, store.OrganizationTenant) ([]store.PluginSummary, error)
 	ListPluginVersions(context.Context, store.OrganizationTenant, string) (store.PluginSource, []store.PluginVersionSummary, error)
 	SetPluginVersionRevoked(context.Context, store.OrganizationTenant, string, string, bool) error
+	SetPluginUpdateCheck(context.Context, store.OrganizationTenant, string, bool) error
 	DeletePluginVersion(context.Context, store.OrganizationTenant, string, string) error
 	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest) (uuid.UUID, error)
 	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
@@ -623,6 +624,16 @@ func (response badRequestResponse) VisitResolveGithubReleaseResponse(w http.Resp
 }
 
 func (response badRequestResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
 	writeError(w, http.StatusBadRequest, Error{Message: response.message})
 	return nil
 }

@@ -266,6 +266,11 @@ func main() {
 	if objects != nil {
 		go pluginimport.NewWorker(repository, pluginimport.NewImporter(pluginUpstream, pluginGitHub, pluginKeyring, repository), 5*time.Second, logger).Run(importCtx)
 	}
+	pluginUpdateInterval, err := scannerDuration("DFBG_PLUGIN_UPDATE_INTERVAL", 24*time.Hour)
+	if err != nil {
+		log.Fatal(err)
+	}
+	go pluginimport.NewChecker(repository, pluginUpstream, pluginGitHub, pluginUpdateInterval, logger).Run(importCtx)
 
 	// One process, two surfaces. In HCP these are separate hosts — auth at
 	// HCP_AUTH_URL, the registry at HCP_API_ADDRESS — and keeping them on

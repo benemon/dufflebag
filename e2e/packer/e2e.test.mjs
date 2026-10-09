@@ -792,6 +792,21 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     assert.equal(createHash('sha256').update(servedZip.bytes).digest('hex'), addedDigest)
     process.stdout.write(`ASSERT synced ${added} into the mirrored amazon 1.8.2; the read plane serves ${addedZip} matching the stored SHA256SUMS\n`)
 
+    // Live update check: the checker asks releases.hashicorp.com for amazon's
+    // newest stable release within a minute of the check being turned on.
+    await api(rootToken, 'PUT', `${registryPath}/plugins/amazon/update-check`, { enabled: true })
+    let amazonEntry
+    await until('the amazon update check to run', async () => {
+      amazonEntry = (await api(rootToken, 'GET', `${registryPath}/plugins`)).plugins.find((p) => p.name === 'amazon')
+      return Boolean(amazonEntry?.update_check.checked_at)
+    }, 3 * 60 * 1000, 2000)
+    assert.equal(amazonEntry.update_check.error, undefined, `amazon update check failed: ${amazonEntry.update_check.error}`)
+    const [latestMajor, latestMinor, latestPatch] = amazonEntry.update_check.latest.split('.').map(Number)
+    assert.ok(latestMajor > 1 || (latestMajor === 1 && (latestMinor > 8 || (latestMinor === 8 && latestPatch >= 2))),
+      `latest ${amazonEntry.update_check.latest} is older than the mirrored 1.8.2`)
+    assert.equal(amazonEntry.update_available, amazonEntry.update_check.latest !== '1.8.2')
+    process.stdout.write(`ASSERT checked releases.hashicorp.com for amazon updates: newest stable ${amazonEntry.update_check.latest}, update_available=${amazonEntry.update_available}\n`)
+
     // A real GitHub import: a public community release, resolved from its link.
     const resolved = await api(rootToken, 'POST', `${registryPath}/catalogue/github/resolve`, {
       release_url: 'https://github.com/rgl/packer-plugin-windows-update/releases/tag/v0.16.10',

@@ -933,6 +933,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText("Packer can't resolve this template stanza until the registry is exposed.")
     await clickByText('button', 'Open probe')
     await waitForText('Pinned to the newest available version, 1.1.0.')
+    assert.doesNotMatch(await bodyText(), /Check for updates/, 'an uploaded plugin has no upstream to check')
     assert.equal(await page.$eval('td[data-label="linux_amd64"]', (cell) => cell.innerText.trim()), '●')
     assert.equal(await page.$eval('td[data-label="darwin_arm64"]', (cell) => cell.innerText.trim()), '○')
     // Revoke and restore are sync changes made in the detail grid's edit mode.
@@ -954,6 +955,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Pinned to the newest available version, 1.1.0.')
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
+    assert.equal(await buttonDisabled('Sync selected (0)'), true)
     await clickByText('button', 'probe')
     await clickByText('button', 'Remove version')
     await waitForText('Remove probe 1.1.0?')

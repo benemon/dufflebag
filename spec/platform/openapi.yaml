@@ -1011,6 +1011,77 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+    put:
+      tags: [plugin-registry]
+      operationId: setPluginUpdateCheck
+      summary: Turn a plugin's update check on or off
+      description: Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                enabled: { type: boolean }
+              required: [enabled]
+      responses:
+        "204": { description: Set. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The plugin was uploaded, so it has no upstream to check.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/sync:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: syncCatalogue
+      summary: Bring selected plugins up to their newest stable release
+      description: |
+        Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+        release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+        update is refused on its own and does not stop the rest. Requires `publisher`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                plugins: { type: array, minItems: 1, maxItems: 100, items: { type: string } }
+              required: [plugins]
+      responses:
+        "200":
+          description: Each plugin's result, in request order.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  results:
+                    type: array
+                    items: { $ref: "#/components/schemas/CatalogueSyncResult" }
+                required: [results]
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The plugin registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -2697,7 +2768,23 @@ components:
         source: { $ref: "#/components/schemas/PluginSource" }
         published_versions: { type: integer, minimum: 0 }
         newest_version: { type: string, description: The newest version that is not revoked. Absent when there is none. }
-      required: [name, source, published_versions]
+        update_check: { $ref: "#/components/schemas/PluginUpdateCheck" }
+        update_available:
+          type: boolean
+          description: The newest stable upstream release seen is newer than every stored version, revoked ones included.
+      required: [name, source, published_versions, update_check, update_available]
+
+    PluginUpdateCheck:
+      type: object
+      description: |
+        Opt-in update checking for an imported plugin (ADR-0027 A6). A check asks the plugin's source for its
+        newest stable release; it never imports. A failed check is recorded quietly and keeps the last version seen.
+      properties:
+        enabled: { type: boolean }
+        checked_at: { type: string, format: date-time }
+        error: { type: string, description: Why the last check failed. Absent after a successful check. }
+        latest: { type: string, description: The newest stable upstream version seen. }
+      required: [enabled]
 
     PluginPlatform:
       type: object
@@ -2788,6 +2875,15 @@ components:
           items: { type: string }
         platforms: { type: array, minItems: 1, items: { type: string } }
       required: [source, product, versions, platforms]
+
+    CatalogueSyncResult:
+      type: object
+      properties:
+        plugin: { type: string }
+        version: { type: string, description: The version the queued job imports. }
+        import_id: { type: string, format: uuid, description: The queued job. Absent when refused. }
+        refused: { type: string, description: Why no job was queued. }
+      required: [plugin]
 
     PluginChange:
       type: object

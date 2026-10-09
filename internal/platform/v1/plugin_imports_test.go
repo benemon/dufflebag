@@ -301,3 +301,118 @@ func TestPluginSyncJobFixtureMatchesTheHandler(t *testing.T) {
 		t.Fatalf("web fixture drifted from the handler's response; regenerate with DUFFLEBAG_UPDATE_FIXTURES=1:\n%s", pretty)
 	}
 }
+
+func TestPluginUpdateChecksAndCatalogueSync(t *testing.T) {
+	checked := initTestTime
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.plugins = []store.PluginSummary{
+		{Name: "amazon", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"},
+			PublishedVersions: []string{"1.8.1"}, StoredVersions: []string{"1.8.1", "1.8.2"},
+			Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked, Latest: "1.8.3", LatestTag: "1.8.3"}},
+		{Name: "git", Source: store.PluginSource{Kind: "github", Repository: "ethanmdavidson/packer-plugin-git"},
+			StoredVersions: []string{"0.6.3"}, Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked, Latest: "0.6.4", LatestTag: "v0.6.4"}},
+		{Name: "docker", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-docker"},
+			StoredVersions: []string{"1.1.4"}, Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked, Latest: "1.1.4", Error: "releases.hashicorp.com could not be reached"}},
+		{Name: "probe", Source: store.PluginSource{Kind: "upload"}, StoredVersions: []string{"1.0.0"}},
+	}
+	repository.pluginVersions = map[string][]store.PluginVersionSummary{
+		"amazon": {{Version: "1.8.2", Stored: []string{"linux_amd64"}}, {Version: "1.8.1", Stored: []string{"darwin_arm64", "linux_amd64"}}},
+		"git":    {{Version: "0.6.3", Stored: []string{"linux_arm64"}}},
+	}
+	handler, trail := auditedPlatform(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{}))
+
+	listed := call(t, handler, http.MethodGet, pluginRegistryPath("plugins"), nil, testToken)
+	var body struct{ Plugins []Plugin }
+	if listed.Code != http.StatusOK || json.Unmarshal(listed.Body.Bytes(), &body) != nil || len(body.Plugins) != 4 {
+		t.Fatalf("list = %d %s", listed.Code, listed.Body.String())
+	}
+	for _, rendered := range body.Plugins {
+		want := map[string]bool{"amazon": true, "git": true}[rendered.Name]
+		if rendered.UpdateAvailable != want {
+			t.Fatalf("%s update_available = %v, want %v", rendered.Name, rendered.UpdateAvailable, want)
+		}
+	}
+	if docker := body.Plugins[2]; docker.UpdateCheck.Error == nil || *docker.UpdateCheck.Latest != "1.1.4" {
+		t.Fatalf("docker's quiet failure = %+v", docker.UpdateCheck)
+	}
+
+	response := call(t, handler, http.MethodPost, pluginRegistryPath("sync"), map[string]any{"plugins": []string{"amazon", "probe", "git", "nope"}}, testToken)
+	var synced struct{ Results []CatalogueSyncResult }
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &synced) != nil || len(synced.Results) != 4 {
+		t.Fatalf("catalogue sync = %d %s", response.Code, response.Body.String())
+	}
+	if synced.Results[0].ImportId == nil || *synced.Results[0].Version != "1.8.3" ||
+		*synced.Results[1].Refused != "no update available" || synced.Results[2].ImportId == nil || *synced.Results[3].Refused != "no such plugin" {
+		t.Fatalf("results = %s", response.Body.String())
+	}
+	amazon, git := repository.imports[0].Request, repository.imports[1].Request
+	if len(repository.imports) != 2 || amazon.SourceKind != "releases-hashicorp" || amazon.Product != "packer-plugin-amazon" ||
+		amazon.Versions[0] != "1.8.3" || strings.Join(amazon.Platforms, ",") != "darwin_arm64,linux_amd64" {
+		t.Fatalf("amazon job = %+v", amazon)
+	}
+	if git.SourceKind != "github" || git.Product != "ethanmdavidson/packer-plugin-git" || git.Versions[0] != "v0.6.4" || git.Platforms[0] != "linux_arm64" {
+		t.Fatalf("git job = %+v, want the pinned tag", git)
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.catalogue.sync", "outcome": "success", "reason": "queued 2 of 4"})
+
+	set := pluginRegistryPath("plugins/probe/update-check")
+	if response := call(t, handler, http.MethodPut, set, map[string]any{"enabled": true}, testToken); response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "no upstream") {
+		t.Fatalf("update check on an upload = %d %s", response.Code, response.Body.String())
+	}
+	if response := call(t, handler, http.MethodPut, pluginRegistryPath("plugins/amazon/update-check"), map[string]any{"enabled": false}, testToken); response.Code != http.StatusNoContent || repository.plugins[0].Update.Enabled {
+		t.Fatalf("turn off = %d", response.Code)
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.update_check.set", "outcome": "success", "reason": "disabled"})
+	builder := importHandler(identity.RoleBuilder, repository, fakeCatalogue{})
+	for path, method := range map[string]string{pluginRegistryPath("sync"): http.MethodPost, pluginRegistryPath("plugins/amazon/update-check"): http.MethodPut} {
+		if response := call(t, builder, method, path, map[string]any{"plugins": []string{"git"}, "enabled": true}, testToken); response.Code != http.StatusForbidden {
+			t.Fatalf("builder %s %s = %d, want 403", method, path, response.Code)
+		}
+	}
+}
+
+const pluginCatalogueFixture = "../../../web/tests/fixtures/plugin-catalogue.json"
+
+// The console's catalogue is tested against this handler's response, written
+// as a fixture (DUFFLEBAG_UPDATE_FIXTURES=1).
+func TestPluginCatalogueFixtureMatchesTheHandler(t *testing.T) {
+	checked := initTestTime
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true, Exposed: true})
+	repository.plugins = []store.PluginSummary{
+		{Name: "amazon", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"},
+			PublishedVersions: []string{"1.8.2"}, StoredVersions: []string{"1.8.2"},
+			Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked, Latest: "1.8.3", LatestTag: "1.8.3"}},
+		{Name: "docker", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-docker"},
+			PublishedVersions: []string{"1.1.4"}, StoredVersions: []string{"1.1.4"},
+			Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked, Latest: "1.1.4", Error: "releases.hashicorp.com could not be reached"}},
+		{Name: "git", Source: store.PluginSource{Kind: "github", Repository: "ethanmdavidson/packer-plugin-git"},
+			PublishedVersions: []string{"0.6.3"}, StoredVersions: []string{"0.6.3"}},
+		{Name: "probe", Source: store.PluginSource{Kind: "upload"}, PublishedVersions: []string{"1.0.0"}, StoredVersions: []string{"1.0.0"}},
+	}
+	response := call(t, importHandler(identity.RoleReader, repository, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("plugins"), nil, testToken)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list = %d %s", response.Code, response.Body.String())
+	}
+	var rendered any
+	if err := json.Unmarshal(response.Body.Bytes(), &rendered); err != nil {
+		t.Fatal(err)
+	}
+	pretty, err := json.MarshalIndent(rendered, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pretty = append(pretty, '\n')
+	if os.Getenv("DUFFLEBAG_UPDATE_FIXTURES") != "" {
+		if err := os.WriteFile(pluginCatalogueFixture, pretty, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fixture, err := os.ReadFile(pluginCatalogueFixture)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(fixture, pretty) {
+		t.Fatalf("web fixture drifted from the handler's response; regenerate with DUFFLEBAG_UPDATE_FIXTURES=1:\n%s", pretty)
+	}
+}

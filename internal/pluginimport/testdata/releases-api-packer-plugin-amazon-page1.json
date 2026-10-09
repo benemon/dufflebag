@@ -1,0 +1,1446 @@
+[
+ {
+  "version": "1.8.3",
+  "timestamp_created": "2026-10-07T08:42:46.823Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.8.2",
+  "timestamp_created": "2026-07-13T07:40:44.765Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.8.1",
+  "timestamp_created": "2026-05-25T08:32:39.100Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.8.0",
+  "timestamp_created": "2025-11-19T11:53:14.204Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.7.1",
+  "timestamp_created": "2025-11-13T10:11:57.983Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.7.0",
+  "timestamp_created": "2025-11-11T15:34:54.456Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.6.0",
+  "timestamp_created": "2025-10-21T11:09:06.226Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.0",
+  "timestamp_created": "2025-10-15T20:18:27.271Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   }
+  ]
+ },
+ {
+  "version": "0.0.1",
+  "timestamp_created": "2025-10-15T20:18:27.256Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.1",
+  "timestamp_created": "2025-10-15T20:18:22.723Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   }
+  ]
+ },
+ {
+  "version": "1.0.2",
+  "timestamp_created": "2025-10-15T20:18:20.764Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.3",
+  "timestamp_created": "2025-10-15T20:18:13.133Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.4",
+  "timestamp_created": "2025-10-15T20:18:11.465Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.6",
+  "timestamp_created": "2025-10-15T20:18:02.772Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.5",
+  "timestamp_created": "2025-10-15T20:16:56.422Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.7",
+  "timestamp_created": "2025-10-15T20:16:12.033Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.9",
+  "timestamp_created": "2025-10-15T20:16:10.918Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.0.8",
+  "timestamp_created": "2025-10-15T20:16:08.965Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.1.1",
+  "timestamp_created": "2025-10-15T20:16:07.296Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "386"
+   },
+   {
+    "os": "netbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "netbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "openbsd",
+    "arch": "386"
+   },
+   {
+    "os": "openbsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "openbsd",
+    "arch": "arm"
+   },
+   {
+    "os": "solaris",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ },
+ {
+  "version": "1.1.0",
+  "timestamp_created": "2025-10-15T20:16:05.199Z",
+  "is_prerelease": false,
+  "status": {
+   "state": "supported"
+  },
+  "builds": [
+   {
+    "os": "darwin",
+    "arch": "amd64"
+   },
+   {
+    "os": "darwin",
+    "arch": "arm64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "386"
+   },
+   {
+    "os": "freebsd",
+    "arch": "amd64"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm"
+   },
+   {
+    "os": "freebsd",
+    "arch": "arm64"
+   },
+   {
+    "os": "linux",
+    "arch": "386"
+   },
+   {
+    "os": "linux",
+    "arch": "amd64"
+   },
+   {
+    "os": "linux",
+    "arch": "arm"
+   },
+   {
+    "os": "linux",
+    "arch": "arm64"
+   },
+   {
+    "os": "windows",
+    "arch": "386"
+   },
+   {
+    "os": "windows",
+    "arch": "amd64"
+   },
+   {
+    "os": "windows",
+    "arch": "arm"
+   },
+   {
+    "os": "windows",
+    "arch": "arm64"
+   }
+  ]
+ }
+]
