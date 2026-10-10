@@ -127,12 +127,15 @@ Releases from releases.hashicorp.com list a manifest;
 [goreleaser](https://goreleaser.com/customization/checksum/) releases on GitHub
 do not.
 
-In the console, open **Plugins**, choose **Upload plugin files**, and select the
-files for one version or several. The console groups them into one upload per
-plugin version, shows each version's files and platforms before anything is
-sent, and refuses a version with no SHA256SUMS file or no zip. Each version is
-then uploaded separately and shows its own result, so one refusal does not stop
-the others. The API takes one version's files as one multipart request:
+In the console, open **Plugins**, choose **Upload plugin files**, and drop or
+select the files for one version or several. The console groups them into one
+upload per plugin version and, before anything is sent, shows each version as
+new or already mirrored and each file as new, a new architecture, or already
+mirrored; a version with no SHA256SUMS file or no zip, and any file that is
+not a release file, is listed under **Not sent**. A name held by another
+source refuses the whole upload. Each version is then uploaded separately and
+shows its own result, so one refusal does not stop the others. The API takes
+one version's files as one multipart request:
 
 ```shell
 curl -X PUT "https://dufflebag.example.com/api/v1/organizations/$ORG_ID/plugin-registry/plugins/git/versions/0.6.3" \
