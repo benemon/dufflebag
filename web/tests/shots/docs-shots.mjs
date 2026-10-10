@@ -8,7 +8,7 @@
 
 import assert from 'node:assert/strict'
 import { execFile as execFileCb, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { existsSync, mkdirSync } from 'node:fs'
 import http from 'node:http'
 import net from 'node:net'
@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { zstdCompressSync } from 'node:zlib'
+import { crc32, zstdCompressSync } from 'node:zlib'
 
 import puppeteer from 'puppeteer-core'
 
@@ -440,6 +440,45 @@ async function completeVersion(token, versionsPath, fixture) {
   return build
 }
 
+// A stored (uncompressed) zip holding one file, shaped like a goreleaser
+// plugin release: the binary inside carries the protocol in its name.
+function storedZip(entryName, content) {
+  const name = Buffer.from(entryName)
+  const data = Buffer.from(content)
+  const sum = crc32(data)
+  const local = Buffer.alloc(30)
+  local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4)
+  local.writeUInt32LE(sum, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22)
+  local.writeUInt16LE(name.length, 26)
+  const central = Buffer.alloc(46)
+  central.writeUInt32LE(0x02014b50, 0); central.writeUInt16LE(20, 4); central.writeUInt16LE(20, 6)
+  central.writeUInt32LE(sum, 16); central.writeUInt32LE(data.length, 20); central.writeUInt32LE(data.length, 24)
+  central.writeUInt16LE(name.length, 28)
+  const end = Buffer.alloc(22)
+  const centralOffset = local.length + name.length + data.length
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(1, 8); end.writeUInt16LE(1, 10)
+  end.writeUInt32LE(central.length + name.length, 12); end.writeUInt32LE(centralOffset, 16)
+  return Buffer.concat([local, name, data, central, name, end])
+}
+
+// Uploads one plugin version as its release files: the SHA256SUMS lists a
+// darwin_arm64 zip that is not uploaded, so the detail grid shows a listed
+// platform beside a held one.
+async function uploadPluginVersion(token, organizationID, name, version) {
+  const zipName = `packer-plugin-${name}_v${version}_x5.0_linux_amd64.zip`
+  const zip = storedZip(`packer-plugin-${name}_v${version}_x5.0_linux_amd64`, `binary ${version}`)
+  const digest = createHash('sha256').update(zip).digest('hex')
+  const sums = `${digest}  ${zipName}\n${'0'.repeat(64)}  packer-plugin-${name}_v${version}_x5.0_darwin_arm64.zip\n`
+  const form = new FormData()
+  form.append('sha256sums', new Blob([sums]), `packer-plugin-${name}_v${version}_SHA256SUMS`)
+  form.append('zips', new Blob([zip], { type: 'application/zip' }), zipName)
+  const response = await fetch(
+    `${base}/api/v1/organizations/${organizationID}/plugin-registry/plugins/${name}/versions/${version}`,
+    { method: 'PUT', headers: { Authorization: `Bearer ${token}` }, body: form },
+  )
+  assert.ok(response.ok, `upload ${name} ${version} answered ${response.status}: ${await response.text()}`)
+}
+
 async function seedFixtures(credentials) {
   const rootToken = await tokenFor(credentials.clientID, credentials.clientSecret)
   const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
@@ -803,6 +842,13 @@ async function seedFixtures(credentials) {
     },
   )
 
+  // The plugin registry: enabled and exposed, holding two uploaded versions
+  // of a plugin built in-house.
+  await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/enable`)
+  await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/expose`)
+  await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.0.0')
+  await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.1.0')
+
   return {
     ubuntuBuildID: ubuntuBuild.id,
     postgresBuildID: postgresBuild.id,
@@ -914,6 +960,28 @@ async function captureSeededScreens(seeded) {
       return card.getBoundingClientRect().height > 0
     }))
   await capture('version-consume-untagged.png')
+  await page.goto(`${base}/plugin-registry`, { waitUntil: 'domcontentloaded' })
+  await waitForText('netbox')
+  await waitForText('The registry is exposed')
+  await capture('plugin-registry.png')
+
+  // Edit mode on the detail grid with one pending change: 1.0.0 unticked.
+  await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Pinned to the newest available version, 1.1.0.')
+  await clickByText('button', 'Edit versions')
+  await page.click('input[aria-label="Serve 1.0.0"]')
+  await waitForText('Packer stops installing it; its files are kept.')
+  await capture('plugin-detail-edit.png')
+
+  // Sync applies it as a job; the job page shows the outcome.
+  await clickByText('button', 'Sync 1 change')
+  await waitForText('Sync netbox')
+  await until('the sync to finish', async () => {
+    const text = await page.evaluate(() => document.body.innerText)
+    return text.includes('Succeeded') && text.includes('Revoked')
+  }, 60000)
+  await capture('plugin-import-job.png')
+
 
   // The 2s-cadence scanner should have findings for the seeded vulnerable
   // go module by now; wait on the API before photographing the build.
@@ -954,6 +1022,7 @@ async function captureSeededScreens(seeded) {
   await page.goto(`${base}/webhooks`, { waitUntil: 'domcontentloaded' })
   await waitForText('ci-notifications')
   await capture('webhooks.png')
+
 
   await page.goto(`${base}/instance`, { waitUntil: 'domcontentloaded' })
   await waitForText('HCP_API_ADDRESS')
