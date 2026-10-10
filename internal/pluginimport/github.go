@@ -46,14 +46,16 @@ func NewGitHub(client *http.Client, base string) *GitHub {
 
 // GitHubRelease is a release resolved to an exact tag.
 type GitHubRelease struct {
-	Repository  string
-	Name        string
-	Tag         string
-	Version     string
-	Prerelease  bool
-	Platforms   []string
-	HasChecksum bool
-	assets      map[string]string
+	Repository    string
+	Name          string
+	Tag           string
+	Version       string
+	Prerelease    bool
+	PublishedAt   time.Time
+	Platforms     []string
+	HasChecksum   bool
+	ChecksumAsset string
+	assets        map[string]string
 }
 
 // Resolve reads the release a link names. A /releases/latest link is
@@ -104,9 +106,10 @@ func (g *GitHub) release(ctx context.Context, repository, which string) (GitHubR
 		return GitHubRelease{}, fmt.Errorf("%w: GitHub answered %d", ErrUpstreamUnavailable, response.StatusCode)
 	}
 	var body struct {
-		Tag        string `json:"tag_name"`
-		Prerelease bool   `json:"prerelease"`
-		Assets     []struct {
+		Tag         string    `json:"tag_name"`
+		Prerelease  bool      `json:"prerelease"`
+		PublishedAt time.Time `json:"published_at"`
+		Assets      []struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
 		} `json:"assets"`
@@ -117,13 +120,13 @@ func (g *GitHub) release(ctx context.Context, repository, which string) (GitHubR
 	_, product, _ := strings.Cut(repository, "/")
 	release := GitHubRelease{
 		Repository: repository, Name: strings.TrimPrefix(product, "packer-plugin-"),
-		Tag: body.Tag, Version: strings.TrimPrefix(body.Tag, "v"), Prerelease: body.Prerelease,
+		Tag: body.Tag, Version: strings.TrimPrefix(body.Tag, "v"), Prerelease: body.Prerelease, PublishedAt: body.PublishedAt,
 		assets: map[string]string{},
 	}
 	for _, asset := range body.Assets {
 		release.assets[asset.Name] = asset.URL
 		if strings.HasSuffix(asset.Name, "_SHA256SUMS") {
-			release.HasChecksum = true
+			release.HasChecksum, release.ChecksumAsset = true, asset.Name
 		}
 		if m := zipPlatform.FindStringSubmatch(asset.Name); m != nil {
 			release.Platforms = append(release.Platforms, m[1]+"_"+m[2])

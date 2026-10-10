@@ -3013,8 +3013,10 @@ components:
         tag: { type: string }
         version: { type: string }
         prerelease: { type: boolean }
+        published_at: { type: string, format: date-time, description: When GitHub published the release; absent for a draft. }
         platforms: { type: array, items: { type: string } }
         has_checksum: { type: boolean, description: A release without a SHA256SUMS asset cannot be imported. }
+        checksum_asset: { type: string, description: The SHA256SUMS asset's name, when the release has one. }
         held_by: { $ref: "#/components/schemas/PluginSource" }
       required: [repository, name, tag, version, prerelease, platforms, has_checksum]
 

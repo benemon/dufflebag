@@ -153,12 +153,17 @@ func TestPluginImportRoleAxis(t *testing.T) {
 func TestResolveGithubRelease(t *testing.T) {
 	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
 	repository.plugins = []store.PluginSummary{{Name: "git", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-git"}}}
-	release := pluginimport.GitHubRelease{Repository: "ethanmdavidson/packer-plugin-git", Name: "git", Tag: "v0.6.3", Version: "0.6.3", Platforms: []string{"linux_amd64"}, HasChecksum: true}
+	release := pluginimport.GitHubRelease{
+		Repository: "ethanmdavidson/packer-plugin-git", Name: "git", Tag: "v0.6.3", Version: "0.6.3", Platforms: []string{"linux_amd64"},
+		HasChecksum: true, ChecksumAsset: "packer-plugin-git_v0.6.3_SHA256SUMS", PublishedAt: initTestTime,
+	}
 	path := pluginRegistryPath("catalogue/github/resolve")
 	link := map[string]any{"release_url": "https://github.com/ethanmdavidson/packer-plugin-git/releases/latest"}
 
 	response := call(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{release: release}), http.MethodPost, path, link, testToken)
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"tag":"v0.6.3"`) ||
+		!strings.Contains(response.Body.String(), `"checksum_asset":"packer-plugin-git_v0.6.3_SHA256SUMS"`) ||
+		!strings.Contains(response.Body.String(), `"published_at":"2026-07-30T10:00:00Z"`) ||
 		!strings.Contains(response.Body.String(), `"held_by":{"kind":"releases-hashicorp","repository":"packer-plugin-git"}`) {
 		t.Fatalf("resolve = %d %s", response.Code, response.Body.String())
 	}

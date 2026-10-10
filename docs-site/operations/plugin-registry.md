@@ -92,10 +92,19 @@ asset.
 
 1. Open **Plugins** and choose **Import from GitHub**.
 2. Paste a release link, `https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag>`
-   or `.../releases/latest`, and choose **Resolve**. dufflebag shows the plugin,
-   version, tag and platforms it found. A `latest` link is resolved to its tag
-   now, and the import uses that tag even if a newer release appears.
-3. Choose platforms and **Import**. The import's page shows the outcome.
+   or `.../releases/latest`, and choose **Resolve**. dufflebag shows what it
+   inferred: the repository, the plugin name, the version and tag, the
+   release date, the checksum file, and whether the name is new, already
+   mirrored, or held by another source. A `latest` link is resolved to its
+   tag now, and the import uses that tag even if a newer release appears.
+   A release without a SHA256SUMS asset cannot be imported.
+3. Tick platforms; a first import preselects the organization's defaults
+   and a mirrored plugin the architectures it has. Choose **Import**. The
+   import's page shows the outcome.
+
+GitHub allows 60 unauthenticated requests an hour from one address. When
+they are used up, the page says when the limit resets; mirrored plugins
+are unaffected.
 
 A release without a SHA256SUMS asset cannot be verified or served. GitHub
 releases carry no key dufflebag can check, so a signature asset is kept as
