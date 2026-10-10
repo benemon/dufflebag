@@ -377,7 +377,7 @@ test-e2e-terraform-encrypted: ## Run the Terraform gate encrypted against a Vaul
 	token=$$(openssl rand -hex 16); \
 	docker rm -f $(TERRAFORM_E2E_VAULT) >/dev/null 2>&1 || true; \
 	docker run -d --name $(TERRAFORM_E2E_VAULT) \
-		-e VAULT_DEV_ROOT_TOKEN_ID="$$token" -p 127.0.0.1::8200 hashicorp/vault:1.17 >/dev/null; \
+		-e VAULT_DEV_ROOT_TOKEN_ID="$$token" -p 127.0.0.1::8200 hashicorp/vault:2.0.3 >/dev/null; \
 	port=$$(docker port $(TERRAFORM_E2E_VAULT) 8200/tcp | head -1 | sed 's/.*://'); \
 	addr="http://127.0.0.1:$$port"; \
 	for _ in $$(seq 1 60); do \
@@ -551,7 +551,7 @@ test-packer-ci-encrypted: ## Run the packer gate encrypted against a Vault dev c
 	token=$$(openssl rand -hex 16); \
 	$(PACKER_E2E_DOCKER) rm -f $(PACKER_CI_VAULT) >/dev/null 2>&1 || true; \
 	$(PACKER_E2E_DOCKER) run -d --name $(PACKER_CI_VAULT) \
-		-e VAULT_DEV_ROOT_TOKEN_ID="$$token" -p 127.0.0.1::8200 hashicorp/vault:1.17 >/dev/null; \
+		-e VAULT_DEV_ROOT_TOKEN_ID="$$token" -p 127.0.0.1::8200 hashicorp/vault:2.0.3 >/dev/null; \
 	port=$$($(PACKER_E2E_DOCKER) port $(PACKER_CI_VAULT) 8200/tcp | head -1 | sed 's/.*://'); \
 	addr="http://127.0.0.1:$$port"; \
 	for _ in $$(seq 1 60); do \

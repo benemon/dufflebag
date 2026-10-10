@@ -215,7 +215,7 @@ async function bootStack() {
     'run', '-d', '--rm', '--name', vaultContainer,
     '-e', `VAULT_DEV_ROOT_TOKEN_ID=${vaultToken}`,
     '-p', '127.0.0.1::8200',
-    'hashicorp/vault:1.17',
+    'hashicorp/vault:2.0.3',
   ])
   const { stdout: vaultPortLine } = await execFile(
     'docker', ['port', vaultContainer, '8200/tcp'],
