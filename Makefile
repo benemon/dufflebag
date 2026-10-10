@@ -670,6 +670,17 @@ check-markers: ## Fail on AI-tooling markers in tracked files
 	fi; \
 	echo "no AI-tooling markers in tracked files"
 
+.PHONY: check-docs-register
+# The published guides use plain hyphens (house review duf-6gg5, B14); the gate
+# keeps the accepted standard from regressing.
+check-docs-register: ## Fail on an em dash in the published docs
+	@if hits=$$(git grep -n -- "—" -- 'docs-site/**/*.md' README.md); then \
+		echo "$$hits"; \
+		echo "FAIL: em dash in the published docs; use a plain hyphen or a sentence (duf-6gg5)"; \
+		exit 1; \
+	fi; \
+	echo "published docs keep the house register"
+
 .PHONY: demo-up
 # Stands up a LONG-LIVED instance to browse, and CLAIMS IT before it can be
 # reached. /sys/init is one-shot and ADR-0012 accepts that whoever reaches it

@@ -251,6 +251,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Check for AI-tooling markers
         run: make check-markers
+      - name: Check the published docs' register
+        run: make check-docs-register
 
   lint:
     runs-on: ubuntu-latest
