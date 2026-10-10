@@ -31,11 +31,22 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
+      - name: Log in to Docker Hub
+        # Runners share egress addresses, so anonymous pulls hit rate limits
+        # other tenants spent. Dependabot runs get no Actions secrets and pull
+        # anonymously.
+        if: ${{ env.DOCKER_HUB_USER != '' }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ env.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_PAT }}
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -103,9 +114,20 @@ jobs:
     if: ${{ github.event_name == 'push' || contains(github.event.pull_request.labels.*.name, 'full-ci') }}
     needs: build
     runs-on: ubuntu-latest
+    env:
+      DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Log in to Docker Hub
+        # Runners share egress addresses, so anonymous pulls hit rate limits
+        # other tenants spent. Dependabot runs get no Actions secrets and pull
+        # anonymously.
+        if: ${{ env.DOCKER_HUB_USER != '' }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ env.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_PAT }}
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -154,9 +176,20 @@ jobs:
     strategy:
       matrix:
         packer_version: ['1.16.1', '1.16.0', '1.15.4']
+    env:
+      DOCKER_HUB_USER: ${{ secrets.DOCKER_HUB_USER }}
     steps:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Log in to Docker Hub
+        # Runners share egress addresses, so anonymous pulls hit rate limits
+        # other tenants spent. Dependabot runs get no Actions secrets and pull
+        # anonymously.
+        if: ${{ env.DOCKER_HUB_USER != '' }}
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4
+        with:
+          username: ${{ env.DOCKER_HUB_USER }}
+          password: ${{ secrets.DOCKER_HUB_PAT }}
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
