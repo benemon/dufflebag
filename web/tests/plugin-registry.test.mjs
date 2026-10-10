@@ -856,12 +856,12 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.match(html, />Not checked \(upload\)</)
   assert.match(html, /<code>ethanmdavidson\/packer-plugin-git<\/code>/)
   assert.match(html, /aria-label="Kebab toggle"/)
-  const box = (name) => html.match(new RegExp(`<input[^>]*aria-label="Select ${name} to sync"[^>]*>`))[0]
-  assert.doesNotMatch(box('amazon'), /disabled/)
-  for (const name of ['docker', 'git', 'probe']) {
-    assert.match(box(name), /disabled/, `${name} has no update to sync`)
-    assert.match(box(name), /title="Only plugins with an update available can be synced"/)
-  }
+  // The house selectable-table cells: a select-all header over the rows with an update, PF's row checkboxes.
+  assert.match(html, /aria-label="Select plugins with an update"/)
+  const box = (row) => html.match(new RegExp(`<input[^>]*id="select-${row}"[^>]*>`))[0]
+  assert.doesNotMatch(box(0), /disabled/, 'amazon has an update to sync')
+  for (const row of [1, 2, 3]) assert.match(box(row), /disabled/, `row ${row} has no update to sync`)
+  assert.equal((html.match(/title="Only plugins with an update available can be synced"/g) ?? []).length, 3)
   // No action buttons in the toolbar, no settings card, no exposed alert.
   assert.doesNotMatch(html, /Upload plugin files/)
   assert.doesNotMatch(html, /Save default platforms/)

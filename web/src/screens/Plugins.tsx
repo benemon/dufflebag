@@ -335,6 +335,7 @@ export function PluginCatalogue({
   const rows = catalogueRows(plugins, { name: filter, source, updatesOnly })
   const shown = rows.slice((page - 1) * pageSize, page * pageSize)
   const selectable = (plugin: Plugin) => plugin.update_available && !queuedNames.has(plugin.name)
+  const pageSelectable = shown.filter(selectable).map((plugin) => plugin.name)
   const chosen = plugins.filter((plugin) => selected.includes(plugin.name))
 
   const openConfirm = async (names: string[]) => {
@@ -419,26 +420,38 @@ export function PluginCatalogue({
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
-        <Table aria-label="Plugins" variant="compact">
+        <Table aria-label="Plugins" variant="compact" selectableRowCaptionText="Plugin">
           <Thead>
             <Tr>
-              {canPublish ? <Th screenReaderText="Select" /> : null}
+              {canPublish ? (
+                <Th
+                  aria-label="Select plugins with an update"
+                  select={{
+                    isSelected: pageSelectable.length > 0 && pageSelectable.every((name) => selected.includes(name)),
+                    isIndeterminate: pageSelectable.some((name) => selected.includes(name)) && !pageSelectable.every((name) => selected.includes(name)),
+                    isHeaderSelectDisabled: pageSelectable.length === 0,
+                    onSelect: (_event, isSelecting) => setSelected(isSelecting
+                      ? [...new Set([...selected, ...pageSelectable])] : selected.filter((name) => !pageSelectable.includes(name))),
+                  }}
+                />
+              ) : null}
               <Th>Name</Th><Th>Source</Th><Th>Newest mirrored</Th><Th>Versions</Th><Th>Updates</Th>
               {canPublish ? <Th screenReaderText="Actions" /> : null}
             </Tr>
           </Thead>
           <Tbody>
-            {shown.map((plugin) => (
-              <Tr key={plugin.name} isRowSelected={selected.includes(plugin.name)}>
+            {shown.map((plugin, index) => (
+              <Tr key={plugin.name} isSelectable={canPublish && selectable(plugin)} isRowSelected={selected.includes(plugin.name)}>
                 {canPublish ? (
-                  <Td dataLabel="Select">
-                    <Checkbox
-                      id={`select-${plugin.name}`} aria-label={`Select ${plugin.name} to sync`}
-                      isDisabled={!selectable(plugin)} isChecked={selected.includes(plugin.name)}
-                      title={selectable(plugin) ? undefined : 'Only plugins with an update available can be synced'}
-                      onChange={(_e, checked) => setSelected(checked ? [...selected, plugin.name] : selected.filter((n) => n !== plugin.name))}
-                    />
-                  </Td>
+                  <Td
+                    title={selectable(plugin) ? undefined : 'Only plugins with an update available can be synced'}
+                    select={{
+                      rowIndex: (page - 1) * pageSize + index,
+                      isSelected: selected.includes(plugin.name),
+                      isDisabled: !selectable(plugin),
+                      onSelect: (_e, checked) => setSelected(checked ? [...selected, plugin.name] : selected.filter((n) => n !== plugin.name)),
+                    }}
+                  />
                 ) : null}
                 <Td dataLabel="Name">
                   <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>
