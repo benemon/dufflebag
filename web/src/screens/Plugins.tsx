@@ -386,7 +386,7 @@ export function PluginCatalogue({
         <CardTitle>All plugins</CardTitle>
         <CardBody>
         <Toolbar id="plugins-toolbar">
-          <ToolbarContent>
+          <ToolbarContent alignItems="center">
             <ToolbarItem>
               <SearchInput
                 aria-label="Filter plugins by name" placeholder="Filter by name" value={filter}
@@ -408,7 +408,7 @@ export function PluginCatalogue({
             {canPublish ? (
               <>
                 <ToolbarItem variant="separator" />
-                <ToolbarItem><Content component="small">{selected.length ? `${selected.length} selected` : 'Select plugins with an update'}</Content></ToolbarItem>
+                <ToolbarItem><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{selected.length ? `${selected.length} selected` : 'Select plugins with an update'}</span></ToolbarItem>
                 <ToolbarItem>
                   <Button variant="primary" isDisabled={selected.length === 0} onClick={() => void openConfirm(selected)}>Sync selected</Button>
                 </ToolbarItem>
