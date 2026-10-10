@@ -177,7 +177,7 @@ export type HashicorpPluginVersion = {
   mirrored: boolean
 }
 
-export type ImportPlatformOutcome = { platform: string; outcome: 'imported' | 'failed'; error?: string }
+export type ImportPlatformOutcome = { platform: string; outcome: 'imported' | 'already_mirrored' | 'failed'; error?: string }
 
 export type PluginChange = { version: string; action: 'add' | 'revoke' | 'restore'; platforms?: string[] }
 
@@ -196,9 +196,76 @@ export type PluginImport = {
   platforms: string[]
   changes: PluginChange[]
   state: 'queued' | 'running' | 'succeeded' | 'partially_succeeded' | 'failed'
+  created_by: string
+  origin: 'import' | 'plugin' | 'catalogue' | 'upload'
+  batch_index: number
+  batch_size: number
+  queued_ahead: number
   created_at: string
   finished_at?: string
   outcomes: ImportVersionOutcome[]
+}
+
+// A job's rows are its sync changes, or the versions an import requested;
+// outcomes are recorded in that order as the worker finishes each one.
+export function importJobRows(job: PluginImport): { version: string; change: string; architectures: string; outcome?: ImportVersionOutcome }[] {
+  const sync = job.changes.length > 0
+  const rows = sync
+    ? job.changes.map((change) => ({
+      version: change.version,
+      change: change.action === 'add' ? 'Add' : change.action === 'revoke' ? 'Revoke' : 'Restore',
+      architectures: change.platforms?.length ? change.platforms.join(', ') : '—',
+    }))
+    : job.versions.map((version) => ({ version, change: 'Import', architectures: job.platforms.join(', ') }))
+  return rows.map((row, index) => ({ ...row, outcome: job.outcomes[index] }))
+}
+
+export function importJobSummary(job: PluginImport): { text: string; progress?: number } {
+  const rows = importJobRows(job)
+  const unit = job.changes.length ? 'change' : 'version'
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
+  const done = job.outcomes.length
+  switch (job.state) {
+    case 'queued':
+      return { text: job.queued_ahead ? `Waiting for ${plural(job.queued_ahead, 'job')} ahead of it.` : 'Next to run.' }
+    case 'running':
+      return { text: `${done} of ${rows.length} ${unit}s done.`, progress: Math.round((done / Math.max(rows.length, 1)) * 100) }
+    case 'failed':
+      return { text: 'Nothing was changed.' }
+    default: {
+      // A row with a failed platform counts as failed, as the job's state does.
+      const failed = job.outcomes.filter((o) => o.outcome === 'failed' || o.platforms?.some((p) => p.outcome === 'failed')).length
+      if (job.state === 'partially_succeeded') return { text: `${rows.length - failed} of ${rows.length} ${unit}s applied. ${plural(failed, unit)} failed.` }
+      if (job.changes.length) return { text: `${plural(rows.length, 'change')} applied.` }
+      const files = job.outcomes.flatMap((o) => o.platforms ?? [])
+      const imported = files.filter((p) => p.outcome === 'imported').length
+      const already = files.filter((p) => p.outcome === 'already_mirrored').length + job.outcomes.filter((o) => o.outcome === 'already_mirrored' && !o.platforms?.length).length
+      return { text: `${plural(rows.length, 'version')}. ${plural(imported, 'file')} imported${already ? `, ${already} already mirrored` : ''}.` }
+    }
+  }
+}
+
+// Queues the failed part of a finished job again: a failed sync's failed
+// changes (an add keeps only its failed platforms), or a failed import's
+// failed versions.
+export function retryPluginImport(token: string, organizationID: string, job: PluginImport): Promise<PluginImport> {
+  const failed = (index: number) => {
+    const outcome = job.outcomes[index]
+    return !outcome || outcome.outcome === 'failed' || (outcome.platforms ?? []).some((p) => p.outcome === 'failed')
+  }
+  if (job.changes.length) {
+    const changes = job.changes.flatMap((change, index) => {
+      if (!failed(index)) return []
+      if (change.action !== 'add') return [change]
+      const failedPlatforms = (job.outcomes[index]?.platforms ?? []).filter((p) => p.outcome === 'failed').map((p) => p.platform)
+      return [{ ...change, platforms: failedPlatforms.length ? failedPlatforms : change.platforms }]
+    })
+    return syncPlugin(token, organizationID, job.product, changes)
+  }
+  const failedVersions = job.versions.filter((_, index) => failed(index))
+  const versions = failedVersions.length ? failedVersions : job.versions
+  if (job.source === 'github') return createGithubImport(token, organizationID, job.product, versions[0] ?? '', job.platforms)
+  return createPluginImport(token, organizationID, job.product, versions, job.platforms)
 }
 
 export async function listHashicorpPlugins(token: string, organizationID: string): Promise<HashicorpPlugin[]> {

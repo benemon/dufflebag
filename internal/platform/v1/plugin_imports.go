@@ -228,7 +228,7 @@ func (s *server) CreatePluginImport(
 	tenant := store.ParseOrganizationTenant(organizationID)
 	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
 		SourceKind: string(body.Source), Product: body.Product, Versions: body.Versions, Platforms: body.Platforms,
-	})
+	}, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginImport)})
 	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
 		audited.failed("not_enabled")
 		return CreatePluginImport409JSONResponse{Message: "plugin registry is not enabled"}, nil
@@ -284,6 +284,8 @@ func renderPluginImport(job store.PluginImport) (PluginImport, error) {
 		Id: job.ID, Source: job.Request.SourceKind, Product: job.Request.Product,
 		Versions: append([]string{}, job.Request.Versions...), Platforms: append([]string{}, job.Request.Platforms...), Changes: []PluginChange{},
 		State: PluginImportState(job.State), CreatedAt: job.CreatedAt, FinishedAt: job.FinishedAt,
+		CreatedBy: job.Origin.CreatedBy, Origin: PluginImportOrigin(job.Origin.Kind),
+		BatchIndex: max(job.Origin.BatchIndex, 1), BatchSize: max(job.Origin.BatchSize, 1), QueuedAhead: job.QueuedAhead,
 		Outcomes: []PluginImportVersionOutcome{},
 	}
 	for _, change := range job.Request.Changes {
@@ -422,7 +424,7 @@ func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject
 	}
 	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
 		SourceKind: source.Kind, Product: request.PluginName, Changes: changes,
-	})
+	}, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginPlugin)})
 	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
 		audited.failed("not_enabled")
 		return SyncPlugin409JSONResponse{Message: "plugin registry is not enabled"}, nil
@@ -532,7 +534,12 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 		byName[summary.Name] = summary
 	}
 	response := SyncCatalogue200JSONResponse{Results: []CatalogueSyncResult{}}
-	queued := 0
+	type planned struct {
+		index   int
+		summary store.PluginSummary
+		request store.PluginImportRequest
+	}
+	var batch []planned
 	for _, name := range request.Body.Plugins {
 		result := CatalogueSyncResult{Plugin: name}
 		refuse := func(reason string) {
@@ -566,8 +573,14 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 		if summary.Source.Kind == "github" {
 			version = summary.Update.LatestTag
 		}
-		id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+		response.Results = append(response.Results, result)
+		batch = append(batch, planned{index: len(response.Results) - 1, summary: summary, request: store.PluginImportRequest{
 			SourceKind: summary.Source.Kind, Product: summary.Source.Repository, Versions: []string{version}, Platforms: platforms,
+		}})
+	}
+	for position, job := range batch {
+		id, err := s.repository.CreatePluginImport(ctx, tenant, job.request, store.PluginImportOrigin{
+			CreatedBy: caller.Name, Kind: string(PluginImportOriginCatalogue), BatchIndex: position + 1, BatchSize: len(batch),
 		})
 		if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
 			audited.failed("not_enabled")
@@ -577,10 +590,9 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 			audited.failed("storage_failed")
 			return nil, err
 		}
-		result.Version, result.ImportId = &summary.Update.Latest, &id
-		response.Results = append(response.Results, result)
-		queued++
+		version := job.summary.Update.Latest
+		response.Results[job.index].Version, response.Results[job.index].ImportId = &version, &id
 	}
-	audited.succeeded(organizationID, fmt.Sprintf("queued %d of %d", queued, len(request.Body.Plugins)))
+	audited.succeeded(organizationID, fmt.Sprintf("queued %d of %d", len(batch), len(request.Body.Plugins)))
 	return response, nil
 }

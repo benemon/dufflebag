@@ -3067,7 +3067,7 @@ components:
       type: object
       properties:
         platform: { type: string }
-        outcome: { type: string, enum: [imported, failed] }
+        outcome: { type: string, enum: [imported, already_mirrored, failed] }
         error: { type: string }
       required: [platform, outcome]
 
@@ -3095,12 +3095,20 @@ components:
           description: A sync's changes, in the order they apply; empty for an import.
           items: { $ref: "#/components/schemas/PluginChange" }
         state: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed] }
+        created_by: { type: string, description: The principal that queued the job. }
+        origin:
+          type: string
+          enum: [import, plugin, catalogue, upload]
+          description: Where the job was queued from; catalogue jobs are one of a Sync selected batch.
+        batch_index: { type: integer, description: This job's position in its batch, from 1. }
+        batch_size: { type: integer, description: Jobs in the batch; 1 outside a batch. }
+        queued_ahead: { type: integer, description: The organization's unfinished jobs queued before this one. }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
         outcomes:
           type: array
           items: { $ref: "#/components/schemas/PluginImportVersionOutcome" }
-      required: [id, source, product, versions, platforms, changes, state, created_at, outcomes]
+      required: [id, source, product, versions, platforms, changes, state, created_by, origin, batch_index, batch_size, queued_ahead, created_at, outcomes]
 
     TemplateStanza:
       type: object

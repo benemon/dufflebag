@@ -1138,12 +1138,16 @@ UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
 RETURNING default_platforms;
 
 -- name: InsertPluginImport :exec
-INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes)
-VALUES ($1, $2, $3, $4, $5, $6, $7);
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes, created_by, origin, batch_index, batch_size)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
 
 -- name: GetPluginImport :one
-SELECT id, source_kind, product, versions, platforms, changes, state, outcomes, created_at, finished_at
-FROM plugin_imports WHERE organization_id = $1 AND id = $2;
+SELECT job.id, job.source_kind, job.product, job.versions, job.platforms, job.changes, job.state, job.outcomes, job.created_at, job.finished_at,
+       job.created_by, job.origin, job.batch_index, job.batch_size,
+       (SELECT count(*) FROM plugin_imports ahead
+        WHERE ahead.organization_id = job.organization_id
+          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead
+FROM plugin_imports job WHERE job.organization_id = $1 AND job.id = $2;
 
 -- name: ClaimPluginImport :one
 SELECT id, source_kind, product, versions, platforms, changes

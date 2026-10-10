@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/google/uuid"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -94,7 +95,7 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 		importer := pluginimport.NewImporter(pluginimport.NewUpstream(server.Client(), server.URL, server.URL), nil, openpgp.EntityList{signer}, repository)
 		id, err := repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
 			SourceKind: "releases-hashicorp", Product: "packer-plugin-probe", Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"},
-		})
+		}, store.PluginImportOrigin{CreatedBy: "alice", Kind: "import"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -122,6 +123,9 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 	if job.State != "succeeded" || json.Unmarshal(job.Outcomes, &outcomes) != nil || len(outcomes) != 1 || outcomes[0].Outcome != pluginimport.OutcomeImported {
 		t.Fatalf("import = %s %s", job.State, job.Outcomes)
 	}
+	if job.Origin != (store.PluginImportOrigin{CreatedBy: "alice", Kind: "import", BatchIndex: 1, BatchSize: 1}) || job.QueuedAhead != 0 {
+		t.Fatalf("origin = %+v, %d ahead", job.Origin, job.QueuedAhead)
+	}
 	source, versions, err := repository.ListPluginVersions(ctx, tenant, "probe")
 	if err != nil || source != (store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-probe"}) || len(versions) != 1 {
 		t.Fatalf("mirrored plugin = %+v %+v, %v", source, versions, err)
@@ -146,7 +150,7 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 			{Version: "1.0.0", Action: "add", Platforms: []string{"linux_arm64"}},
 			{Version: "1.0.0", Action: "revoke"},
 		},
-	})
+	}, store.PluginImportOrigin{CreatedBy: "alice", Kind: "plugin"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,5 +173,28 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 	}
 	if _, err := repository.ServedPluginFile(ctx, organization, "probe", "1.0.0", store.ServedZip, "packer-plugin-probe_1.0.0_linux_arm64.zip"); err != nil {
 		t.Fatalf("the added linux_arm64 zip is not served: %v", err)
+	}
+
+	// A queued job counts the organization's unfinished jobs ahead of it.
+	batch := store.PluginImportRequest{SourceKind: "releases-hashicorp", Product: "packer-plugin-probe", Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"}}
+	var queued []uuid.UUID
+	for position := range 2 {
+		id, err := repository.CreatePluginImport(ctx, tenant, batch, store.PluginImportOrigin{CreatedBy: "alice", Kind: "catalogue", BatchIndex: position + 1, BatchSize: 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		queued = append(queued, id)
+	}
+	for position, id := range queued {
+		job, err := repository.GetPluginImport(ctx, tenant, id)
+		if err != nil || job.QueuedAhead != position || job.Origin.BatchIndex != position+1 || job.Origin.BatchSize != 2 {
+			t.Fatalf("job %d = %+v ahead %d, %v", position, job.Origin, job.QueuedAhead, err)
+		}
+	}
+	if worked, err := pluginimport.NewWorker(repository, importer, time.Second, slog.Default()).RunOnce(ctx); !worked || err != nil {
+		t.Fatalf("worker claimed nothing: %v", err)
+	}
+	if last, err := repository.GetPluginImport(ctx, tenant, queued[1]); err != nil || last.QueuedAhead != 0 {
+		t.Fatalf("after the first finished, the second has %d ahead, %v", last.QueuedAhead, err)
 	}
 }

@@ -247,6 +247,10 @@ type PluginImport struct {
 	ClaimedAt      sql.NullTime    `json:"claimed_at"`
 	FinishedAt     sql.NullTime    `json:"finished_at"`
 	Changes        json.RawMessage `json:"changes"`
+	CreatedBy      string          `json:"created_by"`
+	Origin         string          `json:"origin"`
+	BatchIndex     int32           `json:"batch_index"`
+	BatchSize      int32           `json:"batch_size"`
 }
 
 type PluginRegistry struct {

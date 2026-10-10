@@ -45,14 +45,26 @@ func decodeChanges(raw json.RawMessage) ([]PluginChange, error) {
 	return changes, nil
 }
 
+// PluginImportOrigin is who queued a job and from where: an import form,
+// a plugin's page, the catalogue's Sync selected (one job of a batch), or
+// an upload.
+type PluginImportOrigin struct {
+	CreatedBy  string
+	Kind       string
+	BatchIndex int
+	BatchSize  int
+}
+
 // PluginImport is a recorded import job.
 type PluginImport struct {
-	ID         uuid.UUID
-	Request    PluginImportRequest
-	State      string
-	Outcomes   json.RawMessage
-	CreatedAt  time.Time
-	FinishedAt *time.Time
+	ID          uuid.UUID
+	Request     PluginImportRequest
+	Origin      PluginImportOrigin
+	State       string
+	Outcomes    json.RawMessage
+	CreatedAt   time.Time
+	FinishedAt  *time.Time
+	QueuedAhead int
 }
 
 // ClaimedPluginImport is a job a worker now owns.
@@ -64,7 +76,7 @@ type ClaimedPluginImport struct {
 
 // CreatePluginImport queues an import. The registry must be enabled.
 func (r *Repository) CreatePluginImport(
-	ctx context.Context, tenant OrganizationTenant, request PluginImportRequest,
+	ctx context.Context, tenant OrganizationTenant, request PluginImportRequest, origin PluginImportOrigin,
 ) (uuid.UUID, error) {
 	tx, q, err := r.beginOrganization(ctx, tenant)
 	if err != nil {
@@ -84,6 +96,7 @@ func (r *Repository) CreatePluginImport(
 	if err := q.InsertPluginImport(ctx, postgresdb.InsertPluginImportParams{
 		ID: id, OrganizationID: tenant.OrganizationID, SourceKind: request.SourceKind,
 		Product: request.Product, Versions: nonNil(request.Versions), Platforms: nonNil(request.Platforms), Changes: changes,
+		CreatedBy: origin.CreatedBy, Origin: origin.Kind, BatchIndex: int32(max(origin.BatchIndex, 1)), BatchSize: int32(max(origin.BatchSize, 1)),
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("insert plugin import: %w", err)
 	}
@@ -112,8 +125,9 @@ func (r *Repository) GetPluginImport(ctx context.Context, tenant OrganizationTen
 		return PluginImport{}, err
 	}
 	job := PluginImport{
-		ID: row.ID, State: row.State, Outcomes: row.Outcomes, CreatedAt: row.CreatedAt,
+		ID: row.ID, State: row.State, Outcomes: row.Outcomes, CreatedAt: row.CreatedAt, QueuedAhead: int(row.QueuedAhead),
 		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms, Changes: changes},
+		Origin:  PluginImportOrigin{CreatedBy: row.CreatedBy, Kind: row.Origin, BatchIndex: int(row.BatchIndex), BatchSize: int(row.BatchSize)},
 	}
 	if row.FinishedAt.Valid {
 		job.FinishedAt = &row.FinishedAt.Time

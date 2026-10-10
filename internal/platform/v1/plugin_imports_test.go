@@ -96,8 +96,11 @@ func TestPluginImportsQueueAndRead(t *testing.T) {
 		t.Fatalf("create = %d %s", response.Code, response.Body.String())
 	}
 	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.create", "reason": "queued"})
+	if job.Origin != PluginImportOriginImport || job.CreatedBy == "" || job.CreatedBy != repository.imports[0].Origin.CreatedBy || job.BatchSize != 1 {
+		t.Fatalf("job origin = %s by %q, batch %d of %d", job.Origin, job.CreatedBy, job.BatchIndex, job.BatchSize)
+	}
 	read := call(t, importHandler(identity.RoleReader, repository, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("imports/"+job.Id.String()), nil, testToken)
-	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"outcomes":[]`) {
+	if read.Code != http.StatusOK || !strings.Contains(read.Body.String(), `"outcomes":[]`) || !strings.Contains(read.Body.String(), `"queued_ahead":0`) {
 		t.Fatalf("read = %d %s", read.Code, read.Body.String())
 	}
 	if missing := call(t, handler, http.MethodGet, pluginRegistryPath("imports/"+uuid.NewString()), nil, testToken); missing.Code != http.StatusNotFound {
@@ -352,6 +355,11 @@ func TestPluginUpdateChecksAndCatalogueSync(t *testing.T) {
 	}
 	if git.SourceKind != "github" || git.Product != "ethanmdavidson/packer-plugin-git" || git.Versions[0] != "v0.6.4" || git.Platforms[0] != "linux_arm64" {
 		t.Fatalf("git job = %+v, want the pinned tag", git)
+	}
+	// Each job of a Sync selected knows its place in the batch, counting only the jobs queued.
+	first, second := repository.imports[0].Origin, repository.imports[1].Origin
+	if first.Kind != "catalogue" || first.BatchIndex != 1 || first.BatchSize != 2 || second.BatchIndex != 2 || second.BatchSize != 2 || first.CreatedBy == "" {
+		t.Fatalf("batch origins = %+v, %+v", first, second)
 	}
 	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.catalogue.sync", "outcome": "success", "reason": "queued 2 of 4"})
 

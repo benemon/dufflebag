@@ -943,7 +943,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       await waitForText(serve ? 'served again' : 'stays stored; Packer can no longer fetch it')
       await clickByText('button', 'Sync 1 change')
       await waitForText('Sync probe')
-      await waitForText('1 change, applied in order')
+      await waitForText('from the plugin page, 1 change')
       await until(`the sync to record ${outcome}`, async () => (await bodyText()).includes('Succeeded') && (await bodyText()).includes(outcome), 60000)
       await clickByText('button', 'Open probe')
       await waitForText('Template stanza')

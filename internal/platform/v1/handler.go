@@ -43,7 +43,7 @@ type PlatformRepository interface {
 	SetPluginVersionRevoked(context.Context, store.OrganizationTenant, string, string, bool) error
 	SetPluginUpdateCheck(context.Context, store.OrganizationTenant, string, bool) error
 	DeletePluginVersion(context.Context, store.OrganizationTenant, string, string) error
-	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest) (uuid.UUID, error)
+	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest, store.PluginImportOrigin) (uuid.UUID, error)
 	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
 	PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error)
 	SetPluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant, []string) ([]string, error)
