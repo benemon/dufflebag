@@ -219,8 +219,6 @@ func (i *Importer) mirrored(ctx context.Context, tenant store.OrganizationTenant
 
 type asset struct{ name, url string }
 
-// fetched is a version's metadata, already fetched and, where its source
-// allows, verified; publish downloads its zips and stores it.
 type fetched struct {
 	name, version string
 	source        store.PluginSource
@@ -233,7 +231,6 @@ type fetched struct {
 	platforms     []string
 }
 
-// spool is a version's selected zips, downloaded to temporary files.
 type spool struct {
 	uploaded  []plugin.UploadedZip
 	blobs     map[string]store.PluginBlob

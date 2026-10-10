@@ -258,15 +258,12 @@ export function syncPlugin(token: string, organizationID: string, name: string, 
   return platformPost<PluginImport>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/sync`), { changes })
 }
 
-// What the detail grid's edit mode has changed: a row's selection (absent
-// means unchanged) and the platforms ticked on it.
+// A version absent from selected is unchanged.
 export type PluginEdit = { selected: Record<string, boolean>; added: Record<string, string[]> }
 
 const platformKey = (p: PluginPlatform) => `${p.os}_${p.arch}`
 
-// A mirrored version is revoked by deselecting it and restored by selecting
-// it; platforms are added only to a version that stays served, and an
-// upstream version not yet mirrored is added with the platforms ticked.
+// A revoked version takes no platforms; an unmirrored upstream version needs at least one.
 export function pluginChanges(versions: PluginVersion[], upstream: HashicorpPluginVersion[], edit: PluginEdit): PluginChange[] {
   const changes: PluginChange[] = []
   const mirrored = new Set(versions.map((v) => v.version))

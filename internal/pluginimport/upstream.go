@@ -103,8 +103,7 @@ func (u *Upstream) getJSON(ctx context.Context, address string, into any) error 
 	return nil
 }
 
-// fetchSmall reads one metadata file whole; a SHA256SUMS, signature or
-// manifest larger than limit is not a real one.
+// A SHA256SUMS, signature or manifest larger than limit is not a real one.
 func (u *Upstream) fetchSmall(ctx context.Context, address string, limit int64) ([]byte, error) {
 	response, err := u.get(ctx, address)
 	if err != nil {
@@ -121,7 +120,6 @@ func (u *Upstream) fetchSmall(ctx context.Context, address string, limit int64) 
 	return data, nil
 }
 
-// download streams one zip into file, returning its digest and size.
 func (u *Upstream) download(ctx context.Context, address string, file *os.File) (string, int64, error) {
 	response, err := u.get(ctx, address)
 	if err != nil {
@@ -190,7 +188,6 @@ func (u *Upstream) Versions(ctx context.Context, product, after string) ([]Upstr
 	return versions, next, nil
 }
 
-// release reads one version's file names from the plugin's index.json.
 func (u *Upstream) release(ctx context.Context, product, version string) (releaseFiles, error) {
 	var index struct {
 		Versions map[string]releaseFiles `json:"versions"`
