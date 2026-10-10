@@ -1,9 +1,12 @@
 import { useState } from 'react'
-import { Alert, Button, Checkbox, Content, PageSection, TextInput, Title } from '@patternfly/react-core'
+import {
+  Alert, Breadcrumb, BreadcrumbItem, Button, Checkbox, Content, PageSection, TextInput, Title,
+} from '@patternfly/react-core'
 import { useNavigate } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   createGithubImport, getDefaultPlatforms, listPluginVersions, resolveGithubRelease, sourceLabel, type GithubRelease,
@@ -33,20 +36,25 @@ export function PluginGithub() {
     }
   }
 
+  const resolve = () => guard(async () => {
+    const resolved = await resolveGithubRelease(token, organizationID, link)
+    try {
+      const held = await listPluginVersions(token, organizationID, resolved.name)
+      setPreselected([...new Set(held.versions.flatMap((v) => v.stored_platforms.map((p) => `${p.os}_${p.arch}`)))])
+    } catch {
+      setPreselected(await getDefaultPlatforms(token, organizationID))
+    }
+    setRelease(resolved)
+  }, 'The release could not be resolved.')
+
   return (
     <PluginGithubView
-      link={link} release={release} preselected={preselected} failure={failure} busy={busy}
+      link={link} release={release} preselected={preselected} loading={busy && !release} failure={failure} busy={busy}
+      onBackToRegistry={() => navigate('/buckets')}
+      onBackToPlugins={() => navigate('/plugin-registry')}
       onLinkChange={(value) => { setLink(value); setRelease(null) }}
-      onResolve={() => void guard(async () => {
-        const resolved = await resolveGithubRelease(token, organizationID, link)
-        try {
-          const held = await listPluginVersions(token, organizationID, resolved.name)
-          setPreselected([...new Set(held.versions.flatMap((v) => v.stored_platforms.map((p) => `${p.os}_${p.arch}`)))])
-        } catch {
-          setPreselected(await getDefaultPlatforms(token, organizationID))
-        }
-        setRelease(resolved)
-      }, 'The release could not be resolved.')}
+      onResolve={() => void resolve()}
+      onRefresh={() => void resolve()}
       onImport={(platforms) => void guard(async () => {
         if (!release) return
         const job = await createGithubImport(token, organizationID, release.repository, release.tag, platforms)
@@ -57,15 +65,20 @@ export function PluginGithub() {
 }
 
 export function PluginGithubView({
-  link, release, preselected, failure, busy, onLinkChange, onResolve, onImport,
+  link, release, preselected, loading, failure, busy,
+  onBackToRegistry, onBackToPlugins, onLinkChange, onResolve, onRefresh, onImport,
 }: {
   link: string
   release: GithubRelease | null
   preselected: string[]
+  loading: boolean
   failure: string | null
   busy: boolean
+  onBackToRegistry: () => void
+  onBackToPlugins: () => void
   onLinkChange: (value: string) => void
   onResolve: () => void
+  onRefresh: () => void | Promise<void>
   onImport: (platforms: string[]) => void
 }) {
   const [platforms, setPlatforms] = useState<string[] | null>(null)
@@ -75,17 +88,31 @@ export function PluginGithubView({
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
+            <BreadcrumbItem isActive>Import from GitHub</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title="Import from GitHub"
         description="Paste a public packer-plugin release link. dufflebag shows what it found before anything is imported. GitHub releases carry no signing key dufflebag can check; a signature they include is kept as published."
       />
       <PageSection variant="secondary" isFilled>
-        <TextInput
-          aria-label="GitHub release link" placeholder="https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag>"
-          value={link} onChange={(_event, value) => { setPlatforms(null); onLinkChange(value) }}
-        />
-        <Button variant="secondary" isLoading={busy && !release} isDisabled={busy || link.trim() === ''} onClick={onResolve}>Resolve</Button>
-        {failure ? <Alert variant="danger" isInline title="GitHub could not be read"><Content component="p">{failure}</Content></Alert> : null}
-        {release ? (
+        {loading ? (
+          <PluginLoadingCard message="Loading GitHub release…" />
+        ) : failure ? (
+          <PluginErrorCard title="GitHub release could not be loaded" error={failure} onRetry={onRefresh} />
+        ) : (
+          <>
+            <TextInput
+              aria-label="GitHub release link" placeholder="https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag>"
+              value={link} onChange={(_event, value) => { setPlatforms(null); onLinkChange(value) }}
+            />
+            <Button variant="secondary" isDisabled={busy || link.trim() === ''} onClick={onResolve}>Resolve</Button>
+          </>
+        )}
+        {!loading && !failure && release ? (
           <>
             <Title headingLevel="h2" size="md">{release.name} · {release.version}</Title>
             <Content component="p">

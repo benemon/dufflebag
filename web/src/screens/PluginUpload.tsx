@@ -1,10 +1,13 @@
-import { useEffect, useState } from 'react'
-import { Alert, Button, Card, CardBody, Content, Label, PageSection, Title } from '@patternfly/react-core'
+import { useCallback, useEffect, useState } from 'react'
+import {
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, Content, Label, PageSection, Title,
+} from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   getPluginRegistry, planPluginUploads, publishPluginVersion,
@@ -29,18 +32,33 @@ export function PluginUpload() {
   const [plan, setPlan] = useState<UploadPlan | null>(null)
   const [outcomes, setOutcomes] = useState<Record<string, UploadOutcome>>({})
   const [busy, setBusy] = useState(false)
+  const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!organizationID || token === '') return
-    getPluginRegistry(token, organizationID).then(setRegistry).catch((error: unknown) => {
+  const reload = useCallback(async () => {
+    if (!organizationID || token === '') {
+      setLoading(false)
+      return
+    }
+    setLoading(true)
+    try {
+      setRegistry(await getPluginRegistry(token, organizationID))
+      setFailure(null)
+    } catch (error: unknown) {
       if (!signOutIfUnauthorized(error, signOut)) setFailure(pluginRegistryErrorMessage(error, 'The plugin registry could not be loaded.'))
-    })
+    } finally {
+      setLoading(false)
+    }
   }, [organizationID, signOut, token])
+
+  useEffect(() => { void reload() }, [reload])
 
   return (
     <PluginUploadView
-      registry={registry} plan={plan} outcomes={outcomes} busy={busy} failure={failure}
+      registry={registry} plan={plan} outcomes={outcomes} busy={busy} loading={loading} failure={failure}
+      onBackToRegistry={() => navigate('/buckets')}
+      onBackToPlugins={() => navigate('/plugin-registry')}
+      onRefresh={reload}
       onChoose={(files) => { setOutcomes({}); setFailure(null); setPlan(files.length ? planPluginUploads(files) : null) }}
       onOpen={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onSubmit={async () => {
@@ -83,12 +101,19 @@ function OutcomeLabel({ outcome }: { outcome?: UploadOutcome }) {
   return <Label isCompact color="red">Refused</Label>
 }
 
-export function PluginUploadView({ registry, plan, outcomes, busy, failure, onChoose, onOpen, onSubmit }: {
+export function PluginUploadView({
+  registry, plan, outcomes, busy, loading, failure,
+  onBackToRegistry, onBackToPlugins, onRefresh, onChoose, onOpen, onSubmit,
+}: {
   registry: PluginRegistry | null
   plan: UploadPlan | null
   outcomes: Record<string, UploadOutcome>
   busy: boolean
+  loading: boolean
   failure: string | null
+  onBackToRegistry: () => void
+  onBackToPlugins: () => void
+  onRefresh: () => void | Promise<void>
   onChoose: (files: File[]) => void
   onOpen: (name: string) => void
   onSubmit: () => void | Promise<void>
@@ -103,16 +128,28 @@ export function PluginUploadView({ registry, plan, outcomes, busy, failure, onCh
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
+            <BreadcrumbItem isActive>Upload</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title="Upload plugin"
         description="Upload plugin versions built in-house: each version's SHA256SUMS file, its zips, and its signature or manifest if it has them."
       />
       <PageSection variant="secondary" isFilled>
+        {loading ? (
+          <PluginLoadingCard message="Loading upload…" />
+        ) : failure ? (
+          <PluginErrorCard title="Upload could not be loaded" error={failure} onRetry={onRefresh} />
+        ) : (
+          <>
         {registry && !enabled ? (
           <Alert variant="warning" isInline title="The plugin registry isn't enabled">
             <Content component="p">Enable the registry on the Plugins screen before uploading.</Content>
           </Alert>
         ) : null}
-        {failure ? <Alert variant="danger" isInline title="The plugin registry could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
         <Card>
           <CardBody>
             <Content component="p">
@@ -177,6 +214,8 @@ export function PluginUploadView({ registry, plan, outcomes, busy, failure, onCh
             ))}
           </>
         ) : null}
+          </>
+        )}
       </PageSection>
     </>
   )

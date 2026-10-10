@@ -25,6 +25,7 @@ import { PluginHashicorp } from './screens/PluginHashicorp'
 import { PluginImportJob } from './screens/PluginImportJob'
 import { PluginUpload } from './screens/PluginUpload'
 import { Plugins } from './screens/Plugins'
+import { PluginRegistrySettings } from './screens/PluginRegistrySettings'
 import {
   CreateTenancyButton, TenancyModal, projectCreationRefusal,
 } from './components/TenancyCreation'
@@ -114,6 +115,7 @@ function Authenticated({
         <Route path="/" element={<Landing />} />
         <Route path="/buckets" element={<Buckets />} />
         <Route path="/plugin-registry" element={<Plugins />} />
+        <Route path="/plugin-registry/settings" element={<PluginRegistrySettings />} />
         <Route path="/plugin-registry/upload" element={<PluginUpload />} />
         <Route path="/plugin-registry/hashicorp" element={<PluginHashicorp />} />
         <Route path="/plugin-registry/github" element={<PluginGithub />} />

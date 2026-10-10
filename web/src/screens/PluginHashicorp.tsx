@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Checkbox, Content, Label, PageSection, Spinner, Switch, Title,
+  Breadcrumb, BreadcrumbItem, Button, Checkbox, Content, Label, PageSection, Spinner, Switch, Title,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   createPluginImport, getDefaultPlatforms, listHashicorpPluginVersions, listHashicorpPlugins, listPluginVersions,
@@ -36,10 +37,13 @@ export function PluginHashicorp() {
     }
   }, [signOut])
 
-  useEffect(() => {
+  const reload = useCallback(async () => {
     if (!organizationID || token === '') return
-    void guard(async () => setPlugins(await listHashicorpPlugins(token, organizationID)), 'releases.hashicorp.com could not be reached.')
+    setPlugins(null)
+    await guard(async () => setPlugins(await listHashicorpPlugins(token, organizationID)), 'releases.hashicorp.com could not be reached.')
   }, [guard, organizationID, token])
+
+  useEffect(() => { void reload() }, [reload])
 
   const choose = async (plugin: HashicorpPlugin) => {
     setSelected(plugin)
@@ -62,7 +66,10 @@ export function PluginHashicorp() {
   return (
     <PluginHashicorpView
       plugins={plugins} selected={selected} versions={versions} hasMore={next !== undefined}
-      preselected={preselected} failure={failure} busy={busy}
+      preselected={preselected} loading={plugins === null && !failure} failure={failure} busy={busy}
+      onBackToRegistry={() => navigate('/buckets')}
+      onBackToPlugins={() => navigate('/plugin-registry')}
+      onRefresh={reload}
       onChoose={(plugin) => void choose(plugin)}
       onMore={() => void guard(async () => {
         if (!selected || !next) return
@@ -84,15 +91,20 @@ export function PluginHashicorp() {
 }
 
 export function PluginHashicorpView({
-  plugins, selected, versions, hasMore, preselected, failure, busy, onChoose, onMore, onImport,
+  plugins, selected, versions, hasMore, preselected, loading, failure, busy,
+  onBackToRegistry, onBackToPlugins, onRefresh, onChoose, onMore, onImport,
 }: {
   plugins: HashicorpPlugin[] | null
   selected: HashicorpPlugin | null
   versions: HashicorpPluginVersion[] | null
   hasMore: boolean
   preselected: string[]
+  loading: boolean
   failure: string | null
   busy: boolean
+  onBackToRegistry: () => void
+  onBackToPlugins: () => void
+  onRefresh: () => void | Promise<void>
   onChoose: (plugin: HashicorpPlugin) => void
   onMore: () => void
   onImport: (versions: string[], platforms: string[]) => void | Promise<void>
@@ -108,13 +120,23 @@ export function PluginHashicorpView({
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
+            <BreadcrumbItem isActive>Browse HashiCorp</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title="Browse HashiCorp"
         description="Packer plugins published on releases.hashicorp.com. Each imported version's SHA256SUMS is verified against HashiCorp's signing key before anything is stored."
       />
       <PageSection variant="secondary" isFilled>
-        {failure ? <Alert variant="danger" isInline title="releases.hashicorp.com could not be read"><Content component="p">{failure}</Content></Alert> : null}
-        {plugins === null && !failure ? <><Spinner aria-label="Loading HashiCorp plugins…" /><Content component="p">Loading HashiCorp plugins…</Content></> : null}
-        {plugins ? (
+        {loading ? (
+          <PluginLoadingCard message="Reading releases.hashicorp.com…" />
+        ) : failure ? (
+          <PluginErrorCard title="HashiCorp's plugin list could not be read" error={failure} onRetry={onRefresh} />
+        ) : null}
+        {!loading && !failure && plugins ? (
           <Table aria-label="HashiCorp plugins" variant="compact">
             <Thead><Tr><Th>Plugin</Th><Th>Mirrored versions</Th><Th>Status</Th></Tr></Thead>
             <Tbody>
@@ -134,7 +156,7 @@ export function PluginHashicorpView({
             </Tbody>
           </Table>
         ) : null}
-        {selected ? (
+        {!loading && !failure && selected ? (
           <>
             <Title headingLevel="h2" size="md">{selected.name}</Title>
             <Switch id="show-prereleases" label="Show prereleases" isChecked={showPrereleases} onChange={(_e, value) => setShowPrereleases(value)} />

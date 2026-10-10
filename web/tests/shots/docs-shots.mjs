@@ -962,7 +962,6 @@ async function captureSeededScreens(seeded) {
   await capture('version-consume-untagged.png')
   await page.goto(`${base}/plugin-registry`, { waitUntil: 'domcontentloaded' })
   await waitForText('netbox')
-  await waitForText('The registry is exposed')
   await capture('plugin-registry.png')
 
   // Edit mode on the detail grid with one pending change: 1.0.0 unticked.

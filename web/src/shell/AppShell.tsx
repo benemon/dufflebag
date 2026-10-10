@@ -26,6 +26,7 @@ const NAV: readonly NavGroupModel[] = [
   { group: 'Registry', items: [
     { key: 'buckets', to: '/buckets', label: 'Buckets' },
     { key: 'plugins', to: '/plugin-registry', label: 'Plugins' },
+    { key: 'pluginRegistrySettings', to: '/plugin-registry/settings', label: 'Registry settings' },
   ]},
   // Instance stays under Administration where the design put it: it is
   // reader-tier, so the group renders for every role — role filtering changes
@@ -204,6 +205,9 @@ export function AppShellView({
     if (key === 'buckets' && bucketNav) {
       if (pathname === '/') return true
       return to !== '/' && (pathname === to || pathname.startsWith(`${to}/`))
+    }
+    if (key === 'plugins') {
+      return pathname !== '/plugin-registry/settings' && pathname.startsWith(to)
     }
     return pathname.startsWith(to)
   }

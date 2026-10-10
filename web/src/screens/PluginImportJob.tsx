@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useState } from 'react'
-import { Alert, Button, Content, Label, PageSection, Spinner, Title } from '@patternfly/react-core'
+import { Breadcrumb, BreadcrumbItem, Button, Content, Label, PageSection, Title } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   getPluginImport, getPluginRegistry, templateStanza, terminalImportStates,
@@ -24,6 +25,7 @@ export function PluginImportJob() {
   const [job, setJob] = useState<PluginImport | null>(null)
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
+  const [revision, setRevision] = useState(0)
 
   useEffect(() => {
     if (!organizationID || token === '') return
@@ -45,11 +47,19 @@ export function PluginImportJob() {
     }
     void poll()
     return () => { stopped = true; clearTimeout(timer) }
-  }, [id, organizationID, signOut, token])
+  }, [id, organizationID, revision, signOut, token])
 
   return (
     <PluginImportJobView
       job={job} registry={registry} failure={failure} organizationName={tenant.organization} host={window.location.hostname}
+      id={id} loading={!job && !failure}
+      onBackToRegistry={() => navigate('/buckets')}
+      onBackToPlugins={() => navigate('/plugin-registry')}
+      onRefresh={() => {
+        setJob(null)
+        setFailure(null)
+        setRevision((current) => current + 1)
+      }}
       onOpen={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
     />
   )
@@ -71,12 +81,20 @@ const outcomeLabel = {
   failed: <Label isCompact color="red">Failed</Label>,
 }
 
-export function PluginImportJobView({ job, registry, failure, organizationName, host, onOpen }: {
+export function PluginImportJobView({
+  id, job, registry, loading, failure, organizationName, host,
+  onBackToRegistry, onBackToPlugins, onRefresh, onOpen,
+}: {
+  id: string
   job: PluginImport | null
   registry: PluginRegistry | null
+  loading: boolean
   failure: string | null
   organizationName: string
   host: string
+  onBackToRegistry: () => void
+  onBackToPlugins: () => void
+  onRefresh: () => void | Promise<void>
   onOpen: (name: string) => void
 }) {
   const name = job?.product.replace(/^.*packer-plugin-/, '') ?? ''
@@ -89,6 +107,14 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={() => name && onOpen(name)}>{name || 'Plugin'}</BreadcrumbItem>
+            <BreadcrumbItem isActive>Job {job?.id ?? id}</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title={job ? `${sync ? 'Sync' : 'Import'} ${name}` : 'Import'}
         description={job ? (
           <>{stateLabel[job.state]} {sync ? `${rows.length} ${rows.length === 1 ? 'change' : 'changes'}, applied in order`
@@ -96,9 +122,13 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
         ) : undefined}
       />
       <PageSection variant="secondary" isFilled>
-        {failure ? <Alert variant="danger" isInline title="The import could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
-        {!job && !failure ? <Spinner aria-label="Loading import…" /> : null}
-        {job ? (
+        <NotExposedAlert registry={registry} />
+        {loading ? (
+          <PluginLoadingCard message="Loading job…" />
+        ) : failure ? (
+          <PluginErrorCard title="Job could not be loaded" error={failure} onRetry={onRefresh} />
+        ) : null}
+        {!loading && !failure && job ? (
           <>
             {sync ? null : <Content component="p">Platforms: {job.platforms.join(', ')}</Content>}
             <Table aria-label="Import outcomes" variant="compact">
@@ -132,7 +162,6 @@ export function PluginImportJobView({ job, registry, failure, organizationName, 
             {newest ? (
               <>
                 <Title headingLevel="h2" size="md">Template stanza</Title>
-                <NotExposedAlert registry={registry} />
                 <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest)} />
               </>
             ) : null}

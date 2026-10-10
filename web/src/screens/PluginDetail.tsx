@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Button, Checkbox, ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content, Label,
-  List, ListItem, PageSection, Spinner, Switch, Title,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Checkbox, ClipboardCopyButton, CodeBlock, CodeBlockAction,
+  CodeBlockCode, Content, Label, List, ListItem, PageSection, Switch, Title,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -9,6 +9,7 @@ import { useNavigate, useParams } from 'react-router'
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions, listPluginVersions, listPlugins, pluginChanges,
@@ -79,6 +80,8 @@ export function PluginDetail() {
       name={name} organizationName={tenant.organization} host={window.location.hostname}
       callerRole={self?.role ?? null} registry={registry} detail={detail}
       loading={loading} failure={failure} onRefresh={reload}
+      onBackToRegistry={() => navigate('/buckets')}
+      onBackToPlugins={() => navigate('/plugin-registry')}
       onUpload={() => navigate('/plugin-registry/upload')}
       busy={busy} actionFailure={actionFailure}
       editing={editing} upstream={upstream} summary={summary}
@@ -120,7 +123,8 @@ export function PluginDetail() {
 
 export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, loading, failure, onRefresh, onUpload,
-  busy, actionFailure, editing, upstream, summary, onToggleUpdates, onEdit, onCancelEdit, onSync, onRemove,
+  onBackToRegistry, onBackToPlugins, busy, actionFailure, editing, upstream, summary, onToggleUpdates,
+  onEdit, onCancelEdit, onSync, onRemove,
 }: {
   name: string
   organizationName: string
@@ -131,6 +135,8 @@ export function PluginDetailView({
   loading: boolean
   failure: string | null
   onRefresh: () => void | Promise<void>
+  onBackToRegistry: () => void
+  onBackToPlugins: () => void
   onUpload: () => void
   busy: boolean
   actionFailure: string | null
@@ -172,6 +178,13 @@ export function PluginDetailView({
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
+            <BreadcrumbItem isActive>{name}</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title={name}
         description={detail ? (
           <>
@@ -188,17 +201,20 @@ export function PluginDetailView({
         onRefresh={onRefresh} refreshing={loading}
       />
       <PageSection variant="secondary" isFilled>
+        <NotExposedAlert registry={registry} />
         {actionFailure ? <Alert variant="danger" isInline title="The action failed"><Content component="p">{actionFailure}</Content></Alert> : null}
-        {failure ? <Alert variant="danger" isInline title="The plugin could not be loaded"><Content component="p">{failure}</Content></Alert> : null}
-        {loading && !detail ? <><Spinner aria-label="Loading plugin…" /><Content component="p">Loading plugin…</Content></> : null}
-        {detail && summary && imported ? <UpdateCheck summary={summary} canPublish={canPublish} busy={busy} onToggle={onToggleUpdates} /> : null}
-        {detail ? (
+        {loading && !detail ? (
+          <PluginLoadingCard message={`Loading ${name}…`} />
+        ) : failure ? (
+          <PluginErrorCard title={`${name} could not be loaded`} error={failure} onRetry={onRefresh} />
+        ) : null}
+        {!loading && !failure && detail && summary && imported ? <UpdateCheck summary={summary} canPublish={canPublish} busy={busy} onToggle={onToggleUpdates} /> : null}
+        {!loading && !failure && detail ? (
           <>
             {newest ? (
               <>
                 <Title headingLevel="h2" size="md">Template stanza</Title>
                 <Content component="small">Pinned to the newest available version, {newest.version}.</Content>
-                <NotExposedAlert registry={registry} />
                 <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
               </>
             ) : null}
@@ -351,7 +367,8 @@ export function NotExposedAlert({ registry }: { registry: PluginRegistry | null 
   if (!registry || registry.exposed) return null
   return (
     <Alert variant="info" isInline title="The registry is enabled but not exposed">
-      <Content component="p">Packer can't resolve this template stanza until the registry is exposed.</Content>
+      <Content component="p">Packer can’t resolve the template stanza on this page until the registry is exposed.</Content>
+      <Button component="a" variant="link" isInline href="/plugin-registry/settings">Registry settings</Button>
     </Alert>
   )
 }
