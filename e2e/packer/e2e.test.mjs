@@ -796,9 +796,11 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     // newest stable release within a minute of the check being turned on.
     await api(rootToken, 'PUT', `${registryPath}/plugins/amazon/update-check`, { enabled: true })
     let amazonEntry
-    await until('the amazon update check to run', async () => {
+    // checked_at is stamped when the checker claims the plugin; the result
+    // lands when its upstream call returns, so wait for the result.
+    await until('the amazon update check to record a result', async () => {
       amazonEntry = (await api(rootToken, 'GET', `${registryPath}/plugins`)).plugins.find((p) => p.name === 'amazon')
-      return Boolean(amazonEntry?.update_check.checked_at)
+      return Boolean(amazonEntry?.update_check.latest || amazonEntry?.update_check.error)
     }, 3 * 60 * 1000, 2000)
     assert.equal(amazonEntry.update_check.error, undefined, `amazon update check failed: ${amazonEntry.update_check.error}`)
     const [latestMajor, latestMinor, latestPatch] = amazonEntry.update_check.latest.split('.').map(Number)
