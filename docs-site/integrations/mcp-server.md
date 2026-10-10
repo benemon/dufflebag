@@ -26,10 +26,10 @@ ordinary token endpoint, and refreshes them as they expire. There is no new
 authentication surface - revoking the service principal's secret cuts the
 server off like any other API client.
 
-Every tool that operates on registry state takes `organization_id` and
-`project_id` arguments, and each falls back to the configured defaults, so a
-server registered against one project needs no tenancy boilerplate on any
-call.
+Tools that operate on a project's registry state take `organization_id` and
+`project_id` arguments; the plugin registry tools take `organization_id` alone.
+Each falls back to the configured defaults, so a server registered against one
+project needs no tenancy boilerplate on any call.
 
 ## Requirements
 
@@ -115,7 +115,7 @@ tools omit their bucket argument.
 
 `DFBG_MCP_BUCKET_ID` remains for wider credentials pinning a default bucket -
 and for bucket-scoped principals on older dufflebag-mcp releases. Set it to
-the bucket's ULID (its id, not its name). The first bucket-taking call
+the bucket's ULID id rather than its name. The first bucket-taking call
 resolves the id against the buckets the credential can see, and answers with
 the visible bucket ids when the declared one is not among them. The console
 prints the ULID in the ready-to-paste MCP environment block shown when a

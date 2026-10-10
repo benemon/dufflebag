@@ -19,6 +19,9 @@ and Packer cannot reach it until a maintainer exposes it.
 - **dufflebag reachable on port 443.** A plugin source address cannot carry a
   port, so Packer always connects to port 443 of the host it names. The template
   stanza dufflebag shows names the host without a port.
+
+Source addresses, version constraints and the install sequence are Packer's:
+see [Installing plugins](https://developer.hashicorp.com/packer/docs/plugins/install).
 - **Object storage.** Plugin files are stored in the deployment's object store.
   See [object storage](../components/object-storage.md).
 
@@ -39,13 +42,17 @@ Packer itself presents no credential. Exposure is what grants it access.
 3. Choose **Expose**. Every published plugin version becomes readable, without
    credentials, by anything that can reach dufflebag.
 
-**Unexpose** removes that access immediately; any `packer init` in progress
-fails. **Disable registry** deletes every plugin and file in the registry. It is
+**Unexpose** removes that access. A `packer init` in progress gets 404 on its
+next request. **Disable registry** deletes every plugin's records, then removes
+their files; a file that cannot be removed is logged and is never served. It is
 refused while the registry is exposed, so unexpose first.
 
 ## Import from releases.hashicorp.com
 
-HashiCorp's own Packer plugins are imported rather than uploaded:
+HashiCorp's own Packer plugins are imported rather than uploaded.
+
+Prerequisites: the `publisher` role, and outbound HTTPS from dufflebag to
+`api.releases.hashicorp.com` and `releases.hashicorp.com`.
 
 1. Open **Plugins** and choose **Browse HashiCorp**. The list shows each plugin
    HashiCorp publishes, how many of its versions you mirror, and any plugin
@@ -58,18 +65,20 @@ HashiCorp's own Packer plugins are imported rather than uploaded:
 4. Choose **Import**. The import runs in the background and its page shows the
    outcome of each version, with any platform that failed.
 
-Before storing a version, dufflebag verifies its SHA256SUMS against HashiCorp's
-release-signing key (fingerprint `C874 011F 0AB4 0511 0D02 1055 3436 5D94 72D7 468F`).
-A version whose signature does not verify is not imported. A version you
-already mirror is reported as already mirrored and left unchanged.
-
-Browsing and importing make dufflebag call `api.releases.hashicorp.com` and
-`releases.hashicorp.com`, so they need outbound HTTPS to both; serving plugins
-to Packer never does. Browsing and importing require `publisher`.
+Before storing a version, dufflebag verifies its SHA256SUMS against
+[HashiCorp's release-signing key](https://www.hashicorp.com/.well-known/pgp-key.txt)
+(fingerprint `C874 011F 0AB4 0511 0D02 1055 3436 5D94 72D7 468F`). A version
+whose signature does not verify is not imported. A version you already mirror
+is reported as already mirrored and left unchanged. Serving plugins to Packer
+never needs outbound access.
 
 ## Import from a GitHub release
 
-Community plugins published as GitHub releases are imported from their link:
+Community plugins published as GitHub releases are imported from their link.
+
+Prerequisites: the `publisher` role; outbound HTTPS from dufflebag to
+`api.github.com` and `github.com`; a public release that includes a SHA256SUMS
+asset.
 
 1. Open **Plugins** and choose **Import from GitHub**.
 2. Paste a release link, `https://github.com/<owner>/packer-plugin-<name>/releases/tag/<tag>`
@@ -78,13 +87,13 @@ Community plugins published as GitHub releases are imported from their link:
    now, and the import uses that tag even if a newer release appears.
 3. Choose platforms and **Import**. The import's page shows the outcome.
 
-The release must be public and must include a SHA256SUMS asset; a release
-without one cannot be verified or served. GitHub releases carry no key
-dufflebag can check, so a signature asset is kept as published but not
-verified. Resolving and importing call the GitHub API without credentials,
-which allows 60 calls an hour per egress address; when that is spent, the
-refusal names the time it resets. Downloads of release files do not count
-against it.
+A release without a SHA256SUMS asset cannot be verified or served. GitHub
+releases carry no key dufflebag can check, so a signature asset is kept as
+published but not verified. Resolving and importing call the GitHub API
+without credentials, under
+[GitHub's unauthenticated rate limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api);
+when that is spent, the refusal names the time it resets. Downloads of release
+files do not count against it.
 
 ## Upload a plugin version
 
@@ -95,8 +104,9 @@ A version is uploaded as its release files:
 - the detached signature (`..._SHA256SUMS.sig`), if the release has one;
 - the manifest (`..._manifest.json`), if the SHA256SUMS file lists one.
 
-Releases from releases.hashicorp.com list a manifest; goreleaser releases on
-GitHub do not.
+Releases from releases.hashicorp.com list a manifest;
+[goreleaser](https://goreleaser.com/customization/checksum/) releases on GitHub
+do not.
 
 In the console, open **Plugins**, choose **Upload plugin files**, and select the
 files for one version or several. The console groups them into one upload per
@@ -145,7 +155,8 @@ release changed upstream since then cannot add to it. Mirrored platforms
 cannot be removed: revoke the version, or remove it and import it again
 without that platform.
 
-**Remove version** deletes a version and its files. It cannot be undone.
+**Remove version** deletes a version's records, then removes its files; a file
+that cannot be removed is logged and is never served. It cannot be undone.
 Removing a plugin's last version removes the plugin, and its name can then
 be used by another source. A revoked version still holds the name.
 
@@ -188,7 +199,8 @@ version, which platforms are held (●), listed but not held (○), or not
 published (–).
 
 On a platform with no zip, Packer moves to the next older version that the
-template's version constraint allows and that has the platform. An exact
+template's [version constraint](https://developer.hashicorp.com/packer/docs/plugins/install)
+allows and that has the platform. An exact
 constraint such as `version = "0.6.3"` allows no other version, so the
 install fails on that platform. A range such as `version = ">= 0.6.0"` can
 install an older version there.

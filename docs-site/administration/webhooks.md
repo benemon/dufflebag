@@ -31,7 +31,7 @@ own webhooks, on the organization) and an HTTP or HTTPS receiver.
 
 The dufflebag server immediately sends a signed verification payload. The webhook remains
 `pending` until the endpoint returns a 2xx status. Pending webhooks receive no
-project events.
+events.
 
 If verification fails, fix the receiver and select **Verify** to repeat the
 same handshake. Changing a webhook URL also returns it to `pending` and repeats
@@ -81,9 +81,7 @@ version held (`newest_stored`). Update checks are described in the
 
 ## Follow delivery
 
-1. Expand a webhook row to see its newest 100 delivery records.
-
-Each row shows the operation, response code, attempt count, timestamps, and a
+Expand a webhook row to see its newest 100 delivery records. Each row shows the operation, response code, attempt count, timestamps, and a
 bounded response or failure detail.
 
 ::: warning
@@ -112,7 +110,7 @@ response reads are capped at 64 KiB. Only a bounded snippet is retained in
 the last-100 delivery history.
 
 `DFBG_WEBHOOK_ALLOW_PRIVATE=true` disables the private/local address refusal
-for isolated labs whose receiver deliberately lives on a private network. It
+for isolated labs whose receiver lives on a private network. It
 defaults to `false`. Do not enable it on a deployment where project
 maintainers must not reach internal services. A refused address is recorded
 once as a refused delivery and is not retried.
