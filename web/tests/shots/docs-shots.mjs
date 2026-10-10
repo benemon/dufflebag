@@ -966,10 +966,10 @@ async function captureSeededScreens(seeded) {
 
   // Edit mode on the detail grid with one pending change: 1.0.0 unticked.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Pinned to the newest available version, 1.1.0.')
+  await waitForText('version = "1.1.0"')
   await clickByText('button', 'Edit versions')
   await page.click('input[aria-label="Serve 1.0.0"]')
-  await waitForText('Packer stops installing it; its files are kept.')
+  await waitForText('stays stored; Packer can no longer fetch it')
   await capture('plugin-detail-edit.png')
 
   // Sync applies it as a job; the job page shows the outcome.

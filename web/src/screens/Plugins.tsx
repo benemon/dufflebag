@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, Checkbox, Content, EmptyState,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState,
   EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, MenuToggle, Modal, ModalBody, ModalFooter,
   ModalHeader, PageSection, Pagination, SearchInput, Select, SelectList, SelectOption, Spinner, TextInput,
   Toolbar, ToolbarContent, ToolbarItem,
@@ -335,6 +335,7 @@ export function PluginCatalogue({
   const rows = catalogueRows(plugins, { name: filter, source, updatesOnly })
   const shown = rows.slice((page - 1) * pageSize, page * pageSize)
   const selectable = (plugin: Plugin) => plugin.update_available && !queuedNames.has(plugin.name)
+  const pageSelectable = shown.filter(selectable).map((plugin) => plugin.name)
   const chosen = plugins.filter((plugin) => selected.includes(plugin.name))
 
   const openConfirm = async (names: string[]) => {
@@ -382,8 +383,10 @@ export function PluginCatalogue({
         </Alert>
       ) : null}
       <Card>
-        <Toolbar>
-          <ToolbarContent>
+        <CardTitle>All plugins</CardTitle>
+        <CardBody>
+        <Toolbar id="plugins-toolbar">
+          <ToolbarContent alignItems="center">
             <ToolbarItem>
               <SearchInput
                 aria-label="Filter plugins by name" placeholder="Filter by name" value={filter}
@@ -405,13 +408,13 @@ export function PluginCatalogue({
             {canPublish ? (
               <>
                 <ToolbarItem variant="separator" />
-                <ToolbarItem><Content component="small">{selected.length ? `${selected.length} selected` : 'Select plugins with an update'}</Content></ToolbarItem>
+                <ToolbarItem><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{selected.length ? `${selected.length} selected` : 'Select plugins with an update'}</span></ToolbarItem>
                 <ToolbarItem>
                   <Button variant="primary" isDisabled={selected.length === 0} onClick={() => void openConfirm(selected)}>Sync selected</Button>
                 </ToolbarItem>
               </>
             ) : null}
-            <ToolbarItem align={{ default: 'alignEnd' }}>
+            <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
               <Pagination
                 isCompact itemCount={rows.length} perPage={pageSize} page={page} perPageOptions={[{ title: '20', value: 20 }]}
                 onSetPage={(_event, next) => setPage(next)} titles={{ paginationAriaLabel: 'Plugins pagination' }}
@@ -419,26 +422,38 @@ export function PluginCatalogue({
             </ToolbarItem>
           </ToolbarContent>
         </Toolbar>
-        <Table aria-label="Plugins" variant="compact">
+        <Table aria-label="Plugins" variant="compact" selectableRowCaptionText="Plugin">
           <Thead>
             <Tr>
-              {canPublish ? <Th screenReaderText="Select" /> : null}
+              {canPublish ? (
+                <Th
+                  aria-label="Select plugins with an update"
+                  select={{
+                    isSelected: pageSelectable.length > 0 && pageSelectable.every((name) => selected.includes(name)),
+                    isIndeterminate: pageSelectable.some((name) => selected.includes(name)) && !pageSelectable.every((name) => selected.includes(name)),
+                    isHeaderSelectDisabled: pageSelectable.length === 0,
+                    onSelect: (_event, isSelecting) => setSelected(isSelecting
+                      ? [...new Set([...selected, ...pageSelectable])] : selected.filter((name) => !pageSelectable.includes(name))),
+                  }}
+                />
+              ) : null}
               <Th>Name</Th><Th>Source</Th><Th>Newest mirrored</Th><Th>Versions</Th><Th>Updates</Th>
               {canPublish ? <Th screenReaderText="Actions" /> : null}
             </Tr>
           </Thead>
           <Tbody>
-            {shown.map((plugin) => (
-              <Tr key={plugin.name} isRowSelected={selected.includes(plugin.name)}>
+            {shown.map((plugin, index) => (
+              <Tr key={plugin.name} isSelectable={canPublish && selectable(plugin)} isRowSelected={selected.includes(plugin.name)}>
                 {canPublish ? (
-                  <Td dataLabel="Select">
-                    <Checkbox
-                      id={`select-${plugin.name}`} aria-label={`Select ${plugin.name} to sync`}
-                      isDisabled={!selectable(plugin)} isChecked={selected.includes(plugin.name)}
-                      title={selectable(plugin) ? undefined : 'Only plugins with an update available can be synced'}
-                      onChange={(_e, checked) => setSelected(checked ? [...selected, plugin.name] : selected.filter((n) => n !== plugin.name))}
-                    />
-                  </Td>
+                  <Td
+                    title={selectable(plugin) ? undefined : 'Only plugins with an update available can be synced'}
+                    select={{
+                      rowIndex: (page - 1) * pageSize + index,
+                      isSelected: selected.includes(plugin.name),
+                      isDisabled: !selectable(plugin),
+                      onSelect: (_e, checked) => setSelected(checked ? [...selected, plugin.name] : selected.filter((n) => n !== plugin.name)),
+                    }}
+                  />
                 ) : null}
                 <Td dataLabel="Name">
                   <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>
@@ -472,6 +487,7 @@ export function PluginCatalogue({
           variant="bottom" itemCount={rows.length} perPage={pageSize} page={page} perPageOptions={[{ title: '20', value: 20 }]}
           onSetPage={(_event, next) => setPage(next)} titles={{ paginationAriaLabel: 'Plugins pagination, bottom' }}
         />
+        </CardBody>
       </Card>
       {confirming ? (
         <CatalogueSyncConfirmation

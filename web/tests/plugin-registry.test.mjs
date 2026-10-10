@@ -149,7 +149,7 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
     {
       name: 'upload', crumbs: ['Registry', 'Plugins', 'Upload'], loading: 'Loading upload…', error: 'Upload could not be loaded',
       view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginUploadView, {
-        ...callbacks, registry: null, plan: null, outcomes: {}, busy: false, loading, failure,
+        ...callbacks, organizationName: 'acme', registry: null, plan: null, held: {}, outcomes: {}, busy: false, loading, failure,
         onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
       })),
     },
@@ -303,10 +303,10 @@ test('upload planning refuses incomplete versions and unknown files before sendi
     file('packer-plugin-amazon_1.8.2_SHA256SUMS'), file('packer-plugin-amazon_1.8.2_linux_arm64.zip'),
   ])
   assert.deepEqual(plan.versions.map((v) => `${v.name} ${v.version}`), ['amazon 1.8.2'])
-  assert.deepEqual(plan.refused, [
-    { label: 'README.md', reason: 'not a SHA256SUMS file, signature, manifest or plugin zip' },
-    { label: 'git 0.6.3', reason: 'no SHA256SUMS file' },
-    { label: 'git 0.6.2', reason: 'no plugin zip' },
+  assert.deepEqual(plan.refused.map(({ label, reason, files }) => ({ label, reason, files: files.map((f) => f.name) })), [
+    { label: 'README.md', reason: 'not a SHA256SUMS file, signature, manifest or plugin zip', files: ['README.md'] },
+    { label: 'git 0.6.3', reason: 'no SHA256SUMS file', files: ['packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip'] },
+    { label: 'git 0.6.2', reason: 'no plugin zip', files: ['packer-plugin-git_v0.6.2_SHA256SUMS'] },
   ])
 })
 
@@ -345,37 +345,62 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
 })
 
-test('the upload view shows each version, then its outcome and stanza', () => {
+const uploadView = (props) => renderToStaticMarkup(React.createElement(PluginUploadView, {
+  organizationName: 'acme', registry: { enabled: true, exposed: false }, plan: null, held: {}, outcomes: {}, busy: false, loading: false, failure: null,
+  onBackToRegistry: () => {}, onBackToPlugins: () => {}, onRefresh: () => {}, onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
+  ...props,
+}))
+
+test('the upload view groups the files by version with each file\'s standing, then the outcome and stanza', () => {
   const plan = planPluginUploads([
     file('packer-plugin-git_v0.6.3_SHA256SUMS', 900), file('packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip', 6259751),
     file('packer-plugin-git_v0.6.2_SHA256SUMS', 900), file('packer-plugin-git_v0.6.2_x5.0_linux_arm64.zip', 6100000),
+    file('packer-plugin-git_v0.6.2_x5.0_darwin_arm64.zip', 6000000),
+    file('README.md', 3000),
   ])
-  const view = (outcomes) => renderToStaticMarkup(React.createElement(PluginUploadView, {
-    registry: { enabled: true, exposed: false }, plan, outcomes, busy: false, failure: null,
-    onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
-  }))
-  const ready = view({})
-  assert.match(ready, /git · 0\.6\.3/)
-  assert.match(ready, /6\.3 MB/)
-  assert.match(ready, /Upload 2 versions/)
-  assert.equal((ready.match(/>Ready</g) ?? []).length, 2)
+  const held = { git: { name: 'git', source: { kind: 'upload' }, versions: [
+    { version: '0.6.2', revoked: false, created_at: '2026-10-01T00:00:00Z', listed_platforms: [], stored_platforms: [{ os: 'linux', arch: 'arm64' }] },
+  ] } }
+  const ready = uploadView({ plan, held })
+  assert.match(ready, /Drag plugin files here/)
+  assert.match(ready, /Upload plugin binaries built in-house/)
+  assert.match(ready, /git · 2 versions/)
+  assert.match(ready, /grouped from 6 files; nothing has been sent yet/)
+  assert.match(ready, /<code>0\.6\.3<\/code>[\s\S]{0,400}?>New version<[\s\S]{0,300}?2 files/)
+  assert.match(ready, /<code>0\.6\.2<\/code>[\s\S]{0,400}?>Available<[\s\S]{0,300}?mirrored · architectures are added, never replaced/)
+  assert.match(ready, /linux_arm64\.zip<\/code><\/td><td[^>]*>linux_arm64<\/td><td[^>]*>6\.3 MB<\/td><td[^>]*>New</)
+  assert.match(ready, /0\.6\.2_x5\.0_linux_arm64\.zip<\/code><\/td><td[^>]*>linux_arm64<\/td><td[^>]*>6\.1 MB<\/td><td[^>]*>Already mirrored</)
+  assert.match(ready, /darwin_arm64\.zip<\/code><\/td><td[^>]*>darwin_arm64<\/td><td[^>]*>6\.0 MB<\/td><td[^>]*>New architecture</)
+  assert.match(ready, /Not sent[\s\S]{0,300}?>1 file</)
+  assert.match(ready, /<code>README\.md<\/code>[\s\S]{0,300}?not a SHA256SUMS file[\s\S]{0,300}?3 KB<\/td><td[^>]*>Skipped</)
+  assert.match(ready, />Upload 5 files · 2 versions</)
+  assert.match(ready, />Cancel</)
 
-  const done = view({
+  const done = uploadView({ plan, held, outcomes: {
     'git 0.6.3': { status: 'published', stanza: { source: 'dufflebag.example.com/plugins/acme/git', version: '0.6.3', hcl: 'source  = "dufflebag.example.com/plugins/acme/git"' } },
     'git 0.6.2': { status: 'refused', message: 'git 0.6.2 already exists; versions are immutable' },
-  })
-  assert.match(done, />Published</)
+  } })
+  assert.match(done, />Imported</)
   assert.match(done, />Refused</)
   assert.match(done, /versions are immutable/)
+  assert.match(done, /5 sent/)
   assert.match(done, /Open git/)
   assert.match(done, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
-  assert.doesNotMatch(done, /Upload 2 versions/)
+  assert.doesNotMatch(done, /Upload 5 files/)
 
-  const disabled = renderToStaticMarkup(React.createElement(PluginUploadView, {
-    registry: { enabled: false, exposed: false }, plan: null, outcomes: {}, busy: false, failure: null,
-    onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
-  }))
-  assert.match(disabled, /The plugin registry isn&#x27;t enabled/)
+  const disabled = uploadView({ registry: { enabled: false, exposed: false } })
+  assert.match(disabled, /The plugin registry isn’t enabled/)
+  assert.match(disabled, /href="\/plugin-registry\/settings"/)
+})
+
+test('an upload under a name held from another source is refused before anything is sent', () => {
+  const plan = planPluginUploads([file('packer-plugin-amazon_v1.8.3-acme_SHA256SUMS', 900), file('packer-plugin-amazon_v1.8.3-acme_x5.0_linux_amd64.zip', 41200000)])
+  const html = uploadView({ plan, held: { amazon: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: [] } } })
+  assert.match(html, /amazon is held from HashiCorp/)
+  assert.match(html, /In acme, amazon comes from HashiCorp \(packer-plugin-amazon\)\. A name belongs to one source per organization, so these uploads are refused\. The name is freed once every amazon version is removed; revoked versions still count\./)
+  assert.match(html, />Refused<[\s\S]{0,300}?name held from HashiCorp/)
+  assert.match(html, /41\.2 MB<\/td><td[^>]*><span[^>]*>Not sent</)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Upload 2 files · 1 version/)
 })
 
 test('publishing sends a multipart PUT to the version path', async () => {
@@ -831,12 +856,13 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.match(html, />Not checked \(upload\)</)
   assert.match(html, /<code>ethanmdavidson\/packer-plugin-git<\/code>/)
   assert.match(html, /aria-label="Kebab toggle"/)
-  const box = (name) => html.match(new RegExp(`<input[^>]*aria-label="Select ${name} to sync"[^>]*>`))[0]
-  assert.doesNotMatch(box('amazon'), /disabled/)
-  for (const name of ['docker', 'git', 'probe']) {
-    assert.match(box(name), /disabled/, `${name} has no update to sync`)
-    assert.match(box(name), /title="Only plugins with an update available can be synced"/)
-  }
+  // The house selectable-table cells: a select-all header over the rows with an update, PF's row checkboxes.
+  assert.match(html, /All plugins<\/[\s\S]{0,600}?id="plugins-toolbar"/, 'the catalogue card carries a title and a toolbar like the other list screens')
+  assert.match(html, /aria-label="Select plugins with an update"/)
+  const box = (row) => html.match(new RegExp(`<input[^>]*id="select-${row}"[^>]*>`))[0]
+  assert.doesNotMatch(box(0), /disabled/, 'amazon has an update to sync')
+  for (const row of [1, 2, 3]) assert.match(box(row), /disabled/, `row ${row} has no update to sync`)
+  assert.equal((html.match(/title="Only plugins with an update available can be synced"/g) ?? []).length, 3)
   // No action buttons in the toolbar, no settings card, no exposed alert.
   assert.doesNotMatch(html, /Upload plugin files/)
   assert.doesNotMatch(html, /Save default platforms/)
