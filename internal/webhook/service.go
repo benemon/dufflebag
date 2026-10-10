@@ -45,7 +45,7 @@ func NewService(repository Repository, sealer *credseal.Sealer, client *http.Cli
 }
 
 func (s *Service) Create(ctx context.Context, organizationID, projectID string, write Create) (*Record, error) {
-	if err := validateCreate(write); err != nil {
+	if err := validateCreate(write, projectID == ""); err != nil {
 		return nil, err
 	}
 	at := s.now().UTC()
@@ -99,7 +99,7 @@ func (s *Service) Update(ctx context.Context, organizationID, projectID, webhook
 	if write.Events != nil {
 		record.Events = append([]string{}, (*write.Events)...)
 	}
-	if err := validateCreate(Create{Name: record.Name, URL: record.URL, Description: record.Description, Events: record.Events}); err != nil {
+	if err := validateCreate(Create{Name: record.Name, URL: record.URL, Description: record.Description, Events: record.Events}, projectID == ""); err != nil {
 		return nil, err
 	}
 	if write.Secret != nil {
@@ -233,7 +233,7 @@ func boundedDetail(value []byte) string {
 	return string(valid)
 }
 
-func validateCreate(write Create) error {
+func validateCreate(write Create, organization bool) error {
 	if strings.TrimSpace(write.Name) == "" || utf8.RuneCountInString(write.Name) > 200 {
 		return fmt.Errorf("%w: name must contain 1 to 200 characters", ErrInvalid)
 	}
@@ -244,8 +244,12 @@ func validateCreate(write Create) error {
 	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.User != nil {
 		return fmt.Errorf("%w: url must be an http or https URL without user information", ErrInvalid)
 	}
-	allowed := make(map[string]bool, len(Operations))
-	for _, operation := range Operations {
+	catalogue := Operations
+	if organization {
+		catalogue = OrganizationOperations
+	}
+	allowed := make(map[string]bool, len(catalogue))
+	for _, operation := range catalogue {
 		allowed[operation] = true
 	}
 	seen := make(map[string]bool, len(write.Events))

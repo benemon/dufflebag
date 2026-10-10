@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
+	"github.com/benemon/dufflebag/internal/webhook"
 	"github.com/google/uuid"
 )
 
@@ -106,11 +108,47 @@ func (r *Repository) RecordPluginUpdateCheck(
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	state, err := q.GetPluginUpdateState(ctx, id)
+	if err != nil {
+		return fmt.Errorf("get plugin update state: %w", err)
+	}
 	nullable := func(value string) sql.NullString { return sql.NullString{String: value, Valid: value != ""} }
 	if err := q.RecordPluginUpdateCheck(ctx, postgresdb.RecordPluginUpdateCheckParams{
 		ID: id, UpdateError: nullable(checkErr), UpdateLatest: nullable(latest), UpdateLatestTag: nullable(tag),
 	}); err != nil {
 		return fmt.Errorf("record plugin update check: %w", err)
 	}
+	// The event fires once, when a version newer than every one seen and
+	// every one held first appears (ADR-0027 A6).
+	newest := plugin.Newest(state.StoredVersions)
+	if latest != "" && (!state.UpdateLatest.Valid || plugin.Compare(latest, state.UpdateLatest.String) > 0) &&
+		(newest == "" || plugin.Compare(latest, newest) > 0) {
+		source := sourceOf(state.SourceKind, state.SourceRepository)
+		if err := enqueueOrganizationWebhookEvent(ctx, q, tenant, webhook.OperationPluginUpdateAvailable,
+			webhook.Target{Type: "plugin", Name: state.Name},
+			PluginUpdateAvailable{
+				Plugin: state.Name, Source: PluginUpdateSource(source),
+				Latest: latest, Tag: tag, NewestStored: newest,
+			},
+			time.Now().UTC(),
+		); err != nil {
+			return err
+		}
+	}
 	return tx.Commit()
+}
+
+// PluginUpdateAvailable is the payload of a plugin.update_available event.
+type PluginUpdateAvailable struct {
+	Plugin       string             `json:"plugin"`
+	Source       PluginUpdateSource `json:"source"`
+	Latest       string             `json:"latest"`
+	Tag          string             `json:"tag,omitempty"`
+	NewestStored string             `json:"newest_stored,omitempty"`
+}
+
+// PluginUpdateSource is where an update was seen.
+type PluginUpdateSource struct {
+	Kind       string `json:"kind"`
+	Repository string `json:"repository,omitempty"`
 }

@@ -122,6 +122,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	rlsTables := []string{
 		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
+		"organization_webhooks", "organization_webhook_outbox", "organization_webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
 		"build_scan_state", "build_findings_summary", "version_findings_summary", "pending_scans",
 	}
@@ -232,7 +233,10 @@ func TestTenantIsolation(t *testing.T) {
 
 	seedPluginRows(t, ctx, db, orgA)
 	seedPluginRows(t, ctx, db, orgB)
-	for _, table := range []string{"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports"} {
+	for _, table := range []string{
+		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports",
+		"organization_webhooks", "organization_webhook_outbox", "organization_webhook_deliveries",
+	} {
 		t.Run(table, func(t *testing.T) {
 			tx, err := store.BeginOrganizationTenant(ctx, db, orgA)
 			if err != nil {
@@ -838,7 +842,7 @@ func seedPluginRows(t *testing.T, ctx context.Context, db *sql.DB, organization 
 		t.Fatal(err)
 	}
 	defer func() { _ = tx.Rollback() }()
-	pluginID, versionID := uuid.NewString(), uuid.NewString()
+	pluginID, versionID, webhookID := uuid.NewString(), uuid.NewString(), uuid.NewString()
 	for _, statement := range []struct {
 		query string
 		args  []any
@@ -850,6 +854,12 @@ func seedPluginRows(t *testing.T, ctx context.Context, db *sql.DB, organization 
 			VALUES ($1, $2, 'f.zip', 'linux', 'amd64', 'd', 1, 'k')`, []any{organization, versionID}},
 		{`INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
 			VALUES ($1, $2, 'releases-hashicorp', 'packer-plugin-probe', '{1.0.0}', '{linux_amd64}')`, []any{uuid.NewString(), organization}},
+		{`INSERT INTO organization_webhooks (organization_id, id, name, url, created_at, updated_at)
+			VALUES ($1, $2, 'w', 'https://example.com', now(), now())`, []any{organization, webhookID}},
+		{`INSERT INTO organization_webhook_outbox (organization_id, event_id, occurred_at, operation, target, actor, payload, available_at)
+			VALUES ($1, 'e', now(), 'plugin.update_available', '{}', '{}', '{}', now())`, []any{organization}},
+		{`INSERT INTO organization_webhook_deliveries (organization_id, id, webhook_id, event_id, operation, status, created_at)
+			VALUES ($1, $2, $3, 'e', 'plugin.update_available', 'pending', now())`, []any{organization, uuid.NewString(), webhookID}},
 	} {
 		if _, err := tx.ExecContext(ctx, statement.query, statement.args...); err != nil {
 			t.Fatalf("seed plugin rows for %s: %v", organization, err)

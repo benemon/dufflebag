@@ -17,7 +17,7 @@ import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import { When } from '../components/When'
 import { SkeletonRows } from '../components/Loading'
 import {
-  WEBHOOK_OPERATIONS, createWebhook, deleteWebhook, listWebhookDeliveries, listWebhooks,
+  ORGANIZATION_WEBHOOK_OPERATIONS, WEBHOOK_OPERATIONS, createWebhook, deleteWebhook, listWebhookDeliveries, listWebhooks,
   verifyWebhook, type Webhook, type WebhookDelivery, type WebhookOperation,
 } from '../data/webhooks'
 
@@ -31,11 +31,14 @@ type Draft = {
 
 const emptyDraft: Draft = { name: '', url: '', description: '', secret: '', events: [] }
 
+export type WebhookScope = 'organization' | 'project'
+
 export function Webhooks() {
   const { state, self, selectedOrganization, selectedProject } = useAuth()
-  const tenant = selectedOrganization && selectedProject
-    ? { organizationID: selectedOrganization, projectID: selectedProject }
-    : null
+  // The selection decides the scope: an organization alone shows its own
+  // webhooks, a project shows the project's.
+  const scope: WebhookScope = selectedProject ? 'project' : 'organization'
+  const tenant = selectedOrganization ? { organizationID: selectedOrganization, projectID: selectedProject ?? '' } : null
   const token = state?.token ?? ''
   const [webhooks, setWebhooks] = useState<Webhook[]>([])
   const [loading, setLoading] = useState(true)
@@ -61,11 +64,12 @@ export function Webhooks() {
   useEffect(() => { void reload() }, [reload])
 
   if (!tenant) {
-    return <PageSection><Alert variant="info" isInline title="Select a project to manage webhooks" /></PageSection>
+    return <PageSection><Alert variant="info" isInline title="Select an organization to manage webhooks" /></PageSection>
   }
 
   return (
     <WebhooksView
+      scope={scope}
       webhooks={webhooks} loading={loading} failure={failure}
       callerRole={self?.role ?? null}
       onCreate={async (draft) => {
@@ -85,10 +89,22 @@ export function Webhooks() {
   )
 }
 
+const scopeCopy = {
+  organization: {
+    description: 'Send signed organization events, such as a plugin update becoming available, to an HTTP endpoint after its activation handshake succeeds.',
+    empty: 'Create a webhook to send signed organization events.',
+  },
+  project: {
+    description: 'Send signed project events to an HTTP endpoint after its activation handshake succeeds.',
+    empty: 'Create a webhook to send signed project events.',
+  },
+}
+
 export function WebhooksView({
-  webhooks, loading, failure, callerRole, onCreate, onVerify, onDelete, onBulkDelete,
+  scope = 'project', webhooks, loading, failure, callerRole, onCreate, onVerify, onDelete, onBulkDelete,
   onRefresh, onDeliveries,
 }: {
+  scope?: WebhookScope
   webhooks: Webhook[]
   loading: boolean
   failure: string | null
@@ -117,7 +133,7 @@ export function WebhooksView({
         title="Webhooks"
         onRefresh={onRefresh}
         refreshing={loading}
-        description="Send signed project events to an HTTP endpoint after its activation handshake succeeds."
+        description={scopeCopy[scope].description}
         actions={!creating && (loading || failure || webhooks.length > 0) ? (
           <RoleRestrictedButton
             action="configureWebhooks" callerRole={callerRole} variant="primary"
@@ -140,6 +156,7 @@ export function WebhooksView({
         ) : null}
         {creating ? (
           <CreateWebhookForm
+            operations={scope === 'organization' ? ORGANIZATION_WEBHOOK_OPERATIONS : WEBHOOK_OPERATIONS}
             callerRole={callerRole} onCancel={() => setCreating(false)}
             onCreate={async (draft) => run(async () => { await onCreate(draft); setCreating(false) })}
           />
@@ -148,7 +165,7 @@ export function WebhooksView({
           <SkeletonRows screenreaderText="Loading webhooks…" />
         ) : webhooks.length === 0 && !failure ? (
           <EmptyState titleText="No webhooks are configured" headingLevel="h2">
-            <EmptyStateBody>Create a webhook to send signed project events.</EmptyStateBody>
+            <EmptyStateBody>{scopeCopy[scope].empty}</EmptyStateBody>
             <EmptyStateFooter>
               <EmptyStateActions>
                 {!creating ? (
@@ -172,7 +189,8 @@ export function WebhooksView({
   )
 }
 
-export function CreateWebhookForm({ callerRole, onCreate, onCancel }: {
+export function CreateWebhookForm({ operations = WEBHOOK_OPERATIONS, callerRole, onCreate, onCancel }: {
+  operations?: readonly WebhookOperation[]
   callerRole: import('../auth/permissions').Role | null
   onCreate: (draft: Draft) => Promise<void>
   onCancel: () => void
@@ -202,7 +220,7 @@ export function CreateWebhookForm({ callerRole, onCreate, onCancel }: {
           </FormGroup>
           <FormGroup label="Events" fieldId="webhook-events">
             <Content component="p">Leave every box clear to subscribe to all operations.</Content>
-            {WEBHOOK_OPERATIONS.map((operation) => (
+            {operations.map((operation) => (
               <Checkbox
                 key={operation} id={`event-${operation}`} label={operation}
                 isChecked={draft.events.includes(operation)}

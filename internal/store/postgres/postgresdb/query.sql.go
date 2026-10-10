@@ -405,6 +405,101 @@ func (q *Queries) CreateOrganization(ctx context.Context, arg CreateOrganization
 	return i, err
 }
 
+const createOrganizationWebhook = `-- name: CreateOrganizationWebhook :one
+INSERT INTO organization_webhooks (
+    organization_id, id, name, url, description, sealed_secret,
+    events, state, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, 'pending', $8, $8)
+RETURNING organization_id, id, name, url, description, sealed_secret, events, state, last_verification_at, last_verification_error, created_at, updated_at
+`
+
+type CreateOrganizationWebhookParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ID             uuid.UUID `json:"id"`
+	Name           string    `json:"name"`
+	Url            string    `json:"url"`
+	Description    string    `json:"description"`
+	SealedSecret   []byte    `json:"sealed_secret"`
+	Events         []string  `json:"events"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+func (q *Queries) CreateOrganizationWebhook(ctx context.Context, arg CreateOrganizationWebhookParams) (OrganizationWebhook, error) {
+	row := q.db.QueryRowContext(ctx, createOrganizationWebhook,
+		arg.OrganizationID,
+		arg.ID,
+		arg.Name,
+		arg.Url,
+		arg.Description,
+		arg.SealedSecret,
+		pq.Array(arg.Events),
+		arg.CreatedAt,
+	)
+	var i OrganizationWebhook
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Description,
+		&i.SealedSecret,
+		pq.Array(&i.Events),
+		&i.State,
+		&i.LastVerificationAt,
+		&i.LastVerificationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const createOrganizationWebhookDelivery = `-- name: CreateOrganizationWebhookDelivery :one
+INSERT INTO organization_webhook_deliveries (
+    organization_id, id, webhook_id, event_id, operation,
+    status, attempt_count, next_attempt_at, created_at
+) VALUES ($1, $2, $3, $4, $5, 'pending', 0, $6, $6)
+ON CONFLICT (organization_id, webhook_id, event_id) DO UPDATE
+SET event_id = EXCLUDED.event_id
+RETURNING organization_id, id, webhook_id, event_id, operation, status, attempt_count, first_attempted_at, last_attempted_at, next_attempt_at, response_code, detail, created_at
+`
+
+type CreateOrganizationWebhookDeliveryParams struct {
+	OrganizationID uuid.UUID    `json:"organization_id"`
+	ID             uuid.UUID    `json:"id"`
+	WebhookID      uuid.UUID    `json:"webhook_id"`
+	EventID        string       `json:"event_id"`
+	Operation      string       `json:"operation"`
+	NextAttemptAt  sql.NullTime `json:"next_attempt_at"`
+}
+
+func (q *Queries) CreateOrganizationWebhookDelivery(ctx context.Context, arg CreateOrganizationWebhookDeliveryParams) (OrganizationWebhookDelivery, error) {
+	row := q.db.QueryRowContext(ctx, createOrganizationWebhookDelivery,
+		arg.OrganizationID,
+		arg.ID,
+		arg.WebhookID,
+		arg.EventID,
+		arg.Operation,
+		arg.NextAttemptAt,
+	)
+	var i OrganizationWebhookDelivery
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.WebhookID,
+		&i.EventID,
+		&i.Operation,
+		&i.Status,
+		&i.AttemptCount,
+		&i.FirstAttemptedAt,
+		&i.LastAttemptedAt,
+		&i.NextAttemptAt,
+		&i.ResponseCode,
+		&i.Detail,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const createPrincipal = `-- name: CreatePrincipal :one
 INSERT INTO principals (
     id, name, client_id, organization_id, project_id, bucket_id, role, created_at, integrity_mac
@@ -764,6 +859,30 @@ func (q *Queries) DeleteOrganization(ctx context.Context, id uuid.UUID) (string,
 	return result, err
 }
 
+const deleteOrganizationWebhook = `-- name: DeleteOrganizationWebhook :execrows
+DELETE FROM organization_webhooks WHERE id = $1
+`
+
+func (q *Queries) DeleteOrganizationWebhook(ctx context.Context, id uuid.UUID) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOrganizationWebhook, id)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+const deleteOrganizationWebhookOutboxEvent = `-- name: DeleteOrganizationWebhookOutboxEvent :execrows
+DELETE FROM organization_webhook_outbox WHERE event_id = $1
+`
+
+func (q *Queries) DeleteOrganizationWebhookOutboxEvent(ctx context.Context, eventID string) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteOrganizationWebhookOutboxEvent, eventID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deletePin = `-- name: DeletePin :exec
 DELETE FROM pins
 USING buckets
@@ -996,6 +1115,65 @@ func (q *Queries) EnablePluginRegistry(ctx context.Context, organizationID uuid.
 	return exposed, err
 }
 
+const enqueueOrganizationWebhookEvent = `-- name: EnqueueOrganizationWebhookEvent :exec
+WITH subscribed AS (
+    SELECT id FROM organization_webhooks
+    WHERE state = 'active'
+      AND (cardinality(events) = 0 OR $2::text = ANY(events))
+), pruned AS (
+    DELETE FROM organization_webhook_deliveries AS doomed
+    WHERE doomed.webhook_id IN (SELECT id FROM subscribed) AND doomed.id IN (
+        SELECT retained.id FROM organization_webhook_deliveries AS retained
+        WHERE retained.webhook_id = doomed.webhook_id
+        ORDER BY retained.created_at DESC, retained.id DESC
+        OFFSET 99
+    )
+), queued AS (
+    INSERT INTO organization_webhook_outbox (
+        organization_id, event_id, occurred_at, operation,
+        target, actor, payload, available_at
+    )
+    SELECT $1, $4,
+           $3::timestamptz, $2,
+           $5, $6, $7,
+           $3::timestamptz
+    WHERE EXISTS (SELECT 1 FROM subscribed)
+    RETURNING event_id
+)
+INSERT INTO organization_webhook_deliveries (
+    organization_id, id, webhook_id, event_id, operation,
+    status, attempt_count, next_attempt_at, created_at
+)
+SELECT $1, gen_random_uuid(),
+       subscribed.id, queued.event_id, $2,
+       'pending', 0, $3::timestamptz,
+       $3::timestamptz
+FROM subscribed CROSS JOIN queued
+`
+
+type EnqueueOrganizationWebhookEventParams struct {
+	OrganizationID uuid.UUID       `json:"organization_id"`
+	Operation      string          `json:"operation"`
+	OccurredAt     time.Time       `json:"occurred_at"`
+	EventID        string          `json:"event_id"`
+	Target         json.RawMessage `json:"target"`
+	Actor          json.RawMessage `json:"actor"`
+	Payload        json.RawMessage `json:"payload"`
+}
+
+func (q *Queries) EnqueueOrganizationWebhookEvent(ctx context.Context, arg EnqueueOrganizationWebhookEventParams) error {
+	_, err := q.db.ExecContext(ctx, enqueueOrganizationWebhookEvent,
+		arg.OrganizationID,
+		arg.Operation,
+		arg.OccurredAt,
+		arg.EventID,
+		arg.Target,
+		arg.Actor,
+		arg.Payload,
+	)
+	return err
+}
+
 const enqueueWebhookEvent = `-- name: EnqueueWebhookEvent :exec
 WITH subscribed AS (
     SELECT id FROM webhooks
@@ -1180,6 +1358,29 @@ func (q *Queries) GetInitializationTimestamp(ctx context.Context) (time.Time, er
 	return initialized_at, err
 }
 
+const getNextOrganizationWebhookOutboxEvent = `-- name: GetNextOrganizationWebhookOutboxEvent :one
+SELECT organization_id, event_id, occurred_at, operation, target, actor, payload, available_at FROM organization_webhook_outbox
+WHERE available_at <= $1
+ORDER BY available_at, event_id
+LIMIT 1
+`
+
+func (q *Queries) GetNextOrganizationWebhookOutboxEvent(ctx context.Context, availableAt time.Time) (OrganizationWebhookOutbox, error) {
+	row := q.db.QueryRowContext(ctx, getNextOrganizationWebhookOutboxEvent, availableAt)
+	var i OrganizationWebhookOutbox
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.EventID,
+		&i.OccurredAt,
+		&i.Operation,
+		&i.Target,
+		&i.Actor,
+		&i.Payload,
+		&i.AvailableAt,
+	)
+	return i, err
+}
+
 const getNextWebhookOutboxEvent = `-- name: GetNextWebhookOutboxEvent :one
 SELECT organization_id, project_id, event_id, occurred_at, operation, target, actor, payload, available_at FROM webhook_outbox
 WHERE available_at <= $1
@@ -1226,6 +1427,30 @@ func (q *Queries) GetOrganizationIDByName(ctx context.Context, name string) (uui
 	var id uuid.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const getOrganizationWebhook = `-- name: GetOrganizationWebhook :one
+SELECT organization_id, id, name, url, description, sealed_secret, events, state, last_verification_at, last_verification_error, created_at, updated_at FROM organization_webhooks WHERE id = $1
+`
+
+func (q *Queries) GetOrganizationWebhook(ctx context.Context, id uuid.UUID) (OrganizationWebhook, error) {
+	row := q.db.QueryRowContext(ctx, getOrganizationWebhook, id)
+	var i OrganizationWebhook
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Description,
+		&i.SealedSecret,
+		pq.Array(&i.Events),
+		&i.State,
+		&i.LastVerificationAt,
+		&i.LastVerificationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const getPin = `-- name: GetPin :one
@@ -1335,6 +1560,35 @@ func (q *Queries) GetPluginRegistryDefaultPlatforms(ctx context.Context, organiz
 	var default_platforms []string
 	err := row.Scan(pq.Array(&default_platforms))
 	return default_platforms, err
+}
+
+const getPluginUpdateState = `-- name: GetPluginUpdateState :one
+SELECT name, source_kind, source_repository, update_latest,
+    ARRAY(SELECT version FROM plugin_versions WHERE plugin_id = plugins.id)::text[] AS stored_versions
+FROM plugins
+WHERE plugins.id = $1
+FOR UPDATE
+`
+
+type GetPluginUpdateStateRow struct {
+	Name             string         `json:"name"`
+	SourceKind       string         `json:"source_kind"`
+	SourceRepository sql.NullString `json:"source_repository"`
+	UpdateLatest     sql.NullString `json:"update_latest"`
+	StoredVersions   []string       `json:"stored_versions"`
+}
+
+func (q *Queries) GetPluginUpdateState(ctx context.Context, id uuid.UUID) (GetPluginUpdateStateRow, error) {
+	row := q.db.QueryRowContext(ctx, getPluginUpdateState, id)
+	var i GetPluginUpdateStateRow
+	err := row.Scan(
+		&i.Name,
+		&i.SourceKind,
+		&i.SourceRepository,
+		&i.UpdateLatest,
+		pq.Array(&i.StoredVersions),
+	)
+	return i, err
 }
 
 const getPluginVersionRevoked = `-- name: GetPluginVersionRevoked :one
@@ -2263,6 +2517,133 @@ func (q *Queries) ListOrganizationIDs(ctx context.Context) ([]uuid.UUID, error) 
 			return nil, err
 		}
 		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationWebhookDeliveries = `-- name: ListOrganizationWebhookDeliveries :many
+SELECT organization_id, id, webhook_id, event_id, operation, status, attempt_count, first_attempted_at, last_attempted_at, next_attempt_at, response_code, detail, created_at FROM organization_webhook_deliveries
+WHERE webhook_id = $1
+ORDER BY created_at DESC, id DESC
+LIMIT 100
+`
+
+func (q *Queries) ListOrganizationWebhookDeliveries(ctx context.Context, webhookID uuid.UUID) ([]OrganizationWebhookDelivery, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationWebhookDeliveries, webhookID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrganizationWebhookDelivery
+	for rows.Next() {
+		var i OrganizationWebhookDelivery
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.ID,
+			&i.WebhookID,
+			&i.EventID,
+			&i.Operation,
+			&i.Status,
+			&i.AttemptCount,
+			&i.FirstAttemptedAt,
+			&i.LastAttemptedAt,
+			&i.NextAttemptAt,
+			&i.ResponseCode,
+			&i.Detail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationWebhookEventDeliveries = `-- name: ListOrganizationWebhookEventDeliveries :many
+SELECT organization_id, id, webhook_id, event_id, operation, status, attempt_count, first_attempted_at, last_attempted_at, next_attempt_at, response_code, detail, created_at FROM organization_webhook_deliveries
+WHERE event_id = $1
+ORDER BY created_at, id
+`
+
+func (q *Queries) ListOrganizationWebhookEventDeliveries(ctx context.Context, eventID string) ([]OrganizationWebhookDelivery, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationWebhookEventDeliveries, eventID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrganizationWebhookDelivery
+	for rows.Next() {
+		var i OrganizationWebhookDelivery
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.ID,
+			&i.WebhookID,
+			&i.EventID,
+			&i.Operation,
+			&i.Status,
+			&i.AttemptCount,
+			&i.FirstAttemptedAt,
+			&i.LastAttemptedAt,
+			&i.NextAttemptAt,
+			&i.ResponseCode,
+			&i.Detail,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOrganizationWebhooks = `-- name: ListOrganizationWebhooks :many
+SELECT organization_id, id, name, url, description, sealed_secret, events, state, last_verification_at, last_verification_error, created_at, updated_at FROM organization_webhooks ORDER BY created_at DESC, id DESC
+`
+
+func (q *Queries) ListOrganizationWebhooks(ctx context.Context) ([]OrganizationWebhook, error) {
+	rows, err := q.db.QueryContext(ctx, listOrganizationWebhooks)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OrganizationWebhook
+	for rows.Next() {
+		var i OrganizationWebhook
+		if err := rows.Scan(
+			&i.OrganizationID,
+			&i.ID,
+			&i.Name,
+			&i.Url,
+			&i.Description,
+			&i.SealedSecret,
+			pq.Array(&i.Events),
+			&i.State,
+			&i.LastVerificationAt,
+			&i.LastVerificationError,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err
@@ -3295,6 +3676,21 @@ func (q *Queries) PluginVersionExists(ctx context.Context, arg PluginVersionExis
 	return exists, err
 }
 
+const pruneOrganizationWebhookDeliveries = `-- name: PruneOrganizationWebhookDeliveries :exec
+DELETE FROM organization_webhook_deliveries AS doomed
+WHERE doomed.webhook_id = $1 AND doomed.id IN (
+    SELECT retained.id FROM organization_webhook_deliveries AS retained
+    WHERE retained.webhook_id = $1
+    ORDER BY retained.created_at DESC, retained.id DESC
+    OFFSET 100
+)
+`
+
+func (q *Queries) PruneOrganizationWebhookDeliveries(ctx context.Context, webhookID uuid.UUID) error {
+	_, err := q.db.ExecContext(ctx, pruneOrganizationWebhookDeliveries, webhookID)
+	return err
+}
+
 const pruneWebhookDeliveries = `-- name: PruneWebhookDeliveries :exec
 DELETE FROM webhook_deliveries AS doomed
 WHERE doomed.webhook_id = $1 AND doomed.id IN (
@@ -3437,6 +3833,95 @@ type RecordInitializationParams struct {
 func (q *Queries) RecordInitialization(ctx context.Context, arg RecordInitializationParams) error {
 	_, err := q.db.ExecContext(ctx, recordInitialization, arg.InitializedAt, arg.RecoveryDigest, arg.RecoveryThreshold)
 	return err
+}
+
+const recordOrganizationWebhookDeliveryAttempt = `-- name: RecordOrganizationWebhookDeliveryAttempt :one
+UPDATE organization_webhook_deliveries
+SET status = $2, attempt_count = $3,
+    first_attempted_at = COALESCE(first_attempted_at, $4),
+    last_attempted_at = $4, next_attempt_at = $5,
+    response_code = $6, detail = $7
+WHERE id = $1
+RETURNING organization_id, id, webhook_id, event_id, operation, status, attempt_count, first_attempted_at, last_attempted_at, next_attempt_at, response_code, detail, created_at
+`
+
+type RecordOrganizationWebhookDeliveryAttemptParams struct {
+	ID              uuid.UUID      `json:"id"`
+	Status          string         `json:"status"`
+	AttemptCount    int32          `json:"attempt_count"`
+	LastAttemptedAt sql.NullTime   `json:"last_attempted_at"`
+	NextAttemptAt   sql.NullTime   `json:"next_attempt_at"`
+	ResponseCode    sql.NullInt32  `json:"response_code"`
+	Detail          sql.NullString `json:"detail"`
+}
+
+func (q *Queries) RecordOrganizationWebhookDeliveryAttempt(ctx context.Context, arg RecordOrganizationWebhookDeliveryAttemptParams) (OrganizationWebhookDelivery, error) {
+	row := q.db.QueryRowContext(ctx, recordOrganizationWebhookDeliveryAttempt,
+		arg.ID,
+		arg.Status,
+		arg.AttemptCount,
+		arg.LastAttemptedAt,
+		arg.NextAttemptAt,
+		arg.ResponseCode,
+		arg.Detail,
+	)
+	var i OrganizationWebhookDelivery
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.WebhookID,
+		&i.EventID,
+		&i.Operation,
+		&i.Status,
+		&i.AttemptCount,
+		&i.FirstAttemptedAt,
+		&i.LastAttemptedAt,
+		&i.NextAttemptAt,
+		&i.ResponseCode,
+		&i.Detail,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const recordOrganizationWebhookVerification = `-- name: RecordOrganizationWebhookVerification :one
+UPDATE organization_webhooks
+SET state = $2, last_verification_at = $3,
+    last_verification_error = $4, updated_at = $3
+WHERE id = $1
+RETURNING organization_id, id, name, url, description, sealed_secret, events, state, last_verification_at, last_verification_error, created_at, updated_at
+`
+
+type RecordOrganizationWebhookVerificationParams struct {
+	ID                    uuid.UUID      `json:"id"`
+	State                 string         `json:"state"`
+	LastVerificationAt    sql.NullTime   `json:"last_verification_at"`
+	LastVerificationError sql.NullString `json:"last_verification_error"`
+}
+
+func (q *Queries) RecordOrganizationWebhookVerification(ctx context.Context, arg RecordOrganizationWebhookVerificationParams) (OrganizationWebhook, error) {
+	row := q.db.QueryRowContext(ctx, recordOrganizationWebhookVerification,
+		arg.ID,
+		arg.State,
+		arg.LastVerificationAt,
+		arg.LastVerificationError,
+	)
+	var i OrganizationWebhook
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Description,
+		&i.SealedSecret,
+		pq.Array(&i.Events),
+		&i.State,
+		&i.LastVerificationAt,
+		&i.LastVerificationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const recordPluginImport = `-- name: RecordPluginImport :exec
@@ -3770,6 +4255,20 @@ func (q *Queries) SetBuildIntegrityMAC(ctx context.Context, arg SetBuildIntegrit
 	return err
 }
 
+const setOrganizationWebhookOutboxAvailableAt = `-- name: SetOrganizationWebhookOutboxAvailableAt :exec
+UPDATE organization_webhook_outbox SET available_at = $2 WHERE event_id = $1
+`
+
+type SetOrganizationWebhookOutboxAvailableAtParams struct {
+	EventID     string    `json:"event_id"`
+	AvailableAt time.Time `json:"available_at"`
+}
+
+func (q *Queries) SetOrganizationWebhookOutboxAvailableAt(ctx context.Context, arg SetOrganizationWebhookOutboxAvailableAtParams) error {
+	_, err := q.db.ExecContext(ctx, setOrganizationWebhookOutboxAvailableAt, arg.EventID, arg.AvailableAt)
+	return err
+}
+
 const setPluginRegistryDefaultPlatforms = `-- name: SetPluginRegistryDefaultPlatforms :one
 UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
 RETURNING default_platforms
@@ -4088,6 +4587,59 @@ func (q *Queries) UpdateBuild(ctx context.Context, arg UpdateBuildParams) (Build
 		&i.Metadata,
 		&i.IntegrityMac,
 		&i.BucketID,
+	)
+	return i, err
+}
+
+const updateOrganizationWebhook = `-- name: UpdateOrganizationWebhook :one
+UPDATE organization_webhooks
+SET name = $2, url = $3, description = $4, sealed_secret = $5,
+    events = $6, state = $7, last_verification_at = $8,
+    last_verification_error = $9, updated_at = $10
+WHERE id = $1
+RETURNING organization_id, id, name, url, description, sealed_secret, events, state, last_verification_at, last_verification_error, created_at, updated_at
+`
+
+type UpdateOrganizationWebhookParams struct {
+	ID                    uuid.UUID      `json:"id"`
+	Name                  string         `json:"name"`
+	Url                   string         `json:"url"`
+	Description           string         `json:"description"`
+	SealedSecret          []byte         `json:"sealed_secret"`
+	Events                []string       `json:"events"`
+	State                 string         `json:"state"`
+	LastVerificationAt    sql.NullTime   `json:"last_verification_at"`
+	LastVerificationError sql.NullString `json:"last_verification_error"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+}
+
+func (q *Queries) UpdateOrganizationWebhook(ctx context.Context, arg UpdateOrganizationWebhookParams) (OrganizationWebhook, error) {
+	row := q.db.QueryRowContext(ctx, updateOrganizationWebhook,
+		arg.ID,
+		arg.Name,
+		arg.Url,
+		arg.Description,
+		arg.SealedSecret,
+		pq.Array(arg.Events),
+		arg.State,
+		arg.LastVerificationAt,
+		arg.LastVerificationError,
+		arg.UpdatedAt,
+	)
+	var i OrganizationWebhook
+	err := row.Scan(
+		&i.OrganizationID,
+		&i.ID,
+		&i.Name,
+		&i.Url,
+		&i.Description,
+		&i.SealedSecret,
+		pq.Array(&i.Events),
+		&i.State,
+		&i.LastVerificationAt,
+		&i.LastVerificationError,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

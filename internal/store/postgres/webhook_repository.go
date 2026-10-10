@@ -14,6 +14,9 @@ import (
 )
 
 func (r *Repository) CreateWebhook(ctx context.Context, record webhook.Record) (*webhook.Record, error) {
+	if record.ProjectID == "" {
+		return r.createOrganizationWebhook(ctx, record)
+	}
 	tenant := ParseTenant(record.OrganizationID, record.ProjectID)
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
@@ -36,6 +39,9 @@ func (r *Repository) CreateWebhook(ctx context.Context, record webhook.Record) (
 }
 
 func (r *Repository) GetWebhook(ctx context.Context, organizationID, projectID, webhookID string) (*webhook.Record, error) {
+	if projectID == "" {
+		return r.getOrganizationWebhook(ctx, organizationID, webhookID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
 	if err != nil {
 		return nil, err
@@ -59,6 +65,9 @@ func (r *Repository) GetWebhook(ctx context.Context, organizationID, projectID, 
 }
 
 func (r *Repository) ListWebhooks(ctx context.Context, organizationID, projectID string) ([]webhook.Record, error) {
+	if projectID == "" {
+		return r.listOrganizationWebhooks(ctx, organizationID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
 	if err != nil {
 		return nil, err
@@ -79,6 +88,9 @@ func (r *Repository) ListWebhooks(ctx context.Context, organizationID, projectID
 }
 
 func (r *Repository) UpdateWebhook(ctx context.Context, record webhook.Record) (*webhook.Record, error) {
+	if record.ProjectID == "" {
+		return r.updateOrganizationWebhook(ctx, record)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(record.OrganizationID, record.ProjectID))
 	if err != nil {
 		return nil, err
@@ -104,6 +116,9 @@ func (r *Repository) UpdateWebhook(ctx context.Context, record webhook.Record) (
 }
 
 func (r *Repository) DeleteWebhook(ctx context.Context, organizationID, projectID, webhookID string) error {
+	if projectID == "" {
+		return r.deleteOrganizationWebhook(ctx, organizationID, webhookID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
 	if err != nil {
 		return err
@@ -127,6 +142,9 @@ func (r *Repository) RecordWebhookVerification(
 	ctx context.Context, record webhook.Record, eventID, status string,
 	responseCode *int, detail *string, at time.Time,
 ) (*webhook.Record, error) {
+	if record.ProjectID == "" {
+		return r.recordOrganizationWebhookVerification(ctx, record, eventID, status, responseCode, detail, at)
+	}
 	tenant := ParseTenant(record.OrganizationID, record.ProjectID)
 	tx, q, err := r.begin(ctx, tenant)
 	if err != nil {
@@ -169,6 +187,9 @@ func (r *Repository) RecordWebhookVerification(
 }
 
 func (r *Repository) ListWebhookDeliveries(ctx context.Context, organizationID, projectID, webhookID string) ([]webhook.Delivery, error) {
+	if projectID == "" {
+		return r.listOrganizationWebhookDeliveries(ctx, organizationID, webhookID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(organizationID, projectID))
 	if err != nil {
 		return nil, err
@@ -198,7 +219,11 @@ func (r *Repository) ListWebhookDeliveries(ctx context.Context, organizationID, 
 }
 
 func (r *Repository) ListWebhookProjects(ctx context.Context) ([]webhook.Project, error) {
-	rows, err := r.db.QueryContext(ctx, `SELECT organization_id::text, id::text FROM projects ORDER BY created_at, id`)
+	// An organization is listed with an empty project: its own webhooks.
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT organization_id::text, id::text FROM projects
+		UNION ALL
+		SELECT id::text, '' FROM organizations`)
 	if err != nil {
 		return nil, fmt.Errorf("list webhook projects: %w", err)
 	}
@@ -215,6 +240,9 @@ func (r *Repository) ListWebhookProjects(ctx context.Context) ([]webhook.Project
 }
 
 func (r *Repository) GetNextWebhookOutboxEvent(ctx context.Context, project webhook.Project, at time.Time) (*webhook.OutboxEvent, error) {
+	if project.ProjectID == "" {
+		return r.getNextOrganizationWebhookOutboxEvent(ctx, project.OrganizationID, at)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(project.OrganizationID, project.ProjectID))
 	if err != nil {
 		return nil, err
@@ -238,6 +266,9 @@ func (r *Repository) GetNextWebhookOutboxEvent(ctx context.Context, project webh
 }
 
 func (r *Repository) ListWebhookEventDeliveries(ctx context.Context, project webhook.Project, eventID string) ([]webhook.Delivery, error) {
+	if project.ProjectID == "" {
+		return r.listOrganizationWebhookEventDeliveries(ctx, project.OrganizationID, eventID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(project.OrganizationID, project.ProjectID))
 	if err != nil {
 		return nil, err
@@ -258,6 +289,9 @@ func (r *Repository) ListWebhookEventDeliveries(ctx context.Context, project web
 }
 
 func (r *Repository) RecordWebhookDeliveryAttempt(ctx context.Context, delivery webhook.Delivery) error {
+	if delivery.ProjectID == "" {
+		return r.recordOrganizationWebhookDeliveryAttempt(ctx, delivery)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(delivery.OrganizationID, delivery.ProjectID))
 	if err != nil {
 		return err
@@ -278,6 +312,9 @@ func (r *Repository) RecordWebhookDeliveryAttempt(ctx context.Context, delivery 
 }
 
 func (r *Repository) ScheduleWebhookOutboxEvent(ctx context.Context, project webhook.Project, eventID string, at time.Time) error {
+	if project.ProjectID == "" {
+		return r.scheduleOrganizationWebhookOutboxEvent(ctx, project.OrganizationID, eventID, at)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(project.OrganizationID, project.ProjectID))
 	if err != nil {
 		return err
@@ -290,6 +327,9 @@ func (r *Repository) ScheduleWebhookOutboxEvent(ctx context.Context, project web
 }
 
 func (r *Repository) DeleteWebhookOutboxEvent(ctx context.Context, project webhook.Project, eventID string) error {
+	if project.ProjectID == "" {
+		return r.deleteOrganizationWebhookOutboxEvent(ctx, project.OrganizationID, eventID)
+	}
 	tx, q, err := r.begin(ctx, ParseTenant(project.OrganizationID, project.ProjectID))
 	if err != nil {
 		return err

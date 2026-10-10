@@ -1,17 +1,24 @@
 # Webhooks
 
-Webhooks send project registry changes to your own HTTP endpoint. They are
-operational configuration. A project `maintainer` can create, verify, update,
-or delete them and inspect their delivery history.
+Webhooks send registry changes to your own HTTP endpoint. A project's
+webhooks receive its version, channel and bucket events. An organization's own
+webhooks receive its plugin registry events. The console shows whichever the
+current selection names: with an organization selected and no project, the
+organization's webhooks; with a project selected, the project's.
+
+Webhooks are operational configuration. A `maintainer` of the project, or of
+the organization for its own webhooks, can create, verify, update or delete
+them and inspect their delivery history.
 
 ![dufflebag Webhooks screen showing an active webhook](/screenshots/webhooks.png)
 
 ## Create and activate a webhook
 
-Prerequisites: The `maintainer` role on the project and an HTTP or HTTPS
-receiver.
+Prerequisites: The `maintainer` role on the project (or, for an organization's
+own webhooks, on the organization) and an HTTP or HTTPS receiver.
 
-1. Open **Webhooks** in the console and select **Create webhook**.
+1. Select the organization, and the project for project webhooks, then open
+   **Webhooks** and select **Create webhook**.
 
 2. Provide a name and an HTTP or HTTPS URL.
 
@@ -57,7 +64,20 @@ previous assignment fields, including unassignment.
 Subscriptions use the audit-vocabulary operation names shown by the console.
 They cover version creation, completion, revocation scheduling, revocation,
 restore, and deletion; channel creation, assignment, and deletion; and bucket
-creation and deletion. An empty event list means all operations.
+creation and deletion. An empty event list means all operations. An
+organization's own webhooks choose from the [organization events](#organization-events).
+
+## Organization events
+
+| Operation | Sent when |
+| --- | --- |
+| `plugin.update_available` | An update check sees a release of a plugin newer than every version seen before and every version the organization holds. It is sent once per such version. |
+
+Organization events carry no `project_id`. The target is
+`{"type": "plugin", "name": "<plugin>"}`, and the payload names the plugin, its
+source, the new release (`latest`, plus `tag` for GitHub) and the newest
+version held (`newest_stored`). Update checks are described in the
+[plugin registry guide](../operations/plugin-registry.md#check-for-updates).
 
 ## Follow delivery
 

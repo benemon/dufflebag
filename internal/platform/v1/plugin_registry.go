@@ -9,7 +9,7 @@ import (
 	store "github.com/benemon/dufflebag/internal/store/postgres"
 )
 
-func (s *server) admitPluginRegistryMutation(
+func (s *server) admitOrganization(
 	ctx context.Context, required identity.Role, organizationID string,
 ) (*identity.Principal, refusal, error) {
 	caller, refused := authorizeTenancy(ctx, required, organizationID, "")
@@ -60,7 +60,7 @@ func (s *server) EnablePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -89,7 +89,7 @@ func (s *server) ExposePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -121,7 +121,7 @@ func (s *server) UnexposePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -153,7 +153,7 @@ func (s *server) DisablePluginRegistry(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err

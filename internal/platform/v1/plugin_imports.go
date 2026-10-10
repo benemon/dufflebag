@@ -69,7 +69,7 @@ func (s *server) SetPluginDefaultPlatforms(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RoleMaintainer, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -102,7 +102,7 @@ func (s *server) ListHashicorpPlugins(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -149,7 +149,7 @@ func (s *server) ListHashicorpPluginVersions(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -208,7 +208,7 @@ func (s *server) CreatePluginImport(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -304,7 +304,7 @@ func (s *server) ResolveGithubRelease(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -359,7 +359,7 @@ func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -466,7 +466,7 @@ func (s *server) SetPluginUpdateCheck(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -504,7 +504,7 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err

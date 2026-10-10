@@ -165,7 +165,10 @@ for newer releases. Uploaded plugins have no source to check.
 3. When that release is newer than every version the plugin holds, revoked
    ones included, the catalogue marks the plugin **Update available**.
 
-A check only looks. Nothing is imported until you sync. To bring plugins up
+A check only looks. Nothing is imported until you sync. When a check first
+sees a newer release, the organization's own
+[webhooks](../administration/webhooks.md#organization-events) receive one
+`plugin.update_available` event. To bring plugins up
 to date, tick them in the catalogue and choose **Sync selected**. Each
 plugin gets its own import job for the newest release, with the platforms it
 already has, so one plugin's failure does not hold back the rest. A GitHub

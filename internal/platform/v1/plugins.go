@@ -152,7 +152,7 @@ func (s *server) PublishPluginVersion(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -420,7 +420,7 @@ func (s *server) RevokePluginVersion(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -452,7 +452,7 @@ func (s *server) RestorePluginVersion(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
@@ -484,7 +484,7 @@ func (s *server) DeletePluginVersion(
 	audited := s.beginLifecycleAudit()
 	defer func() { audited.log(ctx) }()
 	organizationID := request.OrganizationId.String()
-	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
 	if err != nil {
 		audited.failed("storage_failed")
 		return nil, err
