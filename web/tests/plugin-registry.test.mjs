@@ -154,7 +154,7 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
     assert.match(loading, /aria-busy="true"/, `${screen.name}: loading card`)
 
     const failed = screen.view(false, 'upstream unavailable')
-    assert.match(failed, new RegExp(screen.error.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace("'", '&#x27;')), `${screen.name}: error title`)
+    assert.match(failed, new RegExp(screen.error.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll("'", '&#x27;')), `${screen.name}: error title`)
     assert.match(failed, /font-family:monospace/, `${screen.name}: monospace error`)
     assert.match(failed, />Retry</, `${screen.name}: retry`)
   }
