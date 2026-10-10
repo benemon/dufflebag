@@ -1000,7 +1000,10 @@ async function captureSeededScreens(seeded) {
   await capture('build.png')
   await clickByText('button[role="tab"]', 'Packages')
   await waitForText('with findings')
-  await until('the findings row to expand', async () => {
+  // Package rows list their findings as links; the expandable rows are the
+  // advisories on the Vulnerabilities facet, one per GHSA.
+  await clickByText('button[role="tab"]', 'Vulnerabilities')
+  await until('the first advisory to expand', async () => {
     const expander = await page.$('.pf-v6-c-table__compound-expansion-toggle button')
     if (!expander) return false
     await expander.click()
@@ -1056,6 +1059,7 @@ async function captureSeededScreens(seeded) {
   // This capture is last because it deliberately replaces the browser's root
   // session. Restore that original session before returning to keep additions
   // after this block independent of the bucket binding.
+  await page.waitForSelector('#client-id')
   await page.type('#client-id', seeded.bucketPrincipal.client_id)
   await page.type('#client-secret', seeded.bucketPrincipal.secret)
   await clickByText('button', 'Log in')
@@ -1076,6 +1080,8 @@ async function captureSeededScreens(seeded) {
 
   await clickByText('button', 'Sign out')
   await waitForText('Log in')
+  // The heading lands before the form does.
+  await page.waitForSelector('#client-id')
   await page.type('#client-id', seeded.rootCredentials.clientID)
   await page.type('#client-secret', seeded.rootCredentials.clientSecret)
   await clickByText('button', 'Log in')

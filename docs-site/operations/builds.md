@@ -116,7 +116,7 @@ Only a current successful scan produces findings, including an empty
 findings list when the scan found nothing. A newer failed scan does not
 erase the findings from the previous successful run.
 
-![dufflebag build packages tab showing vulnerability findings](/screenshots/scanner-findings.png)
+![dufflebag build vulnerabilities facet with an advisory expanded to its affected packages](/screenshots/scanner-findings.png)
 
 With a scanner configured:
 
