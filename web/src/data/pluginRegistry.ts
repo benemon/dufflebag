@@ -32,7 +32,7 @@ export async function disablePluginRegistry(token: string, organizationID: strin
 
 export type PluginSource = { kind: 'upload' | 'releases-hashicorp' | 'github'; repository?: string }
 
-export type PluginUpdateCheck = { enabled: boolean; checked_at?: string; error?: string; latest?: string }
+export type PluginUpdateCheck = { enabled: boolean; checked_at?: string; error?: string; latest?: string; latest_tag?: string }
 
 export type Plugin = {
   name: string
@@ -292,4 +292,48 @@ export type CatalogueSyncResult = { plugin: string; version?: string; import_id?
 
 export async function syncCatalogue(token: string, organizationID: string, plugins: string[]): Promise<CatalogueSyncResult[]> {
   return (await platformPost<{ results: CatalogueSyncResult[] }>(token, path(organizationID, 'sync'), { plugins })).results
+}
+
+// One row of the catalogue's "Sync N plugins" confirmation: the version the
+// job moves to and which of the plugin's architectures that release has.
+export type CatalogueSyncPlan = {
+  plugin: string
+  from: string
+  to: string
+  architectures: string
+  warning: string
+}
+
+export async function planCatalogueSync(token: string, organizationID: string, plugins: Plugin[]): Promise<CatalogueSyncPlan[]> {
+  return Promise.all(plugins.map(async (plugin) => {
+    const to = plugin.update_check.latest ?? ''
+    const held = await listPluginVersions(token, organizationID, plugin.name)
+    const existing = [...new Set(held.versions.flatMap((v) => v.stored_platforms.map((p) => `${p.os}_${p.arch}`)))].sort()
+    let published: string[] = []
+    if (plugin.source.kind === 'releases-hashicorp' && plugin.source.repository) {
+      const page = await listHashicorpPluginVersions(token, organizationID, plugin.source.repository)
+      published = page.versions.find((v) => v.version === to)?.platforms ?? []
+    } else if (plugin.source.kind === 'github' && plugin.source.repository) {
+      const tag = plugin.update_check.latest_tag ?? `v${to}`
+      published = (await resolveGithubRelease(token, organizationID, `https://github.com/${plugin.source.repository}/releases/tag/${tag}`)).platforms
+    }
+    const missing = existing.filter((platform) => !published.includes(platform))
+    const plural = (n: number) => `${n} architecture${n === 1 ? '' : 's'}`
+    return {
+      plugin: plugin.name, from: plugin.newest_version ?? '', to,
+      architectures: missing.length ? `${existing.length - missing.length} of its ${plural(existing.length)}` : `its ${plural(existing.length)}`,
+      warning: missing.length ? `${missing.join(', ')} ${missing.length === 1 ? "isn't" : "aren't"} published for ${to} and will be skipped` : '',
+    }
+  }))
+}
+
+export type CatalogueSourceFilter = 'All sources' | 'HashiCorp' | 'GitHub' | 'Local'
+
+// The catalogue's three filters, applied together.
+export function catalogueRows(plugins: Plugin[], filters: { name: string; source: CatalogueSourceFilter; updatesOnly: boolean }): Plugin[] {
+  const name = filters.name.trim().toLowerCase()
+  return plugins
+    .filter((plugin) => plugin.name.includes(name))
+    .filter((plugin) => filters.source === 'All sources' || sourceLabel(plugin.source) === filters.source)
+    .filter((plugin) => !filters.updatesOnly || plugin.update_available)
 }

@@ -1535,6 +1535,9 @@ type PluginUpdateCheck struct {
 
 	// Latest The newest stable upstream version seen.
 	Latest *string `json:"latest,omitempty"`
+
+	// LatestTag The release tag of latest
+	LatestTag *string `json:"latest_tag,omitempty"`
 }
 
 // PluginVersion defines model for PluginVersion.

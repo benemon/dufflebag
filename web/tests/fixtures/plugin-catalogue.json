@@ -12,7 +12,8 @@
       "update_check": {
         "checked_at": "2026-07-30T10:00:00Z",
         "enabled": true,
-        "latest": "1.8.3"
+        "latest": "1.8.3",
+        "latest_tag": "1.8.3"
       }
     },
     {
