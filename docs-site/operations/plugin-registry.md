@@ -41,10 +41,12 @@ Packer itself presents no credential. Exposure is what grants it access.
 
 1. In the console, open **Plugins** and choose **Enable the registry**.
 2. Upload at least one plugin version (below).
-3. Choose **Expose**. Every published plugin version becomes readable, without
-   credentials, by anything that can reach dufflebag.
+3. Open **Registry settings** and choose **Expose**. Every published plugin
+   version becomes readable, without credentials, by anything that can reach
+   dufflebag.
 
-**Unexpose** removes that access. A `packer init` in progress gets 404 on its
+**Registry settings** also holds the organization's default platforms and the
+two other lifecycle controls. **Unexpose** removes that access. A `packer init` in progress gets 404 on its
 next request. **Disable registry** deletes every plugin's records, then removes
 their files; a file that cannot be removed is logged and is never served. It is
 refused while the registry is exposed, so unexpose first.

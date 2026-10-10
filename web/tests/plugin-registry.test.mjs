@@ -11,6 +11,8 @@ let ApiError
 let DisablePluginRegistryConfirmation
 let PluginRegistryConfirmationView
 let PluginRegistryView
+let PluginRegistrySettingsView
+let PluginErrorCard
 let TypedConfirmModalView
 let disablePluginRegistry
 let enablePluginRegistry
@@ -51,6 +53,7 @@ before(async () => {
   } = await vite.ssrLoadModule('/src/screens/Plugins.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
+  ;({ PluginErrorCard } = await vite.ssrLoadModule('/src/components/PluginLoadState.tsx'))
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
@@ -61,6 +64,8 @@ before(async () => {
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
   ;({ PluginGithubView } = await vite.ssrLoadModule('/src/screens/PluginGithub.tsx'))
+  ;({ PluginRegistrySettingsView } =
+    await vite.ssrLoadModule('/src/screens/PluginRegistrySettings.tsx'))
 })
 
 after(async () => { await vite.close() })
@@ -68,11 +73,10 @@ after(async () => { await vite.close() })
 const props = (over = {}) => ({
   organizationName: 'acme', callerRole: 'maintainer', host: 'dufflebag.example.com',
   registry: { enabled: false, exposed: false }, plugins: [], loading: false, failure: null,
+  onBackToRegistry: () => {},
   onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {}, onImportGithub: () => {},
   onOpenImport: () => {}, onSyncSelected: async () => [],
-  defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], onSetDefaultPlatforms: async () => {},
-  onRefresh: async () => {}, onEnable: async () => {}, onExpose: async () => {},
-  onUnexpose: async () => {}, onDisable: async () => {}, ...over,
+  onRefresh: async () => {}, onEnable: async () => {}, ...over,
 })
 
 const render = (over = {}) => renderToStaticMarkup(
@@ -80,11 +84,12 @@ const render = (over = {}) => renderToStaticMarkup(
 )
 
 test('screen renders loading, error, disabled reader, and disabled maintainer states honestly', () => {
-  assert.match(render({ loading: true, registry: null }), /Loading plugin registry/)
+  assert.match(render({ loading: true, registry: null }), /Loading plugins…/)
 
   const failed = render({ failure: 'database unavailable', registry: null })
-  assert.match(failed, /Plugin registry could not be loaded/)
+  assert.match(failed, /Plugins could not be loaded/)
   assert.match(failed, /database unavailable/)
+  assert.match(failed, />Retry</)
 
   const reader = render({ callerRole: 'reader' })
   assert.match(reader, /The plugin registry isn&#x27;t enabled/)
@@ -96,25 +101,92 @@ test('screen renders loading, error, disabled reader, and disabled maintainer st
   assert.match(maintainer, /Enable the registry/)
 })
 
-test('enabled and exposed states show the required settings and honest empty state', () => {
+test('all six plugin screens pin their breadcrumb, loading card, and retryable error card', () => {
+  const callbacks = { onBackToRegistry: () => {}, onBackToPlugins: () => {}, onRefresh: () => {} }
+  const screens = [
+    {
+      name: 'catalogue', crumbs: ['Registry', 'Plugins'], loading: 'Loading plugins…', error: 'Plugins could not be loaded',
+      view: (loading, failure) => render({ loading, failure, registry: null }),
+    },
+    {
+      name: 'detail', crumbs: ['Registry', 'Plugins', 'amazon'], loading: 'Loading amazon…', error: 'amazon could not be loaded',
+      view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+        ...callbacks, name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
+        registry: null, detail: null, loading, failure, onUpload: () => {}, busy: false,
+        actionFailure: null, editing: false, upstream: [], summary: null, onToggleUpdates: () => {},
+        onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+      })),
+    },
+    {
+      name: 'job', crumbs: ['Registry', 'Plugins', 'Plugin', 'Job 01KZF3QW7N'], loading: 'Loading job…', error: 'Job could not be loaded',
+      view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginImportJobView, {
+        ...callbacks, id: '01KZF3QW7N', job: null, registry: null, loading, failure,
+        organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
+      })),
+    },
+    {
+      name: 'hashicorp', crumbs: ['Registry', 'Plugins', 'Browse HashiCorp'], loading: 'Reading releases.hashicorp.com…', error: "HashiCorp's plugin list could not be read",
+      view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginHashicorpView, {
+        ...callbacks, plugins: null, selected: null, versions: null, hasMore: false, preselected: [],
+        loading, failure, busy: false, onChoose: () => {}, onMore: () => {}, onImport: () => {},
+      })),
+    },
+    {
+      name: 'github', crumbs: ['Registry', 'Plugins', 'Import from GitHub'], loading: 'Loading GitHub release…', error: 'GitHub release could not be loaded',
+      view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginGithubView, {
+        ...callbacks, link: '', release: null, preselected: [], loading, failure, busy: false,
+        onLinkChange: () => {}, onResolve: () => {}, onImport: () => {},
+      })),
+    },
+    {
+      name: 'upload', crumbs: ['Registry', 'Plugins', 'Upload'], loading: 'Loading upload…', error: 'Upload could not be loaded',
+      view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginUploadView, {
+        ...callbacks, registry: null, plan: null, outcomes: {}, busy: false, loading, failure,
+        onChoose: () => {}, onOpen: () => {}, onSubmit: () => {},
+      })),
+    },
+  ]
+
+  for (const screen of screens) {
+    const loading = screen.view(true, null)
+    assert.match(loading, new RegExp(screen.crumbs.join('[\\s\\S]*')), `${screen.name}: breadcrumbs`)
+    assert.match(loading, new RegExp(screen.loading.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')), `${screen.name}: loading`)
+    assert.match(loading, /aria-busy="true"/, `${screen.name}: loading card`)
+
+    const failed = screen.view(false, 'upstream unavailable')
+    assert.match(failed, new RegExp(screen.error.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replaceAll("'", '&#x27;')), `${screen.name}: error title`)
+    assert.match(failed, /font-family:monospace/, `${screen.name}: monospace error`)
+    assert.match(failed, />Retry</, `${screen.name}: retry`)
+  }
+})
+
+test('the shared Retry action invokes the screen reload callback', () => {
+  let calls = 0
+  const card = PluginErrorCard({ title: 'Failed', error: 'bad gateway', onRetry: () => { calls += 1 } })
+  const body = card.props.children
+  const retry = body.props.children[1]
+  retry.props.onClick()
+  assert.equal(calls, 1)
+})
+
+test('the catalogue links unexposed state to settings and carries no lifecycle settings or exposed alert', () => {
   const enabled = render({ registry: { enabled: true, exposed: false } })
   assert.match(enabled, /The registry is enabled but not exposed/)
-  assert.match(enabled, /Packer can&#x27;t reach plugins until the registry is exposed/)
+  assert.match(enabled, /Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed/)
+  assert.match(enabled, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Registry settings</)
   assert.match(enabled, /No plugins mirrored yet/)
   assert.match(enabled, /Upload plugin files/)
-  assert.match(enabled, />Expose</)
-  assert.match(enabled, /Disable registry/)
+  assert.doesNotMatch(enabled, />Expose</)
+  assert.doesNotMatch(enabled, /Disable registry/)
 
   const exposed = render({ registry: { enabled: true, exposed: true } })
-  assert.match(exposed, /The registry is exposed/)
-  assert.match(exposed, />Unexpose</)
-  assert.match(exposed, /Unexpose the registry first before disabling it/)
-  assert.match(exposed, /<button[^>]*disabled=""[^>]*>[\s\S]*?Disable registry[\s\S]*?<\/button>/)
+  assert.doesNotMatch(exposed, /The registry is exposed/)
+  assert.doesNotMatch(exposed, /Registry settings/)
 
   const reader = render({
     callerRole: 'reader', registry: { enabled: true, exposed: false },
   })
-  assert.doesNotMatch(reader, /Registry settings/)
+  assert.match(reader, /Registry settings/)
   assert.match(reader, /No plugins mirrored yet/)
   assert.doesNotMatch(reader, /Upload plugin files/)
 })
@@ -255,7 +327,9 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   const html = detail({ enabled: true, exposed: false })
   assert.match(html, /source  = &quot;dufflebag\.example\.com\/plugins\/acme\/git&quot;/)
   assert.match(html, /version = &quot;0\.6\.3&quot;/)
-  assert.match(html, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+  assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
+  assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Registry settings</)
+  assert.ok(html.indexOf('Registry settings') < html.indexOf('Template stanza'))
   assert.match(html, /<td[^>]*data-label="darwin_arm64"[^>]*>○<\/td>/)
   assert.match(html, /<td[^>]*data-label="linux_arm64"[^>]*>●<\/td>/)
   assert.match(html, /Upload version/)
@@ -285,7 +359,7 @@ test('the upload view shows each version, then its outcome and stanza', () => {
   assert.match(done, />Refused</)
   assert.match(done, /versions are immutable/)
   assert.match(done, /Open git/)
-  assert.match(done, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+  assert.match(done, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
   assert.doesNotMatch(done, /Upload 2 versions/)
 
   const disabled = renderToStaticMarkup(React.createElement(PluginUploadView, {
@@ -420,11 +494,40 @@ test('remove uses the version path', async () => {
   ])
 })
 
-test('the registry settings show the default platforms and the catalogue offers HashiCorp to publishers', () => {
-  const html = render({ registry: { enabled: true, exposed: false } })
-  assert.match(html, /value="linux_amd64, linux_arm64, darwin_arm64"/)
-  assert.match(html, /Save default platforms/)
-  assert.match(html, /Browse HashiCorp/)
+test('registry settings own lifecycle controls and default platforms with maintainer gating', () => {
+  const settings = (callerRole, registry) => renderToStaticMarkup(React.createElement(
+    PluginRegistrySettingsView,
+    {
+      organizationName: 'acme', callerRole, registry,
+      defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'],
+      loading: false, failure: null, onBackToRegistry: () => {}, onBackToPlugins: () => {},
+      onRefresh: () => {}, onEnable: async () => {}, onExpose: async () => {},
+      onUnexpose: async () => {}, onDisable: async () => {}, onSetDefaultPlatforms: async () => {},
+    },
+  ))
+  const unexposed = settings('maintainer', { enabled: true, exposed: false })
+  assert.match(unexposed, /Registry[\s\S]*Plugins[\s\S]*Registry settings/)
+  assert.match(unexposed, />Expose</)
+  assert.match(unexposed, /Disable registry/)
+  assert.match(unexposed, /value="linux_amd64, linux_arm64, darwin_arm64"/)
+  assert.match(unexposed, /Save default platforms/)
+
+  const exposed = settings('maintainer', { enabled: true, exposed: true })
+  assert.match(exposed, />Unexpose</)
+  assert.match(exposed, /Unexpose the registry first before disabling it/)
+  assert.match(exposed, /<button[^>]*disabled=""[^>]*>[\s\S]*?Disable registry[\s\S]*?<\/button>/)
+
+  const reader = settings('reader', { enabled: true, exposed: false })
+  assert.match(reader, /Default platforms: linux_amd64, linux_arm64, darwin_arm64/)
+  assert.doesNotMatch(reader, />Expose</)
+  assert.doesNotMatch(reader, /Disable registry/)
+  assert.doesNotMatch(reader, /Save default platforms/)
+
+  const disabled = settings('maintainer', { enabled: false, exposed: false })
+  assert.match(disabled, /Enable the registry/)
+  assert.doesNotMatch(settings('reader', { enabled: false, exposed: false }), /Enable the registry/)
+
+  assert.match(render({ registry: { enabled: true, exposed: false } }), /Browse HashiCorp/)
   assert.doesNotMatch(render({ callerRole: 'reader', registry: { enabled: true, exposed: false } }), /Browse HashiCorp/)
 })
 
@@ -471,7 +574,9 @@ test('an import job shows each version\'s outcome and failed platforms', () => {
   assert.match(html, /not published upstream/)
   assert.match(html, /does not verify against the HashiCorp key/)
   assert.match(html, /version = &quot;1\.8\.3&quot;/)
-  assert.match(html, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+  assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
+  assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Registry settings</)
+  assert.ok(html.indexOf('Registry settings') < html.indexOf('Import outcomes'))
 })
 
 test('a sync job shows each change in order with its outcome', () => {

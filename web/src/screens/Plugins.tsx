@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ActionGroup, Alert, AlertActionCloseButton, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState,
+  Alert, AlertActionCloseButton, Breadcrumb, BreadcrumbItem, Button, Checkbox, Content, EmptyState,
   EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, List, ListItem, Modal, ModalBody, ModalFooter,
-  ModalHeader, PageSection, SearchInput, Spinner, TextInput, Toolbar, ToolbarContent, ToolbarItem,
+  ModalHeader, PageSection, SearchInput, TextInput, Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate } from 'react-router'
@@ -10,11 +10,11 @@ import { useNavigate } from 'react-router'
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
+import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
-  disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginRegistry,
-  listPlugins, setDefaultPlatforms, sourceLabel, syncCatalogue, unexposePluginRegistry, type CatalogueSyncResult, type Plugin,
+  enablePluginRegistry, getPluginRegistry, listPlugins, sourceLabel, syncCatalogue, type CatalogueSyncResult, type Plugin,
   type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
@@ -27,7 +27,6 @@ export function Plugins() {
   const navigate = useNavigate()
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [plugins, setPlugins] = useState<Plugin[]>([])
-  const [defaultPlatforms, setDefaultPlatformsState] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -41,7 +40,6 @@ export function Plugins() {
     try {
       const next = await getPluginRegistry(token, organizationID)
       setPlugins(next.enabled ? await listPlugins(token, organizationID) : [])
-      setDefaultPlatformsState(next.enabled ? await getDefaultPlatforms(token, organizationID) : [])
       setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
@@ -65,6 +63,7 @@ export function Plugins() {
       host={window.location.hostname}
       registry={registry}
       plugins={plugins}
+      onBackToRegistry={() => navigate('/buckets')}
       onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onUpload={() => navigate('/plugin-registry/upload')}
       onBrowse={() => navigate('/plugin-registry/hashicorp')}
@@ -75,29 +74,12 @@ export function Plugins() {
         await reload()
         return results
       }}
-      defaultPlatforms={defaultPlatforms}
-      onSetDefaultPlatforms={async (platforms) => {
-        setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
-      }}
       loading={loading}
       failure={failure}
       onRefresh={reload}
       onEnable={async () => {
         const next = await enablePluginRegistry(token, organizationID)
         setRegistry(next)
-      }}
-      onExpose={async () => {
-        const next = await exposePluginRegistry(token, organizationID)
-        setRegistry(next)
-      }}
-      onUnexpose={async () => {
-        const next = await unexposePluginRegistry(token, organizationID)
-        setRegistry(next)
-      }}
-      onDisable={async () => {
-        await disablePluginRegistry(token, organizationID)
-        setRegistry({ enabled: false, exposed: false })
-        setPlugins([])
       }}
     />
   )
@@ -113,21 +95,17 @@ type PluginRegistryViewProps = {
   host: string
   registry: PluginRegistry | null
   plugins: Plugin[]
+  onBackToRegistry: () => void
   onOpenPlugin: (name: string) => void
   onUpload: () => void
   onBrowse: () => void
   onImportGithub: () => void
   onOpenImport: (id: string) => void
   onSyncSelected: (names: string[]) => Promise<CatalogueSyncResult[]>
-  defaultPlatforms: string[]
-  onSetDefaultPlatforms: (platforms: string[]) => Promise<void>
   loading: boolean
   failure: string | null
   onRefresh: () => void | Promise<void>
   onEnable: () => Promise<void>
-  onExpose: () => Promise<void>
-  onUnexpose: () => Promise<void>
-  onDisable: () => Promise<void>
 }
 
 export function PluginRegistryView(props: PluginRegistryViewProps) {
@@ -150,25 +128,28 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
   return (
     <>
       <ScreenHeader
+        breadcrumbs={(
+          <Breadcrumb>
+            <BreadcrumbItem component="button" onClick={props.onBackToRegistry}>Registry</BreadcrumbItem>
+            <BreadcrumbItem isActive>Plugins</BreadcrumbItem>
+          </Breadcrumb>
+        )}
         title="Plugins"
         description="Mirror Packer plugins through this organization's registry."
         onRefresh={props.onRefresh}
         refreshing={props.loading}
       />
       <PageSection variant="secondary" isFilled>
-        {props.failure ? (
-          <Alert variant="danger" isInline title="Plugin registry could not be loaded">
-            <Content component="p">{props.failure}</Content>
-          </Alert>
-        ) : null}
         {actionFailure ? (
           <Alert variant="danger" isInline title="The action failed">
             <Content component="p">{actionFailure}</Content>
           </Alert>
         ) : null}
         {props.loading ? (
-          <><Spinner aria-label="Loading plugin registry…" /><Content component="p">Loading plugin registry…</Content></>
-        ) : props.failure || !props.registry ? null : !props.registry.enabled ? (
+          <PluginLoadingCard message="Loading plugins…" />
+        ) : props.failure ? (
+          <PluginErrorCard title="Plugins could not be loaded" error={props.failure} onRetry={props.onRefresh} />
+        ) : !props.registry ? null : !props.registry.enabled ? (
           <EmptyState titleText="The plugin registry isn't enabled" headingLevel="h2">
             <EmptyStateBody>
               Enable it to mirror Packer plugins for {props.organizationName}, so packer init resolves
@@ -185,9 +166,6 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
         ) : (
           <EnabledRegistry
             {...props}
-            canConfigure={canConfigure}
-            busy={busy}
-            run={run}
           />
         )}
       </PageSection>
@@ -197,91 +175,26 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 
 function EnabledRegistry({
   organizationName, callerRole, host, registry, plugins, onOpenPlugin, onUpload, onBrowse, onImportGithub,
-  onOpenImport, onSyncSelected, defaultPlatforms, onSetDefaultPlatforms, canConfigure, busy, run, onExpose, onUnexpose, onDisable,
-}: PluginRegistryViewProps & {
-  canConfigure: boolean
-  busy: boolean
-  run: (work: () => Promise<void>) => Promise<void>
-}) {
-  const [confirming, setConfirming] = useState<'expose' | 'unexpose' | 'disable' | null>(null)
+  onOpenImport, onSyncSelected,
+}: PluginRegistryViewProps) {
   const exposed = registry?.exposed ?? false
-  const confirm = (work: () => Promise<void>) => {
-    setConfirming(null)
-    void run(work)
-  }
 
   return (
     <>
-      {exposed ? (
-        <Alert variant="success" isInline title="The registry is exposed">
-          <Content component="p">Plugins are anonymously readable to anyone who can reach dufflebag.</Content>
-        </Alert>
-      ) : (
+      {!exposed ? (
         <Alert variant="info" isInline title="The registry is enabled but not exposed">
-          <Content component="p">Packer can't reach plugins until the registry is exposed.</Content>
+          <Content component="p">
+            Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed.
+          </Content>
+          <Button component="a" variant="link" isInline href="/plugin-registry/settings">Registry settings</Button>
         </Alert>
-      )}
+      ) : null}
       <PluginCatalogue
         organizationName={organizationName} host={host} plugins={plugins}
         canPublish={permitsAction(callerRole, 'publishPlugin')}
         onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse} onImportGithub={onImportGithub}
         onOpenImport={onOpenImport} onSyncSelected={onSyncSelected}
       />
-      {canConfigure ? (
-        <Card aria-label="Registry settings">
-          <CardTitle>Registry settings</CardTitle>
-          <CardBody>
-            <ActionGroup>
-              {exposed ? (
-                <Button variant="secondary" isDisabled={busy} onClick={() => setConfirming('unexpose')}>
-                  Unexpose
-                </Button>
-              ) : (
-                <Button variant="primary" isDisabled={busy} onClick={() => setConfirming('expose')}>
-                  Expose
-                </Button>
-              )}
-              <Button
-                variant="danger" isDisabled={busy || exposed}
-                onClick={() => setConfirming('disable')}
-              >Disable registry</Button>
-            </ActionGroup>
-            {exposed ? <Content component="p">Unexpose the registry first before disabling it.</Content> : null}
-            <DefaultPlatformsEditor
-              platforms={defaultPlatforms} busy={busy}
-              onSave={(platforms) => void run(() => onSetDefaultPlatforms(platforms))}
-            />
-          </CardBody>
-        </Card>
-      ) : null}
-      {confirming === 'expose' ? (
-        <PluginRegistryConfirmation
-          title="Expose the plugin registry?"
-          body="Plugins become anonymously readable to anyone who can reach dufflebag."
-          verb="Expose registry"
-          busy={busy}
-          onCancel={() => setConfirming(null)}
-          onConfirm={() => confirm(onExpose)}
-        />
-      ) : null}
-      {confirming === 'unexpose' ? (
-        <PluginRegistryConfirmation
-          title="Unexpose the plugin registry?"
-          body="In-flight packer init fails when the registry is unexposed."
-          verb="Unexpose registry"
-          busy={busy}
-          onCancel={() => setConfirming(null)}
-          onConfirm={() => confirm(onUnexpose)}
-        />
-      ) : null}
-      {confirming === 'disable' ? (
-        <DisablePluginRegistryConfirmation
-          organizationName={organizationName}
-          busy={busy}
-          onCancel={() => setConfirming(null)}
-          onConfirm={() => confirm(onDisable)}
-        />
-      ) : null}
     </>
   )
 }

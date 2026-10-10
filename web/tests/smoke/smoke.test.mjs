@@ -878,10 +878,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Sign out')
     assert.doesNotMatch(await bodyText(), /Log in/)
     await until('all root navigation items to appear', async () =>
-      (await globalNavItems()).length === 8)
+      (await globalNavItems()).length === 9)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Plugins', 'Registry settings', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -918,7 +918,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText(`Enable it to mirror Packer plugins for ${wizardOrganizationName}`)
     await clickByText('button', 'Enable the registry')
     await waitForText('The registry is enabled but not exposed')
-    await waitForText("Packer can't reach plugins until the registry is exposed.")
+    await waitForText('Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed.')
     await waitForText('No plugins mirrored yet')
 
     await clickByText('button', 'Upload plugin files')
@@ -930,7 +930,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Upload 2 versions')
     await until('both versions to publish', async () => ((await bodyText()).match(/Published/g) ?? []).length === 2)
     await waitForText(`/plugins/${wizardOrganizationName}/probe"`)
-    await waitForText("Packer can't resolve this template stanza until the registry is exposed.")
+    await waitForText("Packer can’t resolve the template stanza on this page until the registry is exposed.")
     await clickByText('button', 'Open probe')
     await waitForText('Pinned to the newest available version, 1.1.0.')
     assert.doesNotMatch(await bodyText(), /Check for updates/, 'an uploaded plugin has no upstream to check')
@@ -967,17 +967,20 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickInModal('Remove version')
     await waitForText('No plugins mirrored yet')
 
+    // The lifecycle controls live on the settings screen (design: the catalogue carries none).
+    await clickByText('a', 'Registry settings')
+    await waitForText('The registry is enabled but not exposed.')
     await clickByText('button', 'Expose')
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
     await clickInModal('Expose registry')
-    await waitForText('The registry is exposed')
+    await waitForText('The registry is enabled and exposed.')
     assert.equal(await buttonDisabled('Disable registry'), true)
     await waitForText('Unexpose the registry first before disabling it.')
 
     await clickByText('button', 'Unexpose')
     await waitForText('In-flight packer init fails when the registry is unexposed.')
     await clickInModal('Unexpose registry')
-    await waitForText('The registry is enabled but not exposed')
+    await waitForText('The registry is enabled but not exposed.')
     assert.equal(await buttonDisabled('Disable registry'), false)
 
     await clickByText('button', 'Disable registry')

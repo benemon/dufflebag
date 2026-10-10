@@ -50,6 +50,8 @@ export const NAV_REQUIREMENTS = {
   buckets: 'reader',
   // internal/platform/v1/plugin_registry.go authorizes registry reads at RoleReader.
   plugins: 'reader',
+  // Registry lifecycle and default-platform mutations require RoleMaintainer.
+  pluginRegistrySettings: 'maintainer',
   // internal/platform/v1/handler.go:621 authorizes ListPrincipals at maintainer.
   principals: 'maintainer',
   // internal/platform/v1/audit_targets.go:20 authorizes ListAuditTargets at root.

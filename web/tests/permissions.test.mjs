@@ -104,9 +104,18 @@ test('each role gets the navigation snapshot declared by the server', () => {
     ['reader', ['buckets', 'plugins', 'bagdrop', 'instance']],
     ['builder', ['buckets', 'plugins', 'bagdrop', 'instance']],
     ['publisher', ['buckets', 'plugins', 'bagdrop', 'instance']],
-    ['maintainer', ['buckets', 'plugins', 'principals', 'bagdrop', 'webhooks', 'instance']],
-    ['root', ['buckets', 'plugins', 'principals', 'audit', 'encryption', 'bagdrop', 'webhooks', 'instance']],
+    ['maintainer', ['buckets', 'plugins', 'pluginRegistrySettings', 'principals', 'bagdrop', 'webhooks', 'instance']],
+    ['root', ['buckets', 'plugins', 'pluginRegistrySettings', 'principals', 'audit', 'encryption', 'bagdrop', 'webhooks', 'instance']],
   ]) {
     assert.deepEqual(visibleNavItems(role), expected, String(role))
   }
+})
+
+test('registry settings navigation is maintainer-gated while the catalogue remains readable', () => {
+  for (const role of [null, 'reader', 'builder', 'publisher']) {
+    assert.equal(visibleNavItems(role).includes('pluginRegistrySettings'), false, String(role))
+    assert.equal(visibleNavItems(role).includes('plugins'), true, String(role))
+  }
+  assert.equal(visibleNavItems('maintainer').includes('pluginRegistrySettings'), true)
+  assert.equal(visibleNavItems('root').includes('pluginRegistrySettings'), true)
 })
