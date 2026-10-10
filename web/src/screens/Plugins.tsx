@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, Checkbox, Content, EmptyState,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState,
   EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, MenuToggle, Modal, ModalBody, ModalFooter,
   ModalHeader, PageSection, Pagination, SearchInput, Select, SelectList, SelectOption, Spinner, TextInput,
   Toolbar, ToolbarContent, ToolbarItem,
@@ -383,7 +383,9 @@ export function PluginCatalogue({
         </Alert>
       ) : null}
       <Card>
-        <Toolbar>
+        <CardTitle>All plugins</CardTitle>
+        <CardBody>
+        <Toolbar id="plugins-toolbar">
           <ToolbarContent>
             <ToolbarItem>
               <SearchInput
@@ -412,7 +414,7 @@ export function PluginCatalogue({
                 </ToolbarItem>
               </>
             ) : null}
-            <ToolbarItem align={{ default: 'alignEnd' }}>
+            <ToolbarItem variant="pagination" align={{ default: 'alignEnd' }}>
               <Pagination
                 isCompact itemCount={rows.length} perPage={pageSize} page={page} perPageOptions={[{ title: '20', value: 20 }]}
                 onSetPage={(_event, next) => setPage(next)} titles={{ paginationAriaLabel: 'Plugins pagination' }}
@@ -485,6 +487,7 @@ export function PluginCatalogue({
           variant="bottom" itemCount={rows.length} perPage={pageSize} page={page} perPageOptions={[{ title: '20', value: 20 }]}
           onSetPage={(_event, next) => setPage(next)} titles={{ paginationAriaLabel: 'Plugins pagination, bottom' }}
         />
+        </CardBody>
       </Card>
       {confirming ? (
         <CatalogueSyncConfirmation

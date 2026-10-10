@@ -857,6 +857,7 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.match(html, /<code>ethanmdavidson\/packer-plugin-git<\/code>/)
   assert.match(html, /aria-label="Kebab toggle"/)
   // The house selectable-table cells: a select-all header over the rows with an update, PF's row checkboxes.
+  assert.match(html, /All plugins<\/[\s\S]{0,600}?id="plugins-toolbar"/, 'the catalogue card carries a title and a toolbar like the other list screens')
   assert.match(html, /aria-label="Select plugins with an update"/)
   const box = (row) => html.match(new RegExp(`<input[^>]*id="select-${row}"[^>]*>`))[0]
   assert.doesNotMatch(box(0), /disabled/, 'amazon has an update to sync')
