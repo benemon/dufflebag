@@ -955,7 +955,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Pinned to the newest available version, 1.1.0.')
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
-    assert.equal(await buttonDisabled('Sync selected (0)'), true)
+    assert.equal(await buttonDisabled('Sync selected'), true)
     await clickByText('button', 'probe')
     await clickByText('button', 'Remove version')
     await waitForText('Remove probe 1.1.0?')

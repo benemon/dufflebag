@@ -187,11 +187,13 @@ for newer releases. Uploaded plugins have no source to check.
 A check only looks. Nothing is imported until you sync. When a check first
 sees a newer release, the organization's own
 [webhooks](../administration/webhooks.md#organization-events) receive one
-`plugin.update_available` event. To bring plugins up
-to date, tick them in the catalogue and choose **Sync selected**. Each
-plugin gets its own import job for the newest release, with the platforms it
-already has, so one plugin's failure does not hold back the rest. A GitHub
-plugin is imported from the release tag the check saw.
+`plugin.update_available` event. To bring plugins up to date, tick them in
+the catalogue (the **Update available** filter shows only those) and choose
+**Sync selected**. The confirmation lists each plugin's move and any of its
+platforms the new release does not publish, then **Start N jobs** queues one
+import job per plugin for the newest release, with the platforms it already
+has, so one plugin's failure does not hold back the rest. A GitHub plugin is
+imported from the release tag the check saw.
 
 A failed check is shown on the plugin's page with its reason and is retried
 at the next interval. It raises no alert, so a deployment without internet

@@ -454,6 +454,9 @@ func renderUpdateCheck(summary store.PluginSummary) (PluginUpdateCheck, bool) {
 	if summary.Update.Latest != "" {
 		check.Latest = &summary.Update.Latest
 	}
+	if summary.Update.LatestTag != "" {
+		check.LatestTag = &summary.Update.LatestTag
+	}
 	newest := plugin.Newest(summary.StoredVersions)
 	available := summary.Update.Enabled && summary.Update.Latest != "" &&
 		(newest == "" || plugin.Compare(summary.Update.Latest, newest) > 0)
