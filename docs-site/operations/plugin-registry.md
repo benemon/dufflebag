@@ -150,8 +150,10 @@ A publisher changes what a plugin serves from its page:
    version to add it. A plugin from releases.hashicorp.com also lists its
    newer releases; tick one to mirror it with the platforms the plugin
    already has.
-4. Check the pending changes and choose **Sync**. The changes run in order
-   as one job, and its page shows each change's outcome.
+4. Check the pending changes under the grid; **Undo** drops one. Choose
+   **Sync N changes**. The changes run in order as one job, and its page
+   shows each change's outcome. **Discard** leaves edit mode without
+   syncing.
 
 ![The plugin detail grid in edit mode with one pending change](/screenshots/plugin-detail-edit.png)
 
@@ -163,7 +165,8 @@ release changed upstream since then cannot add to it. Mirrored platforms
 cannot be removed: revoke the version, or remove it and import it again
 without that platform.
 
-**Remove version** deletes a version's records, then removes its files; a file
+**Remove version**, in a version's row menu, deletes its records, then
+removes its files; a file
 that cannot be removed is logged and is never served. It cannot be undone.
 Removing a plugin's last version removes the plugin, and its name can then
 be used by another source. A revoked version still holds the name.
@@ -177,7 +180,9 @@ changes, `POST .../versions/{version}/revoke`,
 A plugin imported from releases.hashicorp.com or GitHub can check its source
 for newer releases. Uploaded plugins have no source to check.
 
-1. Open the plugin and turn on **Check for updates**.
+1. Open the plugin and turn on **Check daily for a newer stable version**
+   in its Update check card, which also shows when the last check ran and
+   its last error.
 2. dufflebag asks the source for its newest stable release within a minute,
    then once every `DFBG_PLUGIN_UPDATE_INTERVAL` (24 hours by default).
    Prereleases are ignored.

@@ -234,19 +234,20 @@ export function DisablePluginRegistryConfirmation({
 }
 
 export function PluginRegistryConfirmation({
-  title, body, verb, busy, onConfirm, onCancel,
+  title, body, verb, busy, danger = false, onConfirm, onCancel,
 }: {
   title: string
   body: string
   verb: string
   busy: boolean
+  danger?: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
   return (
     <Modal aria-labelledby="plugin-registry-confirm-title" isOpen onClose={onCancel} variant="small">
       <PluginRegistryConfirmationView
-        title={title} body={body} verb={verb} busy={busy}
+        title={title} body={body} verb={verb} busy={busy} danger={danger}
         onConfirm={onConfirm} onCancel={onCancel}
       />
     </Modal>
@@ -254,12 +255,13 @@ export function PluginRegistryConfirmation({
 }
 
 export function PluginRegistryConfirmationView({
-  title, body, verb, busy, onConfirm, onCancel,
+  title, body, verb, busy, danger = false, onConfirm, onCancel,
 }: {
   title: string
   body: string
   verb: string
   busy: boolean
+  danger?: boolean
   onConfirm: () => void
   onCancel: () => void
 }) {
@@ -268,7 +270,7 @@ export function PluginRegistryConfirmationView({
       <ModalHeader labelId="plugin-registry-confirm-title" title={title} />
       <ModalBody><Content component="p">{body}</Content></ModalBody>
       <ModalFooter>
-        <Button variant="primary" isLoading={busy} isDisabled={busy} onClick={onConfirm}>{verb}</Button>
+        <Button variant={danger ? 'danger' : 'primary'} isLoading={busy} isDisabled={busy} onClick={onConfirm}>{verb}</Button>
         <Button variant="link" isDisabled={busy} onClick={onCancel}>Cancel</Button>
       </ModalFooter>
     </>
