@@ -74,7 +74,7 @@ func TestTransitKubernetesAuth(t *testing.T) {
 	}
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:           "hashicorp/vault:1.17",
+			Image:           "hashicorp/vault:2.0.3",
 			ExposedPorts:    []string{"8200/tcp"},
 			HostAccessPorts: []int{reviewerPort},
 			Env: map[string]string{
@@ -258,7 +258,7 @@ func TestTransitAppRoleAuth(t *testing.T) {
 	const rootToken = "dufflebag-integration-root"
 	container, err := testcontainers.GenericContainer(ctx, testcontainers.GenericContainerRequest{
 		ContainerRequest: testcontainers.ContainerRequest{
-			Image:        "hashicorp/vault:1.17",
+			Image:        "hashicorp/vault:2.0.3",
 			ExposedPorts: []string{"8200/tcp"},
 			Env: map[string]string{
 				"VAULT_DEV_ROOT_TOKEN_ID":  rootToken,

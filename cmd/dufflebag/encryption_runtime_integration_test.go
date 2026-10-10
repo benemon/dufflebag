@@ -28,7 +28,7 @@ func startVaultDev(t *testing.T) string {
 	ctx := context.Background()
 	container, err := tc.GenericContainer(ctx, tc.GenericContainerRequest{
 		ContainerRequest: tc.ContainerRequest{
-			Image:        "hashicorp/vault:1.17",
+			Image:        "hashicorp/vault:2.0.3",
 			Env:          map[string]string{"VAULT_DEV_ROOT_TOKEN_ID": "runtime-root"},
 			ExposedPorts: []string{"8200/tcp"},
 			WaitingFor:   wait.ForHTTP("/v1/sys/health").WithPort("8200/tcp"),
