@@ -357,6 +357,34 @@ func (response refusalResponse) VisitVerifyWebhookResponse(w http.ResponseWriter
 func (response refusalResponse) VisitListWebhookDeliveriesResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+
+func (response refusalResponse) VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+
+func (response refusalResponse) VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitRescanBuildResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

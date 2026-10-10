@@ -1,4 +1,4 @@
-// Package webhook implements project-scoped webhook activation and delivery.
+// Package webhook implements project- and organization-scoped webhook activation and delivery.
 package webhook
 
 import (
@@ -20,6 +20,7 @@ const (
 	OperationBucketCreated              = "bucket.created"
 	OperationBucketDeleted              = "bucket.deleted"
 	OperationVerification               = "webhook.verification"
+	OperationPluginUpdateAvailable      = "plugin.update_available"
 
 	StatePending = "pending"
 	StateActive  = "active"
@@ -45,6 +46,9 @@ var Operations = []string{
 	OperationChannelCreated, OperationChannelDeleted, OperationChannelAssigned,
 	OperationBucketCreated, OperationBucketDeleted,
 }
+
+// OrganizationOperations are the events an organization webhook can receive.
+var OrganizationOperations = []string{OperationPluginUpdateAvailable}
 
 type Record struct {
 	OrganizationID        string
@@ -94,7 +98,7 @@ type Envelope struct {
 	EventID        string          `json:"event_id"`
 	OccurredAt     time.Time       `json:"occurred_at"`
 	OrganizationID string          `json:"organization_id"`
-	ProjectID      string          `json:"project_id"`
+	ProjectID      string          `json:"project_id,omitempty"`
 	Operation      string          `json:"operation"`
 	Target         Target          `json:"target"`
 	Actor          Actor           `json:"actor"`
@@ -106,6 +110,8 @@ type OutboxEvent struct {
 	AvailableAt time.Time
 }
 
+// Project is a dispatch unit. An empty ProjectID is the organization's own
+// webhooks.
 type Project struct {
 	OrganizationID string
 	ProjectID      string

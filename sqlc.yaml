@@ -8,6 +8,7 @@ sql:
       - internal/store/postgres/migrations/000008_plugin_imports.up.sql
       - internal/store/postgres/migrations/000009_plugin_import_changes.up.sql
       - internal/store/postgres/migrations/000010_plugin_update_checks.up.sql
+      - internal/store/postgres/migrations/000011_organization_webhooks.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:
@@ -21,6 +22,10 @@ sql:
               type: byte
               slice: true
           - column: webhooks.sealed_secret
+            go_type:
+              type: byte
+              slice: true
+          - column: organization_webhooks.sealed_secret
             go_type:
               type: byte
               slice: true

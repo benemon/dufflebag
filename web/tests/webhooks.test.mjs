@@ -7,6 +7,8 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
+let listWebhooks
+let ORGANIZATION_WEBHOOK_OPERATIONS
 let CreateWebhookForm
 let DeleteConfirmation
 let WebhooksView
@@ -30,6 +32,7 @@ before(async () => {
   } =
     await vite.ssrLoadModule('/src/screens/Webhooks.tsx'))
   ;({ updateBulkSelection } = await vite.ssrLoadModule('/src/components/BulkSelection.ts'))
+  ;({ listWebhooks, ORGANIZATION_WEBHOOK_OPERATIONS } = await vite.ssrLoadModule('/src/data/webhooks.ts'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
 })
@@ -233,4 +236,31 @@ test('webhook deliveries paginate the in-memory listing', () => {
   assert.match(markup, />operation-20</)
   assert.doesNotMatch(markup, />operation-21</)
   assert.ok((markup.match(/pf-v6-c-pagination/g) ?? []).length >= 2)
+})
+
+test('an organization scope offers only organization events and says so', () => {
+  const organization = view({ scope: 'organization' })
+  assert.match(organization, /signed organization events, such as a plugin update becoming available/)
+  const form = renderToStaticMarkup(React.createElement(CreateWebhookForm, {
+    operations: ORGANIZATION_WEBHOOK_OPERATIONS, callerRole: 'maintainer', onCreate: async () => {}, onCancel: () => {},
+  }))
+  assert.match(form, /plugin\.update_available/)
+  assert.doesNotMatch(form, /version\.created/)
+  assert.match(view({ scope: 'project' }), /signed project events/)
+})
+
+test('an organization tenant addresses the organization webhook path', async () => {
+  const originalFetch = globalThis.fetch
+  const paths = []
+  globalThis.fetch = async (path) => {
+    paths.push(path)
+    return new Response(JSON.stringify({ webhooks: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await listWebhooks('token', { organizationID: 'org', projectID: '' })
+    await listWebhooks('token', { organizationID: 'org', projectID: 'proj' })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(paths, ['/api/v1/organizations/org/webhooks', '/api/v1/organizations/org/projects/proj/webhooks'])
 })

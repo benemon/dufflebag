@@ -2092,6 +2092,162 @@ paths:
         "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/organizations/{organizationId}/webhooks:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [webhooks]
+      operationId: listOrganizationWebhooks
+      summary: List an organization's own webhooks
+      description: Requires maintainer on this organization. Secrets are never returned.
+      responses:
+        "200":
+          description: Webhooks.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  webhooks:
+                    type: array
+                    items: { $ref: "#/components/schemas/Webhook" }
+                required: [webhooks]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    post:
+      tags: [webhooks]
+      operationId: createOrganizationWebhook
+      summary: Create and verify a organization webhook
+      description: |
+        Stores the write-only secret sealed at rest and immediately attempts a
+        signed verification handshake. A failed or refused handshake leaves the
+        webhook pending; pending webhooks receive no events. Requires maintainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookCreate" }
+      responses:
+        "201":
+          description: Created. The returned state reflects the handshake result.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The configured secret cannot be sealed on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/webhooks/{webhookId}:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      tags: [webhooks]
+      operationId: getOrganizationWebhook
+      summary: Read a organization webhook
+      description: Requires maintainer. The secret is never returned.
+      responses:
+        "200":
+          description: Webhook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [webhooks]
+      operationId: updateOrganizationWebhook
+      summary: Update a organization webhook
+      description: |
+        Replaces only supplied fields. A supplied secret replaces the sealed
+        secret. Changing the URL returns the webhook to pending and immediately
+        re-attempts verification. Requires maintainer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookUpdate" }
+      responses:
+        "200":
+          description: Updated webhook.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The supplied secret cannot be sealed on this deployment.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    delete:
+      tags: [webhooks]
+      operationId: deleteOrganizationWebhook
+      summary: Delete a organization webhook
+      description: Requires maintainer.
+      responses:
+        "204": { description: Deleted. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/WebhookId"
+    post:
+      tags: [webhooks]
+      operationId: verifyOrganizationWebhook
+      summary: Re-attempt a webhook activation handshake
+      description: |
+        Sends the signed verification payload. A 2xx response activates the
+        webhook; failure leaves it pending and records the failure. Requires maintainer.
+      responses:
+        "200":
+          description: Webhook with its resulting activation state.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Webhook" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/WebhookId"
+    get:
+      tags: [webhooks]
+      operationId: listOrganizationWebhookDeliveries
+      summary: List the webhook's last 100 deliveries
+      description: Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+      responses:
+        "200":
+          description: Newest-first delivery history.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deliveries:
+                    type: array
+                    maxItems: 100
+                    items: { $ref: "#/components/schemas/WebhookDelivery" }
+                required: [deliveries]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
 components:
   securitySchemes:
     bearerAuth:
@@ -3239,6 +3395,10 @@ components:
         - channel.assigned
         - bucket.created
         - bucket.deleted
+        - plugin.update_available
+      description: |
+        Project webhooks receive the version, channel and bucket events; organization webhooks receive
+        plugin.update_available. A webhook subscribing outside its scope's events is refused.
 
     WebhookState:
       type: string
@@ -3359,7 +3519,7 @@ components:
     WebhookTarget:
       type: object
       properties:
-        type: { type: string, enum: [version, channel, bucket] }
+        type: { type: string, enum: [version, channel, bucket, plugin] }
         bucket: { type: string }
         fingerprint: { type: string }
         name: { type: string }
@@ -3378,7 +3538,7 @@ components:
         event_id: { type: string, description: ULID. }
         occurred_at: { type: string, format: date-time }
         organization_id: { type: string, format: uuid }
-        project_id: { type: string, format: uuid }
+        project_id: { type: string, format: uuid, description: Absent on an organization webhook's events. }
         operation: { $ref: "#/components/schemas/WebhookOperation" }
         target: { $ref: "#/components/schemas/WebhookTarget" }
         actor: { $ref: "#/components/schemas/WebhookActor" }
@@ -3387,4 +3547,4 @@ components:
           additionalProperties: true
           description: Operation-specific compatibility-plane wire data.
       required:
-        [event_id, occurred_at, organization_id, project_id, operation, target, actor, payload]
+        [event_id, occurred_at, organization_id, operation, target, actor, payload]

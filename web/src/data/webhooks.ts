@@ -8,7 +8,10 @@ export const WEBHOOK_OPERATIONS = [
   'channel.assigned', 'bucket.created', 'bucket.deleted',
 ] as const
 
-export type WebhookOperation = (typeof WEBHOOK_OPERATIONS)[number]
+// An organization's own webhooks receive the plugin registry's events.
+export const ORGANIZATION_WEBHOOK_OPERATIONS = ['plugin.update_available'] as const
+
+export type WebhookOperation = (typeof WEBHOOK_OPERATIONS)[number] | (typeof ORGANIZATION_WEBHOOK_OPERATIONS)[number]
 
 export type Webhook = {
   id: string
@@ -45,9 +48,10 @@ export type WebhookDelivery = {
   created_at: string
 }
 
+// An empty projectID addresses the organization's own webhooks.
 function path(tenant: Tenant, suffix = ''): string {
   const base = `/organizations/${encodeURIComponent(tenant.organizationID)}` +
-    `/projects/${encodeURIComponent(tenant.projectID)}/webhooks`
+    (tenant.projectID === '' ? '' : `/projects/${encodeURIComponent(tenant.projectID)}`) + '/webhooks'
   return suffix === '' ? base : `${base}/${suffix}`
 }
 

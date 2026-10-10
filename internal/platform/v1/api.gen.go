@@ -713,6 +713,7 @@ const (
 	ChannelAssigned            WebhookOperation = "channel.assigned"
 	ChannelCreated             WebhookOperation = "channel.created"
 	ChannelDeleted             WebhookOperation = "channel.deleted"
+	PluginUpdateAvailable      WebhookOperation = "plugin.update_available"
 	VersionCompleted           WebhookOperation = "version.completed"
 	VersionCreated             WebhookOperation = "version.created"
 	VersionDeleted             WebhookOperation = "version.deleted"
@@ -733,6 +734,8 @@ func (e WebhookOperation) Valid() bool {
 	case ChannelCreated:
 		return true
 	case ChannelDeleted:
+		return true
+	case PluginUpdateAvailable:
 		return true
 	case VersionCompleted:
 		return true
@@ -771,19 +774,22 @@ func (e WebhookState) Valid() bool {
 
 // Defines values for WebhookTargetType.
 const (
-	Bucket  WebhookTargetType = "bucket"
-	Channel WebhookTargetType = "channel"
-	Version WebhookTargetType = "version"
+	WebhookTargetTypeBucket  WebhookTargetType = "bucket"
+	WebhookTargetTypeChannel WebhookTargetType = "channel"
+	WebhookTargetTypePlugin  WebhookTargetType = "plugin"
+	WebhookTargetTypeVersion WebhookTargetType = "version"
 )
 
 // Valid indicates whether the value is a known member of the WebhookTargetType enum.
 func (e WebhookTargetType) Valid() bool {
 	switch e {
-	case Bucket:
+	case WebhookTargetTypeBucket:
 		return true
-	case Channel:
+	case WebhookTargetTypeChannel:
 		return true
-	case Version:
+	case WebhookTargetTypePlugin:
+		return true
+	case WebhookTargetTypeVersion:
 		return true
 	default:
 		return false
@@ -1804,18 +1810,24 @@ type WebhookEnvelope struct {
 	Actor WebhookActor `json:"actor"`
 
 	// EventId ULID.
-	EventId        string             `json:"event_id"`
-	OccurredAt     time.Time          `json:"occurred_at"`
+	EventId    string    `json:"event_id"`
+	OccurredAt time.Time `json:"occurred_at"`
+
+	// Operation Project webhooks receive the version, channel and bucket events; organization webhooks receive
+	// plugin.update_available. A webhook subscribing outside its scope's events is refused.
 	Operation      WebhookOperation   `json:"operation"`
 	OrganizationId openapi_types.UUID `json:"organization_id"`
 
 	// Payload Operation-specific compatibility-plane wire data.
-	Payload   map[string]interface{} `json:"payload"`
-	ProjectId openapi_types.UUID     `json:"project_id"`
-	Target    WebhookTarget          `json:"target"`
+	Payload map[string]interface{} `json:"payload"`
+
+	// ProjectId Absent on an organization webhook's events.
+	ProjectId *openapi_types.UUID `json:"project_id,omitempty"`
+	Target    WebhookTarget       `json:"target"`
 }
 
-// WebhookOperation defines model for WebhookOperation.
+// WebhookOperation Project webhooks receive the version, channel and bucket events; organization webhooks receive
+// plugin.update_available. A webhook subscribing outside its scope's events is refused.
 type WebhookOperation string
 
 // WebhookState defines model for WebhookState.
@@ -2019,6 +2031,12 @@ type CreateWebhookJSONRequestBody = WebhookCreate
 
 // UpdateWebhookJSONRequestBody defines body for UpdateWebhook for application/json ContentType.
 type UpdateWebhookJSONRequestBody = WebhookUpdate
+
+// CreateOrganizationWebhookJSONRequestBody defines body for CreateOrganizationWebhook for application/json ContentType.
+type CreateOrganizationWebhookJSONRequestBody = WebhookCreate
+
+// UpdateOrganizationWebhookJSONRequestBody defines body for UpdateOrganizationWebhook for application/json ContentType.
+type UpdateOrganizationWebhookJSONRequestBody = WebhookUpdate
 
 // CreatePrincipalJSONRequestBody defines body for CreatePrincipal for application/json ContentType.
 type CreatePrincipalJSONRequestBody CreatePrincipalJSONBody
@@ -2862,6 +2880,86 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify (the `VerifyWebhook` operationId).
 	VerifyWebhook(ctx context.Context, organizationId OrganizationId, projectId ProjectId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListOrganizationWebhooks List an organization's own webhooks
+	//
+	// Requires maintainer on this organization. Secrets are never returned.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks (the `ListOrganizationWebhooks` operationId).
+	ListOrganizationWebhooks(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateOrganizationWebhookWithBody Create and verify a organization webhook
+	//
+	// Stores the write-only secret sealed at rest and immediately attempts a
+	// signed verification handshake. A failed or refused handshake leaves the
+	// webhook pending; pending webhooks receive no events. Requires maintainer.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+	CreateOrganizationWebhookWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// CreateOrganizationWebhook Create and verify a organization webhook
+	//
+	// Stores the write-only secret sealed at rest and immediately attempts a
+	// signed verification handshake. A failed or refused handshake leaves the
+	// webhook pending; pending webhooks receive no events. Requires maintainer.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+	CreateOrganizationWebhook(ctx context.Context, organizationId OrganizationId, body CreateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeleteOrganizationWebhook Delete a organization webhook
+	//
+	// Requires maintainer.
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `DeleteOrganizationWebhook` operationId).
+	DeleteOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetOrganizationWebhook Read a organization webhook
+	//
+	// Requires maintainer. The secret is never returned.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `GetOrganizationWebhook` operationId).
+	GetOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateOrganizationWebhookWithBody Update a organization webhook
+	//
+	// Replaces only supplied fields. A supplied secret replaces the sealed
+	// secret. Changing the URL returns the webhook to pending and immediately
+	// re-attempts verification. Requires maintainer.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+	UpdateOrganizationWebhookWithBody(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// UpdateOrganizationWebhook Update a organization webhook
+	//
+	// Replaces only supplied fields. A supplied secret replaces the sealed
+	// secret. Changing the URL returns the webhook to pending and immediately
+	// re-attempts verification. Requires maintainer.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+	UpdateOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, body UpdateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ListOrganizationWebhookDeliveries List the webhook's last 100 deliveries
+	//
+	// Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries (the `ListOrganizationWebhookDeliveries` operationId).
+	ListOrganizationWebhookDeliveries(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// VerifyOrganizationWebhook Re-attempt a webhook activation handshake
+	//
+	// Sends the signed verification payload. A 2xx response activates the
+	// webhook; failure leaves it pending and records the failure. Requires maintainer.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify (the `VerifyOrganizationWebhook` operationId).
+	VerifyOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPrincipals List service principals at a scope
 	//
@@ -4552,6 +4650,176 @@ func (c *Client) ListWebhookDeliveries(ctx context.Context, organizationId Organ
 // Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify (the `VerifyWebhook` operationId).
 func (c *Client) VerifyWebhook(ctx context.Context, organizationId OrganizationId, projectId ProjectId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewVerifyWebhookRequest(c.Server, organizationId, projectId, webhookId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListOrganizationWebhooks List an organization's own webhooks
+//
+// Requires maintainer on this organization. Secrets are never returned.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks (the `ListOrganizationWebhooks` operationId).
+func (c *Client) ListOrganizationWebhooks(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListOrganizationWebhooksRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateOrganizationWebhookWithBody Create and verify a organization webhook
+//
+// Stores the write-only secret sealed at rest and immediately attempts a
+// signed verification handshake. A failed or refused handshake leaves the
+// webhook pending; pending webhooks receive no events. Requires maintainer.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+func (c *Client) CreateOrganizationWebhookWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateOrganizationWebhookRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// CreateOrganizationWebhook Create and verify a organization webhook
+//
+// Stores the write-only secret sealed at rest and immediately attempts a
+// signed verification handshake. A failed or refused handshake leaves the
+// webhook pending; pending webhooks receive no events. Requires maintainer.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+func (c *Client) CreateOrganizationWebhook(ctx context.Context, organizationId OrganizationId, body CreateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewCreateOrganizationWebhookRequest(c.Server, organizationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeleteOrganizationWebhook Delete a organization webhook
+//
+// Requires maintainer.
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `DeleteOrganizationWebhook` operationId).
+func (c *Client) DeleteOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeleteOrganizationWebhookRequest(c.Server, organizationId, webhookId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetOrganizationWebhook Read a organization webhook
+//
+// Requires maintainer. The secret is never returned.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `GetOrganizationWebhook` operationId).
+func (c *Client) GetOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetOrganizationWebhookRequest(c.Server, organizationId, webhookId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateOrganizationWebhookWithBody Update a organization webhook
+//
+// Replaces only supplied fields. A supplied secret replaces the sealed
+// secret. Changing the URL returns the webhook to pending and immediately
+// re-attempts verification. Requires maintainer.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+func (c *Client) UpdateOrganizationWebhookWithBody(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateOrganizationWebhookRequestWithBody(c.Server, organizationId, webhookId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// UpdateOrganizationWebhook Update a organization webhook
+//
+// Replaces only supplied fields. A supplied secret replaces the sealed
+// secret. Changing the URL returns the webhook to pending and immediately
+// re-attempts verification. Requires maintainer.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+func (c *Client) UpdateOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, body UpdateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewUpdateOrganizationWebhookRequest(c.Server, organizationId, webhookId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ListOrganizationWebhookDeliveries List the webhook's last 100 deliveries
+//
+// Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries (the `ListOrganizationWebhookDeliveries` operationId).
+func (c *Client) ListOrganizationWebhookDeliveries(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListOrganizationWebhookDeliveriesRequest(c.Server, organizationId, webhookId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// VerifyOrganizationWebhook Re-attempt a webhook activation handshake
+//
+// Sends the signed verification payload. A 2xx response activates the
+// webhook; failure leaves it pending and records the failure. Requires maintainer.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify (the `VerifyOrganizationWebhook` operationId).
+func (c *Client) VerifyOrganizationWebhook(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewVerifyOrganizationWebhookRequest(c.Server, organizationId, webhookId)
 	if err != nil {
 		return nil, err
 	}
@@ -7580,6 +7848,305 @@ func NewVerifyWebhookRequest(server string, organizationId OrganizationId, proje
 	return req, nil
 }
 
+// NewListOrganizationWebhooksRequest constructs an http.Request for the ListOrganizationWebhooks method
+func NewListOrganizationWebhooksRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewCreateOrganizationWebhookRequest calls the generic CreateOrganizationWebhook builder with application/json body
+func NewCreateOrganizationWebhookRequest(server string, organizationId OrganizationId, body CreateOrganizationWebhookJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewCreateOrganizationWebhookRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewCreateOrganizationWebhookRequestWithBody constructs an http.Request for the CreateOrganizationWebhook method, with any body, and a specified content type
+func NewCreateOrganizationWebhookRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeleteOrganizationWebhookRequest constructs an http.Request for the DeleteOrganizationWebhook method
+func NewDeleteOrganizationWebhookRequest(server string, organizationId OrganizationId, webhookId WebhookId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "webhookId", webhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetOrganizationWebhookRequest constructs an http.Request for the GetOrganizationWebhook method
+func NewGetOrganizationWebhookRequest(server string, organizationId OrganizationId, webhookId WebhookId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "webhookId", webhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewUpdateOrganizationWebhookRequest calls the generic UpdateOrganizationWebhook builder with application/json body
+func NewUpdateOrganizationWebhookRequest(server string, organizationId OrganizationId, webhookId WebhookId, body UpdateOrganizationWebhookJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewUpdateOrganizationWebhookRequestWithBody(server, organizationId, webhookId, "application/json", bodyReader)
+}
+
+// NewUpdateOrganizationWebhookRequestWithBody constructs an http.Request for the UpdateOrganizationWebhook method, with any body, and a specified content type
+func NewUpdateOrganizationWebhookRequestWithBody(server string, organizationId OrganizationId, webhookId WebhookId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "webhookId", webhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPatch, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewListOrganizationWebhookDeliveriesRequest constructs an http.Request for the ListOrganizationWebhookDeliveries method
+func NewListOrganizationWebhookDeliveriesRequest(server string, organizationId OrganizationId, webhookId WebhookId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "webhookId", webhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks/%s/deliveries", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewVerifyOrganizationWebhookRequest constructs an http.Request for the VerifyOrganizationWebhook method
+func NewVerifyOrganizationWebhookRequest(server string, organizationId OrganizationId, webhookId WebhookId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "webhookId", webhookId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/webhooks/%s/verify", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewListPrincipalsRequest constructs an http.Request for the ListPrincipals method
 func NewListPrincipalsRequest(server string, params *ListPrincipalsParams) (*http.Request, error) {
 	var err error
@@ -8887,6 +9454,96 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify (the `VerifyWebhook` operationId).
 	VerifyWebhookWithResponse(ctx context.Context, organizationId OrganizationId, projectId ProjectId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*VerifyWebhookResponse, error)
+
+	// ListOrganizationWebhooksWithResponse List an organization's own webhooks
+	//
+	// Requires maintainer on this organization. Secrets are never returned.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks (the `ListOrganizationWebhooks` operationId).
+	ListOrganizationWebhooksWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListOrganizationWebhooksResponse, error)
+
+	// CreateOrganizationWebhookWithBodyWithResponse Create and verify a organization webhook
+	//
+	// Stores the write-only secret sealed at rest and immediately attempts a
+	// signed verification handshake. A failed or refused handshake leaves the
+	// webhook pending; pending webhooks receive no events. Requires maintainer.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+	CreateOrganizationWebhookWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateOrganizationWebhookResponse, error)
+
+	// CreateOrganizationWebhookWithResponse Create and verify a organization webhook
+	//
+	// Stores the write-only secret sealed at rest and immediately attempts a
+	// signed verification handshake. A failed or refused handshake leaves the
+	// webhook pending; pending webhooks receive no events. Requires maintainer.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+	CreateOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, body CreateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateOrganizationWebhookResponse, error)
+
+	// DeleteOrganizationWebhookWithResponse Delete a organization webhook
+	//
+	// Requires maintainer.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `DeleteOrganizationWebhook` operationId).
+	DeleteOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*DeleteOrganizationWebhookResponse, error)
+
+	// GetOrganizationWebhookWithResponse Read a organization webhook
+	//
+	// Requires maintainer. The secret is never returned.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `GetOrganizationWebhook` operationId).
+	GetOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*GetOrganizationWebhookResponse, error)
+
+	// UpdateOrganizationWebhookWithBodyWithResponse Update a organization webhook
+	//
+	// Replaces only supplied fields. A supplied secret replaces the sealed
+	// secret. Changing the URL returns the webhook to pending and immediately
+	// re-attempts verification. Requires maintainer.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+	UpdateOrganizationWebhookWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateOrganizationWebhookResponse, error)
+
+	// UpdateOrganizationWebhookWithResponse Update a organization webhook
+	//
+	// Replaces only supplied fields. A supplied secret replaces the sealed
+	// secret. Changing the URL returns the webhook to pending and immediately
+	// re-attempts verification. Requires maintainer.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+	UpdateOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, body UpdateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateOrganizationWebhookResponse, error)
+
+	// ListOrganizationWebhookDeliveriesWithResponse List the webhook's last 100 deliveries
+	//
+	// Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries (the `ListOrganizationWebhookDeliveries` operationId).
+	ListOrganizationWebhookDeliveriesWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*ListOrganizationWebhookDeliveriesResponse, error)
+
+	// VerifyOrganizationWebhookWithResponse Re-attempt a webhook activation handshake
+	//
+	// Sends the signed verification payload. A 2xx response activates the
+	// webhook; failure leaves it pending and records the failure. Requires maintainer.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify (the `VerifyOrganizationWebhook` operationId).
+	VerifyOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*VerifyOrganizationWebhookResponse, error)
 
 	// ListPrincipalsWithResponse List service principals at a scope
 	//
@@ -13063,6 +13720,469 @@ func (r VerifyWebhookResponse) ContentType() string {
 	return ""
 }
 
+type ListOrganizationWebhooksResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Webhooks []Webhook `json:"webhooks"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListOrganizationWebhooksResponse) GetJSON200() *struct {
+	Webhooks []Webhook `json:"webhooks"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListOrganizationWebhooksResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListOrganizationWebhooksResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListOrganizationWebhooksResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r ListOrganizationWebhooksResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListOrganizationWebhooksResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListOrganizationWebhooksResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListOrganizationWebhooksResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type CreateOrganizationWebhookResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON201 the response for an HTTP 201 `application/json` response
+	JSON201 *Webhook
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON201 returns the response for an HTTP 201 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON201() *Webhook {
+	return r.JSON201
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r CreateOrganizationWebhookResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r CreateOrganizationWebhookResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r CreateOrganizationWebhookResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r CreateOrganizationWebhookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r CreateOrganizationWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeleteOrganizationWebhookResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeleteOrganizationWebhookResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeleteOrganizationWebhookResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeleteOrganizationWebhookResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r DeleteOrganizationWebhookResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeleteOrganizationWebhookResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeleteOrganizationWebhookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeleteOrganizationWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetOrganizationWebhookResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Webhook
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetOrganizationWebhookResponse) GetJSON200() *Webhook {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetOrganizationWebhookResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetOrganizationWebhookResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetOrganizationWebhookResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r GetOrganizationWebhookResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetOrganizationWebhookResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetOrganizationWebhookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetOrganizationWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type UpdateOrganizationWebhookResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Webhook
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON200() *Webhook {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r UpdateOrganizationWebhookResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r UpdateOrganizationWebhookResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r UpdateOrganizationWebhookResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r UpdateOrganizationWebhookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r UpdateOrganizationWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ListOrganizationWebhookDeliveriesResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Deliveries []WebhookDelivery `json:"deliveries"`
+	}
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListOrganizationWebhookDeliveriesResponse) GetJSON200() *struct {
+	Deliveries []WebhookDelivery `json:"deliveries"`
+} {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListOrganizationWebhookDeliveriesResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ListOrganizationWebhookDeliveriesResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListOrganizationWebhookDeliveriesResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r ListOrganizationWebhookDeliveriesResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListOrganizationWebhookDeliveriesResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListOrganizationWebhookDeliveriesResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListOrganizationWebhookDeliveriesResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type VerifyOrganizationWebhookResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *Webhook
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r VerifyOrganizationWebhookResponse) GetJSON200() *Webhook {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r VerifyOrganizationWebhookResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r VerifyOrganizationWebhookResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r VerifyOrganizationWebhookResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r VerifyOrganizationWebhookResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r VerifyOrganizationWebhookResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r VerifyOrganizationWebhookResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r VerifyOrganizationWebhookResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListPrincipalsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -15030,6 +16150,150 @@ func (c *ClientWithResponses) VerifyWebhookWithResponse(ctx context.Context, org
 		return nil, err
 	}
 	return ParseVerifyWebhookResponse(rsp)
+}
+
+// ListOrganizationWebhooksWithResponse List an organization's own webhooks
+//
+// Requires maintainer on this organization. Secrets are never returned.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks (the `ListOrganizationWebhooks` operationId).
+func (c *ClientWithResponses) ListOrganizationWebhooksWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListOrganizationWebhooksResponse, error) {
+	rsp, err := c.ListOrganizationWebhooks(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListOrganizationWebhooksResponse(rsp)
+}
+
+// CreateOrganizationWebhookWithBodyWithResponse Create and verify a organization webhook
+//
+// Stores the write-only secret sealed at rest and immediately attempts a
+// signed verification handshake. A failed or refused handshake leaves the
+// webhook pending; pending webhooks receive no events. Requires maintainer.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+func (c *ClientWithResponses) CreateOrganizationWebhookWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*CreateOrganizationWebhookResponse, error) {
+	rsp, err := c.CreateOrganizationWebhookWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateOrganizationWebhookResponse(rsp)
+}
+
+// CreateOrganizationWebhookWithResponse Create and verify a organization webhook
+//
+// Stores the write-only secret sealed at rest and immediately attempts a
+// signed verification handshake. A failed or refused handshake leaves the
+// webhook pending; pending webhooks receive no events. Requires maintainer.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks (the `CreateOrganizationWebhook` operationId).
+func (c *ClientWithResponses) CreateOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, body CreateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*CreateOrganizationWebhookResponse, error) {
+	rsp, err := c.CreateOrganizationWebhook(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseCreateOrganizationWebhookResponse(rsp)
+}
+
+// DeleteOrganizationWebhookWithResponse Delete a organization webhook
+//
+// Requires maintainer.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `DeleteOrganizationWebhook` operationId).
+func (c *ClientWithResponses) DeleteOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*DeleteOrganizationWebhookResponse, error) {
+	rsp, err := c.DeleteOrganizationWebhook(ctx, organizationId, webhookId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeleteOrganizationWebhookResponse(rsp)
+}
+
+// GetOrganizationWebhookWithResponse Read a organization webhook
+//
+// Requires maintainer. The secret is never returned.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `GetOrganizationWebhook` operationId).
+func (c *ClientWithResponses) GetOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*GetOrganizationWebhookResponse, error) {
+	rsp, err := c.GetOrganizationWebhook(ctx, organizationId, webhookId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetOrganizationWebhookResponse(rsp)
+}
+
+// UpdateOrganizationWebhookWithBodyWithResponse Update a organization webhook
+//
+// Replaces only supplied fields. A supplied secret replaces the sealed
+// secret. Changing the URL returns the webhook to pending and immediately
+// re-attempts verification. Requires maintainer.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+func (c *ClientWithResponses) UpdateOrganizationWebhookWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*UpdateOrganizationWebhookResponse, error) {
+	rsp, err := c.UpdateOrganizationWebhookWithBody(ctx, organizationId, webhookId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateOrganizationWebhookResponse(rsp)
+}
+
+// UpdateOrganizationWebhookWithResponse Update a organization webhook
+//
+// Replaces only supplied fields. A supplied secret replaces the sealed
+// secret. Changing the URL returns the webhook to pending and immediately
+// re-attempts verification. Requires maintainer.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId} (the `UpdateOrganizationWebhook` operationId).
+func (c *ClientWithResponses) UpdateOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, body UpdateOrganizationWebhookJSONRequestBody, reqEditors ...RequestEditorFn) (*UpdateOrganizationWebhookResponse, error) {
+	rsp, err := c.UpdateOrganizationWebhook(ctx, organizationId, webhookId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseUpdateOrganizationWebhookResponse(rsp)
+}
+
+// ListOrganizationWebhookDeliveriesWithResponse List the webhook's last 100 deliveries
+//
+// Requires maintainer. Delivery attempts are not duplicated into the audit trail.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries (the `ListOrganizationWebhookDeliveries` operationId).
+func (c *ClientWithResponses) ListOrganizationWebhookDeliveriesWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*ListOrganizationWebhookDeliveriesResponse, error) {
+	rsp, err := c.ListOrganizationWebhookDeliveries(ctx, organizationId, webhookId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListOrganizationWebhookDeliveriesResponse(rsp)
+}
+
+// VerifyOrganizationWebhookWithResponse Re-attempt a webhook activation handshake
+//
+// Sends the signed verification payload. A 2xx response activates the
+// webhook; failure leaves it pending and records the failure. Requires maintainer.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify (the `VerifyOrganizationWebhook` operationId).
+func (c *ClientWithResponses) VerifyOrganizationWebhookWithResponse(ctx context.Context, organizationId OrganizationId, webhookId WebhookId, reqEditors ...RequestEditorFn) (*VerifyOrganizationWebhookResponse, error) {
+	rsp, err := c.VerifyOrganizationWebhook(ctx, organizationId, webhookId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseVerifyOrganizationWebhookResponse(rsp)
 }
 
 // ListPrincipalsWithResponse List service principals at a scope
@@ -18442,6 +19706,363 @@ func ParseVerifyWebhookResponse(rsp *http.Response) (*VerifyWebhookResponse, err
 	return response, nil
 }
 
+// ParseListOrganizationWebhooksResponse parses an HTTP response from a ListOrganizationWebhooksWithResponse call
+func ParseListOrganizationWebhooksResponse(rsp *http.Response) (*ListOrganizationWebhooksResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListOrganizationWebhooksResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Webhooks []Webhook `json:"webhooks"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseCreateOrganizationWebhookResponse parses an HTTP response from a CreateOrganizationWebhookWithResponse call
+func ParseCreateOrganizationWebhookResponse(rsp *http.Response) (*CreateOrganizationWebhookResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &CreateOrganizationWebhookResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 201:
+		var dest Webhook
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON201 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeleteOrganizationWebhookResponse parses an HTTP response from a DeleteOrganizationWebhookWithResponse call
+func ParseDeleteOrganizationWebhookResponse(rsp *http.Response) (*DeleteOrganizationWebhookResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeleteOrganizationWebhookResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetOrganizationWebhookResponse parses an HTTP response from a GetOrganizationWebhookWithResponse call
+func ParseGetOrganizationWebhookResponse(rsp *http.Response) (*GetOrganizationWebhookResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetOrganizationWebhookResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Webhook
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseUpdateOrganizationWebhookResponse parses an HTTP response from a UpdateOrganizationWebhookWithResponse call
+func ParseUpdateOrganizationWebhookResponse(rsp *http.Response) (*UpdateOrganizationWebhookResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &UpdateOrganizationWebhookResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Webhook
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseListOrganizationWebhookDeliveriesResponse parses an HTTP response from a ListOrganizationWebhookDeliveriesWithResponse call
+func ParseListOrganizationWebhookDeliveriesResponse(rsp *http.Response) (*ListOrganizationWebhookDeliveriesResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListOrganizationWebhookDeliveriesResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Deliveries []WebhookDelivery `json:"deliveries"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseVerifyOrganizationWebhookResponse parses an HTTP response from a VerifyOrganizationWebhookWithResponse call
+func ParseVerifyOrganizationWebhookResponse(rsp *http.Response) (*VerifyOrganizationWebhookResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &VerifyOrganizationWebhookResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest Webhook
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListPrincipalsResponse parses an HTTP response from a ListPrincipalsWithResponse call
 func ParseListPrincipalsResponse(rsp *http.Response) (*ListPrincipalsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -19213,6 +20834,27 @@ type ServerInterface interface {
 	// VerifyWebhook Re-attempt a webhook activation handshake
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify)
 	VerifyWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, projectId ProjectId, webhookId WebhookId)
+	// ListOrganizationWebhooks List an organization's own webhooks
+	// (GET /api/v1/organizations/{organizationId}/webhooks)
+	ListOrganizationWebhooks(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// CreateOrganizationWebhook Create and verify a organization webhook
+	// (POST /api/v1/organizations/{organizationId}/webhooks)
+	CreateOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// DeleteOrganizationWebhook Delete a organization webhook
+	// (DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	DeleteOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId)
+	// GetOrganizationWebhook Read a organization webhook
+	// (GET /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	GetOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId)
+	// UpdateOrganizationWebhook Update a organization webhook
+	// (PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	UpdateOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId)
+	// ListOrganizationWebhookDeliveries List the webhook's last 100 deliveries
+	// (GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries)
+	ListOrganizationWebhookDeliveries(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId)
+	// VerifyOrganizationWebhook Re-attempt a webhook activation handshake
+	// (POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify)
+	VerifyOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId)
 	// ListPrincipals List service principals at a scope
 	// (GET /api/v1/principals)
 	ListPrincipals(w http.ResponseWriter, r *http.Request, params ListPrincipalsParams)
@@ -21197,6 +22839,233 @@ func (siw *ServerInterfaceWrapper) VerifyWebhook(w http.ResponseWriter, r *http.
 	handler.ServeHTTP(w, r)
 }
 
+// ListOrganizationWebhooks operation middleware
+func (siw *ServerInterfaceWrapper) ListOrganizationWebhooks(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrganizationWebhooks(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// CreateOrganizationWebhook operation middleware
+func (siw *ServerInterfaceWrapper) CreateOrganizationWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.CreateOrganizationWebhook(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeleteOrganizationWebhook operation middleware
+func (siw *ServerInterfaceWrapper) DeleteOrganizationWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "webhookId" -------------
+	var webhookId WebhookId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "webhookId", r.PathValue("webhookId"), &webhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhookId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeleteOrganizationWebhook(w, r, organizationId, webhookId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetOrganizationWebhook operation middleware
+func (siw *ServerInterfaceWrapper) GetOrganizationWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "webhookId" -------------
+	var webhookId WebhookId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "webhookId", r.PathValue("webhookId"), &webhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhookId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetOrganizationWebhook(w, r, organizationId, webhookId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// UpdateOrganizationWebhook operation middleware
+func (siw *ServerInterfaceWrapper) UpdateOrganizationWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "webhookId" -------------
+	var webhookId WebhookId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "webhookId", r.PathValue("webhookId"), &webhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhookId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.UpdateOrganizationWebhook(w, r, organizationId, webhookId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListOrganizationWebhookDeliveries operation middleware
+func (siw *ServerInterfaceWrapper) ListOrganizationWebhookDeliveries(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "webhookId" -------------
+	var webhookId WebhookId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "webhookId", r.PathValue("webhookId"), &webhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhookId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListOrganizationWebhookDeliveries(w, r, organizationId, webhookId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// VerifyOrganizationWebhook operation middleware
+func (siw *ServerInterfaceWrapper) VerifyOrganizationWebhook(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "webhookId" -------------
+	var webhookId WebhookId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "webhookId", r.PathValue("webhookId"), &webhookId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "webhookId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.VerifyOrganizationWebhook(w, r, organizationId, webhookId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPrincipals operation middleware
 func (siw *ServerInterfaceWrapper) ListPrincipals(w http.ResponseWriter, r *http.Request) {
 
@@ -21688,6 +23557,13 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}", wrapper.UpdateWebhook)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify", wrapper.VerifyWebhook)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/deliveries", wrapper.ListWebhookDeliveries)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks", wrapper.ListOrganizationWebhooks)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks", wrapper.CreateOrganizationWebhook)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks/{webhookId}", wrapper.DeleteOrganizationWebhook)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks/{webhookId}", wrapper.GetOrganizationWebhook)
+	m.HandleFunc(http.MethodPatch+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks/{webhookId}", wrapper.UpdateOrganizationWebhook)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify", wrapper.VerifyOrganizationWebhook)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries", wrapper.ListOrganizationWebhookDeliveries)
 
 	return m
 }
@@ -25891,6 +27767,515 @@ func (response VerifyWebhook404JSONResponse) VisitVerifyWebhookResponse(w http.R
 	return err
 }
 
+type ListOrganizationWebhooksRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type ListOrganizationWebhooksResponseObject interface {
+	VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error
+}
+
+type ListOrganizationWebhooks200JSONResponse struct {
+	Webhooks []Webhook `json:"webhooks"`
+}
+
+func (response ListOrganizationWebhooks200JSONResponse) VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhooks401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListOrganizationWebhooks401JSONResponse) VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhooks403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListOrganizationWebhooks403JSONResponse) VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhooks404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrganizationWebhooks404JSONResponse) VisitListOrganizationWebhooksResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhookRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *CreateOrganizationWebhookJSONRequestBody
+}
+
+type CreateOrganizationWebhookResponseObject interface {
+	VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error
+}
+
+type CreateOrganizationWebhook201JSONResponse Webhook
+
+func (response CreateOrganizationWebhook201JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(201)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhook400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response CreateOrganizationWebhook400JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhook401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response CreateOrganizationWebhook401JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhook403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response CreateOrganizationWebhook403JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response CreateOrganizationWebhook404JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type CreateOrganizationWebhook409JSONResponse Error
+
+func (response CreateOrganizationWebhook409JSONResponse) VisitCreateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrganizationWebhookRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	WebhookId      WebhookId      `json:"webhookId"`
+}
+
+type DeleteOrganizationWebhookResponseObject interface {
+	VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error
+}
+
+type DeleteOrganizationWebhook204Response struct {
+}
+
+func (response DeleteOrganizationWebhook204Response) VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeleteOrganizationWebhook401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeleteOrganizationWebhook401JSONResponse) VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrganizationWebhook403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeleteOrganizationWebhook403JSONResponse) VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeleteOrganizationWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeleteOrganizationWebhook404JSONResponse) VisitDeleteOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrganizationWebhookRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	WebhookId      WebhookId      `json:"webhookId"`
+}
+
+type GetOrganizationWebhookResponseObject interface {
+	VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error
+}
+
+type GetOrganizationWebhook200JSONResponse Webhook
+
+func (response GetOrganizationWebhook200JSONResponse) VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrganizationWebhook401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetOrganizationWebhook401JSONResponse) VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrganizationWebhook403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetOrganizationWebhook403JSONResponse) VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetOrganizationWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetOrganizationWebhook404JSONResponse) VisitGetOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhookRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	WebhookId      WebhookId      `json:"webhookId"`
+	Body           *UpdateOrganizationWebhookJSONRequestBody
+}
+
+type UpdateOrganizationWebhookResponseObject interface {
+	VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error
+}
+
+type UpdateOrganizationWebhook200JSONResponse Webhook
+
+func (response UpdateOrganizationWebhook200JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhook400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response UpdateOrganizationWebhook400JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhook401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response UpdateOrganizationWebhook401JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhook403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response UpdateOrganizationWebhook403JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response UpdateOrganizationWebhook404JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type UpdateOrganizationWebhook409JSONResponse Error
+
+func (response UpdateOrganizationWebhook409JSONResponse) VisitUpdateOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhookDeliveriesRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	WebhookId      WebhookId      `json:"webhookId"`
+}
+
+type ListOrganizationWebhookDeliveriesResponseObject interface {
+	VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error
+}
+
+type ListOrganizationWebhookDeliveries200JSONResponse struct {
+	Deliveries []WebhookDelivery `json:"deliveries"`
+}
+
+func (response ListOrganizationWebhookDeliveries200JSONResponse) VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhookDeliveries401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListOrganizationWebhookDeliveries401JSONResponse) VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhookDeliveries403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ListOrganizationWebhookDeliveries403JSONResponse) VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListOrganizationWebhookDeliveries404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListOrganizationWebhookDeliveries404JSONResponse) VisitListOrganizationWebhookDeliveriesResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrganizationWebhookRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	WebhookId      WebhookId      `json:"webhookId"`
+}
+
+type VerifyOrganizationWebhookResponseObject interface {
+	VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error
+}
+
+type VerifyOrganizationWebhook200JSONResponse Webhook
+
+func (response VerifyOrganizationWebhook200JSONResponse) VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrganizationWebhook401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response VerifyOrganizationWebhook401JSONResponse) VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrganizationWebhook403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response VerifyOrganizationWebhook403JSONResponse) VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type VerifyOrganizationWebhook404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response VerifyOrganizationWebhook404JSONResponse) VisitVerifyOrganizationWebhookResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPrincipalsRequestObject struct {
 	Params ListPrincipalsParams
 }
@@ -26850,6 +29235,27 @@ type StrictServerInterface interface {
 	// VerifyWebhook Re-attempt a webhook activation handshake
 	// (POST /api/v1/organizations/{organizationId}/projects/{projectId}/webhooks/{webhookId}/verify)
 	VerifyWebhook(ctx context.Context, request VerifyWebhookRequestObject) (VerifyWebhookResponseObject, error)
+	// ListOrganizationWebhooks List an organization's own webhooks
+	// (GET /api/v1/organizations/{organizationId}/webhooks)
+	ListOrganizationWebhooks(ctx context.Context, request ListOrganizationWebhooksRequestObject) (ListOrganizationWebhooksResponseObject, error)
+	// CreateOrganizationWebhook Create and verify a organization webhook
+	// (POST /api/v1/organizations/{organizationId}/webhooks)
+	CreateOrganizationWebhook(ctx context.Context, request CreateOrganizationWebhookRequestObject) (CreateOrganizationWebhookResponseObject, error)
+	// DeleteOrganizationWebhook Delete a organization webhook
+	// (DELETE /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	DeleteOrganizationWebhook(ctx context.Context, request DeleteOrganizationWebhookRequestObject) (DeleteOrganizationWebhookResponseObject, error)
+	// GetOrganizationWebhook Read a organization webhook
+	// (GET /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	GetOrganizationWebhook(ctx context.Context, request GetOrganizationWebhookRequestObject) (GetOrganizationWebhookResponseObject, error)
+	// UpdateOrganizationWebhook Update a organization webhook
+	// (PATCH /api/v1/organizations/{organizationId}/webhooks/{webhookId})
+	UpdateOrganizationWebhook(ctx context.Context, request UpdateOrganizationWebhookRequestObject) (UpdateOrganizationWebhookResponseObject, error)
+	// ListOrganizationWebhookDeliveries List the webhook's last 100 deliveries
+	// (GET /api/v1/organizations/{organizationId}/webhooks/{webhookId}/deliveries)
+	ListOrganizationWebhookDeliveries(ctx context.Context, request ListOrganizationWebhookDeliveriesRequestObject) (ListOrganizationWebhookDeliveriesResponseObject, error)
+	// VerifyOrganizationWebhook Re-attempt a webhook activation handshake
+	// (POST /api/v1/organizations/{organizationId}/webhooks/{webhookId}/verify)
+	VerifyOrganizationWebhook(ctx context.Context, request VerifyOrganizationWebhookRequestObject) (VerifyOrganizationWebhookResponseObject, error)
 	// ListPrincipals List service principals at a scope
 	// (GET /api/v1/principals)
 	ListPrincipals(ctx context.Context, request ListPrincipalsRequestObject) (ListPrincipalsResponseObject, error)
@@ -28592,6 +30998,207 @@ func (sh *strictHandler) VerifyWebhook(w http.ResponseWriter, r *http.Request, o
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(VerifyWebhookResponseObject); ok {
 		if err := validResponse.VisitVerifyWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrganizationWebhooks operation middleware
+func (sh *strictHandler) ListOrganizationWebhooks(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ListOrganizationWebhooksRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrganizationWebhooks(ctx, request.(ListOrganizationWebhooksRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrganizationWebhooks")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrganizationWebhooksResponseObject); ok {
+		if err := validResponse.VisitListOrganizationWebhooksResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// CreateOrganizationWebhook operation middleware
+func (sh *strictHandler) CreateOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request CreateOrganizationWebhookRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body CreateOrganizationWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.CreateOrganizationWebhook(ctx, request.(CreateOrganizationWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "CreateOrganizationWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(CreateOrganizationWebhookResponseObject); ok {
+		if err := validResponse.VisitCreateOrganizationWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeleteOrganizationWebhook operation middleware
+func (sh *strictHandler) DeleteOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId) {
+	var request DeleteOrganizationWebhookRequestObject
+
+	request.OrganizationId = organizationId
+	request.WebhookId = webhookId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeleteOrganizationWebhook(ctx, request.(DeleteOrganizationWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeleteOrganizationWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeleteOrganizationWebhookResponseObject); ok {
+		if err := validResponse.VisitDeleteOrganizationWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetOrganizationWebhook operation middleware
+func (sh *strictHandler) GetOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId) {
+	var request GetOrganizationWebhookRequestObject
+
+	request.OrganizationId = organizationId
+	request.WebhookId = webhookId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetOrganizationWebhook(ctx, request.(GetOrganizationWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetOrganizationWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetOrganizationWebhookResponseObject); ok {
+		if err := validResponse.VisitGetOrganizationWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// UpdateOrganizationWebhook operation middleware
+func (sh *strictHandler) UpdateOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId) {
+	var request UpdateOrganizationWebhookRequestObject
+
+	request.OrganizationId = organizationId
+	request.WebhookId = webhookId
+
+	var body UpdateOrganizationWebhookJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.UpdateOrganizationWebhook(ctx, request.(UpdateOrganizationWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "UpdateOrganizationWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(UpdateOrganizationWebhookResponseObject); ok {
+		if err := validResponse.VisitUpdateOrganizationWebhookResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListOrganizationWebhookDeliveries operation middleware
+func (sh *strictHandler) ListOrganizationWebhookDeliveries(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId) {
+	var request ListOrganizationWebhookDeliveriesRequestObject
+
+	request.OrganizationId = organizationId
+	request.WebhookId = webhookId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListOrganizationWebhookDeliveries(ctx, request.(ListOrganizationWebhookDeliveriesRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListOrganizationWebhookDeliveries")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListOrganizationWebhookDeliveriesResponseObject); ok {
+		if err := validResponse.VisitListOrganizationWebhookDeliveriesResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// VerifyOrganizationWebhook operation middleware
+func (sh *strictHandler) VerifyOrganizationWebhook(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, webhookId WebhookId) {
+	var request VerifyOrganizationWebhookRequestObject
+
+	request.OrganizationId = organizationId
+	request.WebhookId = webhookId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.VerifyOrganizationWebhook(ctx, request.(VerifyOrganizationWebhookRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "VerifyOrganizationWebhook")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(VerifyOrganizationWebhookResponseObject); ok {
+		if err := validResponse.VisitVerifyOrganizationWebhookResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
