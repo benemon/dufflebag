@@ -1151,6 +1151,9 @@ type Error struct {
 
 // GithubRelease defines model for GithubRelease.
 type GithubRelease struct {
+	// ChecksumAsset The SHA256SUMS asset's name
+	ChecksumAsset *string `json:"checksum_asset,omitempty"`
+
 	// HasChecksum A release without a SHA256SUMS asset cannot be imported.
 	HasChecksum bool `json:"has_checksum"`
 
@@ -1159,6 +1162,9 @@ type GithubRelease struct {
 	Name       string        `json:"name"`
 	Platforms  []string      `json:"platforms"`
 	Prerelease bool          `json:"prerelease"`
+
+	// PublishedAt When GitHub published the release; absent for a draft.
+	PublishedAt *time.Time `json:"published_at,omitempty"`
 
 	// Repository owner/packer-plugin-<name>
 	Repository string `json:"repository"`

@@ -306,9 +306,18 @@ export type GithubRelease = {
   tag: string
   version: string
   prerelease: boolean
+  published_at?: string
   platforms: string[]
   has_checksum: boolean
+  checksum_asset?: string
   held_by?: PluginSource
+}
+
+// GitHub's unauthenticated limit; the server passes the reset time through.
+export function githubRateLimit(message: string): { resetsAt: Date } | null {
+  if (!/rate limit/i.test(message)) return null
+  const at = /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z)/.exec(message)
+  return { resetsAt: at?.[1] ? new Date(at[1]) : new Date(Date.now() + 3_600_000) }
 }
 
 export function resolveGithubRelease(token: string, organizationID: string, releaseURL: string): Promise<GithubRelease> {

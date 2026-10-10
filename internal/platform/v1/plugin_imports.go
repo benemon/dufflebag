@@ -342,6 +342,12 @@ func (s *server) ResolveGithubRelease(
 	if rendered.Platforms == nil {
 		rendered.Platforms = []string{}
 	}
+	if !release.PublishedAt.IsZero() {
+		rendered.PublishedAt = &release.PublishedAt
+	}
+	if release.ChecksumAsset != "" {
+		rendered.ChecksumAsset = &release.ChecksumAsset
+	}
 	plugins, err := s.repository.ListPlugins(ctx, store.ParseOrganizationTenant(organizationID))
 	if err != nil {
 		audited.failed("storage_failed")

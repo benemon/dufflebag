@@ -38,6 +38,7 @@ let planCatalogueSync
 let catalogueRows
 let pendingItems
 let retryPluginImport
+let githubRateLimit
 let CatalogueSyncConfirmationView
 let createGithubImport
 let createPluginImport
@@ -62,7 +63,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -142,7 +143,8 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
       view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginGithubView, {
         ...callbacks, link: '', release: null, preselected: [], loading, failure, busy: false,
         onLinkChange: () => {}, onResolve: () => {}, onImport: () => {},
-      })),
+              organizationName: 'acme', mirroredVersions: null,
+})),
     },
     {
       name: 'upload', crumbs: ['Registry', 'Plugins', 'Upload'], loading: 'Loading upload…', error: 'Upload could not be loaded',
@@ -735,31 +737,60 @@ test('an import is queued with the selected versions and platforms', async () =>
   })
 })
 
-const githubView = (release, link = 'https://github.com/ethanmdavidson/packer-plugin-git/releases/latest') =>
+const githubView = (release, props = {}, link = 'https://github.com/ethanmdavidson/packer-plugin-git/releases/latest') =>
   renderToStaticMarkup(React.createElement(PluginGithubView, {
-    link, release, preselected: ['linux_amd64'], failure: null, busy: false,
-    onLinkChange: () => {}, onResolve: () => {}, onImport: () => {},
+    organizationName: 'acme', link, release, mirroredVersions: 0, preselected: ['linux_amd64'], loading: false, failure: null, busy: false,
+    onBackToRegistry: () => {}, onBackToPlugins: () => {}, onLinkChange: () => {}, onResolve: () => {}, onRefresh: () => {}, onImport: () => {},
+    ...props,
   }))
 const gitRelease = {
   repository: 'ethanmdavidson/packer-plugin-git', name: 'git', tag: 'v0.6.3', version: '0.6.3', prerelease: false,
-  platforms: ['darwin_arm64', 'linux_amd64'], has_checksum: true,
+  published_at: '2026-09-28T12:00:00Z', platforms: ['darwin_arm64', 'linux_amd64'], has_checksum: true, checksum_asset: 'packer-plugin-git_v0.6.3_SHA256SUMS',
 }
 
 test('a resolved GitHub release shows what was inferred, pinned to its tag', () => {
   const html = githubView(gitRelease)
-  assert.match(html, /git · 0\.6\.3/)
-  assert.match(html, /tag v0\.6\.3, the latest release now\. The import uses this tag/)
-  assert.match(html, /Import git 0\.6\.3 · 1 platforms/)
+  assert.match(html, /Release link/)
+  assert.match(html, /Latest is pinned to an exact version when you resolve it\./)
+  assert.match(html, /Inferred from the release/)
+  assert.match(html, /<dt[^>]*>[\s\S]{0,120}?Repository[\s\S]{0,400}?ethanmdavidson\/packer-plugin-git/)
+  assert.match(html, /Plugin name[\s\S]{0,400}?>git<[\s\S]{0,300}?from the repository name/)
+  assert.match(html, /Version[\s\S]{0,400}?>0\.6\.3<[\s\S]{0,300}?from \/releases\/latest, tag v0\.6\.3/)
+  assert.match(html, /Checksum file[\s\S]{0,400}?packer-plugin-git_v0\.6\.3_SHA256SUMS/)
+  assert.match(html, /In dufflebag[\s\S]{0,400}?New plugin/)
+  assert.match(html, /Platforms[\s\S]{0,200}?· 2 in the release · first import, so acme’s default platforms are preselected/)
+  assert.match(html, /id="github-platform-linux_amd64"[^>]*checked/)
+  assert.match(html, />org default</)
+  assert.match(html, /Import v0\.6\.3 · 1 platform</)
+  assert.match(html, />Cancel</)
+  const tagged = githubView(gitRelease, { mirroredVersions: 2 }, 'https://github.com/ethanmdavidson/packer-plugin-git/releases/tag/v0.6.3')
+  assert.match(tagged, /Version[\s\S]{0,400}?>0\.6\.3<[\s\S]{0,300}?tag v0\.6\.3</)
+  assert.match(tagged, /2 versions mirrored/)
+  assert.match(tagged, /the architectures git already has are preselected/)
+  assert.match(tagged, />existing</)
 })
 
 test('a GitHub release without SHA256SUMS or under a held name cannot be imported', () => {
-  const unsummed = githubView({ ...gitRelease, has_checksum: false })
-  assert.match(unsummed, /no SHA256SUMS asset/)
-  assert.doesNotMatch(unsummed, /Import git/)
+  const unsummed = githubView({ ...gitRelease, has_checksum: false, checksum_asset: undefined })
+  assert.match(unsummed, /Not importable: v0\.6\.3 has no checksum file/)
+  assert.match(unsummed, /The release has 2 binaries but no SHA256SUMS asset\. dufflebag verifies every binary against the release’s checksums, so it won’t import this release\./)
+  assert.match(unsummed, /Checksum file[\s\S]{0,400}?None found/)
+  assert.doesNotMatch(unsummed, /Import v0\.6\.3/)
   const held = githubView({ ...gitRelease, held_by: { kind: 'releases-hashicorp', repository: 'packer-plugin-git' } })
-  assert.match(held, /git is held by another source/)
-  assert.match(held, /freed once every git version is removed, and revoked versions still count/)
-  assert.doesNotMatch(held, /Import git/)
+  assert.match(held, /git is held from HashiCorp/)
+  assert.match(held, /In acme, git comes from HashiCorp \(packer-plugin-git\)\. A name belongs to one source per organization, so this GitHub release is refused\. The name is freed once every git version is removed; revoked versions still count\./)
+  assert.match(held, /In dufflebag[\s\S]{0,400}?Held from HashiCorp/)
+  assert.doesNotMatch(held, /Import v0\.6\.3/)
+})
+
+test('a GitHub rate limit is explained with its reset, and resolving waits', () => {
+  const html = githubView(null, { failure: 'GitHub rate limit reached; it resets at 2099-01-01T00:00:00Z' })
+  assert.match(html, />GitHub rate limit reached</)
+  assert.match(html, /all 60 unauthenticated requests this hour are used\. The limit resets at [^,]+, in \d+ minutes\. Mirrored plugins are unaffected\./)
+  assert.doesNotMatch(html, /GitHub release could not be loaded/)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,100}?Resolve</)
+  assert.deepEqual(githubRateLimit('GitHub could not be reached'), null)
+  assert.equal(githubRateLimit('GitHub rate limit reached; it resets at 2026-10-09T18:00:00Z').resetsAt.toISOString(), '2026-10-09T18:00:00.000Z')
 })
 
 test('a GitHub import sends the repository and the pinned tag', async () => {

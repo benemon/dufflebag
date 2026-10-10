@@ -30,10 +30,11 @@ func githubRelease(t *testing.T, withSums bool) (*httptest.Server, *int) {
 		t.Fatal(err)
 	}
 	var release struct {
-		Tag        string `json:"tag_name"`
-		Prerelease bool   `json:"prerelease"`
-		Draft      bool   `json:"draft"`
-		Assets     []struct {
+		Tag         string `json:"tag_name"`
+		Prerelease  bool   `json:"prerelease"`
+		Draft       bool   `json:"draft"`
+		PublishedAt string `json:"published_at"`
+		Assets      []struct {
 			Name string `json:"name"`
 			URL  string `json:"browser_download_url"`
 			Size int    `json:"size"`
@@ -109,7 +110,8 @@ func TestResolveGitHubReleaseLinks(t *testing.T) {
 			t.Fatalf("%s: %v", link, err)
 		}
 		if release.Repository != "ethanmdavidson/packer-plugin-git" || release.Name != "git" || release.Tag != "v0.6.3" ||
-			release.Version != "0.6.3" || !release.HasChecksum || len(release.Platforms) != 14 {
+			release.Version != "0.6.3" || !release.HasChecksum || len(release.Platforms) != 14 ||
+			release.ChecksumAsset != "packer-plugin-git_v0.6.3_SHA256SUMS" || release.PublishedAt.IsZero() {
 			t.Fatalf("%s resolved to %+v", link, release)
 		}
 	}
