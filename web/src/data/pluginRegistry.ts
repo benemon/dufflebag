@@ -337,3 +337,27 @@ export function catalogueRows(plugins: Plugin[], filters: { name: string; source
     .filter((plugin) => filters.source === 'All sources' || sourceLabel(plugin.source) === filters.source)
     .filter((plugin) => !filters.updatesOnly || plugin.update_available)
 }
+
+// The architectures Packer plugins are published for, grouped as the detail
+// grid's column headers show them (design frame 5.0).
+export const PLUGIN_OS_GROUPS: readonly (readonly [string, readonly string[]])[] = [
+  ['darwin', ['amd64', 'arm64']], ['freebsd', ['386', 'amd64', 'arm']], ['linux', ['386', 'amd64', 'arm', 'arm64']],
+  ['netbsd', ['386', 'amd64', 'arm']], ['openbsd', ['386', 'amd64', 'arm']], ['solaris', ['amd64']], ['windows', ['386', 'amd64']],
+]
+export const PLUGIN_ARCHITECTURES: readonly string[] = PLUGIN_OS_GROUPS.flatMap(([os, arches]) => arches.map((arch) => `${os}_${arch}`))
+
+export type PendingItem = { verb: 'Add' | 'Revoke' | 'Restore'; what: string; detail: string; version: string }
+
+// The pending-changes list as the design words it, one item per change.
+export function pendingItems(changes: PluginChange[], mirrored: Set<string>): PendingItem[] {
+  return changes.map((change) => {
+    const platforms = change.platforms ?? []
+    switch (change.action) {
+      case 'revoke': return { verb: 'Revoke', what: change.version, detail: 'stays stored; Packer can no longer fetch it', version: change.version }
+      case 'restore': return { verb: 'Restore', what: change.version, detail: 'served again', version: change.version }
+      default: return mirrored.has(change.version)
+        ? { verb: 'Add', what: platforms.join(', '), detail: `to ${change.version}`, version: change.version }
+        : { verb: 'Add', what: change.version, detail: `${platforms.length} architecture${platforms.length === 1 ? '' : 's'}: ${platforms.join(', ')}`, version: change.version }
+    }
+  })
+}

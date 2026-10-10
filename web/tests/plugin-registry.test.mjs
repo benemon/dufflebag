@@ -36,6 +36,7 @@ let syncCatalogue
 let setPluginUpdateCheck
 let planCatalogueSync
 let catalogueRows
+let pendingItems
 let CatalogueSyncConfirmationView
 let createGithubImport
 let createPluginImport
@@ -60,7 +61,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -117,7 +118,7 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
         ...callbacks, name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
         registry: null, detail: null, loading, failure, onUpload: () => {}, busy: false,
         actionFailure: null, editing: false, upstream: [], summary: null, onToggleUpdates: () => {},
-        onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+        onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {},
       })),
     },
     {
@@ -320,7 +321,7 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   const detail = (registry) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, editing: false, upstream: [], onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], summary: null, onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {},
     detail: { name: 'git', source: { kind: 'upload' }, versions: [{
       version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z',
       listed_platforms: [{ os: 'linux', arch: 'arm64' }, { os: 'darwin', arch: 'arm64' }],
@@ -333,8 +334,9 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
   assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Registry settings</)
   assert.ok(html.indexOf('Registry settings') < html.indexOf('Template stanza'))
-  assert.match(html, /<td[^>]*data-label="darwin_arm64"[^>]*>○<\/td>/)
-  assert.match(html, /<td[^>]*data-label="linux_arm64"[^>]*>●<\/td>/)
+  assert.match(html, /<td[^>]*data-label="darwin_arm64"[^>]*><span title="Upstream, not mirrored">○<\/span><\/td>/)
+  assert.match(html, /<td[^>]*data-label="linux_arm64"[^>]*><span title="Mirrored"[^>]*>●<\/span><\/td>/)
+  assert.match(html, /<td[^>]*data-label="windows_386"[^>]*><span title="Not published upstream">–<\/span><\/td>/)
   assert.match(html, /Upload version/)
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
 })
@@ -396,21 +398,25 @@ test('publishers edit versions and remove them; readers do neither', () => {
   const view = (callerRole, revoked) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, editing: false, upstream: [], onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], summary: null, onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {},
     detail: { name: 'git', source: { kind: 'upload' }, versions: [{
       version: '0.6.3', revoked, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
     }] },
   }))
   const served = view('publisher', false)
   assert.match(served, />Edit versions</)
-  assert.match(served, />Remove version</)
-  assert.doesNotMatch(served, />Revoke</)
+  assert.match(served, /aria-label="Kebab toggle"/, 'the row menu carries Remove version')
+  assert.match(served, />Available</)
+  assert.match(served, /Not available for uploaded plugins\. To add a version, upload its files\./)
+  assert.match(served, />Upload version</)
+  assert.doesNotMatch(served, /Check daily for a newer stable version/)
   const revoked = view('publisher', true)
   assert.match(revoked, />Revoked</)
-  assert.doesNotMatch(revoked, /Template stanza/)
+  assert.match(revoked, /No version is available: every version is revoked\./)
   const reader = view('reader', false)
   assert.doesNotMatch(reader, />Edit versions</)
-  assert.doesNotMatch(reader, />Remove version</)
+  assert.doesNotMatch(reader, /aria-label="Kebab toggle"/)
+  assert.doesNotMatch(reader, />Upload version</)
 })
 
 const amazonVersions = [
@@ -430,8 +436,8 @@ test('editing turns only unmirrored cells of served versions into checkboxes and
   const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, editing: true, upstream: amazonUpstream,
-    onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+    busy: false, actionFailure: null, editing: true, upstream: amazonUpstream, summary: null,
+    onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {},
     detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
   }))
   assert.match(html, /aria-label="Add linux_arm64 to 1\.8\.2"/)
@@ -441,9 +447,15 @@ test('editing turns only unmirrored cells of served versions into checkboxes and
   assert.match(html, /aria-label="Add 1\.8\.3"/)
   assert.doesNotMatch(html, /aria-label="Add 1\.8\.2"/, 'a mirrored version is not offered again')
   assert.match(html, /aria-label="Serve 1\.8\.1"/)
-  assert.match(html, /No changes yet/)
-  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync 0 changes/)
-  assert.doesNotMatch(html, />Remove version</)
+  assert.match(html, /Pending changes/)
+  assert.match(html, /None yet\. Nothing changes until you sync\./)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync</)
+  assert.match(html, />Discard</)
+  assert.match(html, /Applied as one job\./)
+  assert.match(html, /Editing: tick a version to add or restore it, untick to revoke/)
+  assert.doesNotMatch(html, />Edit versions</)
+  assert.match(html, /<th[^>]*colSpan="4"[^>]*>linux</, 'architecture columns are grouped by OS')
+  assert.match(html, /Not mirrored/)
 })
 
 test('pending changes revoke, restore, add platforms and mirror new versions', () => {
@@ -785,4 +797,42 @@ test('the catalogue filters combine: name, source and update availability', () =
   assert.deepEqual(names({ updatesOnly: true }), ['amazon'])
   assert.deepEqual(names({ name: ' GIT ' }), ['git'])
   assert.deepEqual(names({ source: 'HashiCorp', updatesOnly: true, name: 'doc' }), [])
+})
+
+test('the detail header carries the update pills and the update-check card its last result', () => {
+  const view = (update_check, update_available) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], hasOlderUpstream: true,
+    onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, onSync: () => {}, onRemove: () => {}, onToggleUpdates: () => {},
+    summary: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, version_count: 2, update_available, update_check },
+    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
+  }))
+  const failed = view({ enabled: true, checked_at: '2026-10-09T08:00:00Z', latest: '1.8.3', error: 'releases.hashicorp.com: dial tcp: no such host' }, true)
+  assert.match(failed, /Update available · 1\.8\.3/)
+  assert.match(failed, />Last check failed</)
+  assert.match(failed, /Check daily for a newer stable version/)
+  assert.match(failed, /\(failed\)/)
+  assert.match(failed, /no such host The update pill reflects the last successful check\./)
+  assert.match(failed, /releases\.hashicorp\.com · github\.com\/hashicorp\/packer-plugin-amazon/)
+  assert.match(failed, />Show older upstream versions</)
+  const off = view({ enabled: false }, false)
+  assert.doesNotMatch(off, /Update available/)
+  assert.doesNotMatch(off, />Last check failed</)
+  assert.match(off, />Checks are off</)
+  assert.match(off, /<dd[^>]*>[\s\S]{0,80}None</)
+})
+
+test('pending items are worded per change as the design lists them', () => {
+  assert.deepEqual(pendingItems([
+    { version: '1.8.3', action: 'add', platforms: ['linux_amd64', 'linux_arm64'] },
+    { version: '1.8.2', action: 'add', platforms: ['darwin_arm64'] },
+    { version: '1.8.1', action: 'restore' },
+    { version: '1.8.0', action: 'revoke' },
+  ], new Set(['1.8.2', '1.8.1', '1.8.0'])), [
+    { verb: 'Add', what: '1.8.3', detail: '2 architectures: linux_amd64, linux_arm64', version: '1.8.3' },
+    { verb: 'Add', what: 'darwin_arm64', detail: 'to 1.8.2', version: '1.8.2' },
+    { verb: 'Restore', what: '1.8.1', detail: 'served again', version: '1.8.1' },
+    { verb: 'Revoke', what: '1.8.0', detail: 'stays stored; Packer can no longer fetch it', version: '1.8.0' },
+  ])
 })
