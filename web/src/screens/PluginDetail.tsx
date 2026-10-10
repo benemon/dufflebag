@@ -311,6 +311,7 @@ export function PluginDetailView({
                 </Flex>
               </CardTitle>
               <CardBody>
+                <div style={{ overflowX: 'auto' }}>
                 <Table aria-label="Versions by architecture" variant="compact">
                   <Thead>
                     <Tr>
@@ -370,10 +371,11 @@ export function PluginDetailView({
                     })}
                   </Tbody>
                 </Table>
+                </div>
                 {hasOlderUpstream ? <Button variant="link" isInline onClick={onOlderUpstream}>Show older upstream versions</Button> : null}
                 {editing ? (
                   <div style={{ marginTop: 16 }}>
-                    <Content component="h3">Pending changes <Content component="small">· {pending.length}</Content></Content>
+                    <Content component="h3">Pending changes <span style={{ fontWeight: 'normal', color: 'var(--pf-t--global--text--color--subtle)' }}>· {pending.length}</span></Content>
                     {pending.length === 0 ? <Content component="p">None yet. Nothing changes until you sync.</Content> : null}
                     {pending.map((item) => (
                       <Flex key={`${item.verb}-${item.version}`} gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
