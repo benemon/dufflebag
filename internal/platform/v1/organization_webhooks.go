@@ -9,10 +9,6 @@ import (
 	"github.com/benemon/dufflebag/internal/webhook"
 )
 
-// Organization webhooks are the project handlers' twins with an empty project:
-// the webhook service and repository route that to the organization's own
-// webhooks, admitted at organization tenancy.
-
 func (s *server) ListOrganizationWebhooks(ctx context.Context, request ListOrganizationWebhooksRequestObject) (ListOrganizationWebhooksResponseObject, error) {
 	organizationID, projectID := request.OrganizationId.String(), ""
 	if _, refused, err := s.admitOrganization(ctx, identity.RoleMaintainer, organizationID); err != nil {

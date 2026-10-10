@@ -109,6 +109,16 @@ func RenderManifest(protocol string) []byte {
 	return []byte(fmt.Sprintf("{\n  \"version\": \"1\",\n  \"metadata\": {\n    \"protocol_version\": %q\n  }\n}", protocol))
 }
 
+// ListsManifest reports whether a SHA256SUMS file names the version's
+// manifest, in either of sha256sum's separators.
+func ListsManifest(name, version string, sums []byte) (bool, error) {
+	parsed, err := parseSums(name, version, sums)
+	if err != nil {
+		return false, err
+	}
+	return parsed.ManifestSHA256 != "", nil
+}
+
 // parseSums parses a SHA256SUMS file in sha256sum's output format.
 func parseSums(name, version string, data []byte) (Sums, error) {
 	const file = "SHA256SUMS"

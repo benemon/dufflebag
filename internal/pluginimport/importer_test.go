@@ -233,3 +233,48 @@ func TestSyncRevokesAndRestores(t *testing.T) {
 		t.Fatalf("revoked = %v", repository.revoked)
 	}
 }
+
+// sha256sum's binary mode writes "<digest> *<file>"; the domain parser accepts
+// it, so the importer must find a manifest listed that way too.
+func TestImportVersionFindsAManifestListedInBinaryMode(t *testing.T) {
+	key := signer(t)
+	var archive bytes.Buffer
+	writer := zip.NewWriter(&archive)
+	entry, _ := writer.Create("packer-plugin-probe_v1.0.0_x5.0_linux_amd64")
+	_, _ = entry.Write([]byte("binary"))
+	_ = writer.Close()
+	manifest := []byte(`{"version":"1.0.0","metadata":{"protocol_version":"5.0"}}`)
+	zipName, manifestName := "packer-plugin-probe_1.0.0_linux_amd64.zip", "packer-plugin-probe_1.0.0_manifest.json"
+	zipSum, manifestSum := sha256.Sum256(archive.Bytes()), sha256.Sum256(manifest)
+	sums := fmt.Sprintf("%s *%s\n%s *%s\n", hex.EncodeToString(zipSum[:]), zipName, hex.EncodeToString(manifestSum[:]), manifestName)
+	var signature bytes.Buffer
+	if err := openpgp.DetachSign(&signature, key, strings.NewReader(sums), nil); err != nil {
+		t.Fatal(err)
+	}
+	signatureName := fmt.Sprintf("packer-plugin-probe_1.0.0_SHA256SUMS.%08X.sig", uint32(key.PrimaryKey.KeyId))
+	index, _ := json.Marshal(map[string]any{"versions": map[string]any{"1.0.0": map[string]any{
+		"shasums": "packer-plugin-probe_1.0.0_SHA256SUMS", "shasums_signatures": []string{signatureName},
+		"builds": []map[string]string{{"os": "linux", "arch": "amd64", "filename": zipName}},
+	}}})
+	files := map[string][]byte{
+		"/packer-plugin-probe/index.json":                                 index,
+		"/packer-plugin-probe/1.0.0/packer-plugin-probe_1.0.0_SHA256SUMS": []byte(sums),
+		"/packer-plugin-probe/1.0.0/" + signatureName:                     signature.Bytes(),
+		"/packer-plugin-probe/1.0.0/" + zipName:                           archive.Bytes(),
+		"/packer-plugin-probe/1.0.0/" + manifestName:                      manifest,
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if data, ok := files[r.URL.Path]; ok {
+			_, _ = w.Write(data)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	t.Cleanup(server.Close)
+	repository := &fakeRepository{}
+	importer := NewImporter(NewUpstream(server.Client(), server.URL, server.URL), nil, openpgp.EntityList{key}, repository)
+	outcome := importer.ImportVersion(context.Background(), store.OrganizationTenant{}, "packer-plugin-probe", "1.0.0", []string{"linux_amd64"})
+	if outcome.Outcome != OutcomeImported || len(repository.published) != 1 || repository.published[0].Manifest == nil {
+		t.Fatalf("outcome = %+v, published = %d; want the manifest fetched and stored", outcome, len(repository.published))
+	}
+}

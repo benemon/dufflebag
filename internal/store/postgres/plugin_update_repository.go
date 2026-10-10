@@ -112,9 +112,8 @@ func (r *Repository) RecordPluginUpdateCheck(
 	if err != nil {
 		return fmt.Errorf("get plugin update state: %w", err)
 	}
-	nullable := func(value string) sql.NullString { return sql.NullString{String: value, Valid: value != ""} }
 	if err := q.RecordPluginUpdateCheck(ctx, postgresdb.RecordPluginUpdateCheckParams{
-		ID: id, UpdateError: nullable(checkErr), UpdateLatest: nullable(latest), UpdateLatestTag: nullable(tag),
+		ID: id, UpdateError: nullString(checkErr), UpdateLatest: nullString(latest), UpdateLatestTag: nullString(tag),
 	}); err != nil {
 		return fmt.Errorf("record plugin update check: %w", err)
 	}

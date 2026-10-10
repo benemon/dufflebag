@@ -115,9 +115,13 @@ func (i *Importer) ImportVersion(
 	if err := verifySignature(i.keyring, sums, signature); err != nil {
 		return failed("%v", err)
 	}
+	listed, err := plugin.ListsManifest(name, version, sums)
+	if err != nil {
+		return failed("%v", err)
+	}
 	var manifest []byte
-	if manifestName := plugin.ManifestName(name, version); strings.Contains(string(sums), "  "+manifestName) {
-		if manifest, err = i.upstream.fetchSmall(ctx, i.upstream.fileURL(product, version, manifestName), 1<<20); err != nil {
+	if listed {
+		if manifest, err = i.upstream.fetchSmall(ctx, i.upstream.fileURL(product, version, plugin.ManifestName(name, version)), 1<<20); err != nil {
 			return failed("%v", err)
 		}
 	}
@@ -178,8 +182,12 @@ func (i *Importer) ImportGitHubVersion(
 			return failed("%v", err)
 		}
 	}
+	listed, err := plugin.ListsManifest(release.Name, release.Version, sums)
+	if err != nil {
+		return failed("%v", err)
+	}
 	var manifest []byte
-	if manifestName := plugin.ManifestName(release.Name, release.Version); strings.Contains(string(sums), "  "+manifestName) {
+	if manifestName := plugin.ManifestName(release.Name, release.Version); listed {
 		url, ok := release.assets[manifestName]
 		if !ok {
 			return failed("SHA256SUMS lists %s, but the release has no such asset", manifestName)
@@ -219,8 +227,6 @@ func (i *Importer) mirrored(ctx context.Context, tenant store.OrganizationTenant
 
 type asset struct{ name, url string }
 
-// fetched is a version's metadata, already fetched and, where its source
-// allows, verified; publish downloads its zips and stores it.
 type fetched struct {
 	name, version string
 	source        store.PluginSource
@@ -233,7 +239,6 @@ type fetched struct {
 	platforms     []string
 }
 
-// spool is a version's selected zips, downloaded to temporary files.
 type spool struct {
 	uploaded  []plugin.UploadedZip
 	blobs     map[string]store.PluginBlob

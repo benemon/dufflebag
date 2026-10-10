@@ -58,20 +58,10 @@ func TestBeginRefusesADeniedOrMalformedTenant(t *testing.T) {
 	}
 }
 
-func TestBeginOrganizationRefusesADeniedOrMalformedTenant(t *testing.T) {
+func TestBeginOrganizationRefusesAMalformedTenant(t *testing.T) {
 	repository := NewRepository(nil)
-	for _, tc := range []struct {
-		name   string
-		tenant OrganizationTenant
-	}{
-		{"denied", DeniedOrganizationTenant()},
-		{"malformed", ParseOrganizationTenant("not-a-uuid")},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, err := repository.beginOrganization(context.Background(), tc.tenant)
-			if !errors.Is(err, registry.ErrNotFound) {
-				t.Fatalf("beginOrganization = %v, want ErrNotFound", err)
-			}
-		})
+	_, _, err := repository.beginOrganization(context.Background(), ParseOrganizationTenant("not-a-uuid"))
+	if !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("beginOrganization = %v, want ErrNotFound", err)
 	}
 }

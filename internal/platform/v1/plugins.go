@@ -283,7 +283,6 @@ func renderPluginVersion(version store.PluginVersionSummary) PluginVersion {
 	}
 }
 
-// spooledFile is one uploaded part written to disk while its digest is taken.
 type spooledFile struct {
 	filename string
 	file     *os.File
@@ -340,7 +339,6 @@ func uploadRefusal(file, format string, args ...any) error {
 	return fmt.Errorf("%w: %s: %s", registry.ErrInvalid, file, fmt.Sprintf(format, args...))
 }
 
-// spoolPluginUpload writes each part to a temporary file, hashing as it goes.
 // The form fields are the closed allowlist of ADR-0027 D11.
 func spoolPluginUpload(body *multipart.Reader) (*pluginUpload, error) {
 	upload := &pluginUpload{zips: map[string]*spooledFile{}, entries: map[string][]string{}}

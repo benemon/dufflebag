@@ -22,12 +22,7 @@ var (
 // OrganizationTenant is the RLS scope for organization-level repository operations.
 type OrganizationTenant struct {
 	OrganizationID uuid.UUID
-	denied         bool
 	malformed      bool
-}
-
-func DeniedOrganizationTenant() OrganizationTenant {
-	return OrganizationTenant{denied: true}
 }
 
 func ParseOrganizationTenant(organizationID string) OrganizationTenant {
@@ -191,7 +186,7 @@ func (r *Repository) DisablePluginRegistry(ctx context.Context, tenant Organizat
 func (r *Repository) beginOrganization(
 	ctx context.Context, tenant OrganizationTenant,
 ) (*sql.Tx, *postgresdb.Queries, error) {
-	if tenant.malformed || tenant.denied {
+	if tenant.malformed {
 		return nil, nil, fmt.Errorf("%w: organization tenant", registry.ErrNotFound)
 	}
 	tx, err := BeginOrganizationTenant(ctx, r.db, tenant.OrganizationID.String())
