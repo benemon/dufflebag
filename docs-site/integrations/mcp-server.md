@@ -178,6 +178,26 @@ demo-ubuntu."*
 | --- | --- | --- |
 | `bagdrop_status` | [Bag Drop](../administration/bag-drop.md) mirror state for the project | Configuration, cadence and per-bucket sync state |
 
+### Plugin registry
+
+These tools act on an organization's [plugin registry](../operations/plugin-registry.md)
+and need only an organization, from `organization_id` or `DFBG_MCP_ORGANIZATION_ID`.
+
+| Tool | Purpose | What it returns |
+| --- | --- | --- |
+| `plugin_registry_status` | Whether the registry is usable | Enabled and exposed state, and the source address prefix templates use |
+| `list_plugins` | The organization's plugins | Source, newest available version, version count, and for plugins that check for updates the newest release seen, whether it is an update, and the last check's error |
+| `plugin_versions` | A plugin's versions, newest first | Revocation state, and per version the platforms held and those listed in SHA256SUMS but not held |
+| `plugin_stanza` | A template stanza for a version | The `required_plugins` block for the given version, or the newest not revoked. The source names the instance's host without a port, since Packer refuses one; the stanza notes when the registry is not exposed |
+| `plugin_import_status` | An import or sync job | Its state and the outcome per version or change |
+| `sync_plugin_updates` | Bring plugins up to date (mutating) | Per plugin, the queued import job and version, or why it was refused |
+
+`sync_plugin_updates` imports, for each named plugin with an update
+available, its newest stable release with the platforms the plugin already
+has, one job per plugin. Plugins without an update are refused individually.
+It needs `publisher` authority. The plugin registry tools need a dufflebag
+release that ships the registry.
+
 ### Publishing
 
 | Tool | Purpose | What it returns |
@@ -196,8 +216,8 @@ scanner findings, and if both are clean promote v3 to release."*
 
 ## Read-only posture
 
-Setting `DFBG_MCP_READ_ONLY` removes `create_organization`, `create_project`
-and `promote_channel` from the advertised tool list and refuses their
+Setting `DFBG_MCP_READ_ONLY` removes `create_organization`, `create_project`,
+`promote_channel` and `sync_plugin_updates` from the advertised tool list and refuses their
 dispatch. Combined with a `reader` service principal this gives a deployment
 that cannot mutate the registry regardless of what a client asks for -
 `whoami` reports the posture, so a client can tell why the writes are
