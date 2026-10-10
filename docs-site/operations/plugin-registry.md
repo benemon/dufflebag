@@ -27,7 +27,7 @@ and Packer cannot reach it until a maintainer exposes it.
 | Action | Role at the organization |
 |---|---|
 | View the registry and its plugins | `reader` |
-| Upload, import, revoke, restore or remove plugin versions | `publisher` |
+| Upload, import, sync, revoke, restore or remove plugin versions | `publisher` |
 | Enable, expose, unexpose or disable the registry; set default platforms | `maintainer` |
 
 Packer itself presents no credential. Exposure is what grants it access.
@@ -124,26 +124,40 @@ upload may take up to 30 minutes. A reverse proxy in front of dufflebag applies
 its own limits: an OpenShift route times out after 30 seconds unless the
 `haproxy.router.openshift.io/timeout` annotation raises it.
 
-## Revoke, restore and remove a version
+## Change a plugin's versions and platforms
 
-On the plugin's page, a publisher can act on each version:
+A publisher changes what a plugin serves from its page:
 
-- **Revoke** stops serving the version. Packer gets 404 for each of its files,
-  and the files are kept. A template pinned to that version fails until it is
-  restored.
-- **Restore** serves a revoked version again.
-- **Remove version** deletes the version and its files. It cannot be undone.
-  Removing a plugin's last version removes the plugin, and its name can then
-  be used by another source. A revoked version still holds the name.
+1. Choose **Edit versions**.
+2. Untick a version to revoke it, or tick a revoked version to restore it.
+   Packer gets 404 for each file of a revoked version, and the files are
+   kept. A template pinned to that version fails until it is restored.
+3. For an imported plugin, tick an unmirrored platform (○) on a served
+   version to add it. A plugin from releases.hashicorp.com also lists its
+   newer releases; tick one to mirror it with the platforms the plugin
+   already has.
+4. Check the pending changes and choose **Sync**. The changes run in order
+   as one job, and its page shows each change's outcome.
 
-The API equivalents are `POST .../versions/{version}/revoke`,
+A platform added to a mirrored version is admitted only if the SHA256SUMS
+stored when the version was first mirrored lists it with the same digest. A
+release changed upstream since then cannot add to it. Mirrored platforms
+cannot be removed: revoke the version, or remove it and import it again
+without that platform.
+
+**Remove version** deletes a version and its files. It cannot be undone.
+Removing a plugin's last version removes the plugin, and its name can then
+be used by another source. A revoked version still holds the name.
+
+The API equivalents are `POST .../plugins/{name}/sync` with a list of
+changes, `POST .../versions/{version}/revoke`,
 `POST .../versions/{version}/restore` and `DELETE .../versions/{version}`.
 
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag
 serves only the zips it holds. The plugin's page in the console shows, for each
-version, which platforms are uploaded (●), listed but not uploaded (○), or not
+version, which platforms are held (●), listed but not held (○), or not
 published (–).
 
 On a platform with no zip, Packer moves to the next older version that the

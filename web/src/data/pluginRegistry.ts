@@ -153,17 +153,8 @@ export function planPluginUploads<F extends NamedFile>(files: F[]): UploadPlan<F
   return { versions, refused }
 }
 
-function versionPath(organizationID: string, name: string, version: string, action = ''): string {
-  const base = `plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`
-  return path(organizationID, action === '' ? base : `${base}/${action}`)
-}
-
-export async function revokePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
-  await platformPost<null>(token, versionPath(organizationID, name, version, 'revoke'))
-}
-
-export async function restorePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
-  await platformPost<null>(token, versionPath(organizationID, name, version, 'restore'))
+function versionPath(organizationID: string, name: string, version: string): string {
+  return path(organizationID, `plugins/${encodeURIComponent(name)}/versions/${encodeURIComponent(version)}`)
 }
 
 export async function deletePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
@@ -184,9 +175,11 @@ export type HashicorpPluginVersion = {
 
 export type ImportPlatformOutcome = { platform: string; outcome: 'imported' | 'failed'; error?: string }
 
+export type PluginChange = { version: string; action: 'add' | 'revoke' | 'restore'; platforms?: string[] }
+
 export type ImportVersionOutcome = {
   version: string
-  outcome: 'imported' | 'already_mirrored' | 'failed'
+  outcome: 'imported' | 'already_mirrored' | 'revoked' | 'restored' | 'failed'
   error?: string
   platforms?: ImportPlatformOutcome[]
 }
@@ -197,6 +190,7 @@ export type PluginImport = {
   product: string
   versions: string[]
   platforms: string[]
+  changes: PluginChange[]
   state: 'queued' | 'running' | 'succeeded' | 'partially_succeeded' | 'failed'
   created_at: string
   finished_at?: string
@@ -254,4 +248,37 @@ export function createGithubImport(
   token: string, organizationID: string, repository: string, tag: string, platforms: string[],
 ): Promise<PluginImport> {
   return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'github', product: repository, versions: [tag], platforms })
+}
+
+export function syncPlugin(token: string, organizationID: string, name: string, changes: PluginChange[]): Promise<PluginImport> {
+  return platformPost<PluginImport>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/sync`), { changes })
+}
+
+// What the detail grid's edit mode has changed: a row's selection (absent
+// means unchanged) and the platforms ticked on it.
+export type PluginEdit = { selected: Record<string, boolean>; added: Record<string, string[]> }
+
+const platformKey = (p: PluginPlatform) => `${p.os}_${p.arch}`
+
+// A mirrored version is revoked by deselecting it and restored by selecting
+// it; platforms are added only to a version that stays served, and an
+// upstream version not yet mirrored is added with the platforms ticked.
+export function pluginChanges(versions: PluginVersion[], upstream: HashicorpPluginVersion[], edit: PluginEdit): PluginChange[] {
+  const changes: PluginChange[] = []
+  const mirrored = new Set(versions.map((v) => v.version))
+  for (const version of upstream) {
+    const platforms = edit.added[version.version] ?? []
+    if (!mirrored.has(version.version) && edit.selected[version.version] && platforms.length) {
+      changes.push({ version: version.version, action: 'add', platforms })
+    }
+  }
+  for (const version of versions) {
+    const selected = edit.selected[version.version] ?? !version.revoked
+    const stored = new Set(version.stored_platforms.map(platformKey))
+    const platforms = (edit.added[version.version] ?? []).filter((p) => !stored.has(p))
+    if (version.revoked && selected) changes.push({ version: version.version, action: 'restore' })
+    else if (!version.revoked && !selected) changes.push({ version: version.version, action: 'revoke' })
+    else if (!version.revoked && platforms.length) changes.push({ version: version.version, action: 'add', platforms })
+  }
+  return changes
 }

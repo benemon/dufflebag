@@ -448,6 +448,27 @@ func (e KeyringEntryPurpose) Valid() bool {
 	}
 }
 
+// Defines values for PluginChangeAction.
+const (
+	Add     PluginChangeAction = "add"
+	Restore PluginChangeAction = "restore"
+	Revoke  PluginChangeAction = "revoke"
+)
+
+// Valid indicates whether the value is a known member of the PluginChangeAction enum.
+func (e PluginChangeAction) Valid() bool {
+	switch e {
+	case Add:
+		return true
+	case Restore:
+		return true
+	case Revoke:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginImportState.
 const (
 	PluginImportStateFailed             PluginImportState = "failed"
@@ -516,6 +537,8 @@ const (
 	PluginImportVersionOutcomeOutcomeAlreadyMirrored PluginImportVersionOutcomeOutcome = "already_mirrored"
 	PluginImportVersionOutcomeOutcomeFailed          PluginImportVersionOutcomeOutcome = "failed"
 	PluginImportVersionOutcomeOutcomeImported        PluginImportVersionOutcomeOutcome = "imported"
+	PluginImportVersionOutcomeOutcomeRestored        PluginImportVersionOutcomeOutcome = "restored"
+	PluginImportVersionOutcomeOutcomeRevoked         PluginImportVersionOutcomeOutcome = "revoked"
 )
 
 // Valid indicates whether the value is a known member of the PluginImportVersionOutcomeOutcome enum.
@@ -526,6 +549,10 @@ func (e PluginImportVersionOutcomeOutcome) Valid() bool {
 	case PluginImportVersionOutcomeOutcomeFailed:
 		return true
 	case PluginImportVersionOutcomeOutcomeImported:
+		return true
+	case PluginImportVersionOutcomeOutcomeRestored:
+		return true
+	case PluginImportVersionOutcomeOutcomeRevoked:
 		return true
 	default:
 		return false
@@ -1372,8 +1399,22 @@ type Plugin struct {
 	Source PluginSource `json:"source"`
 }
 
+// PluginChange defines model for PluginChange.
+type PluginChange struct {
+	Action PluginChangeAction `json:"action"`
+
+	// Platforms The OS_ARCH platforms an add brings in; empty for revoke and restore.
+	Platforms *[]string `json:"platforms,omitempty"`
+	Version   string    `json:"version"`
+}
+
+// PluginChangeAction defines model for PluginChange.Action.
+type PluginChangeAction string
+
 // PluginImport defines model for PluginImport.
 type PluginImport struct {
+	// Changes A sync's changes, in the order they apply; empty for an import.
+	Changes    []PluginChange               `json:"changes"`
 	CreatedAt  time.Time                    `json:"created_at"`
 	FinishedAt *time.Time                   `json:"finished_at,omitempty"`
 	Id         openapi_types.UUID           `json:"id"`
@@ -1451,6 +1492,11 @@ type PluginSource struct {
 
 // PluginSourceKind defines model for PluginSource.Kind.
 type PluginSourceKind string
+
+// PluginSyncRequest defines model for PluginSyncRequest.
+type PluginSyncRequest struct {
+	Changes []PluginChange `json:"changes"`
+}
 
 // PluginVersion defines model for PluginVersion.
 type PluginVersion struct {
@@ -1907,6 +1953,9 @@ type SetPluginDefaultPlatformsJSONRequestBody = PluginPlatformList
 // CreatePluginImportJSONRequestBody defines body for CreatePluginImport for application/json ContentType.
 type CreatePluginImportJSONRequestBody = PluginImportRequest
 
+// SyncPluginJSONRequestBody defines body for SyncPlugin for application/json ContentType.
+type SyncPluginJSONRequestBody = PluginSyncRequest
+
 // PublishPluginVersionMultipartRequestBody defines body for PublishPluginVersion for multipart/form-data ContentType.
 type PublishPluginVersionMultipartRequestBody PublishPluginVersionMultipartBody
 
@@ -2338,6 +2387,30 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 	ListPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SyncPluginWithBody Apply one plugin's changes as one import job
+	//
+	// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+	// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+	// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+	// cannot be removed. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+	SyncPluginWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SyncPlugin Apply one plugin's changes as one import job
+	//
+	// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+	// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+	// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+	// cannot be removed. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+	SyncPlugin(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	//
@@ -3534,6 +3607,50 @@ func (c *Client) GetPluginImport(ctx context.Context, organizationId Organizatio
 // Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 func (c *Client) ListPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPluginsRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SyncPluginWithBody Apply one plugin's changes as one import job
+//
+// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+// cannot be removed. Requires `publisher`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+func (c *Client) SyncPluginWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSyncPluginRequestWithBody(c.Server, organizationId, pluginName, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SyncPlugin Apply one plugin's changes as one import job
+//
+// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+// cannot be removed. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+func (c *Client) SyncPlugin(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSyncPluginRequest(c.Server, organizationId, pluginName, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5616,6 +5733,60 @@ func NewListPluginsRequest(server string, organizationId OrganizationId) (*http.
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewSyncPluginRequest calls the generic SyncPlugin builder with application/json body
+func NewSyncPluginRequest(server string, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSyncPluginRequestWithBody(server, organizationId, pluginName, "application/json", bodyReader)
+}
+
+// NewSyncPluginRequestWithBody constructs an http.Request for the SyncPlugin method, with any body, and a specified content type
+func NewSyncPluginRequestWithBody(server string, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/sync", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -7965,6 +8136,30 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 	ListPluginsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListPluginsResponse, error)
 
+	// SyncPluginWithBodyWithResponse Apply one plugin's changes as one import job
+	//
+	// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+	// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+	// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+	// cannot be removed. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+	SyncPluginWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SyncPluginResponse, error)
+
+	// SyncPluginWithResponse Apply one plugin's changes as one import job
+	//
+	// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+	// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+	// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+	// cannot be removed. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+	SyncPluginWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*SyncPluginResponse, error)
+
 	// ListPluginVersionsWithResponse List a plugin's versions and the platforms each one serves
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -10215,6 +10410,82 @@ func (r ListPluginsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListPluginsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SyncPluginResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *PluginImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r SyncPluginResponse) GetJSON202() *PluginImport {
+	return r.JSON202
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SyncPluginResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SyncPluginResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SyncPluginResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SyncPluginResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SyncPluginResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r SyncPluginResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SyncPluginResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SyncPluginResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SyncPluginResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -13569,6 +13840,42 @@ func (c *ClientWithResponses) ListPluginsWithResponse(ctx context.Context, organ
 	return ParseListPluginsResponse(rsp)
 }
 
+// SyncPluginWithBodyWithResponse Apply one plugin's changes as one import job
+//
+// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+// cannot be removed. Requires `publisher`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+func (c *ClientWithResponses) SyncPluginWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SyncPluginResponse, error) {
+	rsp, err := c.SyncPluginWithBody(ctx, organizationId, pluginName, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSyncPluginResponse(rsp)
+}
+
+// SyncPluginWithResponse Apply one plugin's changes as one import job
+//
+// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+// only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+// releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+// cannot be removed. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
+func (c *ClientWithResponses) SyncPluginWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*SyncPluginResponse, error) {
+	rsp, err := c.SyncPlugin(ctx, organizationId, pluginName, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSyncPluginResponse(rsp)
+}
+
 // ListPluginVersionsWithResponse List a plugin's versions and the platforms each one serves
 //
 // Returns a wrapper object for the known response body format(s).
@@ -15800,6 +16107,67 @@ func ParseListPluginsResponse(rsp *http.Response) (*ListPluginsResponse, error) 
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSyncPluginResponse parses an HTTP response from a SyncPluginWithResponse call
+func ParseSyncPluginResponse(rsp *http.Response) (*SyncPluginResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SyncPluginResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest PluginImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -18108,6 +18476,9 @@ type ServerInterface interface {
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// SyncPlugin Apply one plugin's changes as one import job
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
+	SyncPlugin(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
@@ -18787,6 +19158,41 @@ func (siw *ServerInterfaceWrapper) ListPlugins(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPlugins(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncPlugin operation middleware
+func (siw *ServerInterfaceWrapper) SyncPlugin(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncPlugin(w, r, organizationId, pluginName)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20549,6 +20955,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.PublishPluginVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke", wrapper.RevokePluginVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore", wrapper.RestorePluginVersion)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync", wrapper.SyncPlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.CreateProject)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects/{projectId}", wrapper.DeleteProject)
@@ -22171,6 +22578,100 @@ func (response ListPlugins404JSONResponse) VisitListPluginsResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPluginRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	PluginName     PluginName     `json:"pluginName"`
+	Body           *SyncPluginJSONRequestBody
+}
+
+type SyncPluginResponseObject interface {
+	VisitSyncPluginResponse(w http.ResponseWriter) error
+}
+
+type SyncPlugin202JSONResponse PluginImport
+
+func (response SyncPlugin202JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugin400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SyncPlugin400JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugin401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SyncPlugin401JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugin403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SyncPlugin403JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugin404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SyncPlugin404JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncPlugin409JSONResponse Error
+
+func (response SyncPlugin409JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -25374,6 +25875,9 @@ type StrictServerInterface interface {
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error)
+	// SyncPlugin Apply one plugin's changes as one import job
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
+	SyncPlugin(ctx context.Context, request SyncPluginRequestObject) (SyncPluginResponseObject, error)
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(ctx context.Context, request ListPluginVersionsRequestObject) (ListPluginVersionsResponseObject, error)
@@ -26169,6 +26673,40 @@ func (sh *strictHandler) ListPlugins(w http.ResponseWriter, r *http.Request, org
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListPluginsResponseObject); ok {
 		if err := validResponse.VisitListPluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncPlugin operation middleware
+func (sh *strictHandler) SyncPlugin(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName) {
+	var request SyncPluginRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+
+	var body SyncPluginJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncPlugin(ctx, request.(SyncPluginRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncPlugin")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncPluginResponseObject); ok {
+		if err := validResponse.VisitSyncPluginResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

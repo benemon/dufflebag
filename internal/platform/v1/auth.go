@@ -426,6 +426,10 @@ func (response refusalResponse) VisitGetPluginImportResponse(w http.ResponseWrit
 func (response refusalResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+
+func (response refusalResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitListProjectsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

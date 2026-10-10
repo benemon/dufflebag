@@ -1011,6 +1011,40 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+    post:
+      tags: [plugin-registry]
+      operationId: syncPlugin
+      summary: Apply one plugin's changes as one import job
+      description: |
+        Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
+        only if the version's stored SHA256SUMS lists it with a matching digest, or mirrors a new
+        releases.hashicorp.com version. `revoke` and `restore` act on a stored version. Mirrored platforms
+        cannot be removed. Requires `publisher`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PluginSyncRequest" }
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginImport" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The plugin registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/projects:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -2755,6 +2789,27 @@ components:
         platforms: { type: array, minItems: 1, items: { type: string } }
       required: [source, product, versions, platforms]
 
+    PluginChange:
+      type: object
+      properties:
+        version: { type: string }
+        action: { type: string, enum: [add, revoke, restore] }
+        platforms:
+          type: array
+          description: The OS_ARCH platforms an add brings in; empty for revoke and restore.
+          items: { type: string }
+      required: [version, action]
+
+    PluginSyncRequest:
+      type: object
+      properties:
+        changes:
+          type: array
+          minItems: 1
+          maxItems: 50
+          items: { $ref: "#/components/schemas/PluginChange" }
+      required: [changes]
+
     PluginImportPlatformOutcome:
       type: object
       properties:
@@ -2767,7 +2822,7 @@ components:
       type: object
       properties:
         version: { type: string }
-        outcome: { type: string, enum: [imported, already_mirrored, failed] }
+        outcome: { type: string, enum: [imported, already_mirrored, revoked, restored, failed] }
         error: { type: string }
         platforms:
           type: array
@@ -2782,13 +2837,17 @@ components:
         product: { type: string }
         versions: { type: array, items: { type: string } }
         platforms: { type: array, items: { type: string } }
+        changes:
+          type: array
+          description: A sync's changes, in the order they apply; empty for an import.
+          items: { $ref: "#/components/schemas/PluginChange" }
         state: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed] }
         created_at: { type: string, format: date-time }
         finished_at: { type: string, format: date-time }
         outcomes:
           type: array
           items: { $ref: "#/components/schemas/PluginImportVersionOutcome" }
-      required: [id, source, product, versions, platforms, state, created_at, outcomes]
+      required: [id, source, product, versions, platforms, changes, state, created_at, outcomes]
 
     TemplateStanza:
       type: object

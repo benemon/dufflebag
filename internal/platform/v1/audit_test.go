@@ -53,6 +53,7 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"ListHashicorpPlugins":        {"plugin.catalogue.list", "plugin_catalogue", "organizationId"},
 		"ListHashicorpPluginVersions": {"plugin.catalogue.versions", "plugin_catalogue", "product"},
 		"ResolveGithubRelease":        {"plugin.catalogue.github.resolve", "plugin_catalogue", "organizationId"},
+		"SyncPlugin":                  {"plugin.sync", "plugin", "pluginName"},
 		"CreatePluginImport":          {"plugin.import.create", "plugin_import_collection", "organizationId"},
 		"GetPluginImport":             {"plugin.import.read", "plugin_import", "importId"},
 		"PublishPluginVersion":        {"plugin.version.publish", "plugin_version", "version"},

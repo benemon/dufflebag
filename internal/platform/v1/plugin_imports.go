@@ -279,9 +279,15 @@ func (s *server) GetPluginImport(
 func renderPluginImport(job store.PluginImport) (PluginImport, error) {
 	rendered := PluginImport{
 		Id: job.ID, Source: job.Request.SourceKind, Product: job.Request.Product,
-		Versions: job.Request.Versions, Platforms: job.Request.Platforms,
+		Versions: append([]string{}, job.Request.Versions...), Platforms: append([]string{}, job.Request.Platforms...), Changes: []PluginChange{},
 		State: PluginImportState(job.State), CreatedAt: job.CreatedAt, FinishedAt: job.FinishedAt,
 		Outcomes: []PluginImportVersionOutcome{},
+	}
+	for _, change := range job.Request.Changes {
+		rendered.Changes = append(rendered.Changes, PluginChange{Version: change.Version, Action: PluginChangeAction(change.Action)})
+		if len(change.Platforms) > 0 {
+			rendered.Changes[len(rendered.Changes)-1].Platforms = &change.Platforms
+		}
 	}
 	if err := json.Unmarshal(job.Outcomes, &rendered.Outcomes); err != nil {
 		return PluginImport{}, err
@@ -344,4 +350,93 @@ func (s *server) ResolveGithubRelease(
 	}
 	audited.succeeded(organizationID, "")
 	return ResolveGithubRelease200JSONResponse(rendered), nil
+}
+
+func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject) (SyncPluginResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	tenant := store.ParseOrganizationTenant(organizationID)
+	source, versions, err := s.repository.ListPluginVersions(ctx, tenant, request.PluginName)
+	if errors.Is(err, registry.ErrNotFound) {
+		audited.failed("not_found")
+		return SyncPlugin404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "plugin not found"}}, nil
+	}
+	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
+		audited.failed("not_enabled")
+		return SyncPlugin409JSONResponse{Message: "plugin registry is not enabled"}, nil
+	}
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if request.Body == nil || len(request.Body.Changes) == 0 || len(request.Body.Changes) > 50 {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "a sync needs 1 to 50 changes"}, nil
+	}
+	mirrored := map[string]bool{}
+	for _, version := range versions {
+		mirrored[version.Version] = true
+	}
+	seen := map[string]bool{}
+	var changes []store.PluginChange
+	for _, change := range request.Body.Changes {
+		var platforms []string
+		if change.Platforms != nil {
+			platforms = *change.Platforms
+		}
+		var problem string
+		switch {
+		case seen[change.Version]:
+			problem = "changes " + change.Version + " twice"
+		case change.Action == Add && !validPlatforms(platforms):
+			problem = "adds to " + change.Version + " without 1 to 32 distinct OS_ARCH platforms"
+		case change.Action == Add && !mirrored[change.Version] && source.Kind != "releases-hashicorp":
+			problem = "adds version " + change.Version + ", but only releases.hashicorp.com plugins take new versions by sync"
+		case (change.Action == Revoke || change.Action == Restore) && len(platforms) > 0:
+			problem = "names platforms on a " + string(change.Action) + "; a mirrored platform cannot be removed"
+		case (change.Action == Revoke || change.Action == Restore) && !mirrored[change.Version]:
+			problem = string(change.Action) + "s " + change.Version + ", which is not stored"
+		case !change.Action.Valid():
+			problem = "has an unknown action"
+		}
+		if problem != "" {
+			audited.failed("invalid_request")
+			return badRequestResponse{message: "the sync " + problem}, nil
+		}
+		seen[change.Version] = true
+		changes = append(changes, store.PluginChange{Version: change.Version, Action: string(change.Action), Platforms: platforms})
+	}
+	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+		SourceKind: source.Kind, Product: request.PluginName, Changes: changes,
+	})
+	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
+		audited.failed("not_enabled")
+		return SyncPlugin409JSONResponse{Message: "plugin registry is not enabled"}, nil
+	}
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	job, err := s.repository.GetPluginImport(ctx, tenant, id)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(organizationID, "queued")
+	rendered, err := renderPluginImport(job)
+	if err != nil {
+		return nil, err
+	}
+	return SyncPlugin202JSONResponse(rendered), nil
 }

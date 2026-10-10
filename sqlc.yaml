@@ -6,6 +6,7 @@ sql:
       - internal/store/postgres/migrations/000006_plugin_registries.up.sql
       - internal/store/postgres/migrations/000007_plugin_versions.up.sql
       - internal/store/postgres/migrations/000008_plugin_imports.up.sql
+      - internal/store/postgres/migrations/000009_plugin_import_changes.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

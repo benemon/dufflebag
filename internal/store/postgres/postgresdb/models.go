@@ -199,6 +199,7 @@ type PluginImport struct {
 	CreatedAt      time.Time       `json:"created_at"`
 	ClaimedAt      sql.NullTime    `json:"claimed_at"`
 	FinishedAt     sql.NullTime    `json:"finished_at"`
+	Changes        json.RawMessage `json:"changes"`
 }
 
 type PluginRegistry struct {

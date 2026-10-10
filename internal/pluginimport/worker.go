@@ -80,6 +80,10 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 			w.logger.Error("plugin import record failed", "import_id", job.ID, "error", err)
 		}
 	}
+	for _, change := range job.Request.Changes {
+		outcomes = append(outcomes, w.importer.Sync(ctx, job.Tenant, job.Request.Product, change))
+		record(StateRunning)
+	}
 	for _, version := range job.Request.Versions {
 		var outcome VersionOutcome
 		switch job.Request.SourceKind {

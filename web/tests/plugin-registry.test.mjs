@@ -24,12 +24,12 @@ let PluginDetailView
 let PluginUploadView
 let listPlugins
 let publishPluginVersion
-let revokePluginVersion
-let restorePluginVersion
 let deletePluginVersion
 let PluginHashicorpView
 let PluginImportJobView
 let PluginGithubView
+let pluginChanges
+let syncPlugin
 let createGithubImport
 let createPluginImport
 
@@ -52,7 +52,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    revokePluginVersion, restorePluginVersion, deletePluginVersion, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -242,7 +242,7 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   const detail = (registry) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
     detail: { name: 'git', source: { kind: 'upload' }, versions: [{
       version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z',
       listed_platforms: [{ os: 'linux', arch: 'arm64' }, { os: 'darwin', arch: 'arm64' }],
@@ -312,28 +312,95 @@ test('publishing sends a multipart PUT to the version path', async () => {
   assert.equal(sent.options.body.get('zips').name, 'packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')
 })
 
-test('version rows offer revoke or restore and removal to publishers only', () => {
+test('publishers edit versions and remove them; readers do neither', () => {
   const view = (callerRole, revoked) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {},
+    busy: false, actionFailure: null, editing: false, upstream: [], onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
     detail: { name: 'git', source: { kind: 'upload' }, versions: [{
       version: '0.6.3', revoked, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
     }] },
   }))
   const served = view('publisher', false)
-  assert.match(served, />Revoke</)
+  assert.match(served, />Edit versions</)
   assert.match(served, />Remove version</)
+  assert.doesNotMatch(served, />Revoke</)
   const revoked = view('publisher', true)
-  assert.match(revoked, />Restore</)
   assert.match(revoked, />Revoked</)
   assert.doesNotMatch(revoked, /Template stanza/)
   const reader = view('reader', false)
-  assert.doesNotMatch(reader, />Revoke</)
+  assert.doesNotMatch(reader, />Edit versions</)
   assert.doesNotMatch(reader, />Remove version</)
 })
 
-test('revoke, restore and remove use the version paths', async () => {
+const amazonVersions = [
+  { version: '1.8.2', revoked: false, created_at: '2026-10-01T00:00:00Z',
+    listed_platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }, { os: 'darwin', arch: 'arm64' }],
+    stored_platforms: [{ os: 'linux', arch: 'amd64' }] },
+  { version: '1.8.1', revoked: true, created_at: '2026-09-01T00:00:00Z',
+    listed_platforms: [{ os: 'linux', arch: 'amd64' }, { os: 'linux', arch: 'arm64' }],
+    stored_platforms: [{ os: 'linux', arch: 'amd64' }] },
+]
+const amazonUpstream = [
+  { version: '1.8.3', created_at: '2026-10-08T00:00:00Z', prerelease: false, platforms: ['linux_amd64', 'linux_arm64'], mirrored: false },
+  { version: '1.8.2', created_at: '2026-10-01T00:00:00Z', prerelease: false, platforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], mirrored: true },
+]
+
+test('editing turns only unmirrored cells of served versions into checkboxes and lists upstream versions', () => {
+  const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, editing: true, upstream: amazonUpstream,
+    onEdit: () => {}, onCancelEdit: () => {}, onSync: () => {}, onRemove: () => {},
+    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
+  }))
+  assert.match(html, /aria-label="Add linux_arm64 to 1\.8\.2"/)
+  assert.match(html, /aria-label="Add darwin_arm64 to 1\.8\.2"/)
+  assert.doesNotMatch(html, /aria-label="Add linux_amd64 to 1\.8\.2"/, 'a mirrored platform is a status, not a control')
+  assert.doesNotMatch(html, /aria-label="Add linux_arm64 to 1\.8\.1"/, 'a revoked version takes no platforms until restored')
+  assert.match(html, /aria-label="Add 1\.8\.3"/)
+  assert.doesNotMatch(html, /aria-label="Add 1\.8\.2"/, 'a mirrored version is not offered again')
+  assert.match(html, /aria-label="Serve 1\.8\.1"/)
+  assert.match(html, /No changes yet/)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync 0 changes/)
+  assert.doesNotMatch(html, />Remove version</)
+})
+
+test('pending changes revoke, restore, add platforms and mirror new versions', () => {
+  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), { selected: {}, added: {} }), [])
+  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), {
+    selected: { '1.8.3': true, '1.8.1': true },
+    added: { '1.8.3': ['linux_amd64'], '1.8.2': ['linux_amd64', 'darwin_arm64'] },
+  }), [
+    { version: '1.8.3', action: 'add', platforms: ['linux_amd64'] },
+    { version: '1.8.2', action: 'add', platforms: ['darwin_arm64'] },
+    { version: '1.8.1', action: 'restore' },
+  ])
+  assert.deepEqual(pluginChanges(amazonVersions, [], { selected: { '1.8.2': false }, added: { '1.8.2': ['darwin_arm64'] } }),
+    [{ version: '1.8.2', action: 'revoke' }], 'a version being revoked takes no platforms')
+  assert.deepEqual(pluginChanges(amazonVersions, [], { selected: {}, added: { '1.8.1': ['linux_arm64'] } }),
+    [], 'a version that stays revoked takes no platforms')
+  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), { selected: { '1.8.3': true }, added: { '1.8.3': [] } }),
+    [], 'a new version with no platforms is not a change')
+})
+
+test('a sync posts the ordered changes to the plugin', async () => {
+  const originalFetch = globalThis.fetch
+  let sent
+  globalThis.fetch = async (path, options) => {
+    sent = { path, body: JSON.parse(options.body) }
+    return new Response(JSON.stringify({ id: 'job' }), { status: 202, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await syncPlugin('token', 'org', 'amazon', [{ version: '1.8.1', action: 'revoke' }])
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(sent.path, '/api/v1/organizations/org/plugin-registry/plugins/amazon/sync')
+  assert.deepEqual(sent.body, { changes: [{ version: '1.8.1', action: 'revoke' }] })
+})
+
+test('remove uses the version path', async () => {
   const originalFetch = globalThis.fetch
   const requests = []
   globalThis.fetch = async (path, options) => {
@@ -341,15 +408,11 @@ test('revoke, restore and remove use the version paths', async () => {
     return new Response(null, { status: 204 })
   }
   try {
-    await revokePluginVersion('token', 'org', 'git', '0.6.3')
-    await restorePluginVersion('token', 'org', 'git', '0.6.3')
     await deletePluginVersion('token', 'org', 'git', '0.6.3')
   } finally {
     globalThis.fetch = originalFetch
   }
   assert.deepEqual(requests, [
-    'POST /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3/revoke',
-    'POST /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3/restore',
     'DELETE /api/v1/organizations/org/plugin-registry/plugins/git/versions/0.6.3',
   ])
 })
@@ -389,7 +452,7 @@ test('an import job shows each version\'s outcome and failed platforms', () => {
   const html = renderToStaticMarkup(React.createElement(PluginImportJobView, {
     job: {
       id: 'job', source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3', '1.8.2', '1.8.1'],
-      platforms: ['linux_amd64', 'windows_386'], state: 'partially_succeeded', created_at: '2026-10-09T00:00:00Z',
+      platforms: ['linux_amd64', 'windows_386'], changes: [], state: 'partially_succeeded', created_at: '2026-10-09T00:00:00Z',
       outcomes: [
         { version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'failed', error: 'not published upstream' }] },
         { version: '1.8.2', outcome: 'already_mirrored' },
@@ -406,6 +469,23 @@ test('an import job shows each version\'s outcome and failed platforms', () => {
   assert.match(html, /does not verify against the HashiCorp key/)
   assert.match(html, /version = &quot;1\.8\.3&quot;/)
   assert.match(html, /Packer can&#x27;t resolve this template stanza until the registry is exposed/)
+})
+
+test('a sync job shows each change in order with its outcome', () => {
+  // Written by the platform handler (TestPluginSyncJobFixtureMatchesTheHandler).
+  const job = JSON.parse(readFileSync(new URL('./fixtures/plugin-sync-job.json', import.meta.url), 'utf8'))
+  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, {
+    job, registry: { enabled: true, exposed: true }, failure: null, organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
+  }))
+  assert.match(html, /Sync amazon/)
+  assert.match(html, /3 changes, applied in order/)
+  assert.match(html, /add linux_amd64, windows_386/)
+  assert.match(html, /windows_386 failed/)
+  assert.match(html, /digest does not match SHA256SUMS/)
+  assert.match(html, />Restored</)
+  assert.match(html, />restore</)
+  assert.match(html, /Open amazon/)
+  assert.doesNotMatch(html, /Platforms: /)
 })
 
 test('an import is queued with the selected versions and platforms', async () => {

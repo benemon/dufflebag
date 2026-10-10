@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFile as execFileCb, spawn } from 'node:child_process'
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import dns from 'node:dns/promises'
 import {
   existsSync,
@@ -770,6 +770,27 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     )
     assert.ok(amazon.ok, `packer init of the imported amazon plugin failed:\n${amazon.output}`)
     process.stdout.write(`ASSERT imported packer-plugin-amazon 1.8.2 from releases.hashicorp.com (signature verified) and installed it with packer init from ${amazonSource}\n`)
+
+    // A sync adds a platform to the mirrored version. Its zip is admitted only
+    // because the SHA256SUMS stored at the first import lists its digest.
+    const added = arch === 'amd64' ? 'darwin_arm64' : 'linux_amd64'
+    const syncQueued = await api(rootToken, 'POST', `${registryPath}/plugins/amazon/sync`, {
+      changes: [{ version: '1.8.2', action: 'add', platforms: [added] }],
+    })
+    let syncJob = syncQueued
+    await until('the amazon sync to finish', async () => {
+      syncJob = await api(rootToken, 'GET', `${registryPath}/imports/${syncQueued.id}`)
+      return ['succeeded', 'partially_succeeded', 'failed'].includes(syncJob.state)
+    }, 10 * 60 * 1000, 2000)
+    assert.equal(syncJob.state, 'succeeded', `amazon sync: ${JSON.stringify(syncJob)}`)
+    const amazonVersion = `/plugins/${organizationName}/packer-plugin-amazon/1.8.2`
+    const amazonSums = await request('GET', `${amazonVersion}/packer-plugin-amazon_1.8.2_SHA256SUMS`)
+    assert.equal(amazonSums.status, 200)
+    const [addedDigest, addedZip] = amazonSums.body.split('\n').find((line) => line.endsWith(`_${added}.zip`)).split(/\s+/)
+    const servedZip = await request('GET', `${amazonVersion}/${addedZip}`)
+    assert.equal(servedZip.status, 200, `the added ${added} zip is not served`)
+    assert.equal(createHash('sha256').update(servedZip.bytes).digest('hex'), addedDigest)
+    process.stdout.write(`ASSERT synced ${added} into the mirrored amazon 1.8.2; the read plane serves ${addedZip} matching the stored SHA256SUMS\n`)
 
     // A real GitHub import: a public community release, resolved from its link.
     const resolved = await api(rootToken, 'POST', `${registryPath}/catalogue/github/resolve`, {
