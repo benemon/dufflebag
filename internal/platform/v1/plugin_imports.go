@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/benemon/dufflebag/internal/domain/identity"
+	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/pluginimport"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
@@ -439,4 +442,142 @@ func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject
 		return nil, err
 	}
 	return SyncPlugin202JSONResponse(rendered), nil
+}
+
+// renderUpdateCheck reports an update only against every stored version, so
+// a revoked newest version is not offered again.
+func renderUpdateCheck(summary store.PluginSummary) (PluginUpdateCheck, bool) {
+	check := PluginUpdateCheck{Enabled: summary.Update.Enabled, CheckedAt: summary.Update.CheckedAt}
+	if summary.Update.Error != "" {
+		check.Error = &summary.Update.Error
+	}
+	if summary.Update.Latest != "" {
+		check.Latest = &summary.Update.Latest
+	}
+	newest := plugin.Newest(summary.StoredVersions)
+	available := summary.Update.Enabled && summary.Update.Latest != "" &&
+		(newest == "" || plugin.Compare(summary.Update.Latest, newest) > 0)
+	return check, available
+}
+
+func (s *server) SetPluginUpdateCheck(
+	ctx context.Context, request SetPluginUpdateCheckRequestObject,
+) (SetPluginUpdateCheckResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	if request.Body == nil {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "enabled is required"}, nil
+	}
+	err = s.repository.SetPluginUpdateCheck(ctx, store.ParseOrganizationTenant(organizationID), request.PluginName, request.Body.Enabled)
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		audited.failed("not_found")
+		return SetPluginUpdateCheck404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "plugin not found"}}, nil
+	case errors.Is(err, store.ErrPluginUploadHasNoUpdates):
+		audited.failed("uploaded_plugin")
+		return SetPluginUpdateCheck409JSONResponse{Message: "an uploaded plugin has no upstream to check for updates"}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	reason := "disabled"
+	if request.Body.Enabled {
+		reason = "enabled"
+	}
+	audited.succeeded(organizationID, reason)
+	return SetPluginUpdateCheck204Response{}, nil
+}
+
+func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequestObject) (SyncCatalogueResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitPluginRegistryMutation(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	if request.Body == nil || len(request.Body.Plugins) == 0 || len(request.Body.Plugins) > 100 {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "a catalogue sync needs 1 to 100 plugins"}, nil
+	}
+	tenant := store.ParseOrganizationTenant(organizationID)
+	plugins, err := s.repository.ListPlugins(ctx, tenant)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	byName := map[string]store.PluginSummary{}
+	for _, summary := range plugins {
+		byName[summary.Name] = summary
+	}
+	response := SyncCatalogue200JSONResponse{Results: []CatalogueSyncResult{}}
+	queued := 0
+	for _, name := range request.Body.Plugins {
+		result := CatalogueSyncResult{Plugin: name}
+		refuse := func(reason string) {
+			result.Refused = &reason
+			response.Results = append(response.Results, result)
+		}
+		summary, found := byName[name]
+		if _, available := renderUpdateCheck(summary); !found || !available {
+			refuse(map[bool]string{false: "no such plugin", true: "no update available"}[found])
+			continue
+		}
+		_, versions, err := s.repository.ListPluginVersions(ctx, tenant, name)
+		if err != nil {
+			audited.failed("storage_failed")
+			return nil, err
+		}
+		platforms := []string{}
+		for _, version := range versions {
+			for _, platform := range version.Stored {
+				if !slices.Contains(platforms, platform) {
+					platforms = append(platforms, platform)
+				}
+			}
+		}
+		if len(platforms) == 0 {
+			refuse("no mirrored platforms to bring forward")
+			continue
+		}
+		slices.Sort(platforms)
+		version := summary.Update.Latest
+		if summary.Source.Kind == "github" {
+			version = summary.Update.LatestTag
+		}
+		id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+			SourceKind: summary.Source.Kind, Product: summary.Source.Repository, Versions: []string{version}, Platforms: platforms,
+		})
+		if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
+			audited.failed("not_enabled")
+			return SyncCatalogue409JSONResponse{Message: "plugin registry is not enabled"}, nil
+		}
+		if err != nil {
+			audited.failed("storage_failed")
+			return nil, err
+		}
+		result.Version, result.ImportId = &summary.Update.Latest, &id
+		response.Results = append(response.Results, result)
+		queued++
+	}
+	audited.succeeded(organizationID, fmt.Sprintf("queued %d of %d", queued, len(request.Body.Plugins)))
+	return response, nil
 }

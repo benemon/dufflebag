@@ -174,6 +174,11 @@ type Plugin struct {
 	SourceKind       string         `json:"source_kind"`
 	SourceRepository sql.NullString `json:"source_repository"`
 	CreatedAt        time.Time      `json:"created_at"`
+	UpdateCheck      bool           `json:"update_check"`
+	UpdateCheckedAt  sql.NullTime   `json:"update_checked_at"`
+	UpdateError      sql.NullString `json:"update_error"`
+	UpdateLatest     sql.NullString `json:"update_latest"`
+	UpdateLatestTag  sql.NullString `json:"update_latest_tag"`
 }
 
 type PluginFile struct {

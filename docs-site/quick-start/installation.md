@@ -190,6 +190,7 @@ component-specific variable groups live with their components:
 | `DFBG_TRUSTED_PROXIES` | - | Trusted reverse-proxy CIDRs. When the peer is trusted, per-caller admission keys on the rightmost untrusted `X-Forwarded-For` entry; unset means every caller keys on its own peer address |
 | `DFBG_API_MAX_BODY_BYTES` | `16777216` | Maximum JSON request body on the 2023 compatibility surface |
 | `DFBG_PLUGIN_MAX_UPLOAD_BYTES` | `536870912` | Maximum plugin version upload; larger uploads are refused with 413. An upload may take up to 30 minutes |
+| `DFBG_PLUGIN_UPDATE_INTERVAL` | `24h` | How often each plugin with update checking on asks its source for a newer release |
 | `DFBG_SHUTDOWN_GRACE_PERIOD` | `10s` | Shared deadline for HTTP and audit shutdown |
 | `DFBG_AUDIT_HMAC_KEY` / `DFBG_AUDIT_HMAC_KEY_VERSION` | - | Required together when an audit target is configured; must NOT be set when encryption at rest is configured |
 

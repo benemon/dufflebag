@@ -92,6 +92,17 @@ func TestBagDropReconcileIntervalConfiguration(t *testing.T) {
 	}
 }
 
+func TestPluginUpdateIntervalConfiguration(t *testing.T) {
+	t.Setenv("DFBG_PLUGIN_UPDATE_INTERVAL", "")
+	if got, err := scannerDuration("DFBG_PLUGIN_UPDATE_INTERVAL", 24*time.Hour); err != nil || got != 24*time.Hour {
+		t.Fatalf("default interval = %s, %v", got, err)
+	}
+	t.Setenv("DFBG_PLUGIN_UPDATE_INTERVAL", "0s")
+	if _, err := scannerDuration("DFBG_PLUGIN_UPDATE_INTERVAL", 24*time.Hour); err == nil {
+		t.Fatal("a zero interval was accepted")
+	}
+}
+
 func TestWebhookAllowPrivateConfiguration(t *testing.T) {
 	t.Setenv("DFBG_WEBHOOK_ALLOW_PRIVATE", "")
 	if got, err := configuredWebhookAllowPrivate(); err != nil || got {

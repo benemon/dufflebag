@@ -153,6 +153,30 @@ The API equivalents are `POST .../plugins/{name}/sync` with a list of
 changes, `POST .../versions/{version}/revoke`,
 `POST .../versions/{version}/restore` and `DELETE .../versions/{version}`.
 
+## Check for updates
+
+A plugin imported from releases.hashicorp.com or GitHub can check its source
+for newer releases. Uploaded plugins have no source to check.
+
+1. Open the plugin and turn on **Check for updates**.
+2. dufflebag asks the source for its newest stable release within a minute,
+   then once every `DFBG_PLUGIN_UPDATE_INTERVAL` (24 hours by default).
+   Prereleases are ignored.
+3. When that release is newer than every version the plugin holds, revoked
+   ones included, the catalogue marks the plugin **Update available**.
+
+A check only looks. Nothing is imported until you sync. To bring plugins up
+to date, tick them in the catalogue and choose **Sync selected**. Each
+plugin gets its own import job for the newest release, with the platforms it
+already has, so one plugin's failure does not hold back the rest. A GitHub
+plugin is imported from the release tag the check saw.
+
+A failed check is shown on the plugin's page with its reason and is retried
+at the next interval. It raises no alert, so a deployment without internet
+access simply never sees an update. GitHub checks share the 60 calls an hour
+that imports use: dufflebag makes at most one every two minutes, and none for
+an hour after GitHub refuses one.
+
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag

@@ -32,11 +32,15 @@ export async function disablePluginRegistry(token: string, organizationID: strin
 
 export type PluginSource = { kind: 'upload' | 'releases-hashicorp' | 'github'; repository?: string }
 
+export type PluginUpdateCheck = { enabled: boolean; checked_at?: string; error?: string; latest?: string }
+
 export type Plugin = {
   name: string
   source: PluginSource
   published_versions: number
   newest_version?: string
+  update_check: PluginUpdateCheck
+  update_available: boolean
 }
 
 export type PluginPlatform = { os: string; arch: string }
@@ -281,4 +285,14 @@ export function pluginChanges(versions: PluginVersion[], upstream: HashicorpPlug
     else if (!version.revoked && platforms.length) changes.push({ version: version.version, action: 'add', platforms })
   }
   return changes
+}
+
+export async function setPluginUpdateCheck(token: string, organizationID: string, name: string, enabled: boolean): Promise<void> {
+  await platformPut<null>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/update-check`), { enabled })
+}
+
+export type CatalogueSyncResult = { plugin: string; version?: string; import_id?: string; refused?: string }
+
+export async function syncCatalogue(token: string, organizationID: string, plugins: string[]): Promise<CatalogueSyncResult[]> {
+  return (await platformPost<{ results: CatalogueSyncResult[] }>(token, path(organizationID, 'sync'), { plugins })).results
 }

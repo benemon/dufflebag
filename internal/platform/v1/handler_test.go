@@ -739,6 +739,20 @@ func (r *fakeTenancyRepository) ListPlugins(
 	return r.plugins, r.pluginRegistryErr
 }
 
+func (r *fakeTenancyRepository) SetPluginUpdateCheck(_ context.Context, _ store.OrganizationTenant, name string, enabled bool) error {
+	for i := range r.plugins {
+		if r.plugins[i].Name != name {
+			continue
+		}
+		if enabled && r.plugins[i].Source.Kind == "upload" {
+			return store.ErrPluginUploadHasNoUpdates
+		}
+		r.plugins[i].Update.Enabled = enabled
+		return nil
+	}
+	return registry.ErrNotFound
+}
+
 func (r *fakeTenancyRepository) ListPluginVersions(
 	_ context.Context, _ store.OrganizationTenant, name string,
 ) (store.PluginSource, []store.PluginVersionSummary, error) {

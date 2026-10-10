@@ -1081,6 +1081,19 @@ type BuildScanSummary struct {
 	Worst            *Severity `json:"worst,omitempty"`
 }
 
+// CatalogueSyncResult defines model for CatalogueSyncResult.
+type CatalogueSyncResult struct {
+	// ImportId The queued job. Absent when refused.
+	ImportId *openapi_types.UUID `json:"import_id,omitempty"`
+	Plugin   string              `json:"plugin"`
+
+	// Refused Why no job was queued.
+	Refused *string `json:"refused,omitempty"`
+
+	// Version The version the queued job imports.
+	Version *string `json:"version,omitempty"`
+}
+
 // Encryption defines model for Encryption.
 type Encryption struct {
 	// KekLatest The key service's current KEK version, in the same form as kek_ref. Reading this state refreshes it, so a KEK rotated at the key service shows here on the next read; between reads the heartbeat keeps it current. Absent when the provider cannot report it — for Vault transit that requires read capability on the key — and on unencrypted instances.
@@ -1397,6 +1410,13 @@ type Plugin struct {
 
 	// Source Where a plugin's versions come from. Metadata only; never part of its address.
 	Source PluginSource `json:"source"`
+
+	// UpdateAvailable The newest stable upstream release seen is newer than every stored version, revoked ones included.
+	UpdateAvailable bool `json:"update_available"`
+
+	// UpdateCheck Opt-in update checking for an imported plugin (ADR-0027 A6). A check asks the plugin's source for its
+	// newest stable release; it never imports. A failed check is recorded quietly and keeps the last version seen.
+	UpdateCheck PluginUpdateCheck `json:"update_check"`
 }
 
 // PluginChange defines model for PluginChange.
@@ -1496,6 +1516,19 @@ type PluginSourceKind string
 // PluginSyncRequest defines model for PluginSyncRequest.
 type PluginSyncRequest struct {
 	Changes []PluginChange `json:"changes"`
+}
+
+// PluginUpdateCheck Opt-in update checking for an imported plugin (ADR-0027 A6). A check asks the plugin's source for its
+// newest stable release; it never imports. A failed check is recorded quietly and keeps the last version seen.
+type PluginUpdateCheck struct {
+	CheckedAt *time.Time `json:"checked_at,omitempty"`
+	Enabled   bool       `json:"enabled"`
+
+	// Error Why the last check failed. Absent after a successful check.
+	Error *string `json:"error,omitempty"`
+
+	// Latest The newest stable upstream version seen.
+	Latest *string `json:"latest,omitempty"`
 }
 
 // PluginVersion defines model for PluginVersion.
@@ -1867,12 +1900,22 @@ type ListHashicorpPluginVersionsParams struct {
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
 
+// SetPluginUpdateCheckJSONBody defines parameters for SetPluginUpdateCheck.
+type SetPluginUpdateCheckJSONBody struct {
+	Enabled bool `json:"enabled"`
+}
+
 // PublishPluginVersionMultipartBody defines parameters for PublishPluginVersion.
 type PublishPluginVersionMultipartBody struct {
 	Manifest      *openapi_types.File  `json:"manifest,omitempty"`
 	Sha256sums    openapi_types.File   `json:"sha256sums"`
 	Sha256sumsSig *openapi_types.File  `json:"sha256sums_sig,omitempty"`
 	Zips          []openapi_types.File `json:"zips"`
+}
+
+// SyncCatalogueJSONBody defines parameters for SyncCatalogue.
+type SyncCatalogueJSONBody struct {
+	Plugins []string `json:"plugins"`
 }
 
 // CreateProjectJSONBody defines parameters for CreateProject.
@@ -1956,8 +1999,14 @@ type CreatePluginImportJSONRequestBody = PluginImportRequest
 // SyncPluginJSONRequestBody defines body for SyncPlugin for application/json ContentType.
 type SyncPluginJSONRequestBody = PluginSyncRequest
 
+// SetPluginUpdateCheckJSONRequestBody defines body for SetPluginUpdateCheck for application/json ContentType.
+type SetPluginUpdateCheckJSONRequestBody SetPluginUpdateCheckJSONBody
+
 // PublishPluginVersionMultipartRequestBody defines body for PublishPluginVersion for multipart/form-data ContentType.
 type PublishPluginVersionMultipartRequestBody PublishPluginVersionMultipartBody
+
+// SyncCatalogueJSONRequestBody defines body for SyncCatalogue for application/json ContentType.
+type SyncCatalogueJSONRequestBody SyncCatalogueJSONBody
 
 // CreateProjectJSONRequestBody defines body for CreateProject for application/json ContentType.
 type CreateProjectJSONRequestBody CreateProjectJSONBody
@@ -2412,6 +2461,24 @@ type ClientInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
 	SyncPlugin(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// SetPluginUpdateCheckWithBody Turn a plugin's update check on or off
+	//
+	// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+	SetPluginUpdateCheckWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPluginUpdateCheck Turn a plugin's update check on or off
+	//
+	// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+	SetPluginUpdateCheck(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SetPluginUpdateCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions (the `ListPluginVersions` operationId).
@@ -2451,6 +2518,28 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 	RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SyncCatalogueWithBody Bring selected plugins up to their newest stable release
+	//
+	// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+	// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+	// update is refused on its own and does not stop the rest. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+	SyncCatalogueWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SyncCatalogue Bring selected plugins up to their newest stable release
+	//
+	// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+	// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+	// update is refused on its own and does not stop the rest. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+	SyncCatalogue(ctx context.Context, organizationId OrganizationId, body SyncCatalogueJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	//
@@ -3661,6 +3750,44 @@ func (c *Client) SyncPlugin(ctx context.Context, organizationId OrganizationId, 
 	return c.Client.Do(req)
 }
 
+// SetPluginUpdateCheckWithBody Turn a plugin's update check on or off
+//
+// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+func (c *Client) SetPluginUpdateCheckWithBody(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginUpdateCheckRequestWithBody(c.Server, organizationId, pluginName, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetPluginUpdateCheck Turn a plugin's update check on or off
+//
+// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+func (c *Client) SetPluginUpdateCheck(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SetPluginUpdateCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginUpdateCheckRequest(c.Server, organizationId, pluginName, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // ListPluginVersions List a plugin's versions and the platforms each one serves
 //
 // Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions (the `ListPluginVersions` operationId).
@@ -3741,6 +3868,48 @@ func (c *Client) RestorePluginVersion(ctx context.Context, organizationId Organi
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 func (c *Client) RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokePluginVersionRequest(c.Server, organizationId, pluginName, version)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SyncCatalogueWithBody Bring selected plugins up to their newest stable release
+//
+// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+// update is refused on its own and does not stop the rest. Requires `publisher`.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+func (c *Client) SyncCatalogueWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSyncCatalogueRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SyncCatalogue Bring selected plugins up to their newest stable release
+//
+// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+// update is refused on its own and does not stop the rest. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+func (c *Client) SyncCatalogue(ctx context.Context, organizationId OrganizationId, body SyncCatalogueJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSyncCatalogueRequest(c.Server, organizationId, body)
 	if err != nil {
 		return nil, err
 	}
@@ -5791,6 +5960,60 @@ func NewSyncPluginRequestWithBody(server string, organizationId OrganizationId, 
 	return req, nil
 }
 
+// NewSetPluginUpdateCheckRequest calls the generic SetPluginUpdateCheck builder with application/json body
+func NewSetPluginUpdateCheckRequest(server string, organizationId OrganizationId, pluginName PluginName, body SetPluginUpdateCheckJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetPluginUpdateCheckRequestWithBody(server, organizationId, pluginName, "application/json", bodyReader)
+}
+
+// NewSetPluginUpdateCheckRequestWithBody constructs an http.Request for the SetPluginUpdateCheck method, with any body, and a specified content type
+func NewSetPluginUpdateCheckRequestWithBody(server string, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/update-check", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
 // NewListPluginVersionsRequest constructs an http.Request for the ListPluginVersions method
 func NewListPluginVersionsRequest(server string, organizationId OrganizationId, pluginName PluginName) (*http.Request, error) {
 	var err error
@@ -6022,6 +6245,53 @@ func NewRevokePluginVersionRequest(server string, organizationId OrganizationId,
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewSyncCatalogueRequest calls the generic SyncCatalogue builder with application/json body
+func NewSyncCatalogueRequest(server string, organizationId OrganizationId, body SyncCatalogueJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSyncCatalogueRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewSyncCatalogueRequestWithBody constructs an http.Request for the SyncCatalogue method, with any body, and a specified content type
+func NewSyncCatalogueRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/sync", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -8160,6 +8430,24 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync (the `SyncPlugin` operationId).
 	SyncPluginWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SyncPluginJSONRequestBody, reqEditors ...RequestEditorFn) (*SyncPluginResponse, error)
 
+	// SetPluginUpdateCheckWithBodyWithResponse Turn a plugin's update check on or off
+	//
+	// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+	SetPluginUpdateCheckWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginUpdateCheckResponse, error)
+
+	// SetPluginUpdateCheckWithResponse Turn a plugin's update check on or off
+	//
+	// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+	SetPluginUpdateCheckWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SetPluginUpdateCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginUpdateCheckResponse, error)
+
 	// ListPluginVersionsWithResponse List a plugin's versions and the platforms each one serves
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -8207,6 +8495,28 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 	RevokePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RevokePluginVersionResponse, error)
+
+	// SyncCatalogueWithBodyWithResponse Bring selected plugins up to their newest stable release
+	//
+	// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+	// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+	// update is refused on its own and does not stop the rest. Requires `publisher`.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+	SyncCatalogueWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SyncCatalogueResponse, error)
+
+	// SyncCatalogueWithResponse Bring selected plugins up to their newest stable release
+	//
+	// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+	// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+	// update is refused on its own and does not stop the rest. Requires `publisher`.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+	SyncCatalogueWithResponse(ctx context.Context, organizationId OrganizationId, body SyncCatalogueJSONRequestBody, reqEditors ...RequestEditorFn) (*SyncCatalogueResponse, error)
 
 	// UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
 	//
@@ -10492,6 +10802,68 @@ func (r SyncPluginResponse) ContentType() string {
 	return ""
 }
 
+type SetPluginUpdateCheckResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SetPluginUpdateCheckResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SetPluginUpdateCheckResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SetPluginUpdateCheckResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SetPluginUpdateCheckResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r SetPluginUpdateCheckResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetPluginUpdateCheckResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetPluginUpdateCheckResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetPluginUpdateCheckResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type ListPluginVersionsResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -10810,6 +11182,86 @@ func (r RevokePluginVersionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RevokePluginVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SyncCatalogueResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Results []CatalogueSyncResult `json:"results"`
+	}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SyncCatalogueResponse) GetJSON200() *struct {
+	Results []CatalogueSyncResult `json:"results"`
+} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SyncCatalogueResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SyncCatalogueResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SyncCatalogueResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SyncCatalogueResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SyncCatalogueResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r SyncCatalogueResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SyncCatalogueResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SyncCatalogueResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SyncCatalogueResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -13876,6 +14328,36 @@ func (c *ClientWithResponses) SyncPluginWithResponse(ctx context.Context, organi
 	return ParseSyncPluginResponse(rsp)
 }
 
+// SetPluginUpdateCheckWithBodyWithResponse Turn a plugin's update check on or off
+//
+// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+func (c *ClientWithResponses) SetPluginUpdateCheckWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginUpdateCheckResponse, error) {
+	rsp, err := c.SetPluginUpdateCheckWithBody(ctx, organizationId, pluginName, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginUpdateCheckResponse(rsp)
+}
+
+// SetPluginUpdateCheckWithResponse Turn a plugin's update check on or off
+//
+// Only plugins imported from releases.hashicorp.com or GitHub can be checked. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check (the `SetPluginUpdateCheck` operationId).
+func (c *ClientWithResponses) SetPluginUpdateCheckWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, body SetPluginUpdateCheckJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginUpdateCheckResponse, error) {
+	rsp, err := c.SetPluginUpdateCheck(ctx, organizationId, pluginName, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginUpdateCheckResponse(rsp)
+}
+
 // ListPluginVersionsWithResponse List a plugin's versions and the platforms each one serves
 //
 // Returns a wrapper object for the known response body format(s).
@@ -13952,6 +14434,40 @@ func (c *ClientWithResponses) RevokePluginVersionWithResponse(ctx context.Contex
 		return nil, err
 	}
 	return ParseRevokePluginVersionResponse(rsp)
+}
+
+// SyncCatalogueWithBodyWithResponse Bring selected plugins up to their newest stable release
+//
+// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+// update is refused on its own and does not stop the rest. Requires `publisher`.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+func (c *ClientWithResponses) SyncCatalogueWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SyncCatalogueResponse, error) {
+	rsp, err := c.SyncCatalogueWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSyncCatalogueResponse(rsp)
+}
+
+// SyncCatalogueWithResponse Bring selected plugins up to their newest stable release
+//
+// Queues one ordinary import job per plugin with an update available, for the newest stable upstream
+// release seen, with the platforms the plugin already mirrors (ADR-0027 A7, A8). A plugin without an
+// update is refused on its own and does not stop the rest. Requires `publisher`.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/sync (the `SyncCatalogue` operationId).
+func (c *ClientWithResponses) SyncCatalogueWithResponse(ctx context.Context, organizationId OrganizationId, body SyncCatalogueJSONRequestBody, reqEditors ...RequestEditorFn) (*SyncCatalogueResponse, error) {
+	rsp, err := c.SyncCatalogue(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSyncCatalogueResponse(rsp)
 }
 
 // UnexposePluginRegistryWithResponse Stop anonymous reads from the organization plugin registry
@@ -16174,6 +16690,56 @@ func ParseSyncPluginResponse(rsp *http.Response) (*SyncPluginResponse, error) {
 	return response, nil
 }
 
+// ParseSetPluginUpdateCheckResponse parses an HTTP response from a SetPluginUpdateCheckWithResponse call
+func ParseSetPluginUpdateCheckResponse(rsp *http.Response) (*SetPluginUpdateCheckResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetPluginUpdateCheckResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseListPluginVersionsResponse parses an HTTP response from a ListPluginVersionsWithResponse call
 func ParseListPluginVersionsResponse(rsp *http.Response) (*ListPluginVersionsResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -16398,6 +16964,69 @@ func ParseRevokePluginVersionResponse(rsp *http.Response) (*RevokePluginVersionR
 	switch {
 	case rsp.StatusCode == 204:
 		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSyncCatalogueResponse parses an HTTP response from a SyncCatalogueWithResponse call
+func ParseSyncCatalogueResponse(rsp *http.Response) (*SyncCatalogueResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SyncCatalogueResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Results []CatalogueSyncResult `json:"results"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
 		var dest Unauthorized
@@ -18479,6 +19108,9 @@ type ServerInterface interface {
 	// SyncPlugin Apply one plugin's changes as one import job
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
 	SyncPlugin(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
+	// SetPluginUpdateCheck Turn a plugin's update check on or off
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check)
+	SetPluginUpdateCheck(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
@@ -18494,6 +19126,9 @@ type ServerInterface interface {
 	// RevokePluginVersion Stop serving a plugin version; restorable
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
 	RevokePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
+	// SyncCatalogue Bring selected plugins up to their newest stable release
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/sync)
+	SyncCatalogue(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
 	UnexposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -19202,6 +19837,41 @@ func (siw *ServerInterfaceWrapper) SyncPlugin(w http.ResponseWriter, r *http.Req
 	handler.ServeHTTP(w, r)
 }
 
+// SetPluginUpdateCheck operation middleware
+func (siw *ServerInterfaceWrapper) SetPluginUpdateCheck(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPluginUpdateCheck(w, r, organizationId, pluginName)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
 // ListPluginVersions operation middleware
 func (siw *ServerInterfaceWrapper) ListPluginVersions(w http.ResponseWriter, r *http.Request) {
 
@@ -19404,6 +20074,32 @@ func (siw *ServerInterfaceWrapper) RevokePluginVersion(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokePluginVersion(w, r, organizationId, pluginName, version)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SyncCatalogue operation middleware
+func (siw *ServerInterfaceWrapper) SyncCatalogue(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SyncCatalogue(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -20955,6 +21651,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.PublishPluginVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke", wrapper.RevokePluginVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/restore", wrapper.RestorePluginVersion)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check", wrapper.SetPluginUpdateCheck)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/sync", wrapper.SyncCatalogue)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync", wrapper.SyncPlugin)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.ListProjects)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/projects", wrapper.CreateProject)
@@ -22676,6 +23374,80 @@ func (response SyncPlugin409JSONResponse) VisitSyncPluginResponse(w http.Respons
 	return err
 }
 
+type SetPluginUpdateCheckRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	PluginName     PluginName     `json:"pluginName"`
+	Body           *SetPluginUpdateCheckJSONRequestBody
+}
+
+type SetPluginUpdateCheckResponseObject interface {
+	VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error
+}
+
+type SetPluginUpdateCheck204Response struct {
+}
+
+func (response SetPluginUpdateCheck204Response) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type SetPluginUpdateCheck401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SetPluginUpdateCheck401JSONResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginUpdateCheck403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetPluginUpdateCheck403JSONResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginUpdateCheck404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetPluginUpdateCheck404JSONResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginUpdateCheck409JSONResponse Error
+
+func (response SetPluginUpdateCheck409JSONResponse) VisitSetPluginUpdateCheckResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type ListPluginVersionsRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	PluginName     PluginName     `json:"pluginName"`
@@ -23047,6 +23819,101 @@ func (response RevokePluginVersion404JSONResponse) VisitRevokePluginVersionRespo
 type RevokePluginVersion409JSONResponse Error
 
 func (response RevokePluginVersion409JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogueRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *SyncCatalogueJSONRequestBody
+}
+
+type SyncCatalogueResponseObject interface {
+	VisitSyncCatalogueResponse(w http.ResponseWriter) error
+}
+
+type SyncCatalogue200JSONResponse struct {
+	Results []CatalogueSyncResult `json:"results"`
+}
+
+func (response SyncCatalogue200JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogue400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SyncCatalogue400JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogue401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SyncCatalogue401JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogue403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SyncCatalogue403JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogue404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SyncCatalogue404JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SyncCatalogue409JSONResponse Error
+
+func (response SyncCatalogue409JSONResponse) VisitSyncCatalogueResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -25878,6 +26745,9 @@ type StrictServerInterface interface {
 	// SyncPlugin Apply one plugin's changes as one import job
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
 	SyncPlugin(ctx context.Context, request SyncPluginRequestObject) (SyncPluginResponseObject, error)
+	// SetPluginUpdateCheck Turn a plugin's update check on or off
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/update-check)
+	SetPluginUpdateCheck(ctx context.Context, request SetPluginUpdateCheckRequestObject) (SetPluginUpdateCheckResponseObject, error)
 	// ListPluginVersions List a plugin's versions and the platforms each one serves
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions)
 	ListPluginVersions(ctx context.Context, request ListPluginVersionsRequestObject) (ListPluginVersionsResponseObject, error)
@@ -25893,6 +26763,9 @@ type StrictServerInterface interface {
 	// RevokePluginVersion Stop serving a plugin version; restorable
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
 	RevokePluginVersion(ctx context.Context, request RevokePluginVersionRequestObject) (RevokePluginVersionResponseObject, error)
+	// SyncCatalogue Bring selected plugins up to their newest stable release
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/sync)
+	SyncCatalogue(ctx context.Context, request SyncCatalogueRequestObject) (SyncCatalogueResponseObject, error)
 	// UnexposePluginRegistry Stop anonymous reads from the organization plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/unexpose)
 	UnexposePluginRegistry(ctx context.Context, request UnexposePluginRegistryRequestObject) (UnexposePluginRegistryResponseObject, error)
@@ -26714,6 +27587,40 @@ func (sh *strictHandler) SyncPlugin(w http.ResponseWriter, r *http.Request, orga
 	}
 }
 
+// SetPluginUpdateCheck operation middleware
+func (sh *strictHandler) SetPluginUpdateCheck(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName) {
+	var request SetPluginUpdateCheckRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+
+	var body SetPluginUpdateCheckJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetPluginUpdateCheck(ctx, request.(SetPluginUpdateCheckRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetPluginUpdateCheck")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetPluginUpdateCheckResponseObject); ok {
+		if err := validResponse.VisitSetPluginUpdateCheckResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
 // ListPluginVersions operation middleware
 func (sh *strictHandler) ListPluginVersions(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName) {
 	var request ListPluginVersionsRequestObject
@@ -26853,6 +27760,39 @@ func (sh *strictHandler) RevokePluginVersion(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokePluginVersionResponseObject); ok {
 		if err := validResponse.VisitRevokePluginVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SyncCatalogue operation middleware
+func (sh *strictHandler) SyncCatalogue(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request SyncCatalogueRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body SyncCatalogueJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SyncCatalogue(ctx, request.(SyncCatalogueRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SyncCatalogue")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SyncCatalogueResponseObject); ok {
+		if err := validResponse.VisitSyncCatalogueResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {
