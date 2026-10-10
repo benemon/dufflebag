@@ -61,13 +61,19 @@ Prerequisites: the `publisher` role, and outbound HTTPS from dufflebag to
 1. Open **Plugins** and choose **Browse HashiCorp**. The list shows each plugin
    HashiCorp publishes, how many of its versions you mirror, and any plugin
    whose name is held by another source.
-2. Choose a plugin, then the versions to import. Prereleases are hidden unless
-   you show them.
-3. Choose platforms. A plugin you already mirror preselects the platforms it
-   has; a first import preselects the organization's default platforms, which
-   a maintainer sets in **Registry settings**.
-4. Choose **Import**. The import runs in the background and its page shows the
-   outcome of each version, with any platform that failed.
+2. Choose a plugin. Its releases list the version, release date, lifecycle
+   state, platform count, a changelog link, and which versions you already
+   hold. Prereleases are hidden unless you show them, and the platform
+   filter narrows the list to releases that publish one platform. Tick the
+   versions to import.
+3. Under **Platforms to import**, tick architectures by operating system. A
+   plugin you already mirror preselects the architectures it has; a first
+   import preselects the organization's default platforms, which a
+   maintainer sets in **Registry settings**. An architecture no chosen
+   version publishes cannot be ticked.
+4. Choose **Import N versions**. The import runs in the background as one
+   job, and its page shows the outcome of each version, with any platform
+   that failed.
 
 Before storing a version, dufflebag verifies its SHA256SUMS against
 [HashiCorp's release-signing key](https://www.hashicorp.com/.well-known/pgp-key.txt)

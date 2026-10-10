@@ -133,7 +133,7 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
     {
       name: 'hashicorp', crumbs: ['Registry', 'Plugins', 'Browse HashiCorp'], loading: 'Reading releases.hashicorp.com…', error: "HashiCorp's plugin list could not be read",
       view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginHashicorpView, {
-        ...callbacks, plugins: null, selected: null, versions: null, hasMore: false, preselected: [],
+        ...callbacks, organizationName: 'acme', plugins: null, selected: null, versions: null, heldVersions: [], hasMore: false, preselected: [],
         loading, failure, busy: false, onChoose: () => {}, onMore: () => {}, onImport: () => {},
       })),
     },
@@ -548,27 +548,63 @@ test('registry settings own lifecycle controls and default platforms with mainta
   assert.doesNotMatch(render({ callerRole: 'reader', registry: { enabled: true, exposed: false } }), /Browse HashiCorp/)
 })
 
-test('browsing HashiCorp marks held names and mirrored versions', () => {
-  const html = renderToStaticMarkup(React.createElement(PluginHashicorpView, {
-    plugins: [
-      { product: 'packer-plugin-amazon', name: 'amazon', mirrored_versions: 1 },
-      { product: 'packer-plugin-docker', name: 'docker', mirrored_versions: 0, held_by: { kind: 'github', repository: 'acme-infra/packer-plugin-docker' } },
-    ],
-    selected: { product: 'packer-plugin-amazon', name: 'amazon', mirrored_versions: 1 },
-    versions: [
-      { version: '1.8.3', created_at: '2026-10-07T08:42:46Z', prerelease: false, state: 'supported', platforms: ['linux_amd64'], mirrored: false },
-      { version: '1.8.2', created_at: '2026-07-13T08:13:00Z', prerelease: false, platforms: ['linux_amd64'], mirrored: true },
-      { version: '1.9.0-beta.1', created_at: '2026-10-08T00:00:00Z', prerelease: true, platforms: ['linux_amd64'], mirrored: false },
-    ],
-    hasMore: true, preselected: ['linux_amd64'], failure: null, busy: false,
-    onChoose: () => {}, onMore: () => {}, onImport: () => {},
-  }))
-  assert.match(html, /Held by GitHub \(acme-infra\/packer-plugin-docker\)/)
-  assert.match(html, /freed once every version is removed/)
-  assert.match(html, />Mirrored</)
-  assert.match(html, /1\.8\.3/)
+const hashicorpPlugins = [
+  { product: 'packer-plugin-amazon', name: 'amazon', mirrored_versions: 1 },
+  { product: 'packer-plugin-docker', name: 'docker', mirrored_versions: 0, held_by: { kind: 'github', repository: 'acme-infra/packer-plugin-docker' } },
+  { product: 'packer-plugin-vsphere', name: 'vsphere', mirrored_versions: 0 },
+]
+const amazonReleases = [
+  { version: '1.8.3', created_at: '2026-10-07T08:42:46Z', prerelease: false, state: 'supported', changelog: 'https://github.com/hashicorp/packer-plugin-amazon/blob/main/CHANGELOG.md', platforms: ['linux_amd64', 'linux_arm64'], mirrored: false },
+  { version: '1.8.2', created_at: '2026-07-13T08:13:00Z', prerelease: false, platforms: ['linux_amd64'], mirrored: true },
+  { version: '1.9.0-beta.1', created_at: '2026-10-08T00:00:00Z', prerelease: true, platforms: ['linux_amd64'], mirrored: false },
+]
+const hashicorpView = (props) => renderToStaticMarkup(React.createElement(PluginHashicorpView, {
+  organizationName: 'acme', plugins: hashicorpPlugins, selected: hashicorpPlugins[0], versions: amazonReleases,
+  heldVersions: [{ version: '1.8.2', revoked: false, created_at: '2026-07-13T08:13:00Z', listed_platforms: [], stored_platforms: [{ os: 'linux', arch: 'amd64' }] }],
+  hasMore: true, preselected: ['linux_amd64'], loading: false, failure: null, busy: false,
+  onBackToRegistry: () => {}, onBackToPlugins: () => {}, onRefresh: () => {}, onChoose: () => {}, onMore: () => {}, onImport: () => {},
+  ...props,
+}))
+
+test('browsing HashiCorp lists the published plugins with their standing and a selected plugin\'s releases', () => {
+  const html = hashicorpView({})
+  assert.match(html, /Plugins[\s\S]{0,200}?· 3 published/)
+  assert.match(html, /Held from GitHub \(acme-infra\/packer-plugin-docker\)/)
+  assert.match(html, />1 mirrored</)
+  assert.match(html, />Not mirrored</)
+  assert.match(html, /github\.com\/hashicorp\/packer-plugin-amazon/)
+  assert.match(html, /Show prereleases/)
+  assert.match(html, /Platform: any/)
+  assert.match(html, /2 of 3 versions · prereleases hidden/)
+  assert.match(html, /<th[^>]*>Lifecycle<\/th><th[^>]*>Platforms<\/th><th[^>]*>Changelog<\/th><th[^>]*>In dufflebag</)
+  assert.match(html, /<code>1\.8\.3<\/code>/)
+  assert.match(html, />supported</)
+  assert.match(html, />2 platforms</)
+  assert.match(html, /href="https:\/\/github\.com\/hashicorp\/packer-plugin-amazon\/blob\/main\/CHANGELOG\.md"[^>]*>Changelog ↗</)
+  assert.match(html, />Available<[\s\S]{0,300}?1 platforms/, 'a mirrored version shows its standing and stored platform count')
+  assert.match(html, /id="version-1\.8\.2"[^>]*disabled/, 'a mirrored version cannot be chosen again')
   assert.doesNotMatch(html, /1\.9\.0-beta\.1/)
-  assert.match(html, /Load older releases/)
+  assert.match(html, />Show older releases</)
+  assert.match(html, /Platforms to import/)
+  assert.match(html, /Preselected: the architectures amazon already has\./)
+  assert.match(html, /id="platform-linux_amd64"[^>]*checked/)
+  assert.match(html, />existing</)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Import</)
+  assert.match(html, /Select at least one version/)
+  assert.match(html, />Cancel</)
+})
+
+test('a held plugin explains the hold and offers no import; a first import preselects the organization defaults', () => {
+  const held = hashicorpView({ selected: hashicorpPlugins[1], versions: [amazonReleases[0]], heldVersions: [], preselected: [] })
+  assert.match(held, /docker is held from GitHub/)
+  assert.match(held, /In acme, docker comes from GitHub \(acme-infra\/packer-plugin-docker\)\. A name belongs to one source per organization, so HashiCorp’s docker can’t be imported\. The name is freed once every docker version is removed; revoked versions still count\./)
+  assert.match(held, />Not importable</)
+  assert.match(held, /id="version-1\.8\.3"[^>]*disabled/)
+  assert.doesNotMatch(held, /Platforms to import/)
+  const first = hashicorpView({ selected: hashicorpPlugins[2], versions: [amazonReleases[0]], heldVersions: [], preselected: ['linux_amd64', 'darwin_arm64'] })
+  assert.match(first, /Preselected: acme’s default platforms \(Registry settings\), since this is a first import\./)
+  assert.match(first, />org default</)
+  assert.match(first, /id="platform-darwin_arm64"[^>]*checked/)
 })
 
 const jobViewProps = {

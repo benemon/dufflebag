@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Breadcrumb, BreadcrumbItem, Button, Checkbox, Content, Label, PageSection, Spinner, Switch, Title,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content, Flex, FlexItem, Label,
+  MenuToggle, PageSection, Select, SelectList, SelectOption, SimpleList, SimpleListItem, Spinner, Switch,
+  Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate } from 'react-router'
@@ -10,19 +12,22 @@ import { useAuth } from '../auth/AuthContext'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  createPluginImport, getDefaultPlatforms, listHashicorpPluginVersions, listHashicorpPlugins, listPluginVersions,
-  sourceLabel, type HashicorpPlugin, type HashicorpPluginVersion,
+  PLUGIN_OS_GROUPS, createPluginImport, getDefaultPlatforms, listHashicorpPluginVersions, listHashicorpPlugins,
+  listPluginVersions, sourceLabel, type HashicorpPlugin, type HashicorpPluginVersion, type PluginVersion,
 } from '../data/pluginRegistry'
+import { useTenant } from '../data/tenant'
 import { pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginHashicorp() {
   const { state, selectedOrganization, signOut } = useAuth()
+  const { tenant } = useTenant()
   const navigate = useNavigate()
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? ''
   const token = state?.token ?? ''
   const [plugins, setPlugins] = useState<HashicorpPlugin[] | null>(null)
   const [selected, setSelected] = useState<HashicorpPlugin | null>(null)
   const [versions, setVersions] = useState<HashicorpPluginVersion[] | null>(null)
+  const [heldVersions, setHeldVersions] = useState<PluginVersion[]>([])
   const [next, setNext] = useState<string | undefined>()
   const [preselected, setPreselected] = useState<string[]>([])
   const [failure, setFailure] = useState<string | null>(null)
@@ -48,6 +53,7 @@ export function PluginHashicorp() {
   const choose = async (plugin: HashicorpPlugin) => {
     setSelected(plugin)
     setVersions(null)
+    setHeldVersions([])
     await guard(async () => {
       const page = await listHashicorpPluginVersions(token, organizationID, plugin.product)
       setVersions(page.versions)
@@ -56,6 +62,7 @@ export function PluginHashicorp() {
       // before it, the organization's (ADR-0027 A8).
       if (plugin.mirrored_versions > 0) {
         const held = await listPluginVersions(token, organizationID, plugin.name)
+        setHeldVersions(held.versions)
         setPreselected([...new Set(held.versions.flatMap((v) => v.stored_platforms.map((p) => `${p.os}_${p.arch}`)))])
       } else {
         setPreselected(await getDefaultPlatforms(token, organizationID))
@@ -65,7 +72,8 @@ export function PluginHashicorp() {
 
   return (
     <PluginHashicorpView
-      plugins={plugins} selected={selected} versions={versions} hasMore={next !== undefined}
+      organizationName={tenant.organization}
+      plugins={plugins} selected={selected} versions={versions} heldVersions={heldVersions} hasMore={next !== undefined}
       preselected={preselected} loading={plugins === null && !failure} failure={failure} busy={busy}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToPlugins={() => navigate('/plugin-registry')}
@@ -90,13 +98,20 @@ export function PluginHashicorp() {
   )
 }
 
+export function hashicorpPluginNote(plugin: HashicorpPlugin): string {
+  if (plugin.held_by) return `Held from ${sourceLabel(plugin.held_by)}${plugin.held_by.repository ? ` (${plugin.held_by.repository})` : ''}`
+  return plugin.mirrored_versions ? `${plugin.mirrored_versions} mirrored` : 'Not mirrored'
+}
+
 export function PluginHashicorpView({
-  plugins, selected, versions, hasMore, preselected, loading, failure, busy,
+  organizationName, plugins, selected, versions, heldVersions, hasMore, preselected, loading, failure, busy,
   onBackToRegistry, onBackToPlugins, onRefresh, onChoose, onMore, onImport,
 }: {
+  organizationName: string
   plugins: HashicorpPlugin[] | null
   selected: HashicorpPlugin | null
   versions: HashicorpPluginVersion[] | null
+  heldVersions: PluginVersion[]
   hasMore: boolean
   preselected: string[]
   loading: boolean
@@ -110,13 +125,23 @@ export function PluginHashicorpView({
   onImport: (versions: string[], platforms: string[]) => void | Promise<void>
 }) {
   const [showPrereleases, setShowPrereleases] = useState(false)
+  const [platformFilter, setPlatformFilter] = useState('any')
+  const [filterOpen, setFilterOpen] = useState(false)
   const [chosen, setChosen] = useState<string[]>([])
   const [platforms, setPlatforms] = useState<string[] | null>(null)
-  useEffect(() => { setChosen([]); setPlatforms(null) }, [selected])
-  const shownVersions = (versions ?? []).filter((v) => showPrereleases || !v.prerelease)
-  const available = [...new Set(shownVersions.filter((v) => chosen.includes(v.version)).flatMap((v) => v.platforms))].sort()
-  const selectedPlatforms = platforms ?? preselected.filter((p) => available.includes(p))
+  useEffect(() => { setChosen([]); setPlatforms(null); setPlatformFilter('any') }, [selected])
+  const held = selected?.held_by
+  const all = versions ?? []
+  const shownVersions = all
+    .filter((v) => showPrereleases || !v.prerelease)
+    .filter((v) => platformFilter === 'any' || v.platforms.includes(platformFilter))
+  const published = [...new Set(all.flatMap((v) => v.platforms))].sort()
+  const publishedForChosen = [...new Set(all.filter((v) => chosen.includes(v.version)).flatMap((v) => v.platforms))]
+  const selectedPlatforms = platforms ?? preselected
+  const importable = chosen.length > 0 && selectedPlatforms.length > 0
+  const firstImport = (selected?.mirrored_versions ?? 0) === 0
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
+  const heldByVersion = new Map(heldVersions.map((v) => [v.version, v]))
   return (
     <>
       <ScreenHeader
@@ -128,7 +153,7 @@ export function PluginHashicorpView({
           </Breadcrumb>
         )}
         title="Browse HashiCorp"
-        description="Packer plugins published on releases.hashicorp.com. Each imported version's SHA256SUMS is verified against HashiCorp's signing key before anything is stored."
+        description="Plugins HashiCorp publishes at releases.hashicorp.com. Pick versions and platforms; the import runs as one job."
       />
       <PageSection variant="secondary" isFilled>
         {loading ? (
@@ -137,77 +162,160 @@ export function PluginHashicorpView({
           <PluginErrorCard title="HashiCorp's plugin list could not be read" error={failure} onRetry={onRefresh} />
         ) : null}
         {!loading && !failure && plugins ? (
-          <Table aria-label="HashiCorp plugins" variant="compact">
-            <Thead><Tr><Th>Plugin</Th><Th>Mirrored versions</Th><Th>Status</Th></Tr></Thead>
-            <Tbody>
-              {plugins.map((plugin) => (
-                <Tr key={plugin.product} isRowSelected={selected?.product === plugin.product}>
-                  <Td dataLabel="Plugin">
-                    <Button variant="link" isInline isDisabled={Boolean(plugin.held_by)} onClick={() => onChoose(plugin)}>{plugin.name}</Button>
-                  </Td>
-                  <Td dataLabel="Mirrored versions">{plugin.mirrored_versions}</Td>
-                  <Td dataLabel="Status">
-                    {plugin.held_by
-                      ? `Held by ${sourceLabel(plugin.held_by)}${plugin.held_by.repository ? ` (${plugin.held_by.repository})` : ''}. A name belongs to one source; it is freed once every version is removed.`
-                      : null}
-                  </Td>
-                </Tr>
-              ))}
-            </Tbody>
-          </Table>
-        ) : null}
-        {!loading && !failure && selected ? (
-          <>
-            <Title headingLevel="h2" size="md">{selected.name}</Title>
-            <Switch id="show-prereleases" label="Show prereleases" isChecked={showPrereleases} onChange={(_e, value) => setShowPrereleases(value)} />
-            {versions === null ? <Spinner aria-label="Loading releases…" /> : (
-              <Table aria-label={`${selected.name} releases`} variant="compact">
-                <Thead><Tr><Th screenReaderText="Select" /><Th>Version</Th><Th>Released</Th><Th>State</Th><Th>Platforms</Th></Tr></Thead>
-                <Tbody>
-                  {shownVersions.map((version) => (
-                    <Tr key={version.version}>
-                      <Td dataLabel="Select">
-                        <Checkbox
-                          id={`version-${version.version}`} aria-label={`Select ${version.version}`}
-                          isChecked={version.mirrored || chosen.includes(version.version)} isDisabled={version.mirrored}
-                          onChange={() => setChosen(toggle(chosen, version.version))}
-                        />
-                      </Td>
-                      <Td dataLabel="Version">
-                        {version.version} {version.mirrored ? <Label isCompact color="green">Mirrored</Label> : null}
-                        {version.prerelease ? <Label isCompact color="orange">Prerelease</Label> : null}
-                      </Td>
-                      <Td dataLabel="Released">{version.created_at.slice(0, 10)}</Td>
-                      <Td dataLabel="State">{version.state ?? ''}</Td>
-                      <Td dataLabel="Platforms">{version.platforms.length}</Td>
-                    </Tr>
-                  ))}
-                </Tbody>
-              </Table>
-            )}
-            {hasMore ? <Button variant="link" onClick={onMore}>Load older releases</Button> : null}
-            {chosen.length ? (
-              <>
-                <Title headingLevel="h3" size="md">Platforms</Title>
-                <Content component="small">
-                  {selected.mirrored_versions > 0 ? `Preselected: the platforms ${selected.name} already has.` : 'Preselected: the organization\'s default platforms.'}
-                </Content>
-                {available.map((platform) => (
-                  <Checkbox
-                    key={platform} id={`platform-${platform}`} label={platform}
-                    isChecked={selectedPlatforms.includes(platform)}
-                    onChange={() => setPlatforms(toggle(selectedPlatforms, platform))}
-                  />
-                ))}
-                <Button
-                  variant="primary" isLoading={busy} isDisabled={busy || selectedPlatforms.length === 0}
-                  onClick={() => void onImport(chosen, selectedPlatforms)}
-                >
-                  Import {chosen.length === 1 ? `${selected.name} ${chosen[0]}` : `${chosen.length} versions`} · {selectedPlatforms.length} platforms
-                </Button>
-              </>
-            ) : null}
-          </>
+          <Flex gap={{ default: 'gapLg' }} alignItems={{ default: 'alignItemsStretch' }}>
+            <FlexItem style={{ minWidth: 240 }}>
+              <Card isFullHeight>
+                <CardTitle>Plugins <Content component="small">· {plugins.length} published</Content></CardTitle>
+                <CardBody>
+                  <SimpleList aria-label="HashiCorp plugins" isControlled={false}>
+                    {plugins.map((plugin) => (
+                      <SimpleListItem key={plugin.product} isActive={selected?.product === plugin.product} onClick={() => onChoose(plugin)}>
+                        <div>{plugin.name}</div>
+                        <Content component="small" style={plugin.held_by ? { color: 'var(--pf-t--global--color--status--warning--default)' } : undefined}>{hashicorpPluginNote(plugin)}</Content>
+                      </SimpleListItem>
+                    ))}
+                  </SimpleList>
+                </CardBody>
+              </Card>
+            </FlexItem>
+            <FlexItem flex={{ default: 'flex_1' }}>
+              {selected ? (
+                <>
+                  <Card>
+                    <CardTitle>
+                      {selected.name}{' '}
+                      <Content component="small">github.com/hashicorp/{selected.product}</Content>
+                    </CardTitle>
+                    <CardBody>
+                      {held ? (
+                        <Alert variant="danger" isInline title={`${selected.name} is held from ${sourceLabel(held)}`}>
+                          <Content component="p">
+                            In {organizationName}, {selected.name} comes from {sourceLabel(held)}{held.repository ? ` (${held.repository})` : ''}.
+                            A name belongs to one source per organization, so HashiCorp’s {selected.name} can’t be imported.
+                            The name is freed once every {selected.name} version is removed; revoked versions still count.
+                          </Content>
+                        </Alert>
+                      ) : null}
+                      <Toolbar inset={{ default: 'insetNone' }}>
+                        <ToolbarContent>
+                          <ToolbarItem>
+                            <Switch id="show-prereleases" label="Show prereleases" isChecked={showPrereleases} onChange={(_e, value) => setShowPrereleases(value)} />
+                          </ToolbarItem>
+                          <ToolbarItem>
+                            <Select
+                              isOpen={filterOpen} selected={platformFilter} onOpenChange={setFilterOpen}
+                              onSelect={(_event, value) => { setPlatformFilter(String(value)); setFilterOpen(false) }}
+                              toggle={(ref) => <MenuToggle ref={ref} onClick={() => setFilterOpen((open) => !open)} isExpanded={filterOpen}>Platform: {platformFilter}</MenuToggle>}
+                            >
+                              <SelectList>
+                                <SelectOption value="any">any</SelectOption>
+                                {published.map((platform) => <SelectOption key={platform} value={platform}>{platform}</SelectOption>)}
+                              </SelectList>
+                            </Select>
+                          </ToolbarItem>
+                          <ToolbarItem align={{ default: 'alignEnd' }}>
+                            <Content component="small">
+                              {versions === null ? '' : `${shownVersions.length} of ${all.length} versions${showPrereleases ? '' : ' · prereleases hidden'}`}
+                            </Content>
+                          </ToolbarItem>
+                        </ToolbarContent>
+                      </Toolbar>
+                      {versions === null ? <Spinner aria-label="Loading releases…" /> : (
+                        <Table aria-label={`${selected.name} releases`} variant="compact">
+                          <Thead>
+                            <Tr>
+                              <Th screenReaderText="Select" /><Th>Version</Th><Th>Released</Th><Th>Lifecycle</Th><Th>Platforms</Th><Th>Changelog</Th><Th>In dufflebag</Th>
+                            </Tr>
+                          </Thead>
+                          <Tbody>
+                            {shownVersions.map((version) => {
+                              const mirrored = heldByVersion.get(version.version)
+                              const on = version.mirrored || chosen.includes(version.version)
+                              return (
+                                <Tr key={version.version} isRowSelected={on && !version.mirrored && !held}>
+                                  <Td dataLabel="Select">
+                                    <Checkbox
+                                      id={`version-${version.version}`} aria-label={`Select ${version.version}`}
+                                      isChecked={on && !held} isDisabled={version.mirrored || Boolean(held)}
+                                      onChange={() => setChosen(toggle(chosen, version.version))}
+                                    />
+                                  </Td>
+                                  <Td dataLabel="Version">
+                                    <code>{version.version}</code>{' '}
+                                    {version.prerelease ? <Label isCompact variant="outline">prerelease</Label> : null}
+                                  </Td>
+                                  <Td dataLabel="Released">{version.created_at ? new Date(version.created_at).toLocaleDateString() : ''}</Td>
+                                  <Td dataLabel="Lifecycle">{version.state ?? '—'}</Td>
+                                  <Td dataLabel="Platforms">{version.platforms.length} platforms</Td>
+                                  <Td dataLabel="Changelog">
+                                    {version.changelog ? <a href={version.changelog} target="_blank" rel="noreferrer">Changelog ↗</a> : '—'}
+                                  </Td>
+                                  <Td dataLabel="In dufflebag">
+                                    {version.mirrored
+                                      ? <>{mirrored?.revoked ? <Label isCompact color="grey">Revoked</Label> : <Label isCompact color="green">Available</Label>}{mirrored ? <> <Content component="small">{mirrored.stored_platforms.length} platforms</Content></> : null}</>
+                                      : held ? <Content component="small">Not importable</Content> : null}
+                                  </Td>
+                                </Tr>
+                              )
+                            })}
+                          </Tbody>
+                        </Table>
+                      )}
+                      {hasMore ? <Button variant="link" isInline onClick={onMore}>Show older releases</Button> : null}
+                    </CardBody>
+                  </Card>
+                  {!held ? (
+                    <Card>
+                      <CardTitle>
+                        Platforms to import{' '}
+                        <Content component="small">
+                          {firstImport
+                            ? `Preselected: ${organizationName}’s default platforms (Registry settings), since this is a first import.`
+                            : `Preselected: the architectures ${selected.name} already has.`}
+                        </Content>
+                      </CardTitle>
+                      <CardBody>
+                        <Flex gap={{ default: 'gapLg' }} flexWrap={{ default: 'wrap' }}>
+                          {PLUGIN_OS_GROUPS.map(([os, arches]) => (
+                            <FlexItem key={os}>
+                              <Content component="small">{os}</Content>
+                              {arches.map((arch) => {
+                                const platform = `${os}_${arch}`
+                                const unpublished = chosen.length > 0 && !publishedForChosen.includes(platform)
+                                return (
+                                  <Checkbox
+                                    key={platform} id={`platform-${platform}`}
+                                    label={<>{arch} {preselected.includes(platform) ? <Label isCompact variant="outline">{firstImport ? 'org default' : 'existing'}</Label> : null}</>}
+                                    isChecked={selectedPlatforms.includes(platform)} isDisabled={unpublished}
+                                    title={unpublished ? 'Not published for the selected versions' : undefined}
+                                    onChange={() => setPlatforms(toggle(selectedPlatforms, platform))}
+                                  />
+                                )
+                              })}
+                            </FlexItem>
+                          ))}
+                        </Flex>
+                        <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 16 }}>
+                          <Button
+                            variant="primary" isLoading={busy} isDisabled={busy || !importable}
+                            onClick={() => void onImport(chosen, selectedPlatforms)}
+                          >
+                            {chosen.length ? `Import ${chosen.length} ${chosen.length === 1 ? 'version' : 'versions'} · ${selectedPlatforms.length} platforms` : 'Import'}
+                          </Button>
+                          <Button variant="link" isDisabled={busy} onClick={onBackToPlugins}>Cancel</Button>
+                          <Content component="small">
+                            {chosen.length ? `${chosen.join(', ')} × ${selectedPlatforms.join(', ')}` : 'Select at least one version'}
+                          </Content>
+                        </Flex>
+                      </CardBody>
+                    </Card>
+                  ) : null}
+                </>
+              ) : (
+                <Card isFullHeight><CardBody><Content component="p">Choose a plugin to see its releases.</Content></CardBody></Card>
+              )}
+            </FlexItem>
+          </Flex>
         ) : null}
       </PageSection>
     </>
