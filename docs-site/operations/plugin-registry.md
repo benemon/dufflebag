@@ -7,6 +7,8 @@ that an operator has chosen and that stay available when the internet is not.
 Each organization has its own registry. It is off until a maintainer enables it,
 and Packer cannot reach it until a maintainer exposes it.
 
+![dufflebag Plugins screen listing the organization's mirrored plugins](/screenshots/plugin-registry.png)
+
 ## Requirements
 
 - **Packer 1.16.1 or later.** Earlier Packer releases install plugins only from
@@ -148,6 +150,10 @@ A publisher changes what a plugin serves from its page:
    already has.
 4. Check the pending changes and choose **Sync**. The changes run in order
    as one job, and its page shows each change's outcome.
+
+![The plugin detail grid in edit mode with one pending change](/screenshots/plugin-detail-edit.png)
+
+![A sync job page showing each change and its outcome](/screenshots/plugin-import-job.png)
 
 A platform added to a mirrored version is admitted only if the SHA256SUMS
 stored when the version was first mirrored lists it with the same digest. A
