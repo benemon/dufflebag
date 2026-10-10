@@ -1,4 +1,6 @@
 {
+  "batch_index": 1,
+  "batch_size": 1,
   "changes": [
     {
       "action": "add",
@@ -21,8 +23,10 @@
     }
   ],
   "created_at": "2026-07-30T10:00:00Z",
+  "created_by": "test",
   "finished_at": "2026-07-30T10:00:00Z",
   "id": "00000000-0000-0000-0000-000000000000",
+  "origin": "plugin",
   "outcomes": [
     {
       "outcome": "imported",
@@ -51,6 +55,7 @@
   ],
   "platforms": [],
   "product": "amazon",
+  "queued_ahead": 0,
   "source": "releases-hashicorp",
   "state": "partially_succeeded",
   "versions": []

@@ -37,6 +37,7 @@ let setPluginUpdateCheck
 let planCatalogueSync
 let catalogueRows
 let pendingItems
+let retryPluginImport
 let CatalogueSyncConfirmationView
 let createGithubImport
 let createPluginImport
@@ -61,7 +62,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -122,11 +123,12 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
       })),
     },
     {
-      name: 'job', crumbs: ['Registry', 'Plugins', 'Plugin', 'Job 01KZF3QW7N'], loading: 'Loading job…', error: 'Job could not be loaded',
+      name: 'job', crumbs: ['Registry', 'Plugins', 'Plugin', 'Job 01KZF3QW'], loading: 'Loading job…', error: 'Job could not be loaded',
       view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginImportJobView, {
         ...callbacks, id: '01KZF3QW7N', job: null, registry: null, loading, failure,
         organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
-      })),
+              callerRole: 'publisher', busy: false, actionFailure: null, onRetry: () => {},
+})),
     },
     {
       name: 'hashicorp', crumbs: ['Registry', 'Plugins', 'Browse HashiCorp'], loading: 'Reading releases.hashicorp.com…', error: "HashiCorp's plugin list could not be read",
@@ -569,46 +571,114 @@ test('browsing HashiCorp marks held names and mirrored versions', () => {
   assert.match(html, /Load older releases/)
 })
 
-test('an import job shows each version\'s outcome and failed platforms', () => {
-  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, {
-    job: {
-      id: 'job', source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3', '1.8.2', '1.8.1'],
-      platforms: ['linux_amd64', 'windows_386'], changes: [], state: 'partially_succeeded', created_at: '2026-10-09T00:00:00Z',
-      outcomes: [
-        { version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'failed', error: 'not published upstream' }] },
-        { version: '1.8.2', outcome: 'already_mirrored' },
-        { version: '1.8.1', outcome: 'failed', error: 'SHA256SUMS signature does not verify against the HashiCorp key' },
-      ],
-    },
-    registry: { enabled: true, exposed: false }, failure: null, organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
-  }))
+const jobViewProps = {
+  id: 'job', registry: { enabled: true, exposed: true }, loading: false, failure: null, organizationName: 'acme', host: 'dufflebag.example.com',
+  callerRole: 'publisher', busy: false, actionFailure: null,
+  onBackToRegistry: () => {}, onBackToPlugins: () => {}, onRefresh: () => {}, onOpen: () => {}, onRetry: () => {},
+}
+const importJob = (state, outcomes, extra = {}) => ({
+  id: '01KZF3QW7N00000000000000000', source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3', '1.8.2', '1.8.1'],
+  platforms: ['linux_amd64', 'windows_386'], changes: [], state, created_at: '2026-10-09T14:02:00Z',
+  created_by: 'alice', origin: 'import', batch_index: 1, batch_size: 1, queued_ahead: 0, outcomes, ...extra,
+})
+
+test('an import job shows each version\'s outcome and failed platforms, with a retry for the failed ones', () => {
+  const job = importJob('partially_succeeded', [
+    { version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'failed', error: 'not published upstream' }] },
+    { version: '1.8.2', outcome: 'already_mirrored' },
+    { version: '1.8.1', outcome: 'failed', error: 'SHA256SUMS signature does not verify against the HashiCorp key' },
+  ], { finished_at: '2026-10-09T14:04:00Z' })
+  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, { ...jobViewProps, job, registry: { enabled: true, exposed: false } }))
+  assert.match(html, /Import amazon/)
   assert.match(html, /Partially succeeded/)
-  assert.match(html, /Imported/)
-  assert.match(html, /Already mirrored/)
-  assert.match(html, /windows_386 failed/)
-  assert.match(html, /not published upstream/)
-  assert.match(html, /does not verify against the HashiCorp key/)
+  assert.match(html, /Started by alice · [^·]+ · finished [^·]+ · from Browse HashiCorp \(packer-plugin-amazon\)/)
+  assert.match(html, />Job 01KZF3QW</)
+  assert.match(html, /1 of 3 versions applied/)
+  assert.match(html, /1\.8\.3 didn’t get windows_386; 1\.8\.1 didn’t get applied\. Other versions are live\. Retrying runs only the failed versions\./)
+  assert.match(html, />Retry failed versions</)
+  assert.match(html, /Outcome[\s\S]{0,400}?1 of 3 versions applied\. 2 versions failed\./)
+  assert.match(html, />Imported</)
+  assert.match(html, />Already mirrored</)
+  assert.match(html, /<code>windows_386<\/code>[\s\S]{0,400}?not published upstream[\s\S]{0,400}?>Failed</)
+  assert.match(html, /<code>all<\/code>[\s\S]{0,400}?does not verify against the HashiCorp key/)
+  assert.match(html, /1 of 2</, 'a version with a failed platform counts its imported ones')
   assert.match(html, /version = &quot;1\.8\.3&quot;/)
+  assert.match(html, /Pins the newest version this job made available\./)
   assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
   assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Registry settings</)
   assert.ok(html.indexOf('Registry settings') < html.indexOf('Import outcomes'))
+  const reader = renderToStaticMarkup(React.createElement(PluginImportJobView, { ...jobViewProps, job, callerRole: 'reader' }))
+  assert.doesNotMatch(reader, />Retry failed versions</)
+})
+
+test('a job page states its outcome per state: queued, running, failed, succeeded', () => {
+  const render = (job) => renderToStaticMarkup(React.createElement(PluginImportJobView, { ...jobViewProps, job }))
+  const queued = render(importJob('queued', [], { queued_ahead: 1, origin: 'catalogue', batch_index: 1, batch_size: 3 }))
+  assert.match(queued, /Waiting for 1 job ahead of it\./)
+  assert.match(queued, /from Sync selected \(1 of 3 jobs\)/)
+  assert.match(queued, />Waiting</)
+  assert.match(queued, /Appears when the job imports something\./)
+  assert.doesNotMatch(queued, /Open amazon/)
+  const running = render(importJob('running', [{ version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'imported' }] }]))
+  assert.match(running, /1 of 3 versions done\./)
+  assert.match(running, /aria-label="Job progress"/)
+  assert.match(running, />Importing</)
+  assert.match(running, />Waiting</)
+  const failed = render(importJob('failed', [{ version: '1.8.3', outcome: 'failed', error: 'releases.hashicorp.com unreachable: i/o timeout' }], { versions: ['1.8.3'], finished_at: '2026-10-09T14:03:00Z' }))
+  assert.match(failed, />Job failed</)
+  assert.match(failed, /i\/o timeout Nothing was changed\./)
+  assert.match(failed, />Retry job</)
+  assert.match(failed, /No stanza: nothing was imported\./)
+  const succeeded = render(importJob('succeeded', [
+    { version: '1.8.3', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'imported' }] },
+    { version: '1.8.2', outcome: 'imported', platforms: [{ platform: 'linux_amd64', outcome: 'imported' }, { platform: 'windows_386', outcome: 'already_mirrored' }] },
+    { version: '1.8.1', outcome: 'already_mirrored' },
+  ], { finished_at: '2026-10-09T14:03:00Z' }))
+  assert.match(succeeded, /3 versions\. 3 files imported, 2 already mirrored\./)
+  assert.match(succeeded, /Identical to the stored file; nothing written\./)
+  assert.doesNotMatch(succeeded, /Retry/)
+})
+
+test('retrying a job queues only its failed part', async () => {
+  const originalFetch = globalThis.fetch
+  const posted = []
+  globalThis.fetch = async (path, options) => {
+    posted.push({ path, body: JSON.parse(options.body) })
+    return new Response(JSON.stringify({ id: 'next' }), { status: 202, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const sync = JSON.parse(readFileSync(new URL('./fixtures/plugin-sync-job.json', import.meta.url), 'utf8'))
+    await retryPluginImport('token', 'org', sync)
+    assert.deepEqual(posted.at(-1).body, { changes: [
+      { version: '1.8.3', action: 'add', platforms: ['windows_386'] },
+      { version: '1.8.2', action: 'add', platforms: ['linux_arm64'] },
+    ] }, 'a partially failed add keeps only its failed platforms; a succeeded restore is not repeated')
+    assert.match(posted.at(-1).path, /plugins\/amazon\/sync$/)
+    await retryPluginImport('token', 'org', importJob('partially_succeeded', [
+      { version: '1.8.3', outcome: 'imported' }, { version: '1.8.2', outcome: 'failed', error: 'x' }, { version: '1.8.1', outcome: 'failed', error: 'y' },
+    ]))
+    assert.deepEqual(posted.at(-1).body, { source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.2', '1.8.1'], platforms: ['linux_amd64', 'windows_386'] })
+    await retryPluginImport('token', 'org', importJob('failed', [{ version: 'v0.6.4', outcome: 'failed', error: 'x' }], { source: 'github', product: 'owner/packer-plugin-git', versions: ['v0.6.4'] }))
+    assert.deepEqual(posted.at(-1).body, { source: 'github', product: 'owner/packer-plugin-git', versions: ['v0.6.4'], platforms: ['linux_amd64', 'windows_386'] })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('a sync job shows each change in order with its outcome', () => {
   // Written by the platform handler (TestPluginSyncJobFixtureMatchesTheHandler).
   const job = JSON.parse(readFileSync(new URL('./fixtures/plugin-sync-job.json', import.meta.url), 'utf8'))
-  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, {
-    job, registry: { enabled: true, exposed: true }, failure: null, organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
-  }))
+  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, { ...jobViewProps, job }))
   assert.match(html, /Sync amazon/)
-  assert.match(html, /3 changes, applied in order/)
-  assert.match(html, /add linux_amd64, windows_386/)
-  assert.match(html, /windows_386 failed/)
-  assert.match(html, /digest does not match SHA256SUMS/)
+  assert.match(html, /Started by test · [^·]+ · finished [^·]+ · from the plugin page, 3 changes/)
+  assert.match(html, /1 of 3 changes applied\. 2 changes failed\./)
+  assert.match(html, /<td[^>]*>Add<\/td><td[^>]*>linux_amd64, windows_386</)
+  assert.match(html, /<td[^>]*>Restore<\/td><td[^>]*>—</)
+  assert.match(html, /<code>windows_386<\/code>[\s\S]{0,400}?not published upstream/)
+  assert.match(html, /<code>all<\/code>[\s\S]{0,400}?digest does not match SHA256SUMS/)
   assert.match(html, />Restored</)
-  assert.match(html, />restore</)
   assert.match(html, /Open amazon/)
-  assert.doesNotMatch(html, /Platforms: /)
+  assert.match(html, />Retry failed changes</)
 })
 
 test('an import is queued with the selected versions and platforms', async () => {

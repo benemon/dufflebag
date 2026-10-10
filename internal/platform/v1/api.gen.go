@@ -469,6 +469,30 @@ func (e PluginChangeAction) Valid() bool {
 	}
 }
 
+// Defines values for PluginImportOrigin.
+const (
+	PluginImportOriginCatalogue PluginImportOrigin = "catalogue"
+	PluginImportOriginImport    PluginImportOrigin = "import"
+	PluginImportOriginPlugin    PluginImportOrigin = "plugin"
+	PluginImportOriginUpload    PluginImportOrigin = "upload"
+)
+
+// Valid indicates whether the value is a known member of the PluginImportOrigin enum.
+func (e PluginImportOrigin) Valid() bool {
+	switch e {
+	case PluginImportOriginCatalogue:
+		return true
+	case PluginImportOriginImport:
+		return true
+	case PluginImportOriginPlugin:
+		return true
+	case PluginImportOriginUpload:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginImportState.
 const (
 	PluginImportStateFailed             PluginImportState = "failed"
@@ -498,13 +522,16 @@ func (e PluginImportState) Valid() bool {
 
 // Defines values for PluginImportPlatformOutcomeOutcome.
 const (
-	PluginImportPlatformOutcomeOutcomeFailed   PluginImportPlatformOutcomeOutcome = "failed"
-	PluginImportPlatformOutcomeOutcomeImported PluginImportPlatformOutcomeOutcome = "imported"
+	PluginImportPlatformOutcomeOutcomeAlreadyMirrored PluginImportPlatformOutcomeOutcome = "already_mirrored"
+	PluginImportPlatformOutcomeOutcomeFailed          PluginImportPlatformOutcomeOutcome = "failed"
+	PluginImportPlatformOutcomeOutcomeImported        PluginImportPlatformOutcomeOutcome = "imported"
 )
 
 // Valid indicates whether the value is a known member of the PluginImportPlatformOutcomeOutcome enum.
 func (e PluginImportPlatformOutcomeOutcome) Valid() bool {
 	switch e {
+	case PluginImportPlatformOutcomeOutcomeAlreadyMirrored:
+		return true
 	case PluginImportPlatformOutcomeOutcomeFailed:
 		return true
 	case PluginImportPlatformOutcomeOutcomeImported:
@@ -1439,18 +1466,36 @@ type PluginChangeAction string
 
 // PluginImport defines model for PluginImport.
 type PluginImport struct {
+	// BatchIndex This job's position in its batch
+	BatchIndex int `json:"batch_index"`
+
+	// BatchSize Jobs in the batch; 1 outside a batch.
+	BatchSize int `json:"batch_size"`
+
 	// Changes A sync's changes, in the order they apply; empty for an import.
-	Changes    []PluginChange               `json:"changes"`
-	CreatedAt  time.Time                    `json:"created_at"`
-	FinishedAt *time.Time                   `json:"finished_at,omitempty"`
-	Id         openapi_types.UUID           `json:"id"`
-	Outcomes   []PluginImportVersionOutcome `json:"outcomes"`
-	Platforms  []string                     `json:"platforms"`
-	Product    string                       `json:"product"`
-	Source     string                       `json:"source"`
-	State      PluginImportState            `json:"state"`
-	Versions   []string                     `json:"versions"`
+	Changes   []PluginChange `json:"changes"`
+	CreatedAt time.Time      `json:"created_at"`
+
+	// CreatedBy The principal that queued the job.
+	CreatedBy  string             `json:"created_by"`
+	FinishedAt *time.Time         `json:"finished_at,omitempty"`
+	Id         openapi_types.UUID `json:"id"`
+
+	// Origin Where the job was queued from; catalogue jobs are one of a Sync selected batch.
+	Origin    PluginImportOrigin           `json:"origin"`
+	Outcomes  []PluginImportVersionOutcome `json:"outcomes"`
+	Platforms []string                     `json:"platforms"`
+	Product   string                       `json:"product"`
+
+	// QueuedAhead The organization's unfinished jobs queued before this one.
+	QueuedAhead int               `json:"queued_ahead"`
+	Source      string            `json:"source"`
+	State       PluginImportState `json:"state"`
+	Versions    []string          `json:"versions"`
 }
+
+// PluginImportOrigin Where the job was queued from; catalogue jobs are one of a Sync selected batch.
+type PluginImportOrigin string
 
 // PluginImportState defines model for PluginImport.State.
 type PluginImportState string

@@ -213,8 +213,18 @@ func TestSyncAddsAPlatformOnlyWhenTheStoredSumsListIt(t *testing.T) {
 	}
 
 	held := &fakeRepository{existing: []string{"1.0.0"}, stored: store.StoredPluginVersion{Source: repository.stored.Source, Sums: sums, Stored: []string{"linux_amd64"}}}
-	if outcome := NewImporter(upstream, nil, nil, held).Sync(context.Background(), store.OrganizationTenant{}, "probe", add); outcome.Outcome != OutcomeAlreadyMirrored {
+	outcome = NewImporter(upstream, nil, nil, held).Sync(context.Background(), store.OrganizationTenant{}, "probe", add)
+	if outcome.Outcome != OutcomeAlreadyMirrored || len(outcome.Platforms) != 1 || outcome.Platforms[0] != (PlatformOutcome{Platform: "linux_amd64", Outcome: OutcomeAlreadyMirrored}) {
 		t.Fatalf("add of a stored platform = %+v", outcome)
+	}
+
+	// A stored platform is reported beside the ones fetched, so the job page can say which were already there.
+	mixed := store.PluginChange{Version: "1.0.0", Action: "add", Platforms: []string{"linux_amd64", "windows_386"}}
+	outcome = NewImporter(upstream, nil, nil, held).Sync(context.Background(), store.OrganizationTenant{}, "probe", mixed)
+	if outcome.Outcome != OutcomeFailed || len(outcome.Platforms) != 2 ||
+		outcome.Platforms[0] != (PlatformOutcome{Platform: "linux_amd64", Outcome: OutcomeAlreadyMirrored}) ||
+		outcome.Platforms[1].Platform != "windows_386" || outcome.Platforms[1].Outcome != OutcomeFailed {
+		t.Fatalf("add of a stored and an unpublished platform = %+v", outcome)
 	}
 }
 

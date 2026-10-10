@@ -398,13 +398,16 @@ func (i *Importer) addPlatforms(
 		return failed("read the registry: %v", err)
 	}
 	var wanted []string
+	var held []PlatformOutcome
 	for _, platform := range platforms {
-		if !slices.Contains(stored.Stored, platform) {
+		if slices.Contains(stored.Stored, platform) {
+			held = append(held, PlatformOutcome{Platform: platform, Outcome: OutcomeAlreadyMirrored})
+		} else {
 			wanted = append(wanted, platform)
 		}
 	}
 	if len(wanted) == 0 {
-		return VersionOutcome{Version: version, Outcome: OutcomeAlreadyMirrored}
+		return VersionOutcome{Version: version, Outcome: OutcomeAlreadyMirrored, Platforms: held}
 	}
 	var zips map[string]asset
 	switch source.Kind {
@@ -439,7 +442,7 @@ func (i *Importer) addPlatforms(
 		return failed("%v", err)
 	}
 	defer spooled.close()
-	outcome := VersionOutcome{Version: version, Platforms: spooled.platforms}
+	outcome := VersionOutcome{Version: version, Platforms: append(held, spooled.platforms...)}
 	if len(spooled.uploaded) == 0 {
 		outcome.Outcome, outcome.Error = OutcomeFailed, "none of the selected platforms could be fetched"
 		return outcome

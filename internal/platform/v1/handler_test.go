@@ -700,12 +700,12 @@ func (r *fakeTenancyRepository) DeletePluginVersion(
 }
 
 func (r *fakeTenancyRepository) CreatePluginImport(
-	_ context.Context, _ store.OrganizationTenant, request store.PluginImportRequest,
+	_ context.Context, _ store.OrganizationTenant, request store.PluginImportRequest, origin store.PluginImportOrigin,
 ) (uuid.UUID, error) {
 	if !r.pluginRegistry.Enabled {
 		return uuid.Nil, store.ErrPluginRegistryNotEnabled
 	}
-	r.imports = append(r.imports, store.PluginImport{ID: uuid.New(), Request: request, State: "queued", Outcomes: []byte("[]"), CreatedAt: initTestTime})
+	r.imports = append(r.imports, store.PluginImport{ID: uuid.New(), Request: request, Origin: origin, State: "queued", Outcomes: []byte("[]"), CreatedAt: initTestTime})
 	return r.imports[len(r.imports)-1].ID, nil
 }
 

@@ -159,6 +159,12 @@ A publisher changes what a plugin serves from its page:
 
 ![A sync job page showing each change and its outcome](/screenshots/plugin-import-job.png)
 
+A job's page names who started it and from where, its place in the queue
+while it waits, and each version or change with its outcome; a platform
+that failed or was already mirrored is listed under its version with the
+reason. A failed job offers **Retry job**; a partially successful one offers
+**Retry failed changes**, which queues a new job for the failed part only.
+
 A platform added to a mirrored version is admitted only if the SHA256SUMS
 stored when the version was first mirrored lists it with the same digest. A
 release changed upstream since then cannot add to it. Mirrored platforms
