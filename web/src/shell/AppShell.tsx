@@ -26,7 +26,6 @@ const NAV: readonly NavGroupModel[] = [
   { group: 'Registry', items: [
     { key: 'buckets', to: '/buckets', label: 'Buckets' },
     { key: 'plugins', to: '/plugin-registry', label: 'Plugins' },
-    { key: 'pluginRegistrySettings', to: '/plugin-registry/settings', label: 'Registry settings' },
   ]},
   // Instance stays under Administration where the design put it: it is
   // reader-tier, so the group renders for every role — role filtering changes
@@ -35,6 +34,7 @@ const NAV: readonly NavGroupModel[] = [
     { key: 'principals', to: '/principals', label: 'Principals' },
     { key: 'audit', to: '/audit', label: 'Audit' },
     { key: 'encryption', to: '/encryption', label: 'Encryption' },
+    { key: 'pluginRegistrySettings', to: '/plugin-registry/settings', label: 'Plugin registry' },
     { key: 'bagdrop', to: '/bagdrop', label: 'Bag Drop' },
     { key: 'webhooks', to: '/webhooks', label: 'Webhooks' },
     { key: 'instance', to: '/instance', label: 'Instance' },
