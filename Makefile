@@ -148,6 +148,12 @@ generate: $(SWAGGER) ## Regenerate compat models from the vendored specs
 	$(SWAGGER) generate model --spec=$(SPECS)/cloud-resource-manager/2019-12-10/hcp.swagger.json \
 		--target=internal/compat/rm2019 --model-package=models --skip-validation --quiet
 	go mod tidy
+	go run ./cmd/platforms render
+
+.PHONY: platforms
+platforms: ## Refresh spec/platforms.json from releases.hashicorp.com (network), then render it
+	go run ./cmd/platforms fetch
+	go run ./cmd/platforms render
 
 .PHONY: generate-check
 # Covers BOTH generators. sqlc output was previously outside this check, which
@@ -157,9 +163,9 @@ generate: $(SWAGGER) ## Regenerate compat models from the vendored specs
 # uncommitted, and a correct generated change must still be checkable there.
 generate-check: ## Fail if generated code is stale relative to its inputs
 	@set -e; before=$$(mktemp); after=$$(mktemp); trap 'rm -f "$$before" "$$after"' EXIT; \
-		git diff --binary -- internal/compat/hcp2023/models internal/compat/rm2019/models internal/store/postgres/postgresdb internal/platform/v1/api.gen.go > "$$before"; \
+		git diff --binary -- internal/compat/hcp2023/models internal/compat/rm2019/models internal/store/postgres/postgresdb internal/platform/v1/api.gen.go internal/domain/plugin/platforms_gen.go web/src/data/platforms.json > "$$before"; \
 		$(MAKE) generate generate-sql generate-platform; \
-		git diff --binary -- internal/compat/hcp2023/models internal/compat/rm2019/models internal/store/postgres/postgresdb internal/platform/v1/api.gen.go > "$$after"; \
+		git diff --binary -- internal/compat/hcp2023/models internal/compat/rm2019/models internal/store/postgres/postgresdb internal/platform/v1/api.gen.go internal/domain/plugin/platforms_gen.go web/src/data/platforms.json > "$$after"; \
 		if ! cmp -s "$$before" "$$after"; then \
 			echo "generated code is stale — run 'make generate generate-sql generate-platform'"; \
 			diff -u "$$before" "$$after" || true; \

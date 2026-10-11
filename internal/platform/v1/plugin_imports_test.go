@@ -148,6 +148,12 @@ func TestPluginImportRoleAxis(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("uppercase platform = %d, want 400", response.Code)
 	}
+	// Well-formed but not a platform HashiCorp builds plugins for: defaults refuse it, imports do not.
+	unknown := call(t, importHandler(identity.RoleMaintainer, repository, fakeCatalogue{}), http.MethodPut, pluginRegistryPath("default-platforms"),
+		map[string]any{"platforms": []string{"linux_mips64"}}, testToken)
+	if unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "HashiCorp builds Packer plugins for") {
+		t.Fatalf("unknown platform as a default = %d %s, want 400", unknown.Code, unknown.Body.String())
+	}
 }
 
 func TestResolveGithubRelease(t *testing.T) {

@@ -45,7 +45,8 @@ Packer itself presents no credential. Exposure is what grants it access.
    version becomes readable, without credentials, by anything that can reach
    dufflebag.
 
-**Plugin registry** (under **Administration**) also holds the organization's default platforms and the
+**Plugin registry** (under **Administration**) also holds the organization's default platforms, ticked
+from the platforms HashiCorp builds Packer plugins for (grouped by operating system), and the
 two other lifecycle controls. **Unexpose** removes that access. A `packer init` in progress gets 404 on its
 next request. **Disable registry** deletes every plugin's records, then removes
 their files; a file that cannot be removed is logged and is never served. It is

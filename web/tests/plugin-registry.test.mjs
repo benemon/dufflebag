@@ -40,6 +40,9 @@ let pendingItems
 let retryPluginImport
 let githubRateLimit
 let compareVersionsDesc
+let groupPlatforms
+let PLUGIN_ARCHITECTURES
+let PLUGIN_OS_GROUPS
 let CatalogueSyncConfirmationView
 let createGithubImport
 let createPluginImport
@@ -64,7 +67,7 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
   ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
@@ -578,8 +581,11 @@ test('registry settings own lifecycle controls and default platforms with mainta
   assert.match(unexposed, />Default platforms</)
   assert.match(unexposed, />Expose</)
   assert.match(unexposed, /Disable registry/)
-  assert.match(unexposed, /value="linux_amd64, linux_arm64, darwin_arm64"/)
-  assert.match(unexposed, /Save default platforms/)
+  // The defaults are ticked from the published list, grouped by OS; nothing is typed.
+  for (const platform of ['linux_amd64', 'linux_arm64', 'darwin_arm64']) assert.match(unexposed, new RegExp(`id="default-platform-${platform}"[^>]*checked`), platform)
+  assert.match(unexposed, /id="default-platform-windows_amd64"(?![^>]*checked)/)
+  assert.doesNotMatch(unexposed, /aria-label="Default platforms"/)
+  assert.match(unexposed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Save default platforms/, 'nothing changed, nothing to save')
 
   const exposed = settings('maintainer', { enabled: true, exposed: true })
   assert.match(exposed, />Unexpose</)
@@ -1034,4 +1040,12 @@ test('pending items are worded per change as the design lists them', () => {
 test('versions order newest first, with a prerelease below its release', () => {
   const sorted = ['1.8.1', '1.9.0-beta.1', '1.10.0', '1.9.0', 'v1.8.2', '1.8.10'].sort(compareVersionsDesc)
   assert.deepEqual(sorted, ['1.10.0', '1.9.0', '1.9.0-beta.1', '1.8.10', 'v1.8.2', '1.8.1'])
+})
+
+test('the platform list is the generated snapshot, grouped by operating system in its order', () => {
+  assert.ok(PLUGIN_ARCHITECTURES.length >= 18)
+  assert.ok(PLUGIN_ARCHITECTURES.includes('linux_amd64'))
+  assert.deepEqual([...PLUGIN_ARCHITECTURES], [...PLUGIN_ARCHITECTURES].sort(), 'the snapshot is sorted, so the groups are too')
+  assert.deepEqual(groupPlatforms(['darwin_amd64', 'darwin_arm64', 'linux_386', 'linux_amd64']), [['darwin', ['amd64', 'arm64']], ['linux', ['386', 'amd64']]])
+  assert.deepEqual(PLUGIN_OS_GROUPS.flatMap(([os, arches]) => arches.map((arch) => `${os}_${arch}`)), [...PLUGIN_ARCHITECTURES])
 })

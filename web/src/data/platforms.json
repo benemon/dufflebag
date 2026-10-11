@@ -1,0 +1,24 @@
+{
+  "generated_at": "2026-10-11T16:48:00Z",
+  "platforms": [
+    "darwin_amd64",
+    "darwin_arm64",
+    "freebsd_386",
+    "freebsd_amd64",
+    "freebsd_arm",
+    "linux_386",
+    "linux_amd64",
+    "linux_arm",
+    "linux_arm64",
+    "linux_ppc64le",
+    "netbsd_386",
+    "netbsd_amd64",
+    "netbsd_arm",
+    "openbsd_386",
+    "openbsd_amd64",
+    "openbsd_arm",
+    "solaris_amd64",
+    "windows_386",
+    "windows_amd64"
+  ]
+}

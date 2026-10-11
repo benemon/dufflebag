@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState,
+  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, Content, EmptyState, Flex, FlexItem,
   EmptyStateActions, EmptyStateBody, EmptyStateFooter, Label, MenuToggle, Modal, ModalBody, ModalFooter,
-  ModalHeader, PageSection, Pagination, SearchInput, Select, SelectList, SelectOption, Spinner, TextInput,
+  ModalHeader, PageSection, Pagination, SearchInput, Select, SelectList, SelectOption, Spinner,
   Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { ActionsColumn, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
@@ -15,7 +15,7 @@ import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadStat
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
-  catalogueRows, enablePluginRegistry, getPluginRegistry, listPlugins, planCatalogueSync, sourceLabel, syncCatalogue,
+  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, catalogueRows, enablePluginRegistry, getPluginRegistry, listPlugins, planCatalogueSync, sourceLabel, syncCatalogue,
   type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type Plugin,
   type PluginRegistry,
 } from '../data/pluginRegistry'
@@ -560,16 +560,33 @@ export function DefaultPlatformsEditor({ platforms, busy, onSave }: {
   busy: boolean
   onSave: (platforms: string[]) => void
 }) {
-  const [draft, setDraft] = useState(platforms.join(', '))
-  useEffect(() => { setDraft(platforms.join(', ')) }, [platforms])
-  const parsed = draft.split(',').map((platform) => platform.trim()).filter(Boolean)
+  const [draft, setDraft] = useState<string[]>(platforms)
+  useEffect(() => { setDraft(platforms) }, [platforms])
+  const changed = [...draft].sort().join(',') !== [...platforms].sort().join(',')
   return (
     <>
       <Content component="p">
-        Default platforms, used when a plugin is first imported. Later imports keep the platforms the plugin already has.
+        Preselected when a plugin is first imported; later imports keep the platforms the plugin already has.
+        The list is the platforms HashiCorp builds Packer plugins for.
       </Content>
-      <TextInput aria-label="Default platforms" value={draft} onChange={(_event, value) => setDraft(value)} />
-      <Button variant="secondary" isDisabled={busy || parsed.length === 0 || parsed.join(', ') === platforms.join(', ')} onClick={() => onSave(parsed)}>
+      <Flex gap={{ default: 'gapLg' }} flexWrap={{ default: 'wrap' }}>
+        {PLUGIN_OS_GROUPS.map(([os, arches]) => (
+          <FlexItem key={os}>
+            <Content component="small">{os}</Content>
+            {arches.map((arch) => {
+              const platform = `${os}_${arch}`
+              return (
+                <Checkbox
+                  key={platform} id={`default-platform-${platform}`} label={<code>{arch}</code>}
+                  isChecked={draft.includes(platform)} isDisabled={busy}
+                  onChange={(_event, checked) => setDraft(checked ? [...draft, platform] : draft.filter((p) => p !== platform))}
+                />
+              )
+            })}
+          </FlexItem>
+        ))}
+      </Flex>
+      <Button variant="secondary" isDisabled={busy || draft.length === 0 || !changed} onClick={() => onSave(PLUGIN_ARCHITECTURES.filter((p) => draft.includes(p)))} style={{ marginTop: 12 }}>
         Save default platforms
       </Button>
     </>
