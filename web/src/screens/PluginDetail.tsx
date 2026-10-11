@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
+  Pagination, SearchInput, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
   CodeBlockAction, CodeBlockCode, Content, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Flex, FlexItem, Label, PageSection, Switch,
 } from '@patternfly/react-core'
-import { ActionsColumn, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
+import { ActionsColumn, ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
@@ -37,7 +38,6 @@ export function PluginDetail() {
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
-  const [editing, setEditing] = useState(false)
 
   const reload = useCallback(async () => {
     if (!organizationID || token === '') return
@@ -92,10 +92,8 @@ export function PluginDetail() {
       onBackToRegistry={() => navigate('/buckets')}
       onBackToPlugins={() => navigate('/plugin-registry')}
       onUpload={() => navigate('/plugin-registry/upload')}
-      busy={busy} actionFailure={actionFailure} editing={editing}
+      busy={busy} actionFailure={actionFailure}
       onToggleUpdates={act((enabled: boolean) => setPluginUpdateCheck(token, organizationID ?? '', name, enabled))}
-      onEdit={() => { setActionFailure(null); setEditing(true) }}
-      onDiscard={() => setEditing(false)}
       onOlderUpstream={() => void (async () => {
         if (!detail?.source.repository || !olderUpstream) return
         try {
@@ -126,20 +124,52 @@ export function PluginDetail() {
   )
 }
 
-type GridRow = {
+type VersionRow = {
   version: string
   state: 'available' | 'revoked' | 'none'
   prerelease: boolean
   stored: Set<string>
   published: Set<string>
+  released?: string
+}
+
+// What one platform of one version is, in the strip, the legend and the row's controls.
+type MarkKind = 'mirrored' | 'revoked' | 'add' | 'free' | 'upstream' | 'unpublished'
+
+const MARK_WORD: Record<MarkKind, string> = {
+  mirrored: 'Mirrored', revoked: 'Mirrored, revoked', add: 'Will be added', free: 'Upstream', upstream: 'Upstream', unpublished: 'Not published',
+}
+
+const MARK_STYLE: Record<MarkKind, { background: string; boxShadow?: string }> = {
+  mirrored: { background: 'var(--pf-t--global--color--brand--default)' },
+  revoked: { background: 'var(--pf-t--global--color--nonstatus--gray--default)' },
+  add: { background: 'var(--pf-t--global--color--nonstatus--blue--default)' },
+  free: { background: 'var(--pf-t--global--background--color--primary--default)', boxShadow: 'inset 0 0 0 1px var(--pf-t--global--border--color--default)' },
+  upstream: { background: 'var(--pf-t--global--background--color--primary--default)', boxShadow: 'inset 0 0 0 1px var(--pf-t--global--border--color--disabled)' },
+  unpublished: { background: 'var(--pf-t--global--background--color--secondary--default)' },
 }
 
 const platformKey = (p: { os: string; arch: string }) => `${p.os}_${p.arch}`
+const versionsPerPage = 12
+
+export function CoverageStrip({ marks }: { marks: { platform: string; kind: MarkKind }[] }) {
+  const firstOfGroup = new Set(PLUGIN_OS_GROUPS.map(([os, arches]) => `${os}_${arches[0]}`))
+  return (
+    <span aria-label="Platform coverage" style={{ display: 'inline-flex', alignItems: 'center', verticalAlign: 'middle' }}>
+      {marks.map((mark, index) => (
+        <span
+          key={mark.platform} title={`${mark.platform}: ${MARK_WORD[mark.kind]}`}
+          style={{ width: 6, height: 14, borderRadius: 1, marginLeft: index === 0 ? 0 : firstOfGroup.has(mark.platform) ? 4 : 1, ...MARK_STYLE[mark.kind] }}
+        />
+      ))}
+    </span>
+  )
+}
 
 export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, summary, upstream, hasOlderUpstream, loading, failure,
-  onRefresh, onBackToRegistry, onBackToPlugins, onUpload, busy, actionFailure, editing, onToggleUpdates, onEdit,
-  onDiscard, onOlderUpstream, onSync, onRemove,
+  onRefresh, onBackToRegistry, onBackToPlugins, onUpload, busy, actionFailure, onToggleUpdates,
+  onOlderUpstream, onSync, onRemove,
 }: {
   name: string
   organizationName: string
@@ -158,68 +188,101 @@ export function PluginDetailView({
   onUpload: () => void
   busy: boolean
   actionFailure: string | null
-  editing: boolean
   onToggleUpdates: (enabled: boolean) => void
-  onEdit: () => void
-  onDiscard: () => void
   onOlderUpstream: () => void
   onSync: (changes: PluginChange[]) => void
   onRemove: (version: string) => void
 }) {
   const [removing, setRemoving] = useState<string | null>(null)
   const [edit, setEdit] = useState<PluginEdit>({ selected: {}, added: {} })
-  useEffect(() => { if (!editing) setEdit({ selected: {}, added: {} }) }, [editing])
+  const [scope, setScope] = useState<'mirrored' | 'all'>('mirrored')
+  const [filter, setFilter] = useState('')
+  const [page, setPage] = useState(1)
+  const [expanded, setExpanded] = useState<string | null>(null)
+  useEffect(() => { setEdit({ selected: {}, added: {} }) }, [detail])
   const canPublish = permitsAction(callerRole, 'publishPlugin')
   const local = detail?.source.kind === 'upload'
   const newest = detail?.versions.find((version) => !version.revoked)
   const mirrored = new Set(detail?.versions.map((v) => v.version) ?? [])
   const unmirrored = local ? [] : upstream.filter((v) => !mirrored.has(v.version))
+  const releasedAt = new Map(upstream.map((v) => [v.version, v.created_at]))
   // After a plugin's first import, its existing platforms are the default (ADR-0027 A8).
   const existing = [...new Set(detail?.versions.flatMap((v) => v.stored_platforms.map(platformKey)) ?? [])]
-  const rows: GridRow[] = [
-    ...unmirrored.map((v) => ({ version: v.version, state: 'none' as const, prerelease: v.prerelease, stored: new Set<string>(), published: new Set(v.platforms) })),
+  const rows: VersionRow[] = [
+    ...unmirrored.map((v) => ({ version: v.version, state: 'none' as const, prerelease: v.prerelease, stored: new Set<string>(), published: new Set(v.platforms), released: v.created_at })),
     ...(detail?.versions ?? []).map((v) => ({
       version: v.version, state: v.revoked ? 'revoked' as const : 'available' as const, prerelease: false,
       stored: new Set(v.stored_platforms.map(platformKey)),
       published: new Set([...v.listed_platforms, ...v.stored_platforms].map(platformKey)),
+      released: releasedAt.get(v.version) ?? v.created_at,
     })),
   ].sort((a, b) => compareVersionsDesc(a.version, b.version))
-  const changes = detail && editing ? pluginChanges(detail.versions, unmirrored, edit) : []
+  const held = rows.filter((row) => row.state !== 'none')
+  const newestHeld = held[0]
+  const newer = newestHeld ? rows.filter((row) => row.state === 'none' && compareVersionsDesc(row.version, newestHeld.version) < 0) : []
+  const changes = detail ? pluginChanges(detail.versions, unmirrored, edit) : []
   const pending = pendingItems(changes, mirrored)
-  const checked = (row: GridRow) => edit.selected[row.version] ?? (row.state === 'available')
-  const adds = (row: GridRow) => (edit.added[row.version] ?? []).filter((p) => !row.stored.has(p))
-  const toggleRow = (row: GridRow) => setEdit((current) => {
-    const now = !checked(row)
-    const selected = { ...current.selected, [row.version]: now }
-    let added = { ...current.added }
-    if (row.state === 'none') added[row.version] = now ? existing.filter((p) => row.published.has(p)) : []
-    if (row.state === 'available' && !now) added = { ...added, [row.version]: [] }
-    return { selected, added }
+  const serving = (row: VersionRow) => edit.selected[row.version] ?? (row.state === 'available')
+  const adds = (row: VersionRow) => (edit.added[row.version] ?? []).filter((p) => !row.stored.has(p))
+  const op = (row: VersionRow): 'revoke' | 'restore' | null =>
+    row.state === 'available' && !serving(row) ? 'revoke' : row.state === 'revoked' && serving(row) ? 'restore' : null
+  const kind = (row: VersionRow, platform: string): MarkKind => {
+    if (!row.published.has(platform)) return 'unpublished'
+    if (row.stored.has(platform)) return (row.state === 'available' && op(row) !== 'revoke') || (row.state === 'revoked' && op(row) === 'restore') ? 'mirrored' : 'revoked'
+    if (adds(row).includes(platform)) return 'add'
+    return row.state === 'none' || (row.state === 'available' && op(row) !== 'revoke') ? 'free' : 'upstream'
+  }
+  const editable = (k: MarkKind) => canPublish && !local && (k === 'free' || k === 'add')
+  const setVersion = (version: string, selected: boolean | undefined, added: string[] | undefined) => setEdit((current) => {
+    const nextSelected = { ...current.selected }
+    const nextAdded = { ...current.added }
+    if (selected === undefined) delete nextSelected[version]; else nextSelected[version] = selected
+    if (added === undefined) delete nextAdded[version]; else nextAdded[version] = added
+    return { selected: nextSelected, added: nextAdded }
   })
-  const toggleCell = (row: GridRow, platform: string) => setEdit((current) => {
-    const have = current.added[row.version] ?? []
-    const next = have.includes(platform) ? have.filter((p) => p !== platform) : [...have, platform]
-    const selected = row.state === 'none' ? { ...current.selected, [row.version]: next.length > 0 } : current.selected
-    return { selected, added: { ...current.added, [row.version]: next } }
-  })
-  const undo = (version: string) => setEdit((current) => {
-    const selected = { ...current.selected }
-    const added = { ...current.added }
-    delete selected[version]
-    delete added[version]
-    return { selected, added }
-  })
-  const marker = (row: GridRow) => {
-    const on = checked(row)
-    if (row.state === 'available' && !on) return '→ revoke'
-    if (row.state === 'revoked' && on) return '→ restore'
-    if (row.state === 'none' && on && adds(row).length) return '→ add'
-    if (row.state === 'available' && adds(row).length) return `+${adds(row).length}`
+  const defaults = (row: VersionRow) => existing.filter((p) => row.published.has(p))
+  const togglePlatform = (row: VersionRow, platform: string) => {
+    const next = adds(row).includes(platform) ? adds(row).filter((p) => p !== platform) : [...adds(row), platform]
+    setVersion(row.version, row.state === 'none' ? (next.length > 0 ? true : undefined) : edit.selected[row.version], next.length ? next : undefined)
+  }
+  const action = (row: VersionRow): { text: string; run: () => void } | null => {
+    if (!canPublish) return null
+    if (row.state === 'available') {
+      return op(row) === 'revoke'
+        ? { text: 'Undo revoke', run: () => setVersion(row.version, undefined, undefined) }
+        : { text: 'Revoke', run: () => setVersion(row.version, false, undefined) }
+    }
+    if (row.state === 'revoked') {
+      return op(row) === 'restore'
+        ? { text: 'Undo restore', run: () => setVersion(row.version, undefined, undefined) }
+        : { text: 'Restore', run: () => setVersion(row.version, true, undefined) }
+    }
+    if (local) return null
+    return adds(row).length
+      ? { text: 'Clear', run: () => setVersion(row.version, undefined, undefined) }
+      : { text: `Add with ${defaults(row).length} platforms`, run: () => setVersion(row.version, true, defaults(row)) }
+  }
+  const marker = (row: VersionRow) => {
+    const n = adds(row).length
+    if (op(row) === 'revoke') return '→ revoke'
+    if (op(row) === 'restore') return '→ restore'
+    if (n) return row.state === 'none' ? `→ add ${n}` : `+${n}`
     return ''
   }
+  const coverage = (row: VersionRow) => {
+    const n = adds(row).length
+    return `${row.stored.size} of ${row.published.size}${n ? ` (+${n})` : ''}`
+  }
+  const listed = (scope === 'mirrored' ? held : rows).filter((row) => row.version.includes(filter.trim()))
+  const shown = scope === 'all' ? listed.slice((page - 1) * versionsPerPage, page * versionsPerPage) : listed
+  const newestStable = newer.find((row) => !row.prerelease)
   const removingRow = rows.find((row) => row.version === removing)
   const lastVersion = detail?.versions.length === 1
   const check = summary?.update_check
+  const legend: { kind: MarkKind; text: string }[] = [
+    { kind: 'mirrored', text: 'Mirrored' }, { kind: 'revoked', text: 'Revoked' }, { kind: 'add', text: 'Will be added' },
+    { kind: 'free', text: 'Upstream' }, { kind: 'unpublished', text: 'Not published' },
+  ]
 
   return (
     <>
@@ -294,105 +357,145 @@ export function PluginDetailView({
               </FlexItem>
             </Flex>
             <Card>
-              <CardTitle>
-                <Flex alignItems={{ default: 'alignItemsCenter' }} gap={{ default: 'gapMd' }}>
-                  <FlexItem>Versions</FlexItem>
-                  <FlexItem>
-                    <Content component="small">
-                      ● Mirrored · <span style={{ color: 'var(--pf-t--global--color--nonstatus--gray--default)' }}>●</span> Mirrored, revoked
-                      {local ? '' : ' · ○ Upstream, not mirrored'} · – Not published
-                    </Content>
-                  </FlexItem>
-                  <FlexItem align={{ default: 'alignRight' }}>
-                    {editing ? (
-                      <Content component="small">Editing: tick a version to add or restore it, untick to revoke · tick a box to add an architecture</Content>
-                    ) : canPublish ? <Button variant="secondary" onClick={onEdit}>Edit versions</Button> : null}
-                  </FlexItem>
-                </Flex>
-              </CardTitle>
+              <CardTitle>Versions</CardTitle>
               <CardBody>
-                <div style={{ overflowX: 'auto' }}>
-                <Table aria-label="Versions by architecture" variant="compact">
+                <Toolbar id="plugin-versions-toolbar">
+                  <ToolbarContent alignItems="center">
+                    {local ? null : (
+                      <ToolbarItem>
+                        <ToggleGroup aria-label="Versions shown">
+                          <ToggleGroupItem text={`Mirrored · ${held.length}`} buttonId="versions-mirrored" isSelected={scope === 'mirrored'} onChange={() => { setScope('mirrored'); setPage(1) }} />
+                          <ToggleGroupItem text={`All · ${rows.length}`} buttonId="versions-all" isSelected={scope === 'all'} onChange={() => { setScope('all'); setPage(1) }} />
+                        </ToggleGroup>
+                      </ToolbarItem>
+                    )}
+                    <ToolbarItem>
+                      <SearchInput aria-label="Filter versions" placeholder="Filter by version" value={filter} onChange={(_event, value) => { setFilter(value); setPage(1) }} onClear={() => setFilter('')} />
+                    </ToolbarItem>
+                    <ToolbarItem align={{ default: 'alignEnd' }}>
+                      <span style={{ display: 'inline-flex', gap: 14, fontSize: 'var(--pf-t--global--font--size--xs)', color: 'var(--pf-t--global--text--color--subtle)' }}>
+                        {legend.map((entry) => (
+                          <span key={entry.kind} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                            <span style={{ width: 6, height: 14, borderRadius: 1, ...MARK_STYLE[entry.kind] }} />{entry.text}
+                          </span>
+                        ))}
+                      </span>
+                    </ToolbarItem>
+                  </ToolbarContent>
+                </Toolbar>
+                {scope === 'mirrored' && newer.length ? (
+                  <Alert variant="custom" isInline isPlain title={`${newer.length} newer upstream ${newer.length === 1 ? 'version' : 'versions'}`}>
+                    <Flex gap={{ default: 'gapMd' }} alignItems={{ default: 'alignItemsCenter' }}>
+                      <FlexItem>{newer.map((row) => row.version + (row.prerelease ? ' (prerelease)' : '')).join(' · ')}</FlexItem>
+                      {canPublish && newestStable ? (
+                        <FlexItem>
+                          {adds(newestStable).length
+                            ? <Content component="small">{newestStable.version} pending ({adds(newestStable).length} platforms)</Content>
+                            : <Button variant="link" isInline onClick={() => setVersion(newestStable.version, true, defaults(newestStable))}>Add {newestStable.version} with {defaults(newestStable).length} platforms</Button>}
+                        </FlexItem>
+                      ) : null}
+                      <FlexItem><Button variant="link" isInline onClick={() => { setScope('all'); setPage(1) }}>Show all versions</Button></FlexItem>
+                    </Flex>
+                  </Alert>
+                ) : null}
+                <Table aria-label="Versions" variant="compact">
                   <Thead>
                     <Tr>
-                      <Th />
-                      {PLUGIN_OS_GROUPS.map(([os, arches]) => <Th key={os} colSpan={arches.length} hasRightBorder>{os}</Th>)}
-                      {canPublish ? <Th /> : null}
-                    </Tr>
-                    <Tr>
-                      <Th>Version</Th>
-                      {PLUGIN_ARCHITECTURES.map((platform) => <Th key={platform} textCenter>{platform.split('_')[1]}</Th>)}
+                      <Th screenReaderText="Platforms" />
+                      <Th>Version</Th><Th>Status</Th><Th>Platforms</Th><Th>Released</Th>
                       {canPublish ? <Th screenReaderText="Actions" /> : null}
                     </Tr>
                   </Thead>
-                  <Tbody>
-                    {rows.map((row) => {
-                      const on = checked(row)
-                      const revoking = row.state === 'available' && !on
-                      const restoring = row.state === 'revoked' && on
-                      const mark = marker(row)
-                      return (
-                        <Tr key={row.version} isRowSelected={editing && mark !== ''}>
-                          <Td dataLabel="Version">
-                            {editing ? (
-                              <Checkbox
-                                id={`serve-${row.version}`} aria-label={row.state === 'none' ? `Add ${row.version}` : `Serve ${row.version}`}
-                                isChecked={on} onChange={() => toggleRow(row)} style={{ marginRight: 8 }}
-                              />
-                            ) : null}
-                            <code>{row.version}</code>{' '}
+                  {shown.map((row, index) => {
+                    const isExpanded = expanded === row.version
+                    const mark = marker(row)
+                    const act = action(row)
+                    return (
+                      <Tbody key={row.version} isExpanded={isExpanded}>
+                        <Tr isRowSelected={mark !== '' && op(row) !== 'revoke'} style={op(row) === 'revoke' ? { background: 'color-mix(in srgb, var(--pf-t--global--color--status--warning--default) 12%, transparent)' } : undefined}>
+                          <Td expand={{ rowIndex: index, isExpanded, onToggle: () => setExpanded(isExpanded ? null : row.version), expandId: `platforms-${row.version}` }} />
+                          <Td dataLabel="Version"><code>{row.version}</code></Td>
+                          <Td dataLabel="Status">
                             {row.state === 'available' ? <Label isCompact color="green">Available</Label>
                               : row.state === 'revoked' ? <Label isCompact color="grey">Revoked</Label>
                               : <Label isCompact variant="outline">{row.prerelease ? 'Not mirrored · prerelease' : 'Not mirrored'}</Label>}
-                            {mark ? <> <Content component="small">{mark}</Content></> : null}
+                            {mark ? <> <span style={{ color: 'var(--pf-t--global--color--nonstatus--blue--default)', fontSize: 'var(--pf-t--global--font--size--xs)' }}>{mark}</span></> : null}
                           </Td>
-                          {PLUGIN_ARCHITECTURES.map((platform) => {
-                            const published = row.published.has(platform)
-                            const stored = row.stored.has(platform)
-                            const added = adds(row).includes(platform)
-                            const editable = editing && !local && (row.state === 'none' || (row.state === 'available' && on))
-                            let cell
-                            if (!published) cell = <span title="Not published upstream">–</span>
-                            else if (stored) {
-                              const grey = (row.state === 'revoked' && !restoring) || revoking
-                              cell = <span title={editing ? 'Mirrored. To drop a bad binary, revoke or remove the version.' : 'Mirrored'} style={{ color: grey ? 'var(--pf-t--global--color--nonstatus--gray--default)' : 'var(--pf-t--global--color--brand--default)' }}>●</span>
-                            } else if (editable) {
-                              cell = <Checkbox id={`add-${row.version}-${platform}`} aria-label={`Add ${platform} to ${row.version}`} isChecked={added} title={added ? 'Will be added' : 'Add'} onChange={() => toggleCell(row, platform)} />
-                            } else cell = <span title={editing && row.state === 'revoked' ? 'Restore the version to add architectures' : 'Upstream, not mirrored'}>○</span>
-                            return <Td key={platform} dataLabel={platform} textCenter>{cell}</Td>
-                          })}
+                          <Td dataLabel="Platforms" modifier="nowrap">
+                            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
+                              <CoverageStrip marks={PLUGIN_ARCHITECTURES.map((platform) => ({ platform, kind: kind(row, platform) }))} />
+                              <span style={{ color: 'var(--pf-t--global--text--color--subtle)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>{coverage(row)}</span>
+                            </span>
+                          </Td>
+                          <Td dataLabel="Released">{row.released ? new Date(row.released).toLocaleDateString() : ''}</Td>
                           {canPublish ? (
-                            <Td isActionCell>
-                              {row.state !== 'none' ? <ActionsColumn items={[{ title: 'Remove version', onClick: () => setRemoving(row.version) }]} /> : null}
+                            <Td isActionCell modifier="nowrap">
+                              <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} justifyContent={{ default: 'justifyContentFlexEnd' }} flexWrap={{ default: 'nowrap' }}>
+                                {act ? <Button variant="link" isInline isDisabled={busy} onClick={act.run} style={{ whiteSpace: 'nowrap' }}>{act.text}</Button> : null}
+                                {row.state !== 'none' ? <ActionsColumn items={[{ title: 'Remove version', onClick: () => setRemoving(row.version) }]} /> : null}
+                              </Flex>
                             </Td>
                           ) : null}
                         </Tr>
-                      )
-                    })}
-                  </Tbody>
+                        <Tr isExpanded={isExpanded}>
+                          <Td />
+                          <Td dataLabel="Platforms" colSpan={canPublish ? 5 : 4}>
+                            <ExpandableRowContent>
+                              <Flex gap={{ default: 'gapXl' }} flexWrap={{ default: 'wrap' }}>
+                                {PLUGIN_OS_GROUPS.map(([os, arches]) => {
+                                  const items = arches.map((arch) => ({ platform: `${os}_${arch}`, arch, kind: kind(row, `${os}_${arch}`) }))
+                                  const publishedCount = items.filter((item) => item.kind !== 'unpublished').length
+                                  const mirroredCount = items.filter((item) => item.kind === 'mirrored' || item.kind === 'revoked').length
+                                  return (
+                                    <FlexItem key={os}>
+                                      <Content component="small"><strong>{os}</strong> {publishedCount ? `${mirroredCount} of ${publishedCount}` : 'not published'}</Content>
+                                      {items.map((item) => editable(item.kind) ? (
+                                        <Checkbox
+                                          key={item.platform} id={`add-${row.version}-${item.platform}`} aria-label={`Add ${item.platform} to ${row.version}`}
+                                          label={<code>{item.arch}</code>} isChecked={item.kind === 'add'} title={MARK_WORD[item.kind]}
+                                          onChange={() => togglePlatform(row, item.platform)}
+                                        />
+                                      ) : (
+                                        <div key={item.platform} title={item.kind === 'upstream' && row.state === 'revoked' ? 'Restore the version first' : MARK_WORD[item.kind]} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                          <span style={{ width: 12, height: 12, borderRadius: item.kind === 'unpublished' ? 0 : '50%', ...MARK_STYLE[item.kind] }} />
+                                          <code style={{ color: item.kind === 'unpublished' ? 'var(--pf-t--global--text--color--disabled)' : undefined }}>{item.arch}</code>
+                                        </div>
+                                      ))}
+                                    </FlexItem>
+                                  )
+                                })}
+                              </Flex>
+                            </ExpandableRowContent>
+                          </Td>
+                        </Tr>
+                      </Tbody>
+                    )
+                  })}
                 </Table>
-                </div>
-                {hasOlderUpstream ? <Button variant="link" isInline onClick={onOlderUpstream}>Show older upstream versions</Button> : null}
-                {editing ? (
-                  <div style={{ marginTop: 16 }}>
-                    <Content component="h3">Pending changes <span style={{ fontWeight: 'normal', color: 'var(--pf-t--global--text--color--subtle)' }}>· {pending.length}</span></Content>
-                    {pending.length === 0 ? <Content component="p">None yet. Nothing changes until you sync.</Content> : null}
+                {listed.length === 0 ? <Content component="p">No versions match.</Content> : null}
+                {scope === 'all' ? (
+                  <Pagination
+                    variant="bottom" itemCount={listed.length} perPage={versionsPerPage} page={page} perPageOptions={[{ title: '12', value: 12 }]}
+                    onSetPage={(_event, next) => setPage(next)} titles={{ paginationAriaLabel: 'Versions pagination' }}
+                  />
+                ) : null}
+                {scope === 'all' && hasOlderUpstream ? <Button variant="link" isInline onClick={onOlderUpstream}>Show older upstream versions</Button> : null}
+                {canPublish ? (
+                  <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
+                    <FlexItem><strong>{pending.length ? `Pending · ${pending.length}` : 'No pending changes'}</strong></FlexItem>
                     {pending.map((item) => (
-                      <Flex key={`${item.verb}-${item.version}`} gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
-                        <Label isCompact color={item.verb === 'Add' ? 'blue' : item.verb === 'Revoke' ? 'yellow' : 'green'}>{item.verb}</Label>
-                        <code>{item.what}</code>
-                        <Content component="small">{item.detail}</Content>
-                        <Button variant="link" isInline onClick={() => undo(item.version)}>Undo</Button>
-                      </Flex>
+                      <FlexItem key={`${item.kind}-${item.version}`}>
+                        <Label color={item.kind === 'add' ? 'blue' : item.kind === 'revoke' ? 'yellow' : 'green'} onClose={() => setVersion(item.version, undefined, undefined)} closeBtnAriaLabel={`Undo ${item.text}`}>
+                          {item.text}
+                        </Label>
+                      </FlexItem>
                     ))}
-                    <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 12 }}>
+                    <FlexItem align={{ default: 'alignRight' }}>
                       <Button variant="primary" isLoading={busy} isDisabled={busy || changes.length === 0} onClick={() => onSync(changes)}>
                         {changes.length ? `Sync ${changes.length} ${changes.length === 1 ? 'change' : 'changes'}` : 'Sync'}
                       </Button>
-                      <Button variant="link" isDisabled={busy} onClick={onDiscard}>Discard</Button>
-                      <Content component="small">Applied as one job.</Content>
-                    </Flex>
-                  </div>
+                    </FlexItem>
+                  </Flex>
                 ) : null}
               </CardBody>
             </Card>

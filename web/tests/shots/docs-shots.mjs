@@ -964,12 +964,17 @@ async function captureSeededScreens(seeded) {
   await waitForText('netbox')
   await capture('plugin-registry.png')
 
-  // Edit mode on the detail grid with one pending change: 1.0.0 unticked.
+  // The versions list with 1.0.0 expanded and its revoke pending in the tray.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
   await waitForText('version = "1.1.0"')
-  await clickByText('button', 'Edit versions')
-  await page.click('input[aria-label="Serve 1.0.0"]')
-  await waitForText('stays stored; Packer can no longer fetch it')
+  await page.$$eval('table[aria-label="Versions"] tbody tr', (rows) => {
+    const row = rows.find((candidate) => candidate.innerText.includes('1.0.0'))
+    const buttons = [...row.querySelectorAll('button')]
+    buttons[0].click()
+    buttons.find((button) => button.innerText.trim() === 'Revoke').click()
+  })
+  await waitForText('Revoke 1.0.0')
+  await waitForText('Pending · 1')
   await capture('plugin-detail-edit.png')
 
   // Sync applies it as a job; the job page shows the outcome.

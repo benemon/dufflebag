@@ -422,18 +422,18 @@ export const PLUGIN_OS_GROUPS: readonly (readonly [string, readonly string[]])[]
 ]
 export const PLUGIN_ARCHITECTURES: readonly string[] = PLUGIN_OS_GROUPS.flatMap(([os, arches]) => arches.map((arch) => `${os}_${arch}`))
 
-export type PendingItem = { verb: 'Add' | 'Revoke' | 'Restore'; what: string; detail: string; version: string }
+export type PendingItem = { kind: 'add' | 'revoke' | 'restore'; text: string; version: string }
 
-// The pending-changes list as the design words it, one item per change.
+// The pending tray's chips, one per change, worded as the design does.
 export function pendingItems(changes: PluginChange[], mirrored: Set<string>): PendingItem[] {
   return changes.map((change) => {
     const platforms = change.platforms ?? []
     switch (change.action) {
-      case 'revoke': return { verb: 'Revoke', what: change.version, detail: 'stays stored; Packer can no longer fetch it', version: change.version }
-      case 'restore': return { verb: 'Restore', what: change.version, detail: 'served again', version: change.version }
+      case 'revoke': return { kind: 'revoke', text: `Revoke ${change.version}`, version: change.version }
+      case 'restore': return { kind: 'restore', text: `Restore ${change.version}`, version: change.version }
       default: return mirrored.has(change.version)
-        ? { verb: 'Add', what: platforms.join(', '), detail: `to ${change.version}`, version: change.version }
-        : { verb: 'Add', what: change.version, detail: `${platforms.length} architecture${platforms.length === 1 ? '' : 's'}: ${platforms.join(', ')}`, version: change.version }
+        ? { kind: 'add', text: `Add ${platforms.length === 1 ? platforms[0] : `${platforms.length} platforms`} to ${change.version}`, version: change.version }
+        : { kind: 'add', text: `Add ${change.version} · ${platforms.length} ${platforms.length === 1 ? 'platform' : 'platforms'}`, version: change.version }
     }
   })
 }
