@@ -12,6 +12,7 @@ let AppShellView
 let ThemeToggleButton
 let visibleNavItems
 let BucketPickerView
+let clearIntent
 
 before(async () => {
   vite = await createServer({
@@ -22,7 +23,7 @@ before(async () => {
     ssr: { noExternal: [/@patternfly\//] },
   })
   ;({ AppShellView, ThemeToggleButton } = await vite.ssrLoadModule('/src/shell/AppShell.tsx'))
-  ;({ BucketPickerView } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
+  ;({ BucketPickerView, clearIntent } = await vite.ssrLoadModule('/src/shell/TenantSwitcher.tsx'))
   ;({ visibleNavItems } = await vite.ssrLoadModule('/src/auth/permissions.ts'))
 })
 
@@ -201,6 +202,21 @@ test('the bucket picker renders its selection from the matched route parameter',
   ))
   assert.match(markup, /id="tenant-bucket"/)
   assert.match(markup, /value="base images"/)
+  // With a bucket in effect the × steps up to the blank row, so it is labelled as clearing the bucket, not a search.
+  assert.match(markup, /aria-label="Clear bucket"/)
+  assert.doesNotMatch(markup, /aria-label="Clear bucket search"/)
+})
+
+test('the picker × clears a search in progress, steps up while a selection is in effect, and hides otherwise', () => {
+  const withStepUp = [{ value: '', label: '\u2014' }, { value: 'base images', label: 'base images' }]
+  const withoutStepUp = [{ value: 'base images', label: 'base images' }]
+  assert.equal(clearIntent('ba', withStepUp, ''), 'search')
+  assert.equal(clearIntent('', withStepUp, ''), 'selection')
+  assert.equal(clearIntent('', withoutStepUp, ''), 'none', 'no step-up row offered')
+  assert.equal(clearIntent('', withStepUp, undefined), 'none', 'a picker with nothing above its selection')
+  assert.equal(clearIntent('ba', withoutStepUp, undefined), 'search')
+  // The project picker's step up is the organisation-standing tenant, whose id is not the empty string.
+  assert.equal(clearIntent('', [{ value: 'acme/', label: '\u2014' }, { value: 'acme/widgets', label: 'widgets' }], 'acme/'), 'selection')
 })
 
 test('the theme toggle flips its action label and persists the chosen override', () => {

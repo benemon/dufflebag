@@ -102,6 +102,17 @@ export function refreshOnPickerOpen(
   if (open) void refresh()
 }
 
+// What the picker's × does: a search in progress is cleared; otherwise, while
+// the picker offers its step-up row, the × selects it, the same move as
+// choosing "—" from the list (duf-gwjy). A picker with no standing above the
+// selection shows no × at rest.
+export function clearIntent(
+  filterValue: string, options: { value: string }[], stepUpValue: string | undefined,
+): 'search' | 'selection' | 'none' {
+  if (filterValue !== '') return 'search'
+  return stepUpValue !== undefined && options.some((option) => option.value === stepUpValue) ? 'selection' : 'none'
+}
+
 function PickerField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <span className="tenant-picker">
@@ -112,7 +123,7 @@ function PickerField({ label, children }: { label: string; children: ReactNode }
 }
 
 function TypeaheadPicker({
-  id, label, options, selectedValue, selectedLabel, footer, onSelect, onOpen,
+  id, label, options, selectedValue, selectedLabel, footer, stepUpValue, onSelect, onOpen,
 }: {
   id: string
   label: string
@@ -120,6 +131,7 @@ function TypeaheadPicker({
   selectedValue?: string
   selectedLabel: string
   footer: ReactNode
+  stepUpValue?: string
   onSelect: (value: string) => void
   onOpen: () => void
 }) {
@@ -205,13 +217,17 @@ function TypeaheadPicker({
               isExpanded={open}
               aria-controls={`${id}-listbox`}
             />
-            <TextInputGroupUtilities style={inputValue ? undefined : { display: 'none' }}>
+            <TextInputGroupUtilities style={clearIntent(filterValue, options, stepUpValue) === 'none' ? { display: 'none' } : undefined}>
               <Button
                 variant="plain"
-                aria-label={`Clear ${label.toLowerCase()} search`}
+                aria-label={clearIntent(filterValue, options, stepUpValue) === 'search' ? `Clear ${label.toLowerCase()} search` : `Clear ${label.toLowerCase()}`}
                 icon={<TimesIcon />}
                 onClick={(event) => {
                   event.stopPropagation()
+                  if (clearIntent(filterValue, options, stepUpValue) === 'selection' && stepUpValue !== undefined) {
+                    select(stepUpValue)
+                    return
+                  }
                   setInputValue('')
                   setFilterValue('')
                   inputRef.current?.focus()
@@ -264,6 +280,7 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
         }))}
         selectedValue={selectedOrganization ?? undefined}
         selectedLabel={selected?.name ?? 'Choose an organisation'}
+        stepUpValue={rows.some((organization) => organization.id === '') && selectedOrganization ? '' : undefined}
         onSelect={selectOrganization}
         onOpen={() => refreshOnPickerOpen(true, refreshOrganizations)}
         footer={(
@@ -357,6 +374,7 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
         }))}
         selectedValue={tenant.id}
         selectedLabel={label(tenant)}
+        stepUpValue={tenant.projectID !== '' ? tenants.find((candidate) => candidate.projectID === '')?.id : undefined}
         onSelect={(value) => {
           const next = tenants.find((candidate) => candidate.id === value)
           if (next) setTenant(next)
@@ -521,6 +539,7 @@ export function BucketPickerView({
         id="tenant-bucket"
         label="Bucket"
         options={bucketPickerOptions(buckets, pins, selectedBucket != null)}
+        stepUpValue=""
         selectedValue={selectedBucket}
         selectedLabel={selectedBucket ?? '—'}
         onSelect={onSelect}

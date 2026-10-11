@@ -1112,6 +1112,11 @@ test('the console works end to end, from first run to a seeded tenancy', async (
   })
 
   await t.test('the blank project row is the deliberate step up to organisation level', async () => {
+    // The × beside the project is the same step up as the blank row (duf-gwjy).
+    await page.click('button[aria-label="Clear project"]')
+    await until('the project × to step up to organisation level', async () =>
+      (await pickerValue('#tenant-project')) === '—')
+    // The blank row itself is the same step, chosen from the list.
     await choosePickerOption('#tenant-project', '—')
     await until('the project toggle to show the dash', async () =>
       (await pickerValue('#tenant-project')) === '—')
@@ -1634,6 +1639,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the bucket picker to navigate', () =>
       new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
     assert.equal(await pickerValue('#tenant-bucket'), 'smoke-images')
+    await waitForText('Bucket details')
+    // The × beside the bucket steps up to the project: the picker shows the
+    // blank row and the route drops to the buckets listing (duf-gwjy).
+    await page.click('button[aria-label="Clear bucket"]')
+    await until('the bucket to be cleared', async () =>
+      new URL(page.url()).pathname.endsWith('/buckets') && (await pickerValue('#tenant-bucket')) === '\u2014')
+    await waitForText('All buckets')
+    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await until('the bucket picker to navigate again', () =>
+      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
     await waitForText('Bucket details')
     // A fresh bucket states its emptiness (the old list's fresh-bucket proof).
     await clickByText('button', 'Versions')
