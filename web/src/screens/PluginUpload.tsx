@@ -171,8 +171,8 @@ export function PluginUploadView({
           <>
             {registry && !enabled ? (
               <Alert variant="warning" isInline title="The plugin registry isn’t enabled">
-                <Content component="p">Nothing is stored before the registry is enabled. Enable it in Registry settings before uploading.</Content>
-                <Button component="a" variant="link" isInline href="/plugin-registry/settings">Registry settings</Button>
+                <Content component="p">Nothing is stored before the registry is enabled. Enable it under Administration, Plugin registry, before uploading.</Content>
+                <Button component="a" variant="link" isInline href="/plugin-registry/settings">Plugin registry</Button>
               </Alert>
             ) : null}
             {heldElsewhere.map((name) => {

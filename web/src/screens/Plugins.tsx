@@ -199,7 +199,7 @@ function EnabledRegistry({
           <Content component="p">
             Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed.
           </Content>
-          <Button component="a" variant="link" isInline href="/plugin-registry/settings">Registry settings</Button>
+          <Button component="a" variant="link" isInline href="/plugin-registry/settings">Plugin registry</Button>
         </Alert>
       ) : null}
       <PluginCatalogue

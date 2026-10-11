@@ -30,7 +30,7 @@ after(async () => {
   await vite.close()
 })
 
-const labels = ['Registry', 'Plugins', 'Registry settings', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance']
+const labels = ['Registry', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Plugin registry', 'Bag Drop', 'Webhooks', 'Instance']
 const shellSource = readFileSync(new URL('../src/shell/AppShell.tsx', import.meta.url), 'utf8')
 const tenantSwitcherSource = readFileSync(
   new URL('../src/shell/TenantSwitcher.tsx', import.meta.url),
@@ -66,7 +66,7 @@ test('the shell renders only navigation the caller can use', () => {
     ['reader', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
     ['builder', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
     ['publisher', ['Registry', 'Plugins', 'Bag Drop', 'Instance']],
-    ['maintainer', ['Registry', 'Plugins', 'Registry settings', 'Principals', 'Bag Drop', 'Webhooks', 'Instance']],
+    ['maintainer', ['Registry', 'Plugins', 'Principals', 'Plugin registry', 'Bag Drop', 'Webhooks', 'Instance']],
     ['root', labels],
   ]) {
     const markup = view(role)

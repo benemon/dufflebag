@@ -13,7 +13,7 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions,
+  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, compareVersionsDesc, deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions,
   listPluginVersions, listPlugins, pendingItems, pluginChanges, setPluginUpdateCheck, sourceLabel, syncPlugin,
   templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginEdit, type PluginRegistry,
   type PluginVersions,
@@ -183,7 +183,7 @@ export function PluginDetailView({
       stored: new Set(v.stored_platforms.map(platformKey)),
       published: new Set([...v.listed_platforms, ...v.stored_platforms].map(platformKey)),
     })),
-  ]
+  ].sort((a, b) => compareVersionsDesc(a.version, b.version))
   const changes = detail && editing ? pluginChanges(detail.versions, unmirrored, edit) : []
   const pending = pendingItems(changes, mirrored)
   const checked = (row: GridRow) => edit.selected[row.version] ?? (row.state === 'available')
@@ -436,7 +436,7 @@ export function NotExposedAlert({ registry }: { registry: PluginRegistry | null 
   return (
     <Alert variant="info" isInline title="The registry is enabled but not exposed">
       <Content component="p">Packer can’t resolve the template stanza on this page until the registry is exposed.</Content>
-      <Button component="a" variant="link" isInline href="/plugin-registry/settings">Registry settings</Button>
+      <Button component="a" variant="link" isInline href="/plugin-registry/settings">Plugin registry</Button>
     </Alert>
   )
 }
