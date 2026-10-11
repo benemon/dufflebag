@@ -958,21 +958,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Not available for uploaded plugins. To add a version, upload its files.')
     assert.equal(await page.$eval('[title="linux_amd64: Mirrored"]', () => true), true)
     assert.equal(await page.$eval('[title="darwin_arm64: Upstream"]', () => true), true)
-    // Revoke and restore are row actions that land in the pending tray and sync as one job.
+    // Revoke and restore confirm in a dialog, as Remove does, and apply at once.
     // 1.1.0 is the newest held version, so its Revoke is the first on the page.
-    const syncServed = async (serve, outcome) => {
-      await clickByText('button', serve ? 'Restore' : 'Revoke')
-      await waitForText(serve ? 'Restore 1.1.0' : 'Revoke 1.1.0')
-      await clickByText('button', 'Sync 1 change')
-      await waitForText('Sync probe')
-      await waitForText('from the plugin page, 1 change')
-      await until(`the sync to record ${outcome}`, async () => (await bodyText()).includes('Succeeded') && (await bodyText()).includes(outcome), 60000)
-      await clickByText('button', 'Open probe')
-      await waitForText('Template stanza')
+    const serve = async (restore) => {
+      await clickByText('button', restore ? 'Restore' : 'Revoke')
+      await waitForText(restore ? 'Restore probe 1.1.0?' : 'Revoke probe 1.1.0?')
+      await clickInModal(restore ? 'Restore 1.1.0' : 'Revoke 1.1.0')
     }
-    await syncServed(false, 'Revoked')
+    await serve(false)
     await waitForText('version = "1.0.0"')
-    await syncServed(true, 'Restored')
+    await serve(true)
     // The legend always says "Revoked"; the row's status pill is what changes.
     await until('the version to be served again', () =>
       page.$$eval('table[aria-label="Versions"] tbody .pf-v6-c-label', (labels) =>
