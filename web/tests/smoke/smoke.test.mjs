@@ -204,6 +204,27 @@ const choosePickerOption = async (id, text) => {
 
 const pickerValue = (id) => page.$eval(`${id}-input`, (input) => input.value)
 
+// Switching buckets navigates and refetches; a facet clicked on the outgoing
+// screen's rail is lost when the incoming screen mounts, so wait for the new
+// bucket to be on screen before touching its facets.
+// waitForSelector says nothing about the page when it gives up; this does.
+const waitForElement = async (what, selector) => {
+  try {
+    await until(what, () => page.$(selector).then(Boolean))
+  } catch (err) {
+    throw new Error(`${err.message}; the page says:\n${await bodyText()}`)
+  }
+}
+
+const switchBucket = async (name) => {
+  await choosePickerOption('#tenant-bucket', name)
+  await until(`the bucket picker to navigate to ${name}`, () =>
+    new URL(page.url()).pathname.endsWith(`/buckets/${name}`))
+  await until(`${name} to be on screen`, async () =>
+    (await pickerValue('#tenant-bucket')) === name &&
+    (await bodyText()).includes('This bucket'))
+}
+
 /**
  * The text of the table row naming `name`. Row-scoped rather than page-scoped
  * because several principals list at once and each carries its own controls, so
@@ -881,7 +902,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await globalNavItems()).length === 9)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Plugins', 'Registry settings', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Plugin registry', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -935,13 +956,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Open probe')
     await waitForText('version = "1.1.0"')
     await waitForText('Not available for uploaded plugins. To add a version, upload its files.')
-    assert.equal(await page.$eval('td[data-label="linux_amd64"]', (cell) => cell.innerText.trim()), '●')
-    assert.equal(await page.$eval('td[data-label="darwin_arm64"]', (cell) => cell.innerText.trim()), '○')
-    // Revoke and restore are sync changes made in the detail grid's edit mode.
+    assert.equal(await page.$eval('[title="linux_amd64: Mirrored"]', () => true), true)
+    assert.equal(await page.$eval('[title="darwin_arm64: Upstream"]', () => true), true)
+    // Revoke and restore are row actions that land in the pending tray and sync as one job.
+    // 1.1.0 is the newest held version, so its Revoke is the first on the page.
     const syncServed = async (serve, outcome) => {
-      await clickByText('button', 'Edit versions')
-      await page.click('input[aria-label="Serve 1.1.0"]')
-      await waitForText(serve ? 'served again' : 'stays stored; Packer can no longer fetch it')
+      await clickByText('button', serve ? 'Restore' : 'Revoke')
+      await waitForText(serve ? 'Restore 1.1.0' : 'Revoke 1.1.0')
       await clickByText('button', 'Sync 1 change')
       await waitForText('Sync probe')
       await waitForText('from the plugin page, 1 change')
@@ -952,7 +973,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await syncServed(false, 'Revoked')
     await waitForText('version = "1.0.0"')
     await syncServed(true, 'Restored')
-    await until('the version to be served again', async () => !(await bodyText()).includes('Revoked'))
+    // The legend always says "Revoked"; the row's status pill is what changes.
+    await until('the version to be served again', () =>
+      page.$$eval('table[aria-label="Versions"] tbody .pf-v6-c-label', (labels) =>
+        labels.length > 0 && !labels.some((label) => label.innerText.trim() === 'Revoked')))
     await waitForText('version = "1.1.0"')
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
@@ -960,7 +984,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'probe')
     // Remove version lives in the row menu (design frame 5.5); the newest row's menu is first.
     const removeVersion = async (version) => {
-      await waitForText('Edit versions')
+      await waitForText('No pending changes')
       await (await page.waitForSelector('button[aria-label="Kebab toggle"]')).click()
       await clickByText('[role="menuitem"]', 'Remove version')
       await waitForText(`Remove probe ${version}?`)
@@ -974,8 +998,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickInModal('Remove 1.0.0')
     await waitForText('No plugins mirrored yet')
 
-    // The lifecycle controls live on the settings screen (design: the catalogue carries none).
-    await clickByText('a', 'Registry settings')
+    // The lifecycle controls live on the Plugin registry administration screen (design: the catalogue carries none).
+    await clickByText('a', 'Plugin registry')
     await waitForText('The registry is enabled but not exposed.')
     await clickByText('button', 'Expose')
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
@@ -992,8 +1016,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('button', 'Disable registry')
     await waitForText('All plugin data is destroyed when the registry is disabled.')
+    // Enter in the typed confirmation confirms, as it does on every typed confirm.
     await typeToConfirm(wizardOrganizationName)
-    await clickInModal('Disable registry')
+    await page.keyboard.press('Enter')
     await waitForText("The plugin registry isn't enabled")
     await clickByText('a', 'Buckets')
   })
@@ -2060,9 +2085,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       metadata: {},
     })
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Versions')
-    await page.waitForSelector('table[aria-label="Versions"]')
+    await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')
 
@@ -2096,7 +2121,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/packer/2023-01-01/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/buckets/smoke-revocable/channels`
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await waitForText('latest')
 
@@ -2127,7 +2152,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // Delete it through the kebab's danger confirmation; history goes with it.
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
@@ -2679,9 +2704,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // The assigned version's delete is refused with the server's own words.
-    await choosePickerOption('#tenant-bucket', 'smoke-deletable')
+    await switchBucket('smoke-deletable')
     await clickFacet('Bucket facets', 'Versions')
-    await page.waitForSelector('table[aria-label="Versions"]')
+    await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')
     await clickByText('button', 'Delete version')

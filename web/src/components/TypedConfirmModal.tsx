@@ -43,13 +43,14 @@ export function TypedConfirmModalView({
   onConfirmationChange: (confirmation: string) => void
 }) {
   const inputID = 'typed-confirm-modal-input'
+  const ready = !busy && !confirmDisabled && confirmation === expected
   return (
     <>
       <ModalHeader labelId="typed-confirm-modal-title" title={title} />
       <ModalBody>
         {body}
         <Content component="p">Type <strong>{expected}</strong> to confirm.</Content>
-        <Form>
+        <Form onSubmit={(event) => { event.preventDefault(); if (ready) void onConfirm() }}>
           <FormGroup label="Confirmation" isRequired fieldId={inputID}>
             <TextInput
               id={inputID}
@@ -65,7 +66,7 @@ export function TypedConfirmModalView({
         <Button
           variant="danger"
           isLoading={busy}
-          isDisabled={busy || confirmDisabled || confirmation !== expected}
+          isDisabled={!ready}
           onClick={onConfirm}
         >
           {verb}
