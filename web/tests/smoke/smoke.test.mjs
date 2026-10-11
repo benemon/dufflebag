@@ -956,13 +956,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Open probe')
     await waitForText('version = "1.1.0"')
     await waitForText('Not available for uploaded plugins. To add a version, upload its files.')
-    assert.equal(await page.$eval('td[data-label="linux_amd64"]', (cell) => cell.innerText.trim()), '●')
-    assert.equal(await page.$eval('td[data-label="darwin_arm64"]', (cell) => cell.innerText.trim()), '○')
-    // Revoke and restore are sync changes made in the detail grid's edit mode.
+    assert.equal(await page.$eval('[title="linux_amd64: Mirrored"]', () => true), true)
+    assert.equal(await page.$eval('[title="darwin_arm64: Upstream"]', () => true), true)
+    // Revoke and restore are row actions that land in the pending tray and sync as one job.
+    // 1.1.0 is the newest held version, so its Revoke is the first on the page.
     const syncServed = async (serve, outcome) => {
-      await clickByText('button', 'Edit versions')
-      await page.click('input[aria-label="Serve 1.1.0"]')
-      await waitForText(serve ? 'served again' : 'stays stored; Packer can no longer fetch it')
+      await clickByText('button', serve ? 'Restore' : 'Revoke')
+      await waitForText(serve ? 'Restore 1.1.0' : 'Revoke 1.1.0')
       await clickByText('button', 'Sync 1 change')
       await waitForText('Sync probe')
       await waitForText('from the plugin page, 1 change')
@@ -973,7 +973,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await syncServed(false, 'Revoked')
     await waitForText('version = "1.0.0"')
     await syncServed(true, 'Restored')
-    await until('the version to be served again', async () => !(await bodyText()).includes('Revoked'))
+    // The legend always says "Revoked"; the row's status pill is what changes.
+    await until('the version to be served again', () =>
+      page.$$eval('table[aria-label="Versions"] tbody .pf-v6-c-label', (labels) =>
+        labels.length > 0 && !labels.some((label) => label.innerText.trim() === 'Revoked')))
     await waitForText('version = "1.1.0"')
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
@@ -981,7 +984,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'probe')
     // Remove version lives in the row menu (design frame 5.5); the newest row's menu is first.
     const removeVersion = async (version) => {
-      await waitForText('Edit versions')
+      await waitForText('No pending changes')
       await (await page.waitForSelector('button[aria-label="Kebab toggle"]')).click()
       await clickByText('[role="menuitem"]', 'Remove version')
       await waitForText(`Remove probe ${version}?`)

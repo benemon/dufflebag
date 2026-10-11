@@ -339,9 +339,10 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
   assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Plugin registry</)
   assert.ok(html.indexOf('Plugin registry') < html.indexOf('Template stanza'))
-  assert.match(html, /<td[^>]*data-label="darwin_arm64"[^>]*><span title="Upstream, not mirrored">○<\/span><\/td>/)
-  assert.match(html, /<td[^>]*data-label="linux_arm64"[^>]*><span title="Mirrored"[^>]*>●<\/span><\/td>/)
-  assert.match(html, /<td[^>]*data-label="windows_386"[^>]*><span title="Not published upstream">–<\/span><\/td>/)
+  assert.match(html, /title="darwin_arm64: Upstream"/)
+  assert.match(html, /title="linux_arm64: Mirrored"/)
+  assert.match(html, /title="windows_386: Not published"/)
+  assert.match(html, /1 of 2</, 'coverage counts stored platforms against published ones')
   assert.match(html, /Upload version/)
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
 })
@@ -434,7 +435,8 @@ test('publishers edit versions and remove them; readers do neither', () => {
     }] },
   }))
   const served = view('publisher', false)
-  assert.match(served, />Edit versions</)
+  assert.match(served, />Revoke</, 'a served version offers Revoke in its row')
+  assert.match(served, /No pending changes/)
   assert.match(served, /aria-label="Kebab toggle"/, 'the row menu carries Remove version')
   assert.match(served, />Available</)
   assert.match(served, /Not available for uploaded plugins\. To add a version, upload its files\./)
@@ -442,9 +444,11 @@ test('publishers edit versions and remove them; readers do neither', () => {
   assert.doesNotMatch(served, /Check daily for a newer stable version/)
   const revoked = view('publisher', true)
   assert.match(revoked, />Revoked</)
+  assert.match(revoked, />Restore</)
   assert.match(revoked, /No version is available: every version is revoked\./)
   const reader = view('reader', false)
-  assert.doesNotMatch(reader, />Edit versions</)
+  assert.doesNotMatch(reader, />Revoke</)
+  assert.doesNotMatch(reader, /Pending/)
   assert.doesNotMatch(reader, /aria-label="Kebab toggle"/)
   assert.doesNotMatch(reader, />Upload version</)
 })
@@ -462,32 +466,49 @@ const amazonUpstream = [
   { version: '1.8.2', created_at: '2026-10-01T00:00:00Z', prerelease: false, platforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], mirrored: true },
 ]
 
-test('editing turns only unmirrored cells of served versions into checkboxes and lists upstream versions', () => {
-  const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
+test('the versions list shows held versions with a coverage strip, names newer upstream releases, and expands to its platforms', () => {
+  const props = {
     name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, editing: true, summary: null,
+    busy: false, actionFailure: null, summary: null,
     upstream: [...amazonUpstream, { version: '1.7.9', created_at: '2026-05-01T00:00:00Z', prerelease: false, platforms: ['linux_amd64'], mirrored: false }],
-    onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {},
-    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
-  }))
+    onOlderUpstream: () => {}, hasOlderUpstream: false, onSync: () => {}, onRemove: () => {}, onToggleUpdates: () => {},
+    // Oldest first on the wire, so the newest-first order on screen is the sort's doing.
+    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: [...amazonVersions].reverse() },
+  }
+  const html = renderToStaticMarkup(React.createElement(PluginDetailView, props))
+  // Mirrored scope by default: the held versions, newest first, the newer upstream release in the banner, the older one not listed.
+  assert.match(html, />Mirrored · 2</)
+  assert.match(html, />All · 4</)
+  assert.match(html, /Filter by version/)
+  assert.match(html, /1 newer upstream version/)
+  assert.match(html, /Add 1\.8\.3 with 1 platforms/, 'the newest stable upstream is offered with the platforms the plugin already has')
+  assert.match(html, />Show all versions</)
+  assert.match(html, /<code>1\.8\.2<\/code>[\s\S]*<code>1\.8\.1<\/code>/)
+  assert.doesNotMatch(html, /<code>1\.8\.3<\/code>/)
+  assert.doesNotMatch(html, /<code>1\.7\.9<\/code>/)
+  assert.match(html, /<th[^>]*>Version<\/th><th[^>]*>Status<\/th><th[^>]*>Platforms<\/th><th[^>]*>Released<\/th>/)
+  assert.match(html, /aria-label="Platform coverage"/)
+  assert.match(html, /title="linux_amd64: Mirrored"/)
+  assert.match(html, /title="linux_arm64: Upstream"/)
+  assert.match(html, /title="darwin_amd64: Not published"/)
+  assert.match(html, /1 of 3</)
+  assert.match(html, />Revoke</)
+  assert.match(html, />Restore</)
+  assert.match(html, /Mirrored<[\s\S]{0,400}?Revoked<[\s\S]{0,400}?Will be added<[\s\S]{0,400}?Upstream<[\s\S]{0,400}?Not published</, 'the strip legend')
+  assert.match(html, /No pending changes/)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Sync</)
+  // Expanded rows carry the per-platform controls: only unmirrored platforms of a served version are checkboxes.
   assert.match(html, /aria-label="Add linux_arm64 to 1\.8\.2"/)
   assert.match(html, /aria-label="Add darwin_arm64 to 1\.8\.2"/)
   assert.doesNotMatch(html, /aria-label="Add linux_amd64 to 1\.8\.2"/, 'a mirrored platform is a status, not a control')
   assert.doesNotMatch(html, /aria-label="Add linux_arm64 to 1\.8\.1"/, 'a revoked version takes no platforms until restored')
-  assert.match(html, /aria-label="Add 1\.8\.3"/)
-  assert.doesNotMatch(html, /aria-label="Add 1\.8\.2"/, 'a mirrored version is not offered again')
-  assert.match(html, /aria-label="Serve 1\.8\.1"/)
-  assert.match(html, /Pending changes/)
-  assert.match(html, /None yet\. Nothing changes until you sync\./)
-  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync</)
-  assert.match(html, />Discard</)
-  assert.match(html, /Applied as one job\./)
-  assert.match(html, /Editing: tick a version to add or restore it, untick to revoke/)
-  assert.doesNotMatch(html, />Edit versions</)
-  assert.match(html, /<th[^>]*colSpan="4"[^>]*>linux</, 'architecture columns are grouped by OS')
-  assert.match(html, /<code>1\.8\.3<\/code>[\s\S]*<code>1\.8\.2<\/code>[\s\S]*<code>1\.8\.1<\/code>[\s\S]*<code>1\.7\.9<\/code>/, 'rows are ordered by version, upstream and mirrored alike')
-  assert.match(html, /Not mirrored/)
+  assert.match(html, /title="Restore the version first"/)
+  assert.match(html, /<strong>linux<\/strong> 1 of 2/)
+  assert.match(html, /<strong>windows<\/strong> not published/)
+  const reader = renderToStaticMarkup(React.createElement(PluginDetailView, { ...props, callerRole: 'reader' }))
+  assert.doesNotMatch(reader, /aria-label="Add /)
+  assert.doesNotMatch(reader, />Add 1\.8\.3 with/)
 })
 
 test('pending changes revoke, restore, add platforms and mirror new versions', () => {
@@ -986,7 +1007,7 @@ test('the detail header carries the update pills and the update-check card its l
   assert.match(failed, /\(failed\)/)
   assert.match(failed, /no such host The update pill reflects the last successful check\./)
   assert.match(failed, /releases\.hashicorp\.com · github\.com\/hashicorp\/packer-plugin-amazon/)
-  assert.match(failed, />Show older upstream versions</)
+  assert.doesNotMatch(failed, />Show older upstream versions</, 'older upstream paging belongs to the All scope')
   const off = view({ enabled: false }, false)
   assert.doesNotMatch(off, /Update available/)
   assert.doesNotMatch(off, />Last check failed</)
@@ -1001,11 +1022,13 @@ test('pending items are worded per change as the design lists them', () => {
     { version: '1.8.1', action: 'restore' },
     { version: '1.8.0', action: 'revoke' },
   ], new Set(['1.8.2', '1.8.1', '1.8.0'])), [
-    { verb: 'Add', what: '1.8.3', detail: '2 architectures: linux_amd64, linux_arm64', version: '1.8.3' },
-    { verb: 'Add', what: 'darwin_arm64', detail: 'to 1.8.2', version: '1.8.2' },
-    { verb: 'Restore', what: '1.8.1', detail: 'served again', version: '1.8.1' },
-    { verb: 'Revoke', what: '1.8.0', detail: 'stays stored; Packer can no longer fetch it', version: '1.8.0' },
+    { kind: 'add', text: 'Add 1.8.3 · 2 platforms', version: '1.8.3' },
+    { kind: 'add', text: 'Add darwin_arm64 to 1.8.2', version: '1.8.2' },
+    { kind: 'restore', text: 'Restore 1.8.1', version: '1.8.1' },
+    { kind: 'revoke', text: 'Revoke 1.8.0', version: '1.8.0' },
   ])
+  assert.deepEqual(pendingItems([{ version: '1.8.2', action: 'add', platforms: ['darwin_arm64', 'linux_arm64'] }], new Set(['1.8.2'])),
+    [{ kind: 'add', text: 'Add 2 platforms to 1.8.2', version: '1.8.2' }])
 })
 
 test('versions order newest first, with a prerelease below its release', () => {

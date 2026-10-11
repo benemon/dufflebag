@@ -158,22 +158,25 @@ its own limits: an OpenShift route times out after 30 seconds unless the
 
 ## Change a plugin's versions and platforms
 
-A publisher changes what a plugin serves from its page:
+A publisher changes what a plugin serves from its page. The Versions
+card lists the mirrored versions, each with a coverage strip (one mark
+per platform: mirrored, revoked, to be added, upstream, not published)
+and a count; expand a row to see its platforms by operating system.
 
-1. Choose **Edit versions**.
-2. Untick a version to revoke it, or tick a revoked version to restore it.
+1. **Revoke** a version from its row, or **Restore** a revoked one.
    Packer gets 404 for each file of a revoked version, and the files are
    kept. A template pinned to that version fails until it is restored.
-3. For an imported plugin, tick an unmirrored platform (○) on a served
-   version to add it. A plugin from releases.hashicorp.com also lists its
-   newer releases; tick one to mirror it with the platforms the plugin
-   already has.
-4. Check the pending changes under the grid; **Undo** drops one. Choose
-   **Sync N changes**. The changes run in order as one job, and its page
-   shows each change's outcome. **Discard** leaves edit mode without
-   syncing.
+2. For an imported plugin, expand a served version and tick an upstream
+   platform to add it. A plugin from releases.hashicorp.com also names
+   its newer releases above the list: **Add x.y.z with N platforms**
+   mirrors the newest with the platforms the plugin already has, and
+   **All** shows every upstream version, each with **Add with N
+   platforms** or its own platforms to tick.
+3. Each change lands in the pending tray under the list; close a chip to
+   drop it. Choose **Sync N changes**. The changes run in order as one
+   job, and its page shows each change's outcome.
 
-![The plugin detail grid in edit mode with one pending change](/screenshots/plugin-detail-edit.png)
+![The plugin detail versions list with a row expanded and one pending change](/screenshots/plugin-detail-edit.png)
 
 ![A sync job page showing each change and its outcome](/screenshots/plugin-import-job.png)
 
