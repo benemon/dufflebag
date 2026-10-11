@@ -25,6 +25,17 @@ type PluginCatalogue interface {
 
 var platformPattern = regexp.MustCompile(`^[a-z0-9]+_[a-z0-9]+$`)
 
+// knownPlatforms limits the default-platform setting to the published list;
+// imports keep taking any OS_ARCH a release publishes.
+func knownPlatforms(platforms []string) bool {
+	for _, platform := range platforms {
+		if !plugin.KnownPlatform(platform) {
+			return false
+		}
+	}
+	return true
+}
+
 func validPlatforms(platforms []string) bool {
 	seen := map[string]bool{}
 	for _, platform := range platforms {
@@ -79,9 +90,9 @@ func (s *server) SetPluginDefaultPlatforms(
 		return newRefusal(refused), nil
 	}
 	audited.actor(caller)
-	if request.Body == nil || !validPlatforms(request.Body.Platforms) {
+	if request.Body == nil || !validPlatforms(request.Body.Platforms) || !knownPlatforms(request.Body.Platforms) {
 		audited.failed("invalid_request")
-		return badRequestResponse{message: "platforms must be 1 to 32 distinct OS_ARCH values, for example linux_amd64"}, nil
+		return badRequestResponse{message: "platforms must be 1 to 32 distinct platforms HashiCorp builds Packer plugins for, for example linux_amd64"}, nil
 	}
 	platforms, err := s.repository.SetPluginRegistryDefaultPlatforms(ctx, store.ParseOrganizationTenant(organizationID), request.Body.Platforms)
 	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {

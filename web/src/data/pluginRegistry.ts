@@ -1,3 +1,4 @@
+import platforms from './platforms.json'
 import { platformDelete, platformGet, platformPost, platformPut, platformPutForm } from '../api/client'
 
 export type PluginRegistry = {
@@ -414,13 +415,19 @@ export function catalogueRows(plugins: Plugin[], filters: { name: string; source
     .filter((plugin) => !filters.updatesOnly || plugin.update_available)
 }
 
-// The architectures Packer plugins are published for, grouped as the detail
-// grid's column headers show them (design frame 5.0).
-export const PLUGIN_OS_GROUPS: readonly (readonly [string, readonly string[]])[] = [
-  ['darwin', ['amd64', 'arm64']], ['freebsd', ['386', 'amd64', 'arm']], ['linux', ['386', 'amd64', 'arm', 'arm64']],
-  ['netbsd', ['386', 'amd64', 'arm']], ['openbsd', ['386', 'amd64', 'arm']], ['solaris', ['amd64']], ['windows', ['386', 'amd64']],
-]
-export const PLUGIN_ARCHITECTURES: readonly string[] = PLUGIN_OS_GROUPS.flatMap(([os, arches]) => arches.map((arch) => `${os}_${arch}`))
+// The platforms HashiCorp builds Packer plugins for, from the snapshot that
+// make platforms refreshes (spec/platforms.json, rendered by make generate).
+export const PLUGIN_ARCHITECTURES: readonly string[] = platforms.platforms
+export const PLUGIN_OS_GROUPS: readonly (readonly [string, readonly string[]])[] = groupPlatforms(PLUGIN_ARCHITECTURES)
+
+export function groupPlatforms(all: readonly string[]): (readonly [string, readonly string[]])[] {
+  const groups = new Map<string, string[]>()
+  for (const platform of all) {
+    const [os = '', arch = ''] = platform.split('_', 2)
+    groups.set(os, [...(groups.get(os) ?? []), arch])
+  }
+  return [...groups.entries()].map(([os, arches]) => [os, arches] as const)
+}
 
 export type PendingItem = { kind: 'add' | 'revoke' | 'restore'; text: string; version: string }
 

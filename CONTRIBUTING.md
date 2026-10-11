@@ -96,6 +96,18 @@ with the tag baked in as its version, creates the GitHub release with the
 SBOM attached, and attests and signs the image. Tags containing `-rc` push
 an expiring image and attach the SBOM to the workflow run instead.
 
+Before tagging a candidate or a release, refresh the platform list and
+commit the result, so the build carries the platforms HashiCorp published
+as of that cut:
+
+```sh
+make platforms   # reads releases.hashicorp.com into spec/platforms.json, then renders it
+```
+
+`spec/platforms.json` is the only place the list is written; the Go and
+console copies are generated from it, and `make generate-check` fails if
+they drift. The snapshot's diff in the release PR is the review.
+
 ```sh
 git tag -a vX.Y.Z -m vX.Y.Z && git push origin vX.Y.Z
 ```

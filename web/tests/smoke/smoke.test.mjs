@@ -1001,6 +1001,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The lifecycle controls live on the Plugin registry administration screen (design: the catalogue carries none).
     await clickByText('a', 'Plugin registry')
     await waitForText('The registry is enabled but not exposed.')
+    // Default platforms are ticked from the published list, never typed.
+    assert.equal(await buttonDisabled('Save default platforms'), true)
+    await page.click('#default-platform-windows_amd64')
+    assert.equal(await buttonDisabled('Save default platforms'), false)
+    await clickByText('button', 'Save default platforms')
+    await until('the default platforms to be saved', () => buttonDisabled('Save default platforms'))
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await waitForText('The registry is enabled but not exposed.')
+    await until('the saved default to be read back', () =>
+      page.$eval('#default-platform-windows_amd64', (box) => box.checked))
     await clickByText('button', 'Expose')
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
     await clickInModal('Expose registry')
