@@ -286,9 +286,9 @@ Beyond the build path and list operations above, dufflebag serves:
 bucket, version and build produced a given external identifier (an image
 digest, a machine image ID). `external_identifier` is required. `platform`
 and `region` are optional exact filters. Matches span buckets within the
-authorized tenant, revoked versions are returned with their revocation state
-- the caller's question is whether the artifact is still vouched for - and
-results order newest version first with the shared offset pagination. No
+authorized tenant. Revoked versions are returned with their revocation state,
+since the caller's question is whether the artifact is still vouched for.
+Results order newest version first with the shared offset pagination. No
 stock client calls this operation. It exists for external consumers asking
 the incident-response question.
 

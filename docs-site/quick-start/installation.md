@@ -1,8 +1,8 @@
 # Installation
 
-This page gets a serving instance running, then covers the deployment detail
-- hostname constraints, serving, readiness and the core configuration - on
-the same page. Component-specific configuration lives with each component:
+This page gets a serving instance running, then covers the deployment
+detail on the same page: hostname constraints, serving, readiness and the
+core configuration. Component-specific configuration lives with each component:
 [Database](../components/database.md),
 [Object storage](../components/object-storage.md),
 [Encryption](../components/encryption.md) and
