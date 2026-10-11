@@ -902,7 +902,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await globalNavItems()).length === 9)
     assert.deepEqual(
       await globalNavItems(),
-      ['Buckets', 'Plugins', 'Registry settings', 'Principals', 'Audit', 'Encryption', 'Bag Drop', 'Webhooks', 'Instance'],
+      ['Buckets', 'Plugins', 'Principals', 'Audit', 'Encryption', 'Plugin registry', 'Bag Drop', 'Webhooks', 'Instance'],
     )
     // The themed background paints on the PatternFly page element, not body.
     // The sidebar is asserted separately: it once pinned its surface to a
@@ -995,8 +995,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickInModal('Remove 1.0.0')
     await waitForText('No plugins mirrored yet')
 
-    // The lifecycle controls live on the settings screen (design: the catalogue carries none).
-    await clickByText('a', 'Registry settings')
+    // The lifecycle controls live on the Plugin registry administration screen (design: the catalogue carries none).
+    await clickByText('a', 'Plugin registry')
     await waitForText('The registry is enabled but not exposed.')
     await clickByText('button', 'Expose')
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
@@ -1013,8 +1013,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     await clickByText('button', 'Disable registry')
     await waitForText('All plugin data is destroyed when the registry is disabled.')
+    // Enter in the typed confirmation confirms, as it does on every typed confirm.
     await typeToConfirm(wizardOrganizationName)
-    await clickInModal('Disable registry')
+    await page.keyboard.press('Enter')
     await waitForText("The plugin registry isn't enabled")
     await clickByText('a', 'Buckets')
   })

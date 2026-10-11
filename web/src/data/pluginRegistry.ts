@@ -437,3 +437,21 @@ export function pendingItems(changes: PluginChange[], mirrored: Set<string>): Pe
     }
   })
 }
+
+// Newest first: numeric segments compare as numbers, a prerelease sorts below
+// its release, and anything unparseable falls back to string order.
+export function compareVersionsDesc(a: string, b: string): number {
+  const split = (v: string) => {
+    const [core = '', pre] = v.replace(/^v/, '').split('-', 2)
+    return { nums: core.split('.').map((n) => Number.parseInt(n, 10)), pre }
+  }
+  const x = split(a), y = split(b)
+  for (let i = 0; i < Math.max(x.nums.length, y.nums.length); i++) {
+    const l = x.nums[i] ?? 0, r = y.nums[i] ?? 0
+    if (Number.isNaN(l) || Number.isNaN(r)) return b.localeCompare(a)
+    if (l !== r) return r - l
+  }
+  if (x.pre === undefined && y.pre !== undefined) return -1
+  if (x.pre !== undefined && y.pre === undefined) return 1
+  return (y.pre ?? '').localeCompare(x.pre ?? '')
+}

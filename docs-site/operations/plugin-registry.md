@@ -41,11 +41,11 @@ Packer itself presents no credential. Exposure is what grants it access.
 
 1. In the console, open **Plugins** and choose **Enable the registry**.
 2. Upload at least one plugin version (below).
-3. Open **Registry settings** and choose **Expose**. Every published plugin
+3. Open **Plugin registry** under **Administration** and choose **Expose**. Every published plugin
    version becomes readable, without credentials, by anything that can reach
    dufflebag.
 
-**Registry settings** also holds the organization's default platforms and the
+**Plugin registry** (under **Administration**) also holds the organization's default platforms and the
 two other lifecycle controls. **Unexpose** removes that access. A `packer init` in progress gets 404 on its
 next request. **Disable registry** deletes every plugin's records, then removes
 their files; a file that cannot be removed is logged and is never served. It is
@@ -69,7 +69,7 @@ Prerequisites: the `publisher` role, and outbound HTTPS from dufflebag to
 3. Under **Platforms to import**, tick architectures by operating system. A
    plugin you already mirror preselects the architectures it has; a first
    import preselects the organization's default platforms, which a
-   maintainer sets in **Registry settings**. An architecture no chosen
+   maintainer sets under **Administration**, **Plugin registry**. An architecture no chosen
    version publishes cannot be ticked.
 4. Choose **Import N versions**. The import runs in the background as one
    job, and its page shows the outcome of each version, with any platform
