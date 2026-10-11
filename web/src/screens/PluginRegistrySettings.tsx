@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ActionGroup, Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content,
-  EmptyState, EmptyStateActions, EmptyStateBody, EmptyStateFooter, PageSection,
+  ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, DescriptionList, DescriptionListDescription,
+  DescriptionListGroup, DescriptionListTerm, Label, PageSection,
 } from '@patternfly/react-core'
-import { useNavigate } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -23,7 +22,6 @@ import {
 export function PluginRegistrySettings() {
   const { state, self, selectedOrganization, signOut } = useAuth()
   const { tenant } = useTenant()
-  const navigate = useNavigate()
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? null
   const token = state?.token ?? ''
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
@@ -45,7 +43,7 @@ export function PluginRegistrySettings() {
       setFailure(null)
     } catch (error: unknown) {
       if (signOutIfUnauthorized(error, signOut)) return
-      setFailure(pluginRegistryErrorMessage(error, 'Registry settings could not be loaded.'))
+      setFailure(pluginRegistryErrorMessage(error, 'The plugin registry could not be loaded.'))
     } finally {
       setLoading(false)
     }
@@ -54,7 +52,7 @@ export function PluginRegistrySettings() {
   useEffect(() => { void reload() }, [reload])
 
   if (!organizationID) {
-    return <PageSection><Alert variant="info" isInline title="Select an organization to manage registry settings" /></PageSection>
+    return <PageSection><Alert variant="info" isInline title="Select an organization to manage its plugin registry" /></PageSection>
   }
 
   return (
@@ -65,8 +63,6 @@ export function PluginRegistrySettings() {
       defaultPlatforms={defaultPlatforms}
       loading={loading}
       failure={failure}
-      onBackToRegistry={() => navigate('/buckets')}
-      onBackToPlugins={() => navigate('/plugin-registry')}
       onRefresh={reload}
       onEnable={async () => setRegistry(await enablePluginRegistry(token, organizationID))}
       onExpose={async () => setRegistry(await exposePluginRegistry(token, organizationID))}
@@ -85,8 +81,7 @@ export function PluginRegistrySettings() {
 
 export function PluginRegistrySettingsView({
   organizationName, callerRole, registry, defaultPlatforms, loading, failure,
-  onBackToRegistry, onBackToPlugins, onRefresh, onEnable, onExpose, onUnexpose, onDisable,
-  onSetDefaultPlatforms,
+  onRefresh, onEnable, onExpose, onUnexpose, onDisable, onSetDefaultPlatforms,
 }: {
   organizationName: string
   callerRole: Role | null
@@ -94,8 +89,6 @@ export function PluginRegistrySettingsView({
   defaultPlatforms: string[]
   loading: boolean
   failure: string | null
-  onBackToRegistry: () => void
-  onBackToPlugins: () => void
   onRefresh: () => void | Promise<void>
   onEnable: () => Promise<void>
   onExpose: () => Promise<void>
@@ -126,14 +119,14 @@ export function PluginRegistrySettingsView({
   return (
     <>
       <ScreenHeader
-        breadcrumbs={(
-          <Breadcrumb>
-            <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
-            <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
-            <BreadcrumbItem isActive>Registry settings</BreadcrumbItem>
-          </Breadcrumb>
+        title="Plugin registry"
+        description={(
+          <>
+            Mirrors Packer plugins for {organizationName}, so packer init resolves them from dufflebag
+            instead of the internet. Turn it on, expose it to Packer, and set the platforms a first
+            import selects.
+          </>
         )}
-        title="Registry settings"
         onRefresh={onRefresh}
         refreshing={loading}
       />
@@ -144,59 +137,78 @@ export function PluginRegistrySettingsView({
           </Alert>
         ) : null}
         {loading ? (
-          <PluginLoadingCard message="Loading registry settings…" />
+          <PluginLoadingCard message="Loading the plugin registry…" />
         ) : failure ? (
-          <PluginErrorCard title="Registry settings could not be loaded" error={failure} onRetry={onRefresh} />
-        ) : !registry ? null : !registry.enabled ? (
-          <EmptyState titleText="The plugin registry isn't enabled" headingLevel="h2">
-            <EmptyStateBody>
-              Enable it to mirror Packer plugins for {organizationName}, so packer init resolves
-              them from dufflebag instead of the internet.
-            </EmptyStateBody>
-            {canConfigure ? (
-              <EmptyStateFooter><EmptyStateActions>
-                <Button variant="primary" isLoading={busy} isDisabled={busy} onClick={() => void run(onEnable)}>
-                  Enable the registry
-                </Button>
-              </EmptyStateActions></EmptyStateFooter>
-            ) : null}
-          </EmptyState>
-        ) : (
-          <Card aria-label="Registry settings">
-            <CardTitle>Registry lifecycle</CardTitle>
-            <CardBody>
-              <Content component="p">
-                The registry is {registry.exposed ? 'enabled and exposed' : 'enabled but not exposed'}.
-              </Content>
-              {canConfigure ? (
-                <ActionGroup>
-                  {registry.exposed ? (
-                    <Button variant="secondary" isDisabled={busy} onClick={() => setConfirming('unexpose')}>
-                      Unexpose
-                    </Button>
+          <PluginErrorCard title="The plugin registry could not be loaded" error={failure} onRetry={onRefresh} />
+        ) : !registry ? null : (
+          <>
+            <Card aria-label="Plugin registry">
+              <CardTitle>Registry</CardTitle>
+              <CardBody>
+                <DescriptionList isHorizontal isCompact>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Status</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {registry.enabled ? <Label color="green" isCompact>Enabled</Label> : <Label isCompact>Not enabled</Label>}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                  <DescriptionListGroup>
+                    <DescriptionListTerm>Exposure</DescriptionListTerm>
+                    <DescriptionListDescription>
+                      {registry.exposed ? <Label color="blue" isCompact>Exposed to Packer</Label> : <Label isCompact>Not exposed</Label>}
+                    </DescriptionListDescription>
+                  </DescriptionListGroup>
+                </DescriptionList>
+                <Content component="p">
+                  {!registry.enabled
+                    ? `The plugin registry isn't enabled. Enable it to mirror Packer plugins for ${organizationName}; nothing is stored before then.`
+                    : registry.exposed
+                      ? 'The registry is enabled and exposed. Plugins are anonymously readable to anyone who can reach dufflebag.'
+                      : 'The registry is enabled but not exposed. Plugins are stored and can be managed, but Packer can’t reach them until the registry is exposed.'}
+                </Content>
+                {canConfigure ? (
+                  <ActionGroup>
+                    {!registry.enabled ? (
+                      <Button variant="primary" isLoading={busy} isDisabled={busy} onClick={() => void run(onEnable)}>
+                        Enable the registry
+                      </Button>
+                    ) : registry.exposed ? (
+                      <Button variant="secondary" isDisabled={busy} onClick={() => setConfirming('unexpose')}>
+                        Unexpose
+                      </Button>
+                    ) : (
+                      <Button variant="primary" isDisabled={busy} onClick={() => setConfirming('expose')}>
+                        Expose
+                      </Button>
+                    )}
+                    {registry.enabled ? (
+                      <Button
+                        variant="danger" isDisabled={busy || registry.exposed}
+                        onClick={() => setConfirming('disable')}
+                      >Disable registry</Button>
+                    ) : null}
+                  </ActionGroup>
+                ) : null}
+                {registry.exposed ? <Content component="small">Unexpose the registry first before disabling it.</Content> : null}
+              </CardBody>
+            </Card>
+            {registry.enabled ? (
+              <Card>
+                <CardTitle>Default platforms</CardTitle>
+                <CardBody>
+                  {canConfigure ? (
+                    <DefaultPlatformsEditor
+                      platforms={defaultPlatforms}
+                      busy={busy}
+                      onSave={(platforms) => void run(() => onSetDefaultPlatforms(platforms))}
+                    />
                   ) : (
-                    <Button variant="primary" isDisabled={busy} onClick={() => setConfirming('expose')}>
-                      Expose
-                    </Button>
+                    <Content component="p">Default platforms: {defaultPlatforms.join(', ')}</Content>
                   )}
-                  <Button
-                    variant="danger" isDisabled={busy || registry.exposed}
-                    onClick={() => setConfirming('disable')}
-                  >Disable registry</Button>
-                </ActionGroup>
-              ) : null}
-              {registry.exposed ? <Content component="p">Unexpose the registry first before disabling it.</Content> : null}
-              {canConfigure ? (
-                <DefaultPlatformsEditor
-                  platforms={defaultPlatforms}
-                  busy={busy}
-                  onSave={(platforms) => void run(() => onSetDefaultPlatforms(platforms))}
-                />
-              ) : (
-                <Content component="p">Default platforms: {defaultPlatforms.join(', ')}</Content>
-              )}
-            </CardBody>
-          </Card>
+                </CardBody>
+              </Card>
+            ) : null}
+          </>
         )}
         {confirming === 'expose' ? (
           <PluginRegistryConfirmation
