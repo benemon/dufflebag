@@ -204,6 +204,27 @@ const choosePickerOption = async (id, text) => {
 
 const pickerValue = (id) => page.$eval(`${id}-input`, (input) => input.value)
 
+// Switching buckets navigates and refetches; a facet clicked on the outgoing
+// screen's rail is lost when the incoming screen mounts, so wait for the new
+// bucket to be on screen before touching its facets.
+// waitForSelector says nothing about the page when it gives up; this does.
+const waitForElement = async (what, selector) => {
+  try {
+    await until(what, () => page.$(selector).then(Boolean))
+  } catch (err) {
+    throw new Error(`${err.message}; the page says:\n${await bodyText()}`)
+  }
+}
+
+const switchBucket = async (name) => {
+  await choosePickerOption('#tenant-bucket', name)
+  await until(`the bucket picker to navigate to ${name}`, () =>
+    new URL(page.url()).pathname.endsWith(`/buckets/${name}`))
+  await until(`${name} to be on screen`, async () =>
+    (await pickerValue('#tenant-bucket')) === name &&
+    (await bodyText()).includes('This bucket'))
+}
+
 /**
  * The text of the table row naming `name`. Row-scoped rather than page-scoped
  * because several principals list at once and each carries its own controls, so
@@ -2060,9 +2081,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       metadata: {},
     })
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Versions')
-    await page.waitForSelector('table[aria-label="Versions"]')
+    await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')
 
@@ -2096,7 +2117,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/packer/2023-01-01/organizations/${seeded.organization.id}` +
       `/projects/${seeded.project.id}/buckets/smoke-revocable/channels`
 
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await waitForText('latest')
 
@@ -2127,7 +2148,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // Delete it through the kebab's danger confirmation; history goes with it.
-    await choosePickerOption('#tenant-bucket', 'smoke-revocable')
+    await switchBucket('smoke-revocable')
     await clickFacet('Bucket facets', 'Channels')
     await page.click('button[aria-label="Actions for staging"]')
     await clickByText('button', 'Delete channel')
@@ -2679,9 +2700,9 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     })
 
     // The assigned version's delete is refused with the server's own words.
-    await choosePickerOption('#tenant-bucket', 'smoke-deletable')
+    await switchBucket('smoke-deletable')
     await clickFacet('Bucket facets', 'Versions')
-    await page.waitForSelector('table[aria-label="Versions"]')
+    await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
     await waitForText('Lineage')
     await clickByText('button', 'Delete version')
