@@ -23,6 +23,7 @@ let unexposePluginRegistry
 let planPluginUploads
 let templateStanza
 let PluginDetailView
+let versionConfirmation
 let PluginUploadView
 let listPlugins
 let publishPluginVersion
@@ -69,7 +70,7 @@ before(async () => {
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
     deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
-  ;({ PluginDetailView } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
+  ;({ PluginDetailView, versionConfirmation } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
@@ -428,6 +429,26 @@ test('publishing sends a multipart PUT to the version path', async () => {
   assert.equal(sent.options.body.get('zips').name, 'packer-plugin-git_v0.6.3_x5.0_linux_arm64.zip')
 })
 
+test('revoke, restore and remove confirm in one dialog shape; only remove is destructive', () => {
+  const row = { version: '0.6.3', stored: new Set(['linux_amd64', 'darwin_arm64']) }
+  assert.deepEqual(versionConfirmation('revoke', 'git', row, false), {
+    title: 'Revoke git 0.6.3?',
+    body: 'Packer gets 404 for each of its files, so templates pinned to 0.6.3 fail packer init until it is restored. The 2 stored binaries (linux_amd64, darwin_arm64) are kept. To delete them, remove the version instead.',
+    verb: 'Revoke 0.6.3', danger: false,
+  })
+  assert.deepEqual(versionConfirmation('restore', 'git', row, false), {
+    title: 'Restore git 0.6.3?', body: 'Packer resolves 0.6.3 again from its 2 stored binaries (linux_amd64, darwin_arm64).', verb: 'Restore 0.6.3', danger: false,
+  })
+  assert.match(versionConfirmation('revoke', 'git', { version: '0.6.3', stored: new Set(['linux_amd64']) }, false).body, /The 1 stored binary \(linux_amd64\) is kept\. To delete it, remove the version instead\.$/)
+  const remove = versionConfirmation('remove', 'git', { version: '0.6.3', stored: new Set(['linux_amd64']) }, true)
+  assert.equal(remove.title, 'Remove git 0.6.3?')
+  assert.equal(remove.verb, 'Remove 0.6.3')
+  assert.equal(remove.danger, true)
+  assert.match(remove.body, /This deletes 1 stored binary \(linux_amd64\)\. Templates pinned to 0\.6\.3 will fail packer init\. This can’t be undone\./)
+  assert.match(remove.body, /It is git's last version, so git is removed and its name can be used by another source\.$/)
+  assert.doesNotMatch(versionConfirmation('remove', 'git', row, false).body, /last version/)
+})
+
 test('publishers edit versions and remove them; readers do neither', () => {
   const view = (callerRole, revoked) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
@@ -514,22 +535,16 @@ test('the versions list shows held versions with a coverage strip, names newer u
   assert.doesNotMatch(reader, />Add 1\.8\.3 with/)
 })
 
-test('pending changes revoke, restore, add platforms and mirror new versions', () => {
-  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), { selected: {}, added: {} }), [])
+test('pending changes add platforms and mirror new versions; revoke and restore are not changes', () => {
+  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), {}), [])
   assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), {
-    selected: { '1.8.3': true, '1.8.1': true },
-    added: { '1.8.3': ['linux_amd64'], '1.8.2': ['linux_amd64', 'darwin_arm64'] },
+    '1.8.3': ['linux_amd64'], '1.8.2': ['linux_amd64', 'darwin_arm64'],
   }), [
     { version: '1.8.3', action: 'add', platforms: ['linux_amd64'] },
     { version: '1.8.2', action: 'add', platforms: ['darwin_arm64'] },
-    { version: '1.8.1', action: 'restore' },
-  ])
-  assert.deepEqual(pluginChanges(amazonVersions, [], { selected: { '1.8.2': false }, added: { '1.8.2': ['darwin_arm64'] } }),
-    [{ version: '1.8.2', action: 'revoke' }], 'a version being revoked takes no platforms')
-  assert.deepEqual(pluginChanges(amazonVersions, [], { selected: {}, added: { '1.8.1': ['linux_arm64'] } }),
-    [], 'a version that stays revoked takes no platforms')
-  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), { selected: { '1.8.3': true }, added: { '1.8.3': [] } }),
-    [], 'a new version with no platforms is not a change')
+  ], 'a platform the version already has is not added again')
+  assert.deepEqual(pluginChanges(amazonVersions, [], { '1.8.1': ['linux_arm64'] }), [], 'a revoked version takes no platforms')
+  assert.deepEqual(pluginChanges(amazonVersions, amazonUpstream.filter((v) => !v.mirrored), { '1.8.3': [] }), [], 'a new version with no platforms is not a change')
 })
 
 test('a sync posts the ordered changes to the plugin', async () => {
@@ -540,12 +555,12 @@ test('a sync posts the ordered changes to the plugin', async () => {
     return new Response(JSON.stringify({ id: 'job' }), { status: 202, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    await syncPlugin('token', 'org', 'amazon', [{ version: '1.8.1', action: 'revoke' }])
+    await syncPlugin('token', 'org', 'amazon', [{ version: '1.8.3', action: 'add', platforms: ['linux_amd64'] }])
   } finally {
     globalThis.fetch = originalFetch
   }
   assert.equal(sent.path, '/api/v1/organizations/org/plugin-registry/plugins/amazon/sync')
-  assert.deepEqual(sent.body, { changes: [{ version: '1.8.1', action: 'revoke' }] })
+  assert.deepEqual(sent.body, { changes: [{ version: '1.8.3', action: 'add', platforms: ['linux_amd64'] }] })
 })
 
 test('remove uses the version path', async () => {
@@ -1030,16 +1045,12 @@ test('pending items are worded per change as the design lists them', () => {
   assert.deepEqual(pendingItems([
     { version: '1.8.3', action: 'add', platforms: ['linux_amd64', 'linux_arm64'] },
     { version: '1.8.2', action: 'add', platforms: ['darwin_arm64'] },
-    { version: '1.8.1', action: 'restore' },
-    { version: '1.8.0', action: 'revoke' },
   ], new Set(['1.8.2', '1.8.1', '1.8.0'])), [
-    { kind: 'add', text: 'Add 1.8.3 · 2 platforms', version: '1.8.3' },
-    { kind: 'add', text: 'Add darwin_arm64 to 1.8.2', version: '1.8.2' },
-    { kind: 'restore', text: 'Restore 1.8.1', version: '1.8.1' },
-    { kind: 'revoke', text: 'Revoke 1.8.0', version: '1.8.0' },
+    { text: 'Add 1.8.3 · 2 platforms', version: '1.8.3' },
+    { text: 'Add darwin_arm64 to 1.8.2', version: '1.8.2' },
   ])
   assert.deepEqual(pendingItems([{ version: '1.8.2', action: 'add', platforms: ['darwin_arm64', 'linux_arm64'] }], new Set(['1.8.2'])),
-    [{ kind: 'add', text: 'Add 2 platforms to 1.8.2', version: '1.8.2' }])
+    [{ text: 'Add 2 platforms to 1.8.2', version: '1.8.2' }])
 })
 
 test('versions order newest first, with a prerelease below its release', () => {

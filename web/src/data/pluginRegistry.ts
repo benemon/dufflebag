@@ -166,6 +166,14 @@ export async function deletePluginVersion(token: string, organizationID: string,
   await platformDelete(token, versionPath(organizationID, name, version))
 }
 
+export async function revokePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
+  await platformPost<null>(token, `${versionPath(organizationID, name, version)}/revoke`)
+}
+
+export async function restorePluginVersion(token: string, organizationID: string, name: string, version: string): Promise<void> {
+  await platformPost<null>(token, `${versionPath(organizationID, name, version)}/restore`)
+}
+
 export type HashicorpPlugin = { product: string; name: string; mirrored_versions: number; held_by?: PluginSource }
 
 export type HashicorpPluginVersion = {
@@ -335,28 +343,21 @@ export function syncPlugin(token: string, organizationID: string, name: string, 
   return platformPost<PluginImport>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/sync`), { changes })
 }
 
-// A version absent from selected is unchanged.
-export type PluginEdit = { selected: Record<string, boolean>; added: Record<string, string[]> }
-
 const platformKey = (p: PluginPlatform) => `${p.os}_${p.arch}`
 
-// A revoked version takes no platforms; an unmirrored upstream version needs at least one.
-export function pluginChanges(versions: PluginVersion[], upstream: HashicorpPluginVersion[], edit: PluginEdit): PluginChange[] {
+// The sync carries additions only: platforms keyed by version. A revoked
+// version takes none; an unmirrored upstream version needs at least one.
+export function pluginChanges(versions: PluginVersion[], upstream: HashicorpPluginVersion[], added: Record<string, string[]>): PluginChange[] {
   const changes: PluginChange[] = []
   const mirrored = new Set(versions.map((v) => v.version))
   for (const version of upstream) {
-    const platforms = edit.added[version.version] ?? []
-    if (!mirrored.has(version.version) && edit.selected[version.version] && platforms.length) {
-      changes.push({ version: version.version, action: 'add', platforms })
-    }
+    const platforms = added[version.version] ?? []
+    if (!mirrored.has(version.version) && platforms.length) changes.push({ version: version.version, action: 'add', platforms })
   }
   for (const version of versions) {
-    const selected = edit.selected[version.version] ?? !version.revoked
     const stored = new Set(version.stored_platforms.map(platformKey))
-    const platforms = (edit.added[version.version] ?? []).filter((p) => !stored.has(p))
-    if (version.revoked && selected) changes.push({ version: version.version, action: 'restore' })
-    else if (!version.revoked && !selected) changes.push({ version: version.version, action: 'revoke' })
-    else if (!version.revoked && platforms.length) changes.push({ version: version.version, action: 'add', platforms })
+    const platforms = (added[version.version] ?? []).filter((p) => !stored.has(p))
+    if (!version.revoked && platforms.length) changes.push({ version: version.version, action: 'add', platforms })
   }
   return changes
 }
@@ -429,19 +430,15 @@ export function groupPlatforms(all: readonly string[]): (readonly [string, reado
   return [...groups.entries()].map(([os, arches]) => [os, arches] as const)
 }
 
-export type PendingItem = { kind: 'add' | 'revoke' | 'restore'; text: string; version: string }
+export type PendingItem = { text: string; version: string }
 
 // The pending tray's chips, one per change, worded as the design does.
 export function pendingItems(changes: PluginChange[], mirrored: Set<string>): PendingItem[] {
   return changes.map((change) => {
     const platforms = change.platforms ?? []
-    switch (change.action) {
-      case 'revoke': return { kind: 'revoke', text: `Revoke ${change.version}`, version: change.version }
-      case 'restore': return { kind: 'restore', text: `Restore ${change.version}`, version: change.version }
-      default: return mirrored.has(change.version)
-        ? { kind: 'add', text: `Add ${platforms.length === 1 ? platforms[0] : `${platforms.length} platforms`} to ${change.version}`, version: change.version }
-        : { kind: 'add', text: `Add ${change.version} · ${platforms.length} ${platforms.length === 1 ? 'platform' : 'platforms'}`, version: change.version }
-    }
+    return mirrored.has(change.version)
+      ? { text: `Add ${platforms.length === 1 ? platforms[0] : `${platforms.length} platforms`} to ${change.version}`, version: change.version }
+      : { text: `Add ${change.version} · ${platforms.length} ${platforms.length === 1 ? 'platform' : 'platforms'}`, version: change.version }
   })
 }
 

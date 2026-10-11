@@ -843,13 +843,20 @@ async function seedFixtures(credentials) {
   )
 
   // The plugin registry: enabled and exposed, holding two uploaded versions
-  // of a plugin built in-house.
+  // of a plugin built in-house and one HashiCorp plugin imported from
+  // releases.hashicorp.com (the only network the shots need).
   await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/enable`)
   await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/expose`)
   await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.0.0')
   await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.1.0')
+  const ansible = await api(rootToken, 'GET', `/api/v1/organizations/${organization.id}/plugin-registry/catalogue/hashicorp/packer-plugin-ansible`)
+  const ansibleImport = await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/imports`, {
+    source: 'releases-hashicorp', product: 'packer-plugin-ansible',
+    versions: [ansible.versions.find((version) => !version.prerelease).version], platforms: ['linux_amd64'],
+  })
 
   return {
+    ansibleImportID: ansibleImport.id,
     ubuntuBuildID: ubuntuBuild.id,
     postgresBuildID: postgresBuild.id,
     compatBase: `/packer/2023-01-01/organizations/${organization.id}/projects/${project.id}`,
@@ -960,11 +967,21 @@ async function captureSeededScreens(seeded) {
       return card.getBoundingClientRect().height > 0
     }))
   await capture('version-consume-untagged.png')
+  // The import job page, once the worker has fetched and verified the release.
+  await page.goto(`${base}/plugin-registry/imports/${seeded.ansibleImportID}`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Import ansible')
+  await until('the import to finish', async () => {
+    const text = await page.evaluate(() => document.body.innerText)
+    return text.includes('Succeeded') && text.includes('Imported')
+  }, 180000)
+  await capture('plugin-import-job.png')
+
   await page.goto(`${base}/plugin-registry`, { waitUntil: 'domcontentloaded' })
   await waitForText('netbox')
+  await waitForText('ansible')
   await capture('plugin-registry.png')
 
-  // The versions list with 1.0.0 expanded and its revoke pending in the tray.
+  // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
   await waitForText('version = "1.1.0"')
   await page.$$eval('table[aria-label="Versions"] tbody tr', (rows) => {
@@ -973,18 +990,8 @@ async function captureSeededScreens(seeded) {
     buttons[0].click()
     buttons.find((button) => button.innerText.trim() === 'Revoke').click()
   })
-  await waitForText('Revoke 1.0.0')
-  await waitForText('Pending · 1')
-  await capture('plugin-detail-edit.png')
-
-  // Sync applies it as a job; the job page shows the outcome.
-  await clickByText('button', 'Sync 1 change')
-  await waitForText('Sync netbox')
-  await until('the sync to finish', async () => {
-    const text = await page.evaluate(() => document.body.innerText)
-    return text.includes('Succeeded') && text.includes('Revoked')
-  }, 60000)
-  await capture('plugin-import-job.png')
+  await waitForText('Revoke netbox 1.0.0?')
+  await capture('plugin-detail-revoke.png')
 
 
   // The 2s-cadence scanner should have findings for the seeded vulnerable

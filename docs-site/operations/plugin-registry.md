@@ -169,22 +169,23 @@ card lists the mirrored versions, each with a coverage strip (one mark
 per platform: mirrored, revoked, to be added, upstream, not published)
 and a count; expand a row to see its platforms by operating system.
 
-1. **Revoke** a version from its row, or **Restore** a revoked one.
-   Packer gets 404 for each file of a revoked version, and the files are
-   kept. A template pinned to that version fails until it is restored.
+1. **Revoke** a version from its row, or **Restore** a revoked one. Each
+   asks for confirmation and applies at once. Packer gets 404 for each
+   file of a revoked version, and the files are kept. A template pinned
+   to that version fails until it is restored.
 2. For an imported plugin, expand a served version and tick an upstream
    platform to add it. A plugin from releases.hashicorp.com also names
    its newer releases above the list: **Add x.y.z with N platforms**
    mirrors the newest with the platforms the plugin already has, and
    **All** shows every upstream version, each with **Add with N
    platforms** or its own platforms to tick.
-3. Each change lands in the pending tray under the list; close a chip to
-   drop it. Choose **Sync N changes**. The changes run in order as one
-   job, and its page shows each change's outcome.
+3. Each addition lands in the pending tray under the list; close a chip to
+   drop it. Choose **Sync N changes**. The additions run in order as one
+   job, and its page shows each one's outcome.
 
-![The plugin detail versions list with a row expanded and one pending change](/screenshots/plugin-detail-edit.png)
+![The Revoke confirmation over the plugin detail versions list](/screenshots/plugin-detail-revoke.png)
 
-![A sync job page showing each change and its outcome](/screenshots/plugin-import-job.png)
+![An import job page showing the imported version and its platforms](/screenshots/plugin-import-job.png)
 
 A job's page names who started it and from where, its place in the queue
 while it waits, and each version or change with its outcome; a platform

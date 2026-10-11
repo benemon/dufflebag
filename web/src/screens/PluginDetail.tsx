@@ -15,8 +15,8 @@ import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadStat
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, compareVersionsDesc, deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions,
-  listPluginVersions, listPlugins, pendingItems, pluginChanges, setPluginUpdateCheck, sourceLabel, syncPlugin,
-  templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginEdit, type PluginRegistry,
+  listPluginVersions, listPlugins, pendingItems, pluginChanges, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
+  sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginRegistry,
   type PluginVersions,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
@@ -116,6 +116,8 @@ export function PluginDetail() {
           setBusy(false)
         }
       })()}
+      onRevoke={act((version: string) => revokePluginVersion(token, organizationID ?? '', name, version))}
+      onRestore={act((version: string) => restorePluginVersion(token, organizationID ?? '', name, version))}
       onRemove={act(
         (version: string) => deletePluginVersion(token, organizationID ?? '', name, version),
         detail?.versions.length === 1,
@@ -169,7 +171,7 @@ export function CoverageStrip({ marks }: { marks: { platform: string; kind: Mark
 export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, summary, upstream, hasOlderUpstream, loading, failure,
   onRefresh, onBackToRegistry, onBackToPlugins, onUpload, busy, actionFailure, onToggleUpdates,
-  onOlderUpstream, onSync, onRemove,
+  onOlderUpstream, onSync, onRevoke, onRestore, onRemove,
 }: {
   name: string
   organizationName: string
@@ -191,15 +193,17 @@ export function PluginDetailView({
   onToggleUpdates: (enabled: boolean) => void
   onOlderUpstream: () => void
   onSync: (changes: PluginChange[]) => void
+  onRevoke: (version: string) => void
+  onRestore: (version: string) => void
   onRemove: (version: string) => void
 }) {
-  const [removing, setRemoving] = useState<string | null>(null)
-  const [edit, setEdit] = useState<PluginEdit>({ selected: {}, added: {} })
+  const [confirming, setConfirming] = useState<{ kind: ConfirmKind; version: string } | null>(null)
+  const [added, setAdded] = useState<Record<string, string[]>>({})
   const [scope, setScope] = useState<'mirrored' | 'all'>('mirrored')
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState<string | null>(null)
-  useEffect(() => { setEdit({ selected: {}, added: {} }) }, [detail])
+  useEffect(() => { setAdded({}) }, [detail])
   const canPublish = permitsAction(callerRole, 'publishPlugin')
   const local = detail?.source.kind === 'upload'
   const newest = detail?.versions.find((version) => !version.revoked)
@@ -220,54 +224,38 @@ export function PluginDetailView({
   const held = rows.filter((row) => row.state !== 'none')
   const newestHeld = held[0]
   const newer = newestHeld ? rows.filter((row) => row.state === 'none' && compareVersionsDesc(row.version, newestHeld.version) < 0) : []
-  const changes = detail ? pluginChanges(detail.versions, unmirrored, edit) : []
+  const changes = detail ? pluginChanges(detail.versions, unmirrored, added) : []
   const pending = pendingItems(changes, mirrored)
-  const serving = (row: VersionRow) => edit.selected[row.version] ?? (row.state === 'available')
-  const adds = (row: VersionRow) => (edit.added[row.version] ?? []).filter((p) => !row.stored.has(p))
-  const op = (row: VersionRow): 'revoke' | 'restore' | null =>
-    row.state === 'available' && !serving(row) ? 'revoke' : row.state === 'revoked' && serving(row) ? 'restore' : null
+  const adds = (row: VersionRow) => (added[row.version] ?? []).filter((p) => !row.stored.has(p))
   const kind = (row: VersionRow, platform: string): MarkKind => {
     if (!row.published.has(platform)) return 'unpublished'
-    if (row.stored.has(platform)) return (row.state === 'available' && op(row) !== 'revoke') || (row.state === 'revoked' && op(row) === 'restore') ? 'mirrored' : 'revoked'
+    if (row.stored.has(platform)) return row.state === 'revoked' ? 'revoked' : 'mirrored'
     if (adds(row).includes(platform)) return 'add'
-    return row.state === 'none' || (row.state === 'available' && op(row) !== 'revoke') ? 'free' : 'upstream'
+    return row.state === 'revoked' ? 'upstream' : 'free'
   }
   const editable = (k: MarkKind) => canPublish && !local && (k === 'free' || k === 'add')
-  const setVersion = (version: string, selected: boolean | undefined, added: string[] | undefined) => setEdit((current) => {
-    const nextSelected = { ...current.selected }
-    const nextAdded = { ...current.added }
-    if (selected === undefined) delete nextSelected[version]; else nextSelected[version] = selected
-    if (added === undefined) delete nextAdded[version]; else nextAdded[version] = added
-    return { selected: nextSelected, added: nextAdded }
+  const setAdds = (version: string, platforms: string[] | undefined) => setAdded((current) => {
+    const next = { ...current }
+    if (platforms === undefined) delete next[version]; else next[version] = platforms
+    return next
   })
   const defaults = (row: VersionRow) => existing.filter((p) => row.published.has(p))
   const togglePlatform = (row: VersionRow, platform: string) => {
     const next = adds(row).includes(platform) ? adds(row).filter((p) => p !== platform) : [...adds(row), platform]
-    setVersion(row.version, row.state === 'none' ? (next.length > 0 ? true : undefined) : edit.selected[row.version], next.length ? next : undefined)
+    setAdds(row.version, next.length ? next : undefined)
   }
   const action = (row: VersionRow): { text: string; run: () => void } | null => {
     if (!canPublish) return null
-    if (row.state === 'available') {
-      return op(row) === 'revoke'
-        ? { text: 'Undo revoke', run: () => setVersion(row.version, undefined, undefined) }
-        : { text: 'Revoke', run: () => setVersion(row.version, false, undefined) }
-    }
-    if (row.state === 'revoked') {
-      return op(row) === 'restore'
-        ? { text: 'Undo restore', run: () => setVersion(row.version, undefined, undefined) }
-        : { text: 'Restore', run: () => setVersion(row.version, true, undefined) }
-    }
+    if (row.state === 'available') return { text: 'Revoke', run: () => setConfirming({ kind: 'revoke', version: row.version }) }
+    if (row.state === 'revoked') return { text: 'Restore', run: () => setConfirming({ kind: 'restore', version: row.version }) }
     if (local) return null
     return adds(row).length
-      ? { text: 'Clear', run: () => setVersion(row.version, undefined, undefined) }
-      : { text: `Add with ${defaults(row).length} platforms`, run: () => setVersion(row.version, true, defaults(row)) }
+      ? { text: 'Clear', run: () => setAdds(row.version, undefined) }
+      : { text: `Add with ${defaults(row).length} platforms`, run: () => setAdds(row.version, defaults(row)) }
   }
   const marker = (row: VersionRow) => {
     const n = adds(row).length
-    if (op(row) === 'revoke') return '→ revoke'
-    if (op(row) === 'restore') return '→ restore'
-    if (n) return row.state === 'none' ? `→ add ${n}` : `+${n}`
-    return ''
+    return n ? (row.state === 'none' ? `→ add ${n}` : `+${n}`) : ''
   }
   const coverage = (row: VersionRow) => {
     const n = adds(row).length
@@ -276,7 +264,7 @@ export function PluginDetailView({
   const listed = (scope === 'mirrored' ? held : rows).filter((row) => row.version.includes(filter.trim()))
   const shown = scope === 'all' ? listed.slice((page - 1) * versionsPerPage, page * versionsPerPage) : listed
   const newestStable = newer.find((row) => !row.prerelease)
-  const removingRow = rows.find((row) => row.version === removing)
+  const confirmingRow = rows.find((row) => row.version === confirming?.version)
   const lastVersion = detail?.versions.length === 1
   const check = summary?.update_check
   const legend: { kind: MarkKind; text: string }[] = [
@@ -391,7 +379,7 @@ export function PluginDetailView({
                         <FlexItem>
                           {adds(newestStable).length
                             ? <Content component="small">{newestStable.version} pending ({adds(newestStable).length} platforms)</Content>
-                            : <Button variant="link" isInline onClick={() => setVersion(newestStable.version, true, defaults(newestStable))}>Add {newestStable.version} with {defaults(newestStable).length} platforms</Button>}
+                            : <Button variant="link" isInline onClick={() => setAdds(newestStable.version, defaults(newestStable))}>Add {newestStable.version} with {defaults(newestStable).length} platforms</Button>}
                         </FlexItem>
                       ) : null}
                       <FlexItem><Button variant="link" isInline onClick={() => { setScope('all'); setPage(1) }}>Show all versions</Button></FlexItem>
@@ -412,7 +400,7 @@ export function PluginDetailView({
                     const act = action(row)
                     return (
                       <Tbody key={row.version} isExpanded={isExpanded}>
-                        <Tr isRowSelected={mark !== '' && op(row) !== 'revoke'} style={op(row) === 'revoke' ? { background: 'color-mix(in srgb, var(--pf-t--global--color--status--warning--default) 12%, transparent)' } : undefined}>
+                        <Tr isRowSelected={mark !== ''}>
                           <Td expand={{ rowIndex: index, isExpanded, onToggle: () => setExpanded(isExpanded ? null : row.version), expandId: `platforms-${row.version}` }} />
                           <Td dataLabel="Version"><code>{row.version}</code></Td>
                           <Td dataLabel="Status">
@@ -432,7 +420,7 @@ export function PluginDetailView({
                             <Td isActionCell modifier="nowrap">
                               <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} justifyContent={{ default: 'justifyContentFlexEnd' }} flexWrap={{ default: 'nowrap' }}>
                                 {act ? <Button variant="link" isInline isDisabled={busy} onClick={act.run} style={{ whiteSpace: 'nowrap' }}>{act.text}</Button> : null}
-                                {row.state !== 'none' ? <ActionsColumn items={[{ title: 'Remove version', onClick: () => setRemoving(row.version) }]} /> : null}
+                                {row.state !== 'none' ? <ActionsColumn items={[{ title: 'Remove version', onClick: () => setConfirming({ kind: 'remove', version: row.version }) }]} /> : null}
                               </Flex>
                             </Td>
                           ) : null}
@@ -484,8 +472,8 @@ export function PluginDetailView({
                   <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
                     <FlexItem><strong>{pending.length ? `Pending · ${pending.length}` : 'No pending changes'}</strong></FlexItem>
                     {pending.map((item) => (
-                      <FlexItem key={`${item.kind}-${item.version}`}>
-                        <Label color={item.kind === 'add' ? 'blue' : item.kind === 'revoke' ? 'yellow' : 'green'} onClose={() => setVersion(item.version, undefined, undefined)} closeBtnAriaLabel={`Undo ${item.text}`}>
+                      <FlexItem key={item.version}>
+                        <Label color="blue" onClose={() => setAdds(item.version, undefined)} closeBtnAriaLabel={`Undo ${item.text}`}>
                           {item.text}
                         </Label>
                       </FlexItem>
@@ -501,19 +489,48 @@ export function PluginDetailView({
             </Card>
           </>
         ) : null}
-        {removing && removingRow ? (
+        {confirming && confirmingRow ? (
           <PluginRegistryConfirmation
-            title={`Remove ${name} ${removing}?`}
-            body={`This deletes ${removingRow.stored.size} stored ${removingRow.stored.size === 1 ? 'binary' : 'binaries'} (${[...removingRow.stored].join(', ')}). Templates pinned to ${removing} will fail packer init. This can’t be undone. To stop serving it but keep the files, revoke it instead.${lastVersion
-              ? ` It is ${name}'s last version, so ${name} is removed and its name can be used by another source.` : ''}`}
-            verb={`Remove ${removing}`} busy={busy} danger
-            onCancel={() => setRemoving(null)}
-            onConfirm={() => { const version = removing; setRemoving(null); onRemove(version) }}
+            {...versionConfirmation(confirming.kind, name, confirmingRow, lastVersion)} busy={busy}
+            onCancel={() => setConfirming(null)}
+            onConfirm={() => {
+              const { kind, version } = confirming
+              setConfirming(null)
+              if (kind === 'remove') onRemove(version)
+              else if (kind === 'revoke') onRevoke(version)
+              else onRestore(version)
+            }}
           />
         ) : null}
       </PageSection>
     </>
   )
+}
+
+type ConfirmKind = 'revoke' | 'restore' | 'remove'
+
+export function versionConfirmation(
+  kind: ConfirmKind, name: string, row: { version: string; stored: Set<string> }, lastVersion: boolean,
+): { title: string; body: string; verb: string; danger: boolean } {
+  const files = `${row.stored.size} stored ${row.stored.size === 1 ? 'binary' : 'binaries'} (${[...row.stored].join(', ')})`
+  switch (kind) {
+    case 'revoke': return {
+      title: `Revoke ${name} ${row.version}?`,
+      body: `Packer gets 404 for each of its files, so templates pinned to ${row.version} fail packer init until it is restored. The ${files} ${row.stored.size === 1 ? 'is' : 'are'} kept. To delete ${row.stored.size === 1 ? 'it' : 'them'}, remove the version instead.`,
+      verb: `Revoke ${row.version}`, danger: false,
+    }
+    case 'restore': return {
+      title: `Restore ${name} ${row.version}?`,
+      body: `Packer resolves ${row.version} again from its ${files}.`,
+      verb: `Restore ${row.version}`, danger: false,
+    }
+    default: return {
+      title: `Remove ${name} ${row.version}?`,
+      body: `This deletes ${files}. Templates pinned to ${row.version} will fail packer init. This can’t be undone. To stop serving it but keep the files, revoke it instead.${lastVersion
+        ? ` It is ${name}'s last version, so ${name} is removed and its name can be used by another source.` : ''}`,
+      verb: `Remove ${row.version}`, danger: true,
+    }
+  }
 }
 
 function sourceLine(detail: PluginVersions): string {
