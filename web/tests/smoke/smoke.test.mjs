@@ -1015,6 +1015,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Plugins become anonymously readable to anyone who can reach dufflebag.')
     await clickInModal('Expose registry')
     await waitForText('The registry is enabled and exposed.')
+    // Exposed, the screen names the endpoint Packer resolves plugins from.
+    await waitForText(`/plugins/${wizardOrganizationName}/NAME`)
     assert.equal(await buttonDisabled('Disable registry'), true)
     await waitForText('Unexpose the registry first before disabling it.')
 

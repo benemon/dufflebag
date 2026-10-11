@@ -45,6 +45,11 @@ Packer itself presents no credential. Exposure is what grants it access.
    version becomes readable, without credentials, by anything that can reach
    dufflebag.
 
+Once exposed, the **Plugin registry** screen shows the address Packer resolves the
+organization's plugins from, `https://<host>/plugins/<organization>`, with a
+`required_plugins` stanza to copy; each plugin's own page shows the stanza
+pinned to its newest available version.
+
 **Plugin registry** (under **Administration**) also holds the organization's default platforms, ticked
 from the platforms HashiCorp builds Packer plugins for (grouped by operating system), and the
 two other lifecycle controls. **Unexpose** removes that access. A `packer init` in progress gets 404 on its
