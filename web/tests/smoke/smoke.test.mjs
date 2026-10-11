@@ -1650,6 +1650,19 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await until('the bucket picker to navigate again', () =>
       new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
     await waitForText('Bucket details')
+    // Clearing the project clears the bucket with it: organisation standing,
+    // and the bucket route is left behind (duf-gwjy).
+    await page.click('button[aria-label="Clear project"]')
+    await until('the project × to step up and leave the bucket route', async () =>
+      (await pickerValue('#tenant-project')) === '—' && new URL(page.url()).pathname.endsWith('/buckets'))
+    assert.notEqual(await pickerValue('#tenant-bucket').catch(() => null), 'smoke-images', 'the bucket outlived its project')
+    await choosePickerOption('#tenant-project', 'widgets')
+    await until('the project to be selected again', async () =>
+      (await pickerValue('#tenant-project')) === 'widgets')
+    await choosePickerOption('#tenant-bucket', 'smoke-images')
+    await until('the bucket picker to navigate once more', () =>
+      new URL(page.url()).pathname.endsWith('/buckets/smoke-images'))
+    await waitForText('Bucket details')
     // A fresh bucket states its emptiness (the old list's fresh-bucket proof).
     await clickByText('button', 'Versions')
     await waitForText('No versions in this bucket')

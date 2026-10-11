@@ -264,6 +264,8 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
     self, organizations, selectedOrganization, selectOrganization, refreshOrganizations,
   } = useAuth()
   const [creating, setCreating] = useState(false)
+  const { bucket: routeBucket } = useParams()
+  const navigate = useNavigate()
   const rows = organizationRows(organizations)
   const selected = rows.find((candidate) => candidate.id === selectedOrganization)
   const modal = creating ? (
@@ -281,7 +283,12 @@ function OrganizationSelect({ refreshFailure }: { refreshFailure: string | null 
         selectedValue={selectedOrganization ?? undefined}
         selectedLabel={selected?.name ?? 'Choose an organisation'}
         stepUpValue={rows.some((organization) => organization.id === '') && selectedOrganization ? '' : undefined}
-        onSelect={selectOrganization}
+        onSelect={(value) => {
+          selectOrganization(value)
+          // Stepping up to platform standing leaves a bucket route behind; a
+          // deep link settling its organisation keeps it.
+          if (value === '' && routeBucket !== undefined) navigate('/buckets')
+        }}
         onOpen={() => refreshOnPickerOpen(true, refreshOrganizations)}
         footer={(
           <MenuFooter>
@@ -323,6 +330,8 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
   } = useAuth()
   const { tenant, tenants, setTenant } = useTenant()
   const [creating, setCreating] = useState(false)
+  const { bucket: routeBucket } = useParams()
+  const navigate = useNavigate()
   // Same empty-listing rule as the organisation picker: no toggle, so poll
   // hot until the organisation's first project lands.
   const organizationID = state?.claims.organizationID ?? selectedOrganization
@@ -377,7 +386,11 @@ function ProjectSelect({ combined = false }: { combined?: boolean }) {
         stepUpValue={tenant.projectID !== '' ? tenants.find((candidate) => candidate.projectID === '')?.id : undefined}
         onSelect={(value) => {
           const next = tenants.find((candidate) => candidate.id === value)
-          if (next) setTenant(next)
+          if (!next) return
+          setTenant(next)
+          // Stepping up to organisation standing leaves a bucket route behind;
+          // a deep link settling its project keeps it.
+          if (next.projectID === '' && routeBucket !== undefined) navigate('/buckets')
         }}
         onOpen={() => refreshOnPickerOpen(true, refreshProjects)}
         footer={<MenuFooter>{createButton}</MenuFooter>}
