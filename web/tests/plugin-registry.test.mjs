@@ -569,7 +569,7 @@ test('registry settings own lifecycle controls and default platforms with mainta
   const settings = (callerRole, registry) => renderToStaticMarkup(React.createElement(
     PluginRegistrySettingsView,
     {
-      organizationName: 'acme', callerRole, registry,
+      organizationName: 'acme', host: 'dufflebag.example.com', callerRole, registry,
       defaultPlatforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'],
       loading: false, failure: null,
       onRefresh: () => {}, onEnable: async () => {}, onExpose: async () => {},
@@ -588,6 +588,11 @@ test('registry settings own lifecycle controls and default platforms with mainta
   assert.match(unexposed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Save default platforms/, 'nothing changed, nothing to save')
 
   const exposed = settings('maintainer', { enabled: true, exposed: true })
+  // Exposed, the screen says where Packer resolves this organization's plugins from, with a vanilla stanza.
+  assert.match(exposed, />Packer<[\s\S]{0,600}?dufflebag\.example\.com\/plugins\/acme</)
+  assert.match(exposed, /source  = &quot;dufflebag\.example\.com\/plugins\/acme\/NAME&quot;/)
+  assert.match(exposed, /version = &quot;&gt;= 1\.0\.0&quot;/)
+  assert.doesNotMatch(unexposed, /plugins\/acme\/NAME/, 'nothing to configure until the registry is exposed')
   assert.match(exposed, />Unexpose</)
   assert.match(exposed, /Unexpose the registry first before disabling it/)
   assert.match(exposed, /<button[^>]*disabled=""[^>]*>[\s\S]*?Disable registry[\s\S]*?<\/button>/)

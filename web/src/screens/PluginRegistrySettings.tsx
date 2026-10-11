@@ -11,8 +11,9 @@ import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadStat
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
   disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms,
-  getPluginRegistry, setDefaultPlatforms, unexposePluginRegistry, type PluginRegistry,
+  getPluginRegistry, setDefaultPlatforms, templateStanza, unexposePluginRegistry, type PluginRegistry,
 } from '../data/pluginRegistry'
+import { TemplateStanzaBlock } from './PluginDetail'
 import { useTenant } from '../data/tenant'
 import {
   DefaultPlatformsEditor, DisablePluginRegistryConfirmation, PluginRegistryConfirmation,
@@ -58,6 +59,7 @@ export function PluginRegistrySettings() {
   return (
     <PluginRegistrySettingsView
       organizationName={tenant.organization}
+      host={window.location.hostname}
       callerRole={self?.role ?? null}
       registry={registry}
       defaultPlatforms={defaultPlatforms}
@@ -80,10 +82,11 @@ export function PluginRegistrySettings() {
 }
 
 export function PluginRegistrySettingsView({
-  organizationName, callerRole, registry, defaultPlatforms, loading, failure,
+  organizationName, host, callerRole, registry, defaultPlatforms, loading, failure,
   onRefresh, onEnable, onExpose, onUnexpose, onDisable, onSetDefaultPlatforms,
 }: {
   organizationName: string
+  host: string
   callerRole: Role | null
   registry: PluginRegistry | null
   defaultPlatforms: string[]
@@ -192,6 +195,19 @@ export function PluginRegistrySettingsView({
                 {registry.exposed ? <Content component="small">Unexpose the registry first before disabling it.</Content> : null}
               </CardBody>
             </Card>
+            {registry.exposed ? (
+              <Card>
+                <CardTitle>Packer</CardTitle>
+                <CardBody>
+                  <Content component="p">
+                    Packer resolves this organization’s plugins from <code>{host}/plugins/{organizationName}</code>.
+                    Name the plugin and pin its version in the template; <code>packer init</code> fetches it from here.
+                  </Content>
+                  <TemplateStanzaBlock id="registry-stanza" hcl={templateStanza(host, organizationName, 'NAME', '>= 1.0.0')} />
+                  <Content component="small">Replace NAME with the plugin as the catalogue lists it; each plugin’s page shows its stanza with the newest available version.</Content>
+                </CardBody>
+              </Card>
+            ) : null}
             {registry.enabled ? (
               <Card>
                 <CardTitle>Default platforms</CardTitle>
