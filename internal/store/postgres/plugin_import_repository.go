@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
@@ -53,18 +54,39 @@ type PluginImportOrigin struct {
 	Kind       string
 	BatchIndex int
 	BatchSize  int
+	RetryOf    *uuid.UUID
 }
 
 // PluginImport is a recorded import job.
 type PluginImport struct {
 	ID          uuid.UUID
+	Plugin      string
 	Request     PluginImportRequest
 	Origin      PluginImportOrigin
 	State       string
 	Outcomes    json.RawMessage
 	CreatedAt   time.Time
+	StartedAt   *time.Time
 	FinishedAt  *time.Time
 	QueuedAhead int
+}
+
+// PluginImportFilter narrows a job listing. Empty States means every state.
+type PluginImportFilter struct {
+	States []string
+	Plugin string
+	Limit  int
+	Offset int
+}
+
+// PluginNameOf is the plugin a product names: packer-plugin-amazon and
+// acme/packer-plugin-amazon are both amazon; an uploaded plugin's product
+// is its name already.
+func PluginNameOf(product string) string {
+	if _, after, found := strings.Cut(product, "/"); found {
+		product = after
+	}
+	return strings.TrimPrefix(product, "packer-plugin-")
 }
 
 // ClaimedPluginImport is a job a worker now owns.
@@ -93,10 +115,14 @@ func (r *Repository) CreatePluginImport(
 	if err != nil {
 		return uuid.Nil, err
 	}
+	var retryOf uuid.NullUUID
+	if origin.RetryOf != nil {
+		retryOf = uuid.NullUUID{UUID: *origin.RetryOf, Valid: true}
+	}
 	if err := q.InsertPluginImport(ctx, postgresdb.InsertPluginImportParams{
-		ID: id, OrganizationID: tenant.OrganizationID, SourceKind: request.SourceKind,
-		Product: request.Product, Versions: nonNil(request.Versions), Platforms: nonNil(request.Platforms), Changes: changes,
-		CreatedBy: origin.CreatedBy, Origin: origin.Kind, BatchIndex: int32(max(origin.BatchIndex, 1)), BatchSize: int32(max(origin.BatchSize, 1)),
+		ID: id, OrganizationID: tenant.OrganizationID, SourceKind: request.SourceKind, Product: request.Product, Plugin: PluginNameOf(request.Product),
+		Versions: nonNil(request.Versions), Platforms: nonNil(request.Platforms), Changes: changes,
+		CreatedBy: origin.CreatedBy, Origin: origin.Kind, BatchIndex: int32(max(origin.BatchIndex, 1)), BatchSize: int32(max(origin.BatchSize, 1)), RetryOf: retryOf,
 	}); err != nil {
 		return uuid.Nil, fmt.Errorf("insert plugin import: %w", err)
 	}
@@ -120,14 +146,75 @@ func (r *Repository) GetPluginImport(ctx context.Context, tenant OrganizationTen
 	if err != nil {
 		return PluginImport{}, fmt.Errorf("get plugin import: %w", err)
 	}
+	return pluginImportOf(postgresdb.ListPluginImportsRow(row))
+}
+
+// ListPluginImports is one page of the organization's jobs, newest first,
+// with the count of every job the filter matches.
+func (r *Repository) ListPluginImports(ctx context.Context, tenant OrganizationTenant, filter PluginImportFilter) ([]PluginImport, int, error) {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := q.ListPluginImports(ctx, postgresdb.ListPluginImportsParams{
+		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugin: filter.Plugin,
+		PageSize: int32(filter.Limit), PageOffset: int32(filter.Offset),
+	})
+	if err != nil {
+		return nil, 0, fmt.Errorf("list plugin imports: %w", err)
+	}
+	jobs := make([]PluginImport, 0, len(rows))
+	total := 0
+	for _, row := range rows {
+		job, err := pluginImportOf(row)
+		if err != nil {
+			return nil, 0, err
+		}
+		jobs = append(jobs, job)
+		total = int(row.Total)
+	}
+	if len(rows) == 0 && filter.Offset > 0 {
+		total, err = r.countPluginImports(ctx, q, tenant, filter)
+		if err != nil {
+			return nil, 0, err
+		}
+	}
+	return jobs, total, nil
+}
+
+// A page past the end has no row to carry the window count.
+func (r *Repository) countPluginImports(ctx context.Context, q *postgresdb.Queries, tenant OrganizationTenant, filter PluginImportFilter) (int, error) {
+	rows, err := q.ListPluginImports(ctx, postgresdb.ListPluginImportsParams{
+		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugin: filter.Plugin, PageSize: 1, PageOffset: 0,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("count plugin imports: %w", err)
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	return int(rows[0].Total), nil
+}
+
+// GetPluginImport and ListPluginImports select the same columns; the Get
+// row is converted so one mapping serves both.
+func pluginImportOf(row postgresdb.ListPluginImportsRow) (PluginImport, error) {
 	changes, err := decodeChanges(row.Changes)
 	if err != nil {
 		return PluginImport{}, err
 	}
 	job := PluginImport{
-		ID: row.ID, State: row.State, Outcomes: row.Outcomes, CreatedAt: row.CreatedAt, QueuedAhead: int(row.QueuedAhead),
+		ID: row.ID, Plugin: row.Plugin, State: row.State, Outcomes: row.Outcomes, CreatedAt: row.CreatedAt, QueuedAhead: int(row.QueuedAhead),
 		Request: PluginImportRequest{SourceKind: row.SourceKind, Product: row.Product, Versions: row.Versions, Platforms: row.Platforms, Changes: changes},
 		Origin:  PluginImportOrigin{CreatedBy: row.CreatedBy, Kind: row.Origin, BatchIndex: int(row.BatchIndex), BatchSize: int(row.BatchSize)},
+	}
+	if row.RetryOf.Valid {
+		retryOf := row.RetryOf.UUID
+		job.Origin.RetryOf = &retryOf
+	}
+	if row.StartedAt.Valid {
+		job.StartedAt = &row.StartedAt.Time
 	}
 	if row.FinishedAt.Valid {
 		job.FinishedAt = &row.FinishedAt.Time

@@ -251,6 +251,9 @@ type PluginImport struct {
 	Origin         string          `json:"origin"`
 	BatchIndex     int32           `json:"batch_index"`
 	BatchSize      int32           `json:"batch_size"`
+	Plugin         string          `json:"plugin"`
+	StartedAt      sql.NullTime    `json:"started_at"`
+	RetryOf        uuid.NullUUID   `json:"retry_of"`
 }
 
 type PluginRegistry struct {

@@ -1498,11 +1498,12 @@ func (q *Queries) GetPlugin(ctx context.Context, arg GetPluginParams) (GetPlugin
 }
 
 const getPluginImport = `-- name: GetPluginImport :one
-SELECT job.id, job.source_kind, job.product, job.versions, job.platforms, job.changes, job.state, job.outcomes, job.created_at, job.finished_at,
-       job.created_by, job.origin, job.batch_index, job.batch_size,
+SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platforms, job.changes, job.state, job.outcomes,
+       job.created_at, job.started_at, job.finished_at, job.created_by, job.origin, job.batch_index, job.batch_size, job.retry_of,
        (SELECT count(*) FROM plugin_imports ahead
         WHERE ahead.organization_id = job.organization_id
-          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead
+          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead,
+       count(*) OVER ()::integer AS total
 FROM plugin_imports job WHERE job.organization_id = $1 AND job.id = $2
 `
 
@@ -1515,18 +1516,22 @@ type GetPluginImportRow struct {
 	ID          uuid.UUID       `json:"id"`
 	SourceKind  string          `json:"source_kind"`
 	Product     string          `json:"product"`
+	Plugin      string          `json:"plugin"`
 	Versions    []string        `json:"versions"`
 	Platforms   []string        `json:"platforms"`
 	Changes     json.RawMessage `json:"changes"`
 	State       string          `json:"state"`
 	Outcomes    json.RawMessage `json:"outcomes"`
 	CreatedAt   time.Time       `json:"created_at"`
+	StartedAt   sql.NullTime    `json:"started_at"`
 	FinishedAt  sql.NullTime    `json:"finished_at"`
 	CreatedBy   string          `json:"created_by"`
 	Origin      string          `json:"origin"`
 	BatchIndex  int32           `json:"batch_index"`
 	BatchSize   int32           `json:"batch_size"`
+	RetryOf     uuid.NullUUID   `json:"retry_of"`
 	QueuedAhead int32           `json:"queued_ahead"`
+	Total       int32           `json:"total"`
 }
 
 func (q *Queries) GetPluginImport(ctx context.Context, arg GetPluginImportParams) (GetPluginImportRow, error) {
@@ -1536,18 +1541,22 @@ func (q *Queries) GetPluginImport(ctx context.Context, arg GetPluginImportParams
 		&i.ID,
 		&i.SourceKind,
 		&i.Product,
+		&i.Plugin,
 		pq.Array(&i.Versions),
 		pq.Array(&i.Platforms),
 		&i.Changes,
 		&i.State,
 		&i.Outcomes,
 		&i.CreatedAt,
+		&i.StartedAt,
 		&i.FinishedAt,
 		&i.CreatedBy,
 		&i.Origin,
 		&i.BatchIndex,
 		&i.BatchSize,
+		&i.RetryOf,
 		&i.QueuedAhead,
+		&i.Total,
 	)
 	return i, err
 }
@@ -2146,8 +2155,8 @@ func (q *Queries) InsertPluginFile(ctx context.Context, arg InsertPluginFilePara
 }
 
 const insertPluginImport = `-- name: InsertPluginImport :exec
-INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes, created_by, origin, batch_index, batch_size)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, plugin, versions, platforms, changes, created_by, origin, batch_index, batch_size, retry_of)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 `
 
 type InsertPluginImportParams struct {
@@ -2155,6 +2164,7 @@ type InsertPluginImportParams struct {
 	OrganizationID uuid.UUID       `json:"organization_id"`
 	SourceKind     string          `json:"source_kind"`
 	Product        string          `json:"product"`
+	Plugin         string          `json:"plugin"`
 	Versions       []string        `json:"versions"`
 	Platforms      []string        `json:"platforms"`
 	Changes        json.RawMessage `json:"changes"`
@@ -2162,6 +2172,7 @@ type InsertPluginImportParams struct {
 	Origin         string          `json:"origin"`
 	BatchIndex     int32           `json:"batch_index"`
 	BatchSize      int32           `json:"batch_size"`
+	RetryOf        uuid.NullUUID   `json:"retry_of"`
 }
 
 func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImportParams) error {
@@ -2170,6 +2181,7 @@ func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImport
 		arg.OrganizationID,
 		arg.SourceKind,
 		arg.Product,
+		arg.Plugin,
 		pq.Array(arg.Versions),
 		pq.Array(arg.Platforms),
 		arg.Changes,
@@ -2177,6 +2189,7 @@ func (q *Queries) InsertPluginImport(ctx context.Context, arg InsertPluginImport
 		arg.Origin,
 		arg.BatchIndex,
 		arg.BatchSize,
+		arg.RetryOf,
 	)
 	return err
 }
@@ -2772,6 +2785,100 @@ func (q *Queries) ListPlatformPrincipals(ctx context.Context) ([]Principal, erro
 			&i.Role,
 			&i.IntegrityMac,
 			&i.BucketID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPluginImports = `-- name: ListPluginImports :many
+SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platforms, job.changes, job.state, job.outcomes,
+       job.created_at, job.started_at, job.finished_at, job.created_by, job.origin, job.batch_index, job.batch_size, job.retry_of,
+       (SELECT count(*) FROM plugin_imports ahead
+        WHERE ahead.organization_id = job.organization_id
+          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead,
+       count(*) OVER ()::integer AS total
+FROM plugin_imports job
+WHERE job.organization_id = $1
+  AND (cardinality($2::text[]) = 0 OR job.state = ANY($2::text[]))
+  AND ($3::text = '' OR job.plugin = $3::text)
+ORDER BY job.created_at DESC, job.id DESC
+LIMIT $5::integer OFFSET $4::integer
+`
+
+type ListPluginImportsParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	States         []string  `json:"states"`
+	Plugin         string    `json:"plugin"`
+	PageOffset     int32     `json:"page_offset"`
+	PageSize       int32     `json:"page_size"`
+}
+
+type ListPluginImportsRow struct {
+	ID          uuid.UUID       `json:"id"`
+	SourceKind  string          `json:"source_kind"`
+	Product     string          `json:"product"`
+	Plugin      string          `json:"plugin"`
+	Versions    []string        `json:"versions"`
+	Platforms   []string        `json:"platforms"`
+	Changes     json.RawMessage `json:"changes"`
+	State       string          `json:"state"`
+	Outcomes    json.RawMessage `json:"outcomes"`
+	CreatedAt   time.Time       `json:"created_at"`
+	StartedAt   sql.NullTime    `json:"started_at"`
+	FinishedAt  sql.NullTime    `json:"finished_at"`
+	CreatedBy   string          `json:"created_by"`
+	Origin      string          `json:"origin"`
+	BatchIndex  int32           `json:"batch_index"`
+	BatchSize   int32           `json:"batch_size"`
+	RetryOf     uuid.NullUUID   `json:"retry_of"`
+	QueuedAhead int32           `json:"queued_ahead"`
+	Total       int32           `json:"total"`
+}
+
+func (q *Queries) ListPluginImports(ctx context.Context, arg ListPluginImportsParams) ([]ListPluginImportsRow, error) {
+	rows, err := q.db.QueryContext(ctx, listPluginImports,
+		arg.OrganizationID,
+		pq.Array(arg.States),
+		arg.Plugin,
+		arg.PageOffset,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListPluginImportsRow
+	for rows.Next() {
+		var i ListPluginImportsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.SourceKind,
+			&i.Product,
+			&i.Plugin,
+			pq.Array(&i.Versions),
+			pq.Array(&i.Platforms),
+			&i.Changes,
+			&i.State,
+			&i.Outcomes,
+			&i.CreatedAt,
+			&i.StartedAt,
+			&i.FinishedAt,
+			&i.CreatedBy,
+			&i.Origin,
+			&i.BatchIndex,
+			&i.BatchSize,
+			&i.RetryOf,
+			&i.QueuedAhead,
+			&i.Total,
 		); err != nil {
 			return nil, err
 		}
@@ -3655,7 +3762,7 @@ func (q *Queries) MarkBagDropAssociationAttempt(ctx context.Context, arg MarkBag
 }
 
 const markPluginImportRunning = `-- name: MarkPluginImportRunning :exec
-UPDATE plugin_imports SET state = 'running', claimed_at = now(), outcomes = '[]' WHERE id = $1
+UPDATE plugin_imports SET state = 'running', claimed_at = now(), started_at = COALESCE(started_at, now()), outcomes = '[]' WHERE id = $1
 `
 
 func (q *Queries) MarkPluginImportRunning(ctx context.Context, id uuid.UUID) error {

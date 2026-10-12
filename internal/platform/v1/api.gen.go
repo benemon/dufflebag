@@ -823,6 +823,36 @@ func (e WebhookTargetType) Valid() bool {
 	}
 }
 
+// Defines values for ListPluginImportsParamsState.
+const (
+	ListPluginImportsParamsStateFailed             ListPluginImportsParamsState = "failed"
+	ListPluginImportsParamsStatePartiallySucceeded ListPluginImportsParamsState = "partially_succeeded"
+	ListPluginImportsParamsStateQueued             ListPluginImportsParamsState = "queued"
+	ListPluginImportsParamsStateRunning            ListPluginImportsParamsState = "running"
+	ListPluginImportsParamsStateSucceeded          ListPluginImportsParamsState = "succeeded"
+	ListPluginImportsParamsStateUnfinished         ListPluginImportsParamsState = "unfinished"
+)
+
+// Valid indicates whether the value is a known member of the ListPluginImportsParamsState enum.
+func (e ListPluginImportsParamsState) Valid() bool {
+	switch e {
+	case ListPluginImportsParamsStateFailed:
+		return true
+	case ListPluginImportsParamsStatePartiallySucceeded:
+		return true
+	case ListPluginImportsParamsStateQueued:
+		return true
+	case ListPluginImportsParamsStateRunning:
+		return true
+	case ListPluginImportsParamsStateSucceeded:
+		return true
+	case ListPluginImportsParamsStateUnfinished:
+		return true
+	default:
+		return false
+	}
+}
+
 // AuditTarget defines model for AuditTarget.
 type AuditTarget struct {
 	ConsecutiveFailures int                `json:"consecutive_failures"`
@@ -1116,7 +1146,7 @@ type BuildScanSummary struct {
 
 // CatalogueSyncResult defines model for CatalogueSyncResult.
 type CatalogueSyncResult struct {
-	// ImportId The queued job. Absent when refused.
+	// ImportId The queued job
 	ImportId *openapi_types.UUID `json:"import_id,omitempty"`
 	Plugin   string              `json:"plugin"`
 
@@ -1491,13 +1521,22 @@ type PluginImport struct {
 	Origin    PluginImportOrigin           `json:"origin"`
 	Outcomes  []PluginImportVersionOutcome `json:"outcomes"`
 	Platforms []string                     `json:"platforms"`
-	Product   string                       `json:"product"`
+
+	// Plugin The plugin name the job concerns.
+	Plugin  string `json:"plugin"`
+	Product string `json:"product"`
 
 	// QueuedAhead The organization's unfinished jobs queued before this one.
-	QueuedAhead int               `json:"queued_ahead"`
-	Source      string            `json:"source"`
-	State       PluginImportState `json:"state"`
-	Versions    []string          `json:"versions"`
+	QueuedAhead int `json:"queued_ahead"`
+
+	// RetryOf The job this one retries.
+	RetryOf *openapi_types.UUID `json:"retry_of,omitempty"`
+	Source  string              `json:"source"`
+
+	// StartedAt When a worker first took the job.
+	StartedAt *time.Time        `json:"started_at,omitempty"`
+	State     PluginImportState `json:"state"`
+	Versions  []string          `json:"versions"`
 }
 
 // PluginImportOrigin Where the job was queued from; catalogue jobs are one of a Sync selected batch.
@@ -1505,6 +1544,13 @@ type PluginImportOrigin string
 
 // PluginImportState defines model for PluginImport.State.
 type PluginImportState string
+
+// PluginImportConflict defines model for PluginImportConflict.
+type PluginImportConflict struct {
+	// ImportId The queued or running job that stands in the way
+	ImportId *openapi_types.UUID `json:"import_id,omitempty"`
+	Message  string              `json:"message"`
+}
 
 // PluginImportPlatformOutcome defines model for PluginImportPlatformOutcome.
 type PluginImportPlatformOutcome struct {
@@ -1521,7 +1567,10 @@ type PluginImportRequest struct {
 	Platforms []string `json:"platforms"`
 
 	// Product For releases-hashicorp, the product (packer-plugin-amazon); for github, the repository (owner/packer-plugin-git).
-	Product string                    `json:"product"`
+	Product string `json:"product"`
+
+	// RetryOf The failed job this one retries; it must be one of the organization's jobs.
+	RetryOf *openapi_types.UUID       `json:"retry_of,omitempty"`
 	Source  PluginImportRequestSource `json:"source"`
 
 	// Versions For releases-hashicorp, versions; for github, release tags as a resolve returned them.
@@ -1573,6 +1622,9 @@ type PluginSourceKind string
 // PluginSyncRequest defines model for PluginSyncRequest.
 type PluginSyncRequest struct {
 	Changes []PluginChange `json:"changes"`
+
+	// RetryOf The failed job this one retries; it must be one of the organization's jobs.
+	RetryOf *openapi_types.UUID `json:"retry_of,omitempty"`
 }
 
 // PluginUpdateCheck Opt-in update checking for an imported plugin (ADR-0027 A6). A check asks the plugin's source for its
@@ -1965,6 +2017,20 @@ type ListHashicorpPluginVersionsParams struct {
 	// After The next cursor of the previous page.
 	After *string `form:"after,omitempty" json:"after,omitempty"`
 }
+
+// ListPluginImportsParams defines parameters for ListPluginImports.
+type ListPluginImportsParams struct {
+	// State One job state, or `unfinished` for queued and running jobs.
+	State *ListPluginImportsParamsState `form:"state,omitempty" json:"state,omitempty"`
+
+	// Plugin Only jobs for this plugin name.
+	Plugin *string `form:"plugin,omitempty" json:"plugin,omitempty"`
+	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+}
+
+// ListPluginImportsParamsState defines parameters for ListPluginImports.
+type ListPluginImportsParamsState string
 
 // SetPluginUpdateCheckJSONBody defines parameters for SetPluginUpdateCheck.
 type SetPluginUpdateCheckJSONBody struct {
@@ -2477,10 +2543,18 @@ type ClientInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
 	ExposePluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
+	// ListPluginImports The organization's jobs, newest first
+	//
+	// Imports, syncs and uploads alike. Readable by `reader`.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports (the `ListPluginImports` operationId).
+	ListPluginImports(ctx context.Context, organizationId OrganizationId, params *ListPluginImportsParams, reqEditors ...RequestEditorFn) (*http.Response, error)
+
 	// CreatePluginImportWithBody Queue an import of plugin versions from releases.hashicorp.com
 	//
 	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-	// signing key before storing anything (ADR-0027 A3).
+	// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+	// name for its source until the job finishes.
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -2490,7 +2564,8 @@ type ClientInterface interface {
 	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 	//
 	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-	// signing key before storing anything (ADR-0027 A3).
+	// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+	// name for its source until the job finishes.
 	//
 	// Takes a body of the `application/json` content type.
 	//
@@ -3786,10 +3861,28 @@ func (c *Client) ExposePluginRegistry(ctx context.Context, organizationId Organi
 	return c.Client.Do(req)
 }
 
+// ListPluginImports The organization's jobs, newest first
+//
+// Imports, syncs and uploads alike. Readable by `reader`.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports (the `ListPluginImports` operationId).
+func (c *Client) ListPluginImports(ctx context.Context, organizationId OrganizationId, params *ListPluginImportsParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewListPluginImportsRequest(c.Server, organizationId, params)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
 // CreatePluginImportWithBody Queue an import of plugin versions from releases.hashicorp.com
 //
 // Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-// signing key before storing anything (ADR-0027 A3).
+// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+// name for its source until the job finishes.
 //
 // Takes any type of body and a specified content type.
 //
@@ -3809,7 +3902,8 @@ func (c *Client) CreatePluginImportWithBody(ctx context.Context, organizationId 
 // CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 //
 // Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-// signing key before storing anything (ADR-0027 A3).
+// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+// name for its source until the job finishes.
 //
 // Takes a body of the `application/json` content type.
 //
@@ -6099,6 +6193,103 @@ func NewExposePluginRegistryRequest(server string, organizationId OrganizationId
 	}
 
 	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewListPluginImportsRequest constructs an http.Request for the ListPluginImports method
+func NewListPluginImportsRequest(server string, organizationId OrganizationId, params *ListPluginImportsParams) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/imports", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	if params != nil {
+		// queryValues collects non-styled parameters (passthrough, JSON)
+		// that are safe to round-trip through url.Values.Encode().
+		queryValues := queryURL.Query()
+		// rawQueryFragments collects pre-encoded query fragments from
+		// styled parameters, preserving literal commas as delimiters
+		// per the OpenAPI spec (e.g. "color=blue,black,brown").
+		var rawQueryFragments []string
+
+		if params.State != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Plugin != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "plugin", *params.Plugin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Limit != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "limit", *params.Limit, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if params.Offset != nil {
+
+			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "offset", *params.Offset, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "integer", Format: ""}); err != nil {
+				return nil, err
+			} else {
+				for _, qp := range strings.Split(queryFrag, "&") {
+					rawQueryFragments = append(rawQueryFragments, qp)
+				}
+			}
+
+		}
+
+		if encoded := queryValues.Encode(); encoded != "" {
+			rawQueryFragments = append(rawQueryFragments, encoded)
+		}
+		queryURL.RawQuery = strings.Join(rawQueryFragments, "&")
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -8991,10 +9182,20 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/expose (the `ExposePluginRegistry` operationId).
 	ExposePluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExposePluginRegistryResponse, error)
 
+	// ListPluginImportsWithResponse The organization's jobs, newest first
+	//
+	// Imports, syncs and uploads alike. Readable by `reader`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports (the `ListPluginImports` operationId).
+	ListPluginImportsWithResponse(ctx context.Context, organizationId OrganizationId, params *ListPluginImportsParams, reqEditors ...RequestEditorFn) (*ListPluginImportsResponse, error)
+
 	// CreatePluginImportWithBodyWithResponse Queue an import of plugin versions from releases.hashicorp.com
 	//
 	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-	// signing key before storing anything (ADR-0027 A3).
+	// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+	// name for its source until the job finishes.
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -9004,7 +9205,8 @@ type ClientWithResponsesInterface interface {
 	// CreatePluginImportWithResponse Queue an import of plugin versions from releases.hashicorp.com
 	//
 	// Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-	// signing key before storing anything (ADR-0027 A3).
+	// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+	// name for its source until the job finishes.
 	//
 	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -11247,6 +11449,74 @@ func (r ExposePluginRegistryResponse) ContentType() string {
 	return ""
 }
 
+type ListPluginImportsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *struct {
+		Imports []PluginImport `json:"imports"`
+		Total   int            `json:"total"`
+	}
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r ListPluginImportsResponse) GetJSON200() *struct {
+	Imports []PluginImport `json:"imports"`
+	Total   int            `json:"total"`
+} {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ListPluginImportsResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ListPluginImportsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ListPluginImportsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetBody returns the raw response body bytes
+func (r ListPluginImportsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ListPluginImportsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ListPluginImportsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ListPluginImportsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
 type CreatePluginImportResponse struct {
 	Body         []byte
 	HTTPResponse *http.Response
@@ -11261,7 +11531,7 @@ type CreatePluginImportResponse struct {
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON409 the response for an HTTP 409 `application/json` response
-	JSON409 *Error
+	JSON409 *PluginImportConflict
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
@@ -11290,7 +11560,7 @@ func (r CreatePluginImportResponse) GetJSON404() *NotFound {
 }
 
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r CreatePluginImportResponse) GetJSON409() *Error {
+func (r CreatePluginImportResponse) GetJSON409() *PluginImportConflict {
 	return r.JSON409
 }
 
@@ -11451,7 +11721,7 @@ type SyncPluginResponse struct {
 	// JSON404 the response for an HTTP 404 `application/json` response
 	JSON404 *NotFound
 	// JSON409 the response for an HTTP 409 `application/json` response
-	JSON409 *Error
+	JSON409 *PluginImportConflict
 }
 
 // GetJSON202 returns the response for an HTTP 202 `application/json` response
@@ -11480,7 +11750,7 @@ func (r SyncPluginResponse) GetJSON404() *NotFound {
 }
 
 // GetJSON409 returns the response for an HTTP 409 `application/json` response
-func (r SyncPluginResponse) GetJSON409() *Error {
+func (r SyncPluginResponse) GetJSON409() *PluginImportConflict {
 	return r.JSON409
 }
 
@@ -15406,10 +15676,26 @@ func (c *ClientWithResponses) ExposePluginRegistryWithResponse(ctx context.Conte
 	return ParseExposePluginRegistryResponse(rsp)
 }
 
+// ListPluginImportsWithResponse The organization's jobs, newest first
+//
+// Imports, syncs and uploads alike. Readable by `reader`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/imports (the `ListPluginImports` operationId).
+func (c *ClientWithResponses) ListPluginImportsWithResponse(ctx context.Context, organizationId OrganizationId, params *ListPluginImportsParams, reqEditors ...RequestEditorFn) (*ListPluginImportsResponse, error) {
+	rsp, err := c.ListPluginImports(ctx, organizationId, params, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseListPluginImportsResponse(rsp)
+}
+
 // CreatePluginImportWithBodyWithResponse Queue an import of plugin versions from releases.hashicorp.com
 //
 // Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-// signing key before storing anything (ADR-0027 A3).
+// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+// name for its source until the job finishes.
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //
@@ -15425,7 +15711,8 @@ func (c *ClientWithResponses) CreatePluginImportWithBodyWithResponse(ctx context
 // CreatePluginImportWithResponse Queue an import of plugin versions from releases.hashicorp.com
 //
 // Requires `publisher`. The job verifies each version's SHA256SUMS against HashiCorp's pinned
-// signing key before storing anything (ADR-0027 A3).
+// signing key before storing anything (ADR-0027 A3). A first import reserves the plugin's
+// name for its source until the job finishes.
 //
 // Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
 //
@@ -17804,6 +18091,56 @@ func ParseExposePluginRegistryResponse(rsp *http.Response) (*ExposePluginRegistr
 	return response, nil
 }
 
+// ParseListPluginImportsResponse parses an HTTP response from a ListPluginImportsWithResponse call
+func ParseListPluginImportsResponse(rsp *http.Response) (*ListPluginImportsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ListPluginImportsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest struct {
+			Imports []PluginImport `json:"imports"`
+			Total   int            `json:"total"`
+		}
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseCreatePluginImportResponse parses an HTTP response from a CreatePluginImportWithResponse call
 func ParseCreatePluginImportResponse(rsp *http.Response) (*CreatePluginImportResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -17854,7 +18191,7 @@ func ParseCreatePluginImportResponse(rsp *http.Response) (*CreatePluginImportRes
 		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Error
+		var dest PluginImportConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -17997,7 +18334,7 @@ func ParseSyncPluginResponse(rsp *http.Response) (*SyncPluginResponse, error) {
 		response.JSON404 = &dest
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
-		var dest Error
+		var dest PluginImportConflict
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -20771,6 +21108,9 @@ type ServerInterface interface {
 	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
 	ExposePluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ListPluginImports The organization's jobs, newest first
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports)
+	ListPluginImports(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, params ListPluginImportsParams)
 	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
 	CreatePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -21402,6 +21742,87 @@ func (siw *ServerInterfaceWrapper) ExposePluginRegistry(w http.ResponseWriter, r
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExposePluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ListPluginImports operation middleware
+func (siw *ServerInterfaceWrapper) ListPluginImports(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// Parameter object where we will unmarshal all parameters from the context
+	var params ListPluginImportsParams
+
+	// ------------- Optional query parameter "state" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "state"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "state", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "plugin" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "plugin", r.URL.Query(), &params.Plugin, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "plugin"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "plugin", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "limit" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "limit", r.URL.Query(), &params.Limit, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "limit"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "limit", Err: err})
+		}
+		return
+	}
+
+	// ------------- Optional query parameter "offset" -------------
+
+	err = runtime.BindQueryParameterWithOptions("form", true, false, "offset", r.URL.Query(), &params.Offset, runtime.BindQueryParameterOptions{Type: "integer", Format: ""})
+	if err != nil {
+		var requiredError *runtime.RequiredParameterError
+		if errors.As(err, &requiredError) {
+			siw.ErrorHandlerFunc(w, r, &RequiredParamError{ParamName: "offset"})
+		} else {
+			siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "offset", Err: err})
+		}
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ListPluginImports(w, r, organizationId, params)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23566,6 +23987,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.ListPluginImports)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.CreatePluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.GetPluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
@@ -25014,6 +25436,74 @@ func (response ExposePluginRegistry409JSONResponse) VisitExposePluginRegistryRes
 	return err
 }
 
+type ListPluginImportsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Params         ListPluginImportsParams
+}
+
+type ListPluginImportsResponseObject interface {
+	VisitListPluginImportsResponse(w http.ResponseWriter) error
+}
+
+type ListPluginImports200JSONResponse struct {
+	Imports []PluginImport `json:"imports"`
+	Total   int            `json:"total"`
+}
+
+func (response ListPluginImports200JSONResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPluginImports400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response ListPluginImports400JSONResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPluginImports401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ListPluginImports401JSONResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ListPluginImports404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ListPluginImports404JSONResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
 type CreatePluginImportRequestObject struct {
 	OrganizationId OrganizationId `json:"organizationId"`
 	Body           *CreatePluginImportJSONRequestBody
@@ -25093,7 +25583,7 @@ func (response CreatePluginImport404JSONResponse) VisitCreatePluginImportRespons
 	return err
 }
 
-type CreatePluginImport409JSONResponse Error
+type CreatePluginImport409JSONResponse PluginImportConflict
 
 func (response CreatePluginImport409JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
 
@@ -25290,7 +25780,7 @@ func (response SyncPlugin404JSONResponse) VisitSyncPluginResponse(w http.Respons
 	return err
 }
 
-type SyncPlugin409JSONResponse Error
+type SyncPlugin409JSONResponse PluginImportConflict
 
 func (response SyncPlugin409JSONResponse) VisitSyncPluginResponse(w http.ResponseWriter) error {
 
@@ -29172,6 +29662,9 @@ type StrictServerInterface interface {
 	// ExposePluginRegistry Expose the organization plugin registry for anonymous reads
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/expose)
 	ExposePluginRegistry(ctx context.Context, request ExposePluginRegistryRequestObject) (ExposePluginRegistryResponseObject, error)
+	// ListPluginImports The organization's jobs, newest first
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports)
+	ListPluginImports(ctx context.Context, request ListPluginImportsRequestObject) (ListPluginImportsResponseObject, error)
 	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
 	CreatePluginImport(ctx context.Context, request CreatePluginImportRequestObject) (CreatePluginImportResponseObject, error)
@@ -29920,6 +30413,33 @@ func (sh *strictHandler) ExposePluginRegistry(w http.ResponseWriter, r *http.Req
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ExposePluginRegistryResponseObject); ok {
 		if err := validResponse.VisitExposePluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ListPluginImports operation middleware
+func (sh *strictHandler) ListPluginImports(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, params ListPluginImportsParams) {
+	var request ListPluginImportsRequestObject
+
+	request.OrganizationId = organizationId
+	request.Params = params
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ListPluginImports(ctx, request.(ListPluginImportsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ListPluginImports")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ListPluginImportsResponseObject); ok {
+		if err := validResponse.VisitListPluginImportsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

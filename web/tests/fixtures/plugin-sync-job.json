@@ -54,6 +54,7 @@
     }
   ],
   "platforms": [],
+  "plugin": "amazon",
   "product": "amazon",
   "queued_ahead": 0,
   "source": "releases-hashicorp",

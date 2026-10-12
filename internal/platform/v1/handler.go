@@ -45,6 +45,7 @@ type PlatformRepository interface {
 	DeletePluginVersion(context.Context, store.OrganizationTenant, string, string) error
 	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest, store.PluginImportOrigin) (uuid.UUID, error)
 	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
+	ListPluginImports(context.Context, store.OrganizationTenant, store.PluginImportFilter) ([]store.PluginImport, int, error)
 	PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error)
 	SetPluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant, []string) ([]string, error)
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
@@ -614,6 +615,11 @@ func (response badRequestResponse) VisitSetPluginDefaultPlatformsResponse(w http
 }
 
 func (response badRequestResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
 	writeError(w, http.StatusBadRequest, Error{Message: response.message})
 	return nil
 }

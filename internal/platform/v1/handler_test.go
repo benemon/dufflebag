@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -705,8 +706,26 @@ func (r *fakeTenancyRepository) CreatePluginImport(
 	if !r.pluginRegistry.Enabled {
 		return uuid.Nil, store.ErrPluginRegistryNotEnabled
 	}
-	r.imports = append(r.imports, store.PluginImport{ID: uuid.New(), Request: request, Origin: origin, State: "queued", Outcomes: []byte("[]"), CreatedAt: initTestTime})
+	r.imports = append(r.imports, store.PluginImport{
+		ID: uuid.New(), Plugin: store.PluginNameOf(request.Product), Request: request, Origin: origin, State: "queued", Outcomes: []byte("[]"),
+		CreatedAt: initTestTime.Add(time.Duration(len(r.imports)) * time.Second),
+	})
 	return r.imports[len(r.imports)-1].ID, nil
+}
+
+func (r *fakeTenancyRepository) ListPluginImports(_ context.Context, _ store.OrganizationTenant, filter store.PluginImportFilter) ([]store.PluginImport, int, error) {
+	var matching []store.PluginImport
+	for i := len(r.imports) - 1; i >= 0; i-- {
+		job := r.imports[i]
+		if (len(filter.States) == 0 || slices.Contains(filter.States, job.State)) && (filter.Plugin == "" || job.Plugin == filter.Plugin) {
+			matching = append(matching, job)
+		}
+	}
+	total := len(matching)
+	if filter.Offset >= total {
+		return nil, total, nil
+	}
+	return matching[filter.Offset:min(filter.Offset+filter.Limit, total)], total, nil
 }
 
 func (r *fakeTenancyRepository) GetPluginImport(_ context.Context, _ store.OrganizationTenant, id uuid.UUID) (store.PluginImport, error) {

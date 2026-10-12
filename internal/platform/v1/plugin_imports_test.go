@@ -191,8 +191,14 @@ func TestResolveGithubRelease(t *testing.T) {
 		t.Fatalf("builder resolve = %d, want 403", response.Code)
 	}
 
-	handler := importHandler(identity.RolePublisher, repository, fakeCatalogue{})
+	// The name is held by releases.hashicorp.com, so the GitHub import is refused at queue time, not by the worker.
+	held := importHandler(identity.RolePublisher, repository, fakeCatalogue{})
 	github := map[string]any{"source": "github", "product": "ethanmdavidson/packer-plugin-git", "versions": []string{"v0.6.3"}, "platforms": []string{"linux_amd64"}}
+	if response := call(t, held, http.MethodPost, pluginRegistryPath("imports"), github, testToken); response.Code != http.StatusConflict ||
+		!strings.Contains(response.Body.String(), "git comes from releases-hashicorp packer-plugin-git") {
+		t.Fatalf("github import of a held name = %d %s, want 409", response.Code, response.Body.String())
+	}
+	handler := importHandler(identity.RolePublisher, pluginRegistryRepository(store.PluginRegistry{Enabled: true}), fakeCatalogue{})
 	if response := call(t, handler, http.MethodPost, pluginRegistryPath("imports"), github, testToken); response.Code != http.StatusAccepted {
 		t.Fatalf("github import = %d %s", response.Code, response.Body.String())
 	}
@@ -433,5 +439,125 @@ func TestPluginCatalogueFixtureMatchesTheHandler(t *testing.T) {
 	}
 	if !bytes.Equal(fixture, pretty) {
 		t.Fatalf("web fixture drifted from the handler's response; regenerate with DUFFLEBAG_UPDATE_FIXTURES=1:\n%s", pretty)
+	}
+}
+
+func TestPluginImportsListNewestFirstWithFilters(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	handler, trail := auditedPlatform(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{}))
+	queue := func(body map[string]any) PluginImport {
+		t.Helper()
+		response := call(t, handler, http.MethodPost, pluginRegistryPath("imports"), body, testToken)
+		var job PluginImport
+		if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &job) != nil {
+			t.Fatalf("queue = %d %s", response.Code, response.Body.String())
+		}
+		return job
+	}
+	amazon := queue(map[string]any{"source": "releases-hashicorp", "product": "packer-plugin-amazon", "versions": []string{"1.8.2"}, "platforms": []string{"linux_amd64"}})
+	docker := queue(map[string]any{"source": "github", "product": "acme-infra/packer-plugin-docker", "versions": []string{"v1.0.0"}, "platforms": []string{"linux_amd64"}})
+	if amazon.Plugin != "amazon" || docker.Plugin != "docker" || amazon.StartedAt != nil {
+		t.Fatalf("plugin names = %q %q, started %v", amazon.Plugin, docker.Plugin, amazon.StartedAt)
+	}
+	list := func(role identity.Role, query string) (int, ListPluginImports200JSONResponse) {
+		t.Helper()
+		response := call(t, importHandler(role, repository, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("imports"+query), nil, testToken)
+		var page ListPluginImports200JSONResponse
+		if response.Code == http.StatusOK && json.Unmarshal(response.Body.Bytes(), &page) != nil {
+			t.Fatalf("list %s: %s", query, response.Body.String())
+		}
+		return response.Code, page
+	}
+	if code, page := list(identity.RoleReader, ""); code != http.StatusOK || page.Total != 2 || len(page.Imports) != 2 || page.Imports[0].Id != docker.Id || page.Imports[1].Id != amazon.Id {
+		t.Fatalf("list = %d total %d %+v, want newest first", code, page.Total, page.Imports)
+	}
+	for query, want := range map[string]int{"?state=queued": 2, "?state=unfinished": 2, "?state=succeeded": 0, "?plugin=amazon": 1, "?plugin=qemu": 0} {
+		if code, page := list(identity.RoleReader, query); code != http.StatusOK || page.Total != want || len(page.Imports) != want {
+			t.Fatalf("list %s = %d total %d, %d rows, want %d", query, code, page.Total, len(page.Imports), want)
+		}
+	}
+	if code, page := list(identity.RoleReader, "?limit=1&offset=1"); code != http.StatusOK || page.Total != 2 || len(page.Imports) != 1 || page.Imports[0].Id != amazon.Id {
+		t.Fatalf("second page = %d total %d %+v", code, page.Total, page.Imports)
+	}
+	for _, query := range []string{"?limit=0", "?limit=101", "?offset=-1"} {
+		if code, _ := list(identity.RoleReader, query); code != http.StatusBadRequest {
+			t.Fatalf("list %s = %d, want 400", query, code)
+		}
+	}
+	call(t, handler, http.MethodGet, pluginRegistryPath("imports"), nil, testToken)
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.list", "outcome": "success"})
+}
+
+func TestPluginImportRefusesDuplicatesAndReservedNames(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	handler, trail := auditedPlatform(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{plugins: []string{"packer-plugin-qemu"}}))
+	imports := pluginRegistryPath("imports")
+	qemu := map[string]any{"source": "github", "product": "acme-infra/packer-plugin-qemu", "versions": []string{"v1.0.0"}, "platforms": []string{"linux_arm64", "linux_amd64"}}
+	first := call(t, handler, http.MethodPost, imports, qemu, testToken)
+	var job PluginImport
+	if first.Code != http.StatusAccepted || json.Unmarshal(first.Body.Bytes(), &job) != nil {
+		t.Fatalf("first = %d %s", first.Code, first.Body.String())
+	}
+	// The same request, platforms in another order, is the same job.
+	qemu["platforms"] = []string{"linux_amd64", "linux_arm64"}
+	var conflict PluginImportConflict
+	if again := call(t, handler, http.MethodPost, imports, qemu, testToken); again.Code != http.StatusConflict ||
+		json.Unmarshal(again.Body.Bytes(), &conflict) != nil || conflict.ImportId == nil || *conflict.ImportId != job.Id || !strings.Contains(conflict.Message, "identical job for qemu is already queued") {
+		t.Fatalf("identical import = %d %s", again.Code, again.Body.String())
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.create", "outcome": "failure", "reason": "already_queued"})
+	// One more platform is a different job and queues behind the first.
+	qemu["platforms"] = []string{"linux_amd64", "linux_arm64", "darwin_arm64"}
+	if more := call(t, handler, http.MethodPost, imports, qemu, testToken); more.Code != http.StatusAccepted {
+		t.Fatalf("overlapping import = %d %s", more.Code, more.Body.String())
+	}
+	// The name is reserved for GitHub while the import is unfinished: HashiCorp's qemu is refused and shown as held.
+	hashicorp := map[string]any{"source": "releases-hashicorp", "product": "packer-plugin-qemu", "versions": []string{"1.1.0"}, "platforms": []string{"linux_amd64"}}
+	if reserved := call(t, handler, http.MethodPost, imports, hashicorp, testToken); reserved.Code != http.StatusConflict ||
+		json.Unmarshal(reserved.Body.Bytes(), &conflict) != nil || conflict.ImportId == nil || *conflict.ImportId != job.Id ||
+		!strings.Contains(conflict.Message, "qemu is reserved by a queued job from github acme-infra/packer-plugin-qemu") {
+		t.Fatalf("reserved name = %d %s", reserved.Code, reserved.Body.String())
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.create", "outcome": "failure", "reason": "name_reserved"})
+	if catalogue := call(t, handler, http.MethodGet, pluginRegistryPath("catalogue/hashicorp"), nil, testToken); catalogue.Code != http.StatusOK ||
+		!strings.Contains(catalogue.Body.String(), `"held_by":{"kind":"github","repository":"acme-infra/packer-plugin-qemu"}`) {
+		t.Fatalf("catalogue = %d %s, want qemu held by the queued GitHub import", catalogue.Code, catalogue.Body.String())
+	}
+	// retry_of must name one of the organization's jobs, and is echoed.
+	retry := map[string]any{"source": "releases-hashicorp", "product": "packer-plugin-amazon", "versions": []string{"1.8.2"}, "platforms": []string{"linux_amd64"}, "retry_of": uuid.NewString()}
+	if unknown := call(t, handler, http.MethodPost, imports, retry, testToken); unknown.Code != http.StatusBadRequest || !strings.Contains(unknown.Body.String(), "retry_of names no job") {
+		t.Fatalf("unknown retry_of = %d %s", unknown.Code, unknown.Body.String())
+	}
+	retry["retry_of"] = job.Id.String()
+	var retried PluginImport
+	if response := call(t, handler, http.MethodPost, imports, retry, testToken); response.Code != http.StatusAccepted ||
+		json.Unmarshal(response.Body.Bytes(), &retried) != nil || retried.RetryOf == nil || *retried.RetryOf != job.Id {
+		t.Fatalf("retry = %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestSyncPluginRefusesAnIdenticalUnfinishedSync(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.pluginVersions = map[string][]store.PluginVersionSummary{"amazon": {{Version: "1.8.2"}}}
+	repository.pluginSource = store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"}
+	handler := importHandler(identity.RolePublisher, repository, fakeCatalogue{})
+	sync := pluginRegistryPath("plugins/amazon/sync")
+	body := map[string]any{"changes": []map[string]any{{"version": "1.8.3", "action": "add", "platforms": []string{"linux_amd64"}}}}
+	first := call(t, handler, http.MethodPost, sync, body, testToken)
+	var job PluginImport
+	if first.Code != http.StatusAccepted || json.Unmarshal(first.Body.Bytes(), &job) != nil || job.Plugin != "amazon" {
+		t.Fatalf("sync = %d %s", first.Code, first.Body.String())
+	}
+	var conflict PluginImportConflict
+	if again := call(t, handler, http.MethodPost, sync, body, testToken); again.Code != http.StatusConflict ||
+		json.Unmarshal(again.Body.Bytes(), &conflict) != nil || conflict.ImportId == nil || *conflict.ImportId != job.Id {
+		t.Fatalf("identical sync = %d %s", again.Code, again.Body.String())
+	}
+	body["changes"] = []map[string]any{{"version": "1.8.3", "action": "add", "platforms": []string{"linux_arm64"}}}
+	body["retry_of"] = job.Id.String()
+	var retried PluginImport
+	if other := call(t, handler, http.MethodPost, sync, body, testToken); other.Code != http.StatusAccepted ||
+		json.Unmarshal(other.Body.Bytes(), &retried) != nil || retried.RetryOf == nil || *retried.RetryOf != job.Id {
+		t.Fatalf("a different sync with retry_of = %d %s", other.Code, other.Body.String())
 	}
 }
