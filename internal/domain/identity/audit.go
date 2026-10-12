@@ -8,8 +8,9 @@ import (
 type IdentityKind string
 
 const (
-	SystemScannerPrincipalID = "system:scanner"
-	SystemBagDropPrincipalID = "system:bagdrop"
+	SystemScannerPrincipalID      = "system:scanner"
+	SystemBagDropPrincipalID      = "system:bagdrop"
+	SystemPluginPrunerPrincipalID = "system:plugin-pruner"
 )
 
 const (
@@ -50,6 +51,10 @@ const (
 
 	AuditOperationScanExecute   AuditOperation = "scan.execute"
 	AuditOperationScanRetention AuditOperation = "scan.retention"
+
+	// A scheduled prune of finished plugin jobs; the same operation names a
+	// maintainer's Prune now through the API.
+	AuditOperationPluginImportPrune AuditOperation = "plugin.import.prune"
 )
 
 // AuditScope identifies where an operation was attempted.

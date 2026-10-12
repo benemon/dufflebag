@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, DescriptionList, DescriptionListDescription,
-  DescriptionListGroup, DescriptionListTerm, Label, PageSection,
+  DescriptionListGroup, DescriptionListTerm, Flex, FlexItem, Label, NumberInput, PageSection, Switch, TextInput,
+  ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 
 import { signOutIfUnauthorized } from '../api/client'
@@ -10,8 +11,9 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms,
-  getPluginRegistry, setDefaultPlatforms, templateStanza, unexposePluginRegistry, type PluginRegistry,
+  cronProblem, disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginPrune,
+  getPluginRegistry, pruneAges, prunePreview, pruneSchedules, runPluginPrune, scheduleWords, setDefaultPlatforms, setPluginPrune,
+  templateStanza, unexposePluginRegistry, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { TemplateStanzaBlock } from './PluginDetail'
 import { useTenant } from '../data/tenant'
@@ -27,6 +29,7 @@ export function PluginRegistrySettings() {
   const token = state?.token ?? ''
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [defaultPlatforms, setDefaultPlatformsState] = useState<string[]>([])
+  const [prune, setPrune] = useState<PluginPrune | null>(null)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -39,7 +42,10 @@ export function PluginRegistrySettings() {
     setLoading(true)
     try {
       const next = await getPluginRegistry(token, organizationID)
+      const configures = permitsAction(self?.role ?? null, 'configurePluginRegistry')
       setDefaultPlatformsState(next.enabled ? await getDefaultPlatforms(token, organizationID) : [])
+      // The schedule is maintainer-only on the API, like the rest of this page's controls.
+      setPrune(next.enabled && configures ? await getPluginPrune(token, organizationID) : null)
       setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
@@ -48,7 +54,7 @@ export function PluginRegistrySettings() {
     } finally {
       setLoading(false)
     }
-  }, [organizationID, signOut, token])
+  }, [organizationID, self?.role, signOut, token])
 
   useEffect(() => { void reload() }, [reload])
 
@@ -63,6 +69,9 @@ export function PluginRegistrySettings() {
       callerRole={self?.role ?? null}
       registry={registry}
       defaultPlatforms={defaultPlatforms}
+      prune={prune}
+      onSetPrune={async (request) => { setPrune(await setPluginPrune(token, organizationID, request)) }}
+      onPruneNow={async () => { setPrune(await runPluginPrune(token, organizationID)) }}
       loading={loading}
       failure={failure}
       onRefresh={reload}
@@ -73,6 +82,7 @@ export function PluginRegistrySettings() {
         await disablePluginRegistry(token, organizationID)
         setRegistry({ enabled: false, exposed: false })
         setDefaultPlatformsState([])
+        setPrune(null)
       }}
       onSetDefaultPlatforms={async (platforms) => {
         setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
@@ -84,7 +94,11 @@ export function PluginRegistrySettings() {
 export function PluginRegistrySettingsView({
   organizationName, host, callerRole, registry, defaultPlatforms, loading, failure,
   onRefresh, onEnable, onExpose, onUnexpose, onDisable, onSetDefaultPlatforms,
+  prune = null, onSetPrune = async () => {}, onPruneNow = async () => {},
 }: {
+  prune?: PluginPrune | null
+  onSetPrune?: (request: PluginPruneRequest) => Promise<void>
+  onPruneNow?: () => Promise<void>
   organizationName: string
   host: string
   callerRole: Role | null
@@ -224,6 +238,14 @@ export function PluginRegistrySettingsView({
                 </CardBody>
               </Card>
             ) : null}
+            {registry.enabled && canConfigure && prune ? (
+              <Card aria-label="Prune jobs">
+                <CardTitle>Prune jobs</CardTitle>
+                <CardBody>
+                  <PruneJobsEditor prune={prune} busy={busy} onSave={(request) => run(() => onSetPrune(request))} onPruneNow={() => run(onPruneNow)} />
+                </CardBody>
+              </Card>
+            ) : null}
           </>
         )}
         {confirming === 'expose' ? (
@@ -255,6 +277,115 @@ export function PluginRegistrySettingsView({
           />
         ) : null}
       </PageSection>
+    </>
+  )
+}
+
+// The schedule's labels: Off, or On with its cadence, plus the last run's failure.
+export function pruneLabels(prune: PluginPrune): { text: string; color: 'grey' | 'green' | 'red' }[] {
+  if (!prune.enabled) return [{ text: 'Off', color: 'grey' }, ...(prune.last_error ? [{ text: 'Last run failed', color: 'red' as const }] : [])]
+  const preset = pruneSchedules.find((candidate) => candidate.expression === prune.schedule)
+  return [{ text: `On · ${preset ? preset.key : 'custom schedule'}`, color: 'green' }, ...(prune.last_error ? [{ text: 'Last run failed', color: 'red' as const }] : [])]
+}
+
+export function pruneSavedMessage(prune: PluginPrune): string {
+  if (!prune.enabled) return 'Pruning is off. Jobs are kept until they are cleared by hand.'
+  const next = prune.next_run_at ? ` Next run ${new Date(prune.next_run_at).toLocaleString()}.` : ''
+  return `Finished jobs older than ${prune.age_days} days are cleared ${scheduleWords(prune.schedule)}.${next}`
+}
+
+export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {
+  prune: PluginPrune
+  busy: boolean
+  onSave: (request: PluginPruneRequest) => Promise<void> | void
+  onPruneNow: () => Promise<void> | void
+}) {
+  const [enabled, setEnabled] = useState(prune.enabled)
+  const [ageDays, setAgeDays] = useState(prune.age_days)
+  const [schedule, setSchedule] = useState(prune.schedule)
+  const [custom, setCustom] = useState(!pruneSchedules.some((preset) => preset.expression === prune.schedule))
+  const [saved, setSaved] = useState<string | null>(null)
+  useEffect(() => {
+    setEnabled(prune.enabled)
+    setAgeDays(prune.age_days)
+    setSchedule(prune.schedule)
+    setCustom(!pruneSchedules.some((preset) => preset.expression === prune.schedule))
+  }, [prune])
+  const problem = cronProblem(schedule)
+  const dirty = enabled !== prune.enabled || ageDays !== prune.age_days || schedule !== prune.schedule
+  const step = pruneAges.indexOf(ageDays)
+  const format = (value: string | undefined) => (value ? new Date(value).toLocaleString() : '—')
+  return (
+    <>
+      {saved ? <Alert variant="success" isInline title="Prune schedule saved" actionLinks={<Button variant="link" isInline onClick={() => setSaved(null)}>Dismiss</Button>}><Content component="p">{saved}</Content></Alert> : null}
+      <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+        {pruneLabels(prune).map((label) => <FlexItem key={label.text}><Label isCompact color={label.color}>{label.text}</Label></FlexItem>)}
+      </Flex>
+      <Switch
+        id="prune-enabled" label="Clear finished jobs on a schedule" isChecked={enabled} isDisabled={busy}
+        onChange={(_event, checked) => setEnabled(checked)}
+      />
+      <DescriptionList isHorizontal isCompact style={{ marginTop: 12 }}>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Age limit</DescriptionListTerm>
+          <DescriptionListDescription>
+            <NumberInput
+              value={ageDays} unit={ageDays === 1 ? 'day after a job finished' : 'days after a job finished'} widthChars={4} isDisabled={busy || !enabled}
+              inputAriaLabel="Age limit in days" minusBtnAriaLabel="Shorter age limit" plusBtnAriaLabel="Longer age limit"
+              onMinus={() => setAgeDays(pruneAges[Math.max(0, step - 1)] ?? ageDays)} onPlus={() => setAgeDays(pruneAges[Math.min(pruneAges.length - 1, step + 1)] ?? ageDays)}
+              inputProps={{ readOnly: true }}
+            />
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Schedule</DescriptionListTerm>
+          <DescriptionListDescription>
+            <ToggleGroup aria-label="Prune schedule">
+              {pruneSchedules.map((preset) => (
+                <ToggleGroupItem
+                  key={preset.key} text={preset.text} buttonId={`prune-schedule-${preset.key}`} isDisabled={busy || !enabled}
+                  isSelected={!custom && schedule === preset.expression}
+                  onChange={() => { setCustom(false); setSchedule(preset.expression) }}
+                />
+              ))}
+              <ToggleGroupItem text="Custom" buttonId="prune-schedule-custom" isDisabled={busy || !enabled} isSelected={custom} onChange={() => setCustom(true)} />
+            </ToggleGroup>
+            <TextInput
+              id="prune-schedule" aria-label="Cron expression, UTC" value={schedule} readOnlyVariant={custom ? undefined : 'default'} isDisabled={busy || !enabled}
+              validated={problem ? 'error' : 'default'} onChange={(_event, value) => setSchedule(value)} style={{ marginTop: 8, fontFamily: 'var(--pf-t--global--font--family--mono)' }}
+            />
+            <Content component="small">
+              {problem ?? (custom ? `Five fields, UTC: minute, hour, day of month, month, day of week. Runs ${scheduleWords(schedule)}.` : `Runs ${scheduleWords(schedule)}. Choose Custom to write your own expression.`)}
+            </Content>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Preview</DescriptionListTerm>
+          <DescriptionListDescription>{prunePreview(prune, enabled, ageDays)}</DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Next run</DescriptionListTerm>
+          <DescriptionListDescription>{prune.enabled ? format(prune.next_run_at) : '—'}</DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Last run</DescriptionListTerm>
+          <DescriptionListDescription>{prune.last_run_at ? `${format(prune.last_run_at)} · cleared ${prune.last_run_cleared}` : 'Never'}</DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Last error</DescriptionListTerm>
+          <DescriptionListDescription style={prune.last_error ? { color: 'var(--pf-t--global--color--status--danger--default)' } : undefined}>{prune.last_error || 'None'}</DescriptionListDescription>
+        </DescriptionListGroup>
+      </DescriptionList>
+      <ActionGroup>
+        <Button
+          variant="primary" isLoading={busy} isDisabled={busy || !dirty || problem !== null}
+          onClick={() => void Promise.resolve(onSave({ enabled, age_days: ageDays, schedule })).then(() => setSaved(pruneSavedMessage({ ...prune, enabled, age_days: ageDays, schedule })))}
+        >
+          Save prune schedule
+        </Button>
+        <Button variant="secondary" isDisabled={busy || !prune.enabled || problem !== null} onClick={() => void onPruneNow()}>Prune now</Button>
+        {dirty ? <Button variant="link" isDisabled={busy} onClick={() => { setEnabled(prune.enabled); setAgeDays(prune.age_days); setSchedule(prune.schedule); setCustom(!pruneSchedules.some((p) => p.expression === prune.schedule)) }}>Reset</Button> : null}
+      </ActionGroup>
     </>
   )
 }

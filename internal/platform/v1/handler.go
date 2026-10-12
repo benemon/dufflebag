@@ -47,6 +47,10 @@ type PlatformRepository interface {
 	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
 	ListPluginImports(context.Context, store.OrganizationTenant, store.PluginImportFilter) ([]store.PluginImport, int, error)
 	DeletePluginImport(context.Context, store.OrganizationTenant, uuid.UUID) error
+	GetPluginPrune(context.Context, store.OrganizationTenant) (store.PluginPrune, error)
+	SetPluginPrune(context.Context, store.OrganizationTenant, bool, int, string, *time.Time) error
+	PrunePluginImports(context.Context, store.OrganizationTenant, time.Time) (int, error)
+	RecordPluginPrune(context.Context, store.OrganizationTenant, int, string, *time.Time) error
 	PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error)
 	SetPluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant, []string) ([]string, error)
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)
@@ -621,6 +625,11 @@ func (response badRequestResponse) VisitCreatePluginImportResponse(w http.Respon
 }
 
 func (response badRequestResponse) VisitListPluginImportsResponse(w http.ResponseWriter) error {
+	writeError(w, http.StatusBadRequest, Error{Message: response.message})
+	return nil
+}
+
+func (response badRequestResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
 	writeError(w, http.StatusBadRequest, Error{Message: response.message})
 	return nil
 }

@@ -625,3 +625,64 @@ func TestPluginImportsListTakesSeveralStatesAndPlugins(t *testing.T) {
 		}
 	}
 }
+
+func TestPluginPruneScheduleAndPruneNow(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	repository.prune = store.PluginPrune{AgeDays: 30, Schedule: "0 3 * * *"}
+	old, recent := initTestTime.AddDate(0, 0, -40), initTestTime.AddDate(0, 0, -2)
+	repository.imports = []store.PluginImport{
+		{ID: uuid.New(), Plugin: "amazon", State: "succeeded", FinishedAt: &old, Outcomes: []byte("[]"), CreatedAt: old},
+		{ID: uuid.New(), Plugin: "qemu", State: "failed", FinishedAt: &recent, Outcomes: []byte("[]"), CreatedAt: recent},
+		{ID: uuid.New(), Plugin: "vsphere", State: "queued", Outcomes: []byte("[]"), CreatedAt: initTestTime},
+	}
+	handler, trail := auditedPlatform(t, importHandler(identity.RoleMaintainer, repository, fakeCatalogue{}))
+	read := call(t, handler, http.MethodGet, pluginRegistryPath("prune"), nil, testToken)
+	var prune PluginPrune
+	if read.Code != http.StatusOK || json.Unmarshal(read.Body.Bytes(), &prune) != nil || prune.Enabled || prune.AgeDays != 30 || prune.NextRunAt != nil ||
+		prune.WouldClear != 1 || prune.Unfinished != 1 || prune.Kept != 3 {
+		t.Fatalf("prune = %d %s", read.Code, read.Body.String())
+	}
+	for _, role := range []identity.Role{identity.RoleReader, identity.RolePublisher} {
+		if response := call(t, importHandler(role, repository, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("prune"), nil, testToken); response.Code != http.StatusForbidden {
+			t.Fatalf("%s reads the prune schedule = %d, want 403", role, response.Code)
+		}
+	}
+	for name, body := range map[string]map[string]any{
+		"age off the list": {"enabled": true, "age_days": 31, "schedule": "0 3 * * *"},
+		"four fields":      {"enabled": true, "age_days": 30, "schedule": "0 3 * *"},
+		"hour 25":          {"enabled": true, "age_days": 30, "schedule": "0 25 * * *"},
+	} {
+		if response := call(t, handler, http.MethodPut, pluginRegistryPath("prune"), body, testToken); response.Code != http.StatusBadRequest {
+			t.Fatalf("%s = %d %s, want 400", name, response.Code, response.Body.String())
+		}
+	}
+	on := call(t, handler, http.MethodPut, pluginRegistryPath("prune"), map[string]any{"enabled": true, "age_days": 7, "schedule": "0 */6 * * *"}, testToken)
+	if on.Code != http.StatusOK || json.Unmarshal(on.Body.Bytes(), &prune) != nil || !prune.Enabled || prune.AgeDays != 7 || prune.Schedule != "0 */6 * * *" ||
+		prune.NextRunAt == nil || !prune.NextRunAt.Equal(time.Date(2026, 7, 30, 12, 0, 0, 0, time.UTC)) || prune.WouldClear != 1 {
+		t.Fatalf("turn on = %d %s", on.Code, on.Body.String())
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin_registry.prune.configure", "outcome": "success", "reason": "on"})
+	off := call(t, handler, http.MethodPut, pluginRegistryPath("prune"), map[string]any{"enabled": false, "age_days": 7, "schedule": "0 */6 * * *"}, testToken)
+	prune = PluginPrune{}
+	if off.Code != http.StatusOK || json.Unmarshal(off.Body.Bytes(), &prune) != nil || prune.Enabled || prune.NextRunAt != nil {
+		t.Fatalf("turn off = %d %s, want no next run", off.Code, off.Body.String())
+	}
+	// Prune now clears the finished job older than the limit, keeps the recent and the queued, and records the run.
+	run := call(t, handler, http.MethodPost, pluginRegistryPath("prune/run"), nil, testToken)
+	prune = PluginPrune{}
+	if run.Code != http.StatusOK || json.Unmarshal(run.Body.Bytes(), &prune) != nil || prune.LastRunCleared != 1 || prune.LastRunAt == nil || prune.LastError != "" ||
+		prune.WouldClear != 0 || prune.Kept != 2 || prune.Unfinished != 1 {
+		t.Fatalf("prune now = %d %s", run.Code, run.Body.String())
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.prune", "outcome": "success", "reason": "cleared 1"})
+	if len(repository.imports) != 2 || repository.imports[0].Plugin != "qemu" || repository.imports[1].Plugin != "vsphere" {
+		t.Fatalf("imports after prune = %+v", repository.imports)
+	}
+	if response := call(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{}), http.MethodPost, pluginRegistryPath("prune/run"), nil, testToken); response.Code != http.StatusForbidden {
+		t.Fatalf("publisher prunes = %d, want 403", response.Code)
+	}
+	disabled := pluginRegistryRepository(store.PluginRegistry{})
+	if response := call(t, importHandler(identity.RoleMaintainer, disabled, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("prune"), nil, testToken); response.Code != http.StatusConflict {
+		t.Fatalf("prune of a disabled registry = %d, want 409", response.Code)
+	}
+}

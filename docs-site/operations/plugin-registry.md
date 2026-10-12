@@ -236,6 +236,20 @@ screen names that job and offers to open it. A first import also reserves
 its name, so the same plugin cannot be queued from another source until
 the job finishes.
 
+## Prune jobs
+
+Finished job records can be cleared on a schedule. It is off by default;
+jobs are kept until a publisher clears them. A maintainer turns it on
+under **Administration › Plugin registry › Prune jobs**, choosing an age
+limit (1 to 365 days, counted from when each job finished) and a schedule:
+hourly, daily at 03:00 UTC, weekly on Sunday, or a five-field cron
+expression read in UTC. The card previews what a run would clear now,
+shows the next and last runs and the last error, and offers **Prune
+now**. Queued and running jobs are never pruned. A run happens once per
+organization, whatever the number of replicas, and writes one audit
+event naming how many jobs it cleared. A pruned job's page says it was
+cleared.
+
 ## Check for updates
 
 A plugin imported from releases.hashicorp.com or GitHub can check its source

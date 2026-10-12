@@ -1228,3 +1228,36 @@ SELECT name, source_kind, source_repository, update_latest,
 FROM plugins
 WHERE plugins.id = $1
 FOR UPDATE;
+
+-- name: GetPluginPrune :one
+SELECT r.prune_enabled, r.prune_age_days, r.prune_schedule, r.prune_next_at, r.prune_last_run_at, r.prune_last_cleared, r.prune_last_error,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id
+          AND j.state NOT IN ('queued', 'running') AND j.finished_at < now() - make_interval(days => r.prune_age_days))::integer AS would_clear,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id AND j.state IN ('queued', 'running'))::integer AS unfinished,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id)::integer AS kept,
+       COALESCE((SELECT min(j.finished_at) FROM plugin_imports j WHERE j.organization_id = r.organization_id), '0001-01-01'::timestamptz)::timestamptz AS oldest_finished_at
+FROM plugin_registries r WHERE r.organization_id = $1;
+
+-- name: SetPluginPrune :exec
+UPDATE plugin_registries
+SET prune_enabled = $2, prune_age_days = $3, prune_schedule = $4, prune_next_at = $5
+WHERE organization_id = $1;
+
+-- name: ClaimPluginPrune :one
+UPDATE plugin_registries SET prune_last_run_at = now(), prune_next_at = now() + interval '1 hour'
+WHERE organization_id = (
+    SELECT candidate.organization_id FROM plugin_registries AS candidate
+    WHERE candidate.organization_id = $1 AND candidate.prune_enabled
+      AND candidate.prune_next_at IS NOT NULL AND candidate.prune_next_at <= now()
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING organization_id, prune_age_days, prune_schedule;
+
+-- name: PrunePluginImports :execrows
+DELETE FROM plugin_imports
+WHERE organization_id = $1 AND state NOT IN ('queued', 'running') AND finished_at < sqlc.arg(before)::timestamptz;
+
+-- name: RecordPluginPrune :exec
+UPDATE plugin_registries
+SET prune_last_run_at = now(), prune_last_cleared = $2, prune_last_error = $3, prune_next_at = $4
+WHERE organization_id = $1;
