@@ -8,20 +8,20 @@ import {
 import { ActionsColumn, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useSearchParams } from 'react-router'
 
-import { signOutIfUnauthorized } from '../api/client'
+import { ApiError, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
-  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, activeJobFor, catalogueRows, enablePluginRegistry, getPluginRegistry, listPluginImports, listPlugins,
-  planCatalogueSync, retryPluginImport, sourceLabel, syncCatalogue,
+  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, activeJobFor, catalogueRows, deletePluginImport, enablePluginRegistry, getPluginRegistry, listPluginImports,
+  listPlugins, planCatalogueSync, retryPluginImport, sourceLabel, syncCatalogue,
   jobTitle, type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type JobStateFilter, type Plugin, type PluginImport,
   type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
-import { PluginJobsFacet, jobsPageSize, type JobsFilter } from './PluginJobs'
+import { PluginJobsFacet, jobsPageSize, type ClearOutcome, type JobsFilter } from './PluginJobs'
 import { FacetRail, knownCount } from './RegistryFacets'
 
 export function Plugins() {
@@ -32,10 +32,7 @@ export function Plugins() {
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const facet = searchParams.get('facet') === 'jobs' ? 'jobs' : 'plugins'
-  const jobsFilter: JobsFilter = {
-    state: (searchParams.get('state') as JobStateFilter | null) ?? undefined,
-    plugin: searchParams.get('plugin') ?? undefined,
-  }
+  const jobsFilter = parseJobsFilter(searchParams)
   const jobsPage = Math.max(1, Number(searchParams.get('page')) || 1)
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [plugins, setPlugins] = useState<Plugin[]>([])
@@ -45,6 +42,7 @@ export function Plugins() {
   const [jobs, setJobs] = useState<{ imports: PluginImport[]; total: number } | null>(null)
   const [jobsFailure, setJobsFailure] = useState<string | null>(null)
   const [jobsBusy, setJobsBusy] = useState(false)
+  const [clearOutcome, setClearOutcome] = useState<ClearOutcome | null>(null)
 
   // quiet reloads (polling) keep the page as it is instead of showing the loading card.
   const reload = useCallback(async (quiet = false) => {
@@ -57,7 +55,7 @@ export function Plugins() {
     try {
       const next = await getPluginRegistry(token, organizationID)
       const [nextPlugins, nextJobs] = next.enabled
-        ? await Promise.all([listPlugins(token, organizationID), listPluginImports(token, organizationID, { state: 'unfinished', limit: 100 })])
+        ? await Promise.all([listPlugins(token, organizationID), listPluginImports(token, organizationID, { states: ['unfinished'], limit: 100 })])
         : [[], { imports: [], total: 0 }]
       setPlugins(nextPlugins)
       setUnfinished(nextJobs.imports)
@@ -81,7 +79,7 @@ export function Plugins() {
       if (!signOutIfUnauthorized(error, signOut)) setJobsFailure(pluginRegistryErrorMessage(error, 'Jobs could not be loaded.'))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [organizationID, token, facet, jobsFilter.state, jobsFilter.plugin, jobsPage, signOut])
+  }, [organizationID, token, facet, jobsFilter.states.join(','), jobsFilter.plugins.join(','), jobsPage, signOut])
 
   useEffect(() => { void reload() }, [reload])
   useEffect(() => { void loadJobs() }, [loadJobs])
@@ -116,7 +114,35 @@ export function Plugins() {
       facet={facet}
       onFacet={(next) => setQuery({ facet: next === 'jobs' ? 'jobs' : undefined, page: undefined })}
       jobs={jobs} jobsFilter={jobsFilter} jobsPage={jobsPage} jobsFailure={jobsFailure} jobsBusy={jobsBusy}
-      onJobsFilter={(filter) => setQuery({ state: filter.state, plugin: filter.plugin, page: undefined })}
+      onJobsFilter={(filter) => setQuery({ state: filter.states.join(',') || undefined, plugin: filter.plugins.join(',') || undefined, page: undefined })}
+      clearOutcome={clearOutcome}
+      onDismissClearOutcome={() => setClearOutcome(null)}
+      onMatchingJobs={async () => {
+        const all: PluginImport[] = []
+        for (let offset = 0; offset < 1000; offset += 100) {
+          const page = await listPluginImports(token, organizationID, { ...jobsFilter, limit: 100, offset })
+          all.push(...page.imports)
+          if (all.length >= page.total || page.imports.length === 0) break
+        }
+        return all
+      }}
+      onClearJobs={(chosen) => void (async () => {
+        setJobsBusy(true)
+        const outcome: ClearOutcome = { cleared: [], running: [], failed: [] }
+        for (const job of chosen) {
+          try {
+            await deletePluginImport(token, organizationID, job.id)
+            outcome.cleared.push(job)
+          } catch (error: unknown) {
+            if (signOutIfUnauthorized(error, signOut)) return
+            if (error instanceof ApiError && error.status === 409) outcome.running.push(job)
+            else outcome.failed.push({ job, message: pluginRegistryErrorMessage(error, 'the request failed') })
+          }
+        }
+        setClearOutcome(outcome)
+        setJobsBusy(false)
+        await Promise.all([reload(true), loadJobs(true)])
+      })()}
       onJobsPage={(page) => setQuery({ page: page > 1 ? String(page) : undefined })}
       onRetryJob={(job) => void (async () => {
         setJobsBusy(true)
@@ -152,6 +178,12 @@ export function Plugins() {
   )
 }
 
+// The Jobs facet's filters live in the URL as comma lists: ?state=failed,queued&plugin=amazon.
+export function parseJobsFilter(params: URLSearchParams): JobsFilter {
+  const list = (key: string) => (params.get(key) ?? '').split(',').map((v) => v.trim()).filter(Boolean)
+  return { states: list('state') as JobStateFilter[], plugins: list('plugin') }
+}
+
 export function pluginRegistryErrorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
@@ -172,6 +204,10 @@ type PluginRegistryViewProps = {
   onJobsFilter: (filter: JobsFilter) => void
   onJobsPage: (page: number) => void
   onRetryJob: (job: PluginImport) => void
+  clearOutcome: ClearOutcome | null
+  onDismissClearOutcome: () => void
+  onMatchingJobs: () => Promise<PluginImport[]>
+  onClearJobs: (jobs: PluginImport[]) => void
   onBackToRegistry: () => void
   onOpenPlugin: (name: string) => void
   onUpload: () => void
@@ -263,7 +299,8 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 
 function EnabledRegistry({
   organizationName, callerRole, registry, plugins, unfinished, facet, onFacet, jobs, jobsFilter, jobsPage, jobsFailure, jobsBusy,
-  onJobsFilter, onJobsPage, onRetryJob, onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected, onRefresh,
+  onJobsFilter, onJobsPage, onRetryJob, clearOutcome, onDismissClearOutcome, onMatchingJobs, onClearJobs,
+  onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected, onRefresh,
 }: PluginRegistryViewProps) {
   const exposed = registry?.exposed ?? false
   const canPublish = permitsAction(callerRole, 'publishPlugin')
@@ -306,8 +343,9 @@ function EnabledRegistry({
               <PluginJobsFacet
                 jobs={jobs?.imports ?? []} total={jobs?.total ?? 0} filter={jobsFilter} page={jobsPage}
                 plugins={[...new Set([...plugins.map((plugin) => plugin.name), ...unfinished.map((job) => job.plugin)])].sort()}
-                loading={!jobs && !jobsFailure} failure={jobsFailure} canPublish={canPublish} busy={jobsBusy}
+                loading={!jobs && !jobsFailure} failure={jobsFailure} canPublish={canPublish} busy={jobsBusy} outcome={clearOutcome}
                 onFilter={onJobsFilter} onPage={onJobsPage} onOpenJob={onOpenImport} onRetry={onRetryJob} onRefresh={onRefresh}
+                onClear={onClearJobs} onMatching={onMatchingJobs} onDismissOutcome={onDismissClearOutcome}
               />
             </>
           ),

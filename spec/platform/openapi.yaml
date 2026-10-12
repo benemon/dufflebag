@@ -818,12 +818,20 @@ paths:
       parameters:
         - name: state
           in: query
-          description: One job state, or `unfinished` for queued and running jobs.
-          schema: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed, unfinished] }
+          description: Job states to include, comma-separated; `unfinished` means queued and running.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed, unfinished] }
         - name: plugin
           in: query
-          description: Only jobs for this plugin name.
-          schema: { type: string }
+          description: Plugin names to include, comma-separated.
+          style: form
+          explode: false
+          schema:
+            type: array
+            items: { type: string }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 100, default: 25 }
@@ -884,6 +892,24 @@ paths:
         in: path
         required: true
         schema: { type: string, format: uuid }
+    delete:
+      tags: [plugin-registry]
+      operationId: deletePluginImport
+      summary: Clear a job
+      description: |
+        Deletes the job's record. A queued job is taken out of the queue and never runs; a finished
+        job's outcomes are gone, and the versions it mirrored are unchanged. A running job cannot be
+        cleared. Requires `publisher`.
+      responses:
+        "204": { description: Cleared. }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The job is running.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
     get:
       tags: [plugin-registry]
       operationId: getPluginImport

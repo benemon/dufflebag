@@ -48,7 +48,7 @@ export function PluginDetail() {
     try {
       const [nextRegistry, nextDetail, plugins, jobs] = await Promise.all([
         getPluginRegistry(token, organizationID), listPluginVersions(token, organizationID, name), listPlugins(token, organizationID),
-        listPluginImports(token, organizationID, { state: 'unfinished', plugin: name, limit: 100 }),
+        listPluginImports(token, organizationID, { states: ['unfinished'], plugins: [name], limit: 100 }),
       ])
       setRegistry(nextRegistry)
       setDetail(nextDetail)

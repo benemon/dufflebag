@@ -220,16 +220,20 @@ export type PluginImport = {
 
 export type JobStateFilter = PluginImport['state'] | 'unfinished'
 
-export type PluginImportFilter = { state?: JobStateFilter; plugin?: string; limit?: number; offset?: number }
+export type PluginImportFilter = { states?: JobStateFilter[]; plugins?: string[]; limit?: number; offset?: number }
 
 export function listPluginImports(token: string, organizationID: string, filter: PluginImportFilter = {}): Promise<{ imports: PluginImport[]; total: number }> {
   const query = new URLSearchParams()
-  if (filter.state) query.set('state', filter.state)
-  if (filter.plugin) query.set('plugin', filter.plugin)
+  if (filter.states?.length) query.set('state', filter.states.join(','))
+  if (filter.plugins?.length) query.set('plugin', filter.plugins.join(','))
   if (filter.limit !== undefined) query.set('limit', String(filter.limit))
   if (filter.offset) query.set('offset', String(filter.offset))
   const suffix = query.size ? `?${query}` : ''
   return platformGet(token, path(organizationID, `imports${suffix}`))
+}
+
+export async function deletePluginImport(token: string, organizationID: string, id: string): Promise<void> {
+  await platformDelete(token, path(organizationID, `imports/${encodeURIComponent(id)}`))
 }
 
 // What a job does, in the words of the Jobs table: "1.0.0 · 3 platforms",

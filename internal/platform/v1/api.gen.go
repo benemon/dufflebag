@@ -2020,13 +2020,13 @@ type ListHashicorpPluginVersionsParams struct {
 
 // ListPluginImportsParams defines parameters for ListPluginImports.
 type ListPluginImportsParams struct {
-	// State One job state, or `unfinished` for queued and running jobs.
-	State *ListPluginImportsParamsState `form:"state,omitempty" json:"state,omitempty"`
+	// State Job states to include, comma-separated; `unfinished` means queued and running.
+	State *[]ListPluginImportsParamsState `form:"state,omitempty" json:"state,omitempty"`
 
-	// Plugin Only jobs for this plugin name.
-	Plugin *string `form:"plugin,omitempty" json:"plugin,omitempty"`
-	Limit  *int    `form:"limit,omitempty" json:"limit,omitempty"`
-	Offset *int    `form:"offset,omitempty" json:"offset,omitempty"`
+	// Plugin Plugin names to include, comma-separated.
+	Plugin *[]string `form:"plugin,omitempty" json:"plugin,omitempty"`
+	Limit  *int      `form:"limit,omitempty" json:"limit,omitempty"`
+	Offset *int      `form:"offset,omitempty" json:"offset,omitempty"`
 }
 
 // ListPluginImportsParamsState defines parameters for ListPluginImports.
@@ -2571,6 +2571,15 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
 	CreatePluginImport(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DeletePluginImport Clear a job
+	//
+	// Deletes the job's record. A queued job is taken out of the queue and never runs; a finished
+	// job's outcomes are gone, and the versions it mirrored are unchanged. A running job cannot be
+	// cleared. Requires `publisher`.
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `DeletePluginImport` operationId).
+	DeletePluginImport(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// GetPluginImport An import job and the outcome of each version
 	//
@@ -3910,6 +3919,25 @@ func (c *Client) CreatePluginImportWithBody(ctx context.Context, organizationId 
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
 func (c *Client) CreatePluginImport(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewCreatePluginImportRequest(c.Server, organizationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DeletePluginImport Clear a job
+//
+// Deletes the job's record. A queued job is taken out of the queue and never runs; a finished
+// job's outcomes are gone, and the versions it mirrored are unchanged. A running job cannot be
+// cleared. Requires `publisher`.
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `DeletePluginImport` operationId).
+func (c *Client) DeletePluginImport(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDeletePluginImportRequest(c.Server, organizationId, importId)
 	if err != nil {
 		return nil, err
 	}
@@ -6237,7 +6265,7 @@ func NewListPluginImportsRequest(server string, organizationId OrganizationId, p
 
 		if params.State != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "state", *params.State, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -6249,7 +6277,7 @@ func NewListPluginImportsRequest(server string, organizationId OrganizationId, p
 
 		if params.Plugin != nil {
 
-			if queryFrag, err := runtime.StyleParamWithOptions("form", true, "plugin", *params.Plugin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "string", Format: ""}); err != nil {
+			if queryFrag, err := runtime.StyleParamWithOptions("form", false, "plugin", *params.Plugin, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationQuery, Type: "array", Format: ""}); err != nil {
 				return nil, err
 			} else {
 				for _, qp := range strings.Split(queryFrag, "&") {
@@ -6340,6 +6368,47 @@ func NewCreatePluginImportRequestWithBody(server string, organizationId Organiza
 	}
 
 	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewDeletePluginImportRequest constructs an http.Request for the DeletePluginImport method
+func NewDeletePluginImportRequest(server string, organizationId OrganizationId, importId openapi_types.UUID) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "importId", importId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/imports/%s", pathParam0, pathParam1)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodDelete, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
 
 	return req, nil
 }
@@ -9213,6 +9282,17 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/imports (the `CreatePluginImport` operationId).
 	CreatePluginImportWithResponse(ctx context.Context, organizationId OrganizationId, body CreatePluginImportJSONRequestBody, reqEditors ...RequestEditorFn) (*CreatePluginImportResponse, error)
 
+	// DeletePluginImportWithResponse Clear a job
+	//
+	// Deletes the job's record. A queued job is taken out of the queue and never runs; a finished
+	// job's outcomes are gone, and the versions it mirrored are unchanged. A running job cannot be
+	// cleared. Requires `publisher`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `DeletePluginImport` operationId).
+	DeletePluginImportWithResponse(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePluginImportResponse, error)
+
 	// GetPluginImportWithResponse An import job and the outcome of each version
 	//
 	// Returns a wrapper object for the known response body format(s).
@@ -11587,6 +11667,68 @@ func (r CreatePluginImportResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r CreatePluginImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type DeletePluginImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DeletePluginImportResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DeletePluginImportResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DeletePluginImportResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DeletePluginImportResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DeletePluginImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DeletePluginImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DeletePluginImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DeletePluginImportResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -15725,6 +15867,23 @@ func (c *ClientWithResponses) CreatePluginImportWithResponse(ctx context.Context
 	return ParseCreatePluginImportResponse(rsp)
 }
 
+// DeletePluginImportWithResponse Clear a job
+//
+// Deletes the job's record. A queued job is taken out of the queue and never runs; a finished
+// job's outcomes are gone, and the versions it mirrored are unchanged. A running job cannot be
+// cleared. Requires `publisher`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId} (the `DeletePluginImport` operationId).
+func (c *ClientWithResponses) DeletePluginImportWithResponse(ctx context.Context, organizationId OrganizationId, importId openapi_types.UUID, reqEditors ...RequestEditorFn) (*DeletePluginImportResponse, error) {
+	rsp, err := c.DeletePluginImport(ctx, organizationId, importId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDeletePluginImportResponse(rsp)
+}
+
 // GetPluginImportWithResponse An import job and the outcome of each version
 //
 // Returns a wrapper object for the known response body format(s).
@@ -18192,6 +18351,56 @@ func ParseCreatePluginImportResponse(rsp *http.Response) (*CreatePluginImportRes
 
 	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
 		var dest PluginImportConflict
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDeletePluginImportResponse parses an HTTP response from a DeletePluginImportWithResponse call
+func ParseDeletePluginImportResponse(rsp *http.Response) (*DeletePluginImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DeletePluginImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case rsp.StatusCode == 204:
+		break // No content-type
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
 		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
 			return nil, err
 		}
@@ -21114,6 +21323,9 @@ type ServerInterface interface {
 	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
 	CreatePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// DeletePluginImport Clear a job
+	// (DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
+	DeletePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, importId openapi_types.UUID)
 	// GetPluginImport An import job and the outcome of each version
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
 	GetPluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, importId openapi_types.UUID)
@@ -21771,7 +21983,7 @@ func (siw *ServerInterfaceWrapper) ListPluginImports(w http.ResponseWriter, r *h
 
 	// ------------- Optional query parameter "state" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "state", r.URL.Query(), &params.State, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -21784,7 +21996,7 @@ func (siw *ServerInterfaceWrapper) ListPluginImports(w http.ResponseWriter, r *h
 
 	// ------------- Optional query parameter "plugin" -------------
 
-	err = runtime.BindQueryParameterWithOptions("form", true, false, "plugin", r.URL.Query(), &params.Plugin, runtime.BindQueryParameterOptions{Type: "string", Format: ""})
+	err = runtime.BindQueryParameterWithOptions("form", false, false, "plugin", r.URL.Query(), &params.Plugin, runtime.BindQueryParameterOptions{Type: "array", Format: ""})
 	if err != nil {
 		var requiredError *runtime.RequiredParameterError
 		if errors.As(err, &requiredError) {
@@ -21849,6 +22061,41 @@ func (siw *ServerInterfaceWrapper) CreatePluginImport(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.CreatePluginImport(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DeletePluginImport operation middleware
+func (siw *ServerInterfaceWrapper) DeletePluginImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "importId" -------------
+	var importId openapi_types.UUID
+
+	err = runtime.BindStyledParameterWithOptions("simple", "importId", r.PathValue("importId"), &importId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "importId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DeletePluginImport(w, r, organizationId, importId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -23989,6 +24236,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.ListPluginImports)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports", wrapper.CreatePluginImport)
+	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.DeletePluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.GetPluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions", wrapper.ListPluginVersions)
@@ -25586,6 +25834,79 @@ func (response CreatePluginImport404JSONResponse) VisitCreatePluginImportRespons
 type CreatePluginImport409JSONResponse PluginImportConflict
 
 func (response CreatePluginImport409JSONResponse) VisitCreatePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginImportRequestObject struct {
+	OrganizationId OrganizationId     `json:"organizationId"`
+	ImportId       openapi_types.UUID `json:"importId"`
+}
+
+type DeletePluginImportResponseObject interface {
+	VisitDeletePluginImportResponse(w http.ResponseWriter) error
+}
+
+type DeletePluginImport204Response struct {
+}
+
+func (response DeletePluginImport204Response) VisitDeletePluginImportResponse(w http.ResponseWriter) error {
+	w.WriteHeader(204)
+	return nil
+}
+
+type DeletePluginImport401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DeletePluginImport401JSONResponse) VisitDeletePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginImport403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DeletePluginImport403JSONResponse) VisitDeletePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginImport404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response DeletePluginImport404JSONResponse) VisitDeletePluginImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DeletePluginImport409JSONResponse Error
+
+func (response DeletePluginImport409JSONResponse) VisitDeletePluginImportResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -29668,6 +29989,9 @@ type StrictServerInterface interface {
 	// CreatePluginImport Queue an import of plugin versions from releases.hashicorp.com
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/imports)
 	CreatePluginImport(ctx context.Context, request CreatePluginImportRequestObject) (CreatePluginImportResponseObject, error)
+	// DeletePluginImport Clear a job
+	// (DELETE /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
+	DeletePluginImport(ctx context.Context, request DeletePluginImportRequestObject) (DeletePluginImportResponseObject, error)
 	// GetPluginImport An import job and the outcome of each version
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/imports/{importId})
 	GetPluginImport(ctx context.Context, request GetPluginImportRequestObject) (GetPluginImportResponseObject, error)
@@ -30473,6 +30797,33 @@ func (sh *strictHandler) CreatePluginImport(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(CreatePluginImportResponseObject); ok {
 		if err := validResponse.VisitCreatePluginImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DeletePluginImport operation middleware
+func (sh *strictHandler) DeletePluginImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, importId openapi_types.UUID) {
+	var request DeletePluginImportRequestObject
+
+	request.OrganizationId = organizationId
+	request.ImportId = importId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DeletePluginImport(ctx, request.(DeletePluginImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DeletePluginImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DeletePluginImportResponseObject); ok {
+		if err := validResponse.VisitDeletePluginImportResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

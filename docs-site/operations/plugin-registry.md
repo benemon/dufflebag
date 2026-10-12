@@ -221,6 +221,12 @@ jobs queued or running.
 
 ![The Jobs facet listing the organization's import and sync jobs](/screenshots/plugin-jobs.png)
 
+Publishers can **clear** jobs: tick them and choose **Clear N jobs**. A
+queued job is taken out of the queue and never runs; a finished job's
+record is deleted and the versions it mirrored are unchanged. A running job
+cannot be cleared, and a queued one that starts running before the clear
+lands keeps running. A cleared job's page says so. Each clear is audited.
+
 A plugin with a queued or running job shows it on its catalogue row in
 place of the update pill, and its page carries a notice with the job's
 progress that turns to the outcome when it finishes. A first import whose

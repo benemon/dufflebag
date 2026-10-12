@@ -29,6 +29,9 @@ let PluginJobsFacet
 let ImportRefusalAlert
 let jobProgress
 let importSelectionKey
+let clearConfirmation
+let clearOutcomeAlert
+let parseJobsFilter
 let pendingFirstImports
 let catalogueJobLabel
 let jobWhat
@@ -71,9 +74,9 @@ before(async () => {
   ;({
     DisablePluginRegistryConfirmation, PluginRegistryConfirmationView,
     PluginRegistryView, PluginCatalogue, CatalogueSyncConfirmationView,
-    pluginRegistryErrorMessage, pendingFirstImports, catalogueJobLabel,
+    pluginRegistryErrorMessage, pendingFirstImports, catalogueJobLabel, parseJobsFilter,
   } = await vite.ssrLoadModule('/src/screens/Plugins.tsx'))
-  ;({ PluginJobsFacet, ImportRefusalAlert, jobProgress, importSelectionKey } = await vite.ssrLoadModule('/src/screens/PluginJobs.tsx'))
+  ;({ PluginJobsFacet, ImportRefusalAlert, jobProgress, importSelectionKey, clearConfirmation, clearOutcomeAlert } = await vite.ssrLoadModule('/src/screens/PluginJobs.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ PluginErrorCard } = await vite.ssrLoadModule('/src/components/PluginLoadState.tsx'))
@@ -1121,22 +1124,23 @@ test('the jobs list asks the API with the facet filters and paging', async () =>
     return new Response(JSON.stringify({ imports: [], total: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
   }
   try {
-    await listPluginImports('token', 'org', { state: 'unfinished', limit: 100 })
-    await listPluginImports('token', 'org', { state: 'failed', plugin: 'amazon', limit: 10, offset: 20 })
+    await listPluginImports('token', 'org', { states: ['unfinished'], limit: 100 })
+    await listPluginImports('token', 'org', { states: ['failed', 'queued'], plugins: ['amazon', 'qemu'], limit: 10, offset: 20 })
     await listPluginImports('token', 'org')
   } finally {
     globalThis.fetch = originalFetch
   }
   assert.deepEqual(seen, [
     '/api/v1/organizations/org/plugin-registry/imports?state=unfinished&limit=100',
-    '/api/v1/organizations/org/plugin-registry/imports?state=failed&plugin=amazon&limit=10&offset=20',
+    '/api/v1/organizations/org/plugin-registry/imports?state=failed%2Cqueued&plugin=amazon%2Cqemu&limit=10&offset=20',
     '/api/v1/organizations/org/plugin-registry/imports',
   ])
 })
 
 const jobsFacet = (over = {}) => renderToStaticMarkup(React.createElement(PluginJobsFacet, {
-  jobs: [], total: 0, filter: {}, plugins: ['amazon', 'kubevirt'], page: 1, loading: false, failure: null, canPublish: true, busy: false,
-  onFilter: () => {}, onPage: () => {}, onOpenJob: () => {}, onRetry: () => {}, onRefresh: () => {}, ...over,
+  jobs: [], total: 0, filter: { states: [], plugins: [] }, plugins: ['amazon', 'kubevirt'], page: 1, loading: false, failure: null, canPublish: true, busy: false,
+  outcome: null, onFilter: () => {}, onPage: () => {}, onOpenJob: () => {}, onRetry: () => {}, onRefresh: () => {}, onClear: () => {}, onMatching: async () => [], onDismissOutcome: () => {},
+  ...over,
 }))
 
 test('the Jobs facet lists jobs newest first with state, progress, reason and Retry gated by role', () => {
@@ -1155,10 +1159,11 @@ test('the Jobs facet lists jobs newest first with state, progress, reason and Re
   assert.equal((html.match(/>Retry</g) ?? []).length, 1, 'Retry on the failed job only')
   assert.doesNotMatch(jobsFacet({ jobs, total: 3, callerRole: 'reader', canPublish: false }), />Retry</)
   assert.match(html, /aria-label="Jobs pagination"/)
-  assert.match(html, />All states<[\s\S]*?>All plugins</)
-  const filtered = jobsFacet({ jobs: [], total: 0, filter: { state: 'failed', plugin: 'qemu' } })
+  assert.match(html, />State<[\s\S]*?>Plugin</, 'the filters are menus, named for what they filter')
+  const filtered = jobsFacet({ jobs: [], total: 0, filter: { states: ['failed', 'queued'], plugins: ['qemu'] } })
   assert.match(filtered, /No jobs match\./)
-  assert.match(filtered, />Failed<[\s\S]*?>qemu</, 'the active filters show as chips')
+  assert.match(filtered, />State · 2<[\s\S]*?>Plugin · 1</, 'the menus count their picks')
+  assert.match(filtered, />Failed<[\s\S]*?>Queued<[\s\S]*?>qemu</, 'the active filters show as chips')
   assert.doesNotMatch(filtered, /No jobs yet/)
   assert.match(jobsFacet(), /No jobs yet/)
   assert.match(jobsFacet({ loading: true }), /Loading jobs…/)
@@ -1245,4 +1250,54 @@ test('a duplicate import is refused inline, naming the job, until the selection 
   assert.match(refused, /This import is already queued/)
   assert.match(refused, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Import v0\.6\.3 · 1 platform</)
   assert.doesNotMatch(githubView(gitRelease, { refusal: { job: githubJob, message: 'identical', selection: importSelectionKey(['v0.6.3'], ['darwin_arm64']) } }), /This import is already queued/)
+})
+
+test('the Jobs facet selects clearable rows and clears them through one confirmation', () => {
+  const queued = queuedImport('kubevirt', { queued_ahead: 1 })
+  const running = runningSync('amazon')
+  const failed = importJob('failed', [{ version: '1.8.3', outcome: 'failed', error: 'x' }], { id: '01KZFAILED000000000000000' })
+  const html = jobsFacet({ jobs: [queued, running, failed], total: 3 })
+  assert.match(html, /aria-label="Select jobs"/, 'the bulk-select toggle')
+  assert.match(html, /<input id="select-0"[^>]*>/, 'the house row checkbox, PF\'s id per row')
+  assert.match(html, /title="A running job can’t be cleared"/, 'the running row says why it cannot be ticked')
+  assert.match(html, /<input id="select-1"[^>]*disabled/, 'a running row cannot be ticked')
+  assert.match(html, /1 of 3 additions · can’t be cleared/, 'the running row note')
+  assert.match(html, /Select jobs to clear/, 'the selection summary')
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Clear jobs</, 'Clear is disabled with nothing selected')
+  const reader = jobsFacet({ jobs: [queued, running, failed], total: 3, canPublish: false })
+  assert.doesNotMatch(reader, /id="select-|Clear jobs|aria-label="Select jobs"/)
+
+  assert.deepEqual(clearConfirmation([queued, failed]), {
+    title: 'Clear 2 jobs?',
+    parts: [
+      { head: '1 queued: it won’t run', danger: true, body: 'Import kubevirt (1.0.0 · 3 platforms). It is taken out of the queue and the jobs behind move up. Nothing is mirrored for it; queue the work again to get it.' },
+      { head: '1 finished: record deleted', danger: false, body: 'Import amazon. Its outcomes and link stop working. Versions it mirrored are unchanged.' },
+      { head: '', danger: false, body: 'This can’t be undone. If a queued job starts running before this goes through, it isn’t cleared.' },
+    ],
+    verb: 'Clear 2 jobs',
+  })
+  assert.equal(clearConfirmation([failed]).parts.length, 2, 'no queued part without a queued job')
+  assert.deepEqual(clearOutcomeAlert({ cleared: [queued, failed], running: [], failed: [] }), {
+    variant: 'success', title: '2 jobs cleared',
+    body: '1 queued job was taken out of the queue and won’t run: Import kubevirt. 1 finished job record was deleted; the versions it mirrored are unchanged.',
+  })
+  const race = clearOutcomeAlert({ cleared: [failed], running: [queued], failed: [] })
+  assert.equal(race.variant, 'warning')
+  assert.equal(race.title, '1 of 2 jobs cleared')
+  assert.match(race.body, /Import kubevirt started running before it could be cleared, so it will run to the end\. Running jobs can’t be cleared\./)
+  assert.equal(clearOutcomeAlert({ cleared: [], running: [], failed: [{ job: failed, message: '503' }] }).title, 'Nothing was cleared')
+  const shown = jobsFacet({ jobs: [running], total: 1, outcome: { cleared: [failed], running: [], failed: [] } })
+  assert.match(shown, /1 job cleared/)
+  assert.match(jobsFacet({ outcome: { cleared: [failed], running: [], failed: [] } }), /1 job cleared[\s\S]*No jobs yet/, 'the outcome shows above the empty state too')
+
+  assert.deepEqual(parseJobsFilter(new URLSearchParams('state=failed,queued&plugin=amazon')), { states: ['failed', 'queued'], plugins: ['amazon'] })
+  assert.deepEqual(parseJobsFilter(new URLSearchParams('facet=jobs')), { states: [], plugins: [] })
+})
+
+test('a cleared job page says so and leads back to the jobs', () => {
+  const html = renderToStaticMarkup(React.createElement(PluginImportJobView, { ...jobViewProps, job: null, loading: false, cleared: true }))
+  assert.match(html, /This job was cleared/)
+  assert.match(html, /Its record was deleted, by hand or by pruning\. Any versions it mirrored are unchanged\./)
+  assert.match(html, /<button[^>]*>(?:<span[^>]*>)?Jobs</)
+  assert.doesNotMatch(html, /Job could not be loaded/)
 })
