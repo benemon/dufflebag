@@ -40,6 +40,10 @@ func NewBagDropEmitter(writer Writer) *SystemEmitter {
 	return newSystemEmitter(writer, identity.SystemBagDropPrincipalID, "/bagdrop/reconcile", "system.bagdrop")
 }
 
+func NewPluginPruneEmitter(writer Writer) *SystemEmitter {
+	return newSystemEmitter(writer, identity.SystemPluginPrunerPrincipalID, "/plugin-registry/prune", "system.plugin.prune")
+}
+
 func newSystemEmitter(writer Writer, principalID, path, routeID string) *SystemEmitter {
 	return &SystemEmitter{writer: writer, now: time.Now, principalID: principalID, path: path, routeID: routeID}
 }

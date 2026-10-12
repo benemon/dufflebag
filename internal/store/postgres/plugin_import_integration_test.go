@@ -305,3 +305,83 @@ func TestPluginImportsClearOnlyWhenNotRunning(t *testing.T) {
 		t.Fatalf("after clearing = %d jobs, %v", total, err)
 	}
 }
+
+func TestPluginPruneClaimsOnceAndClearsOnlyOldFinishedJobs(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseOrganizationTenant(orgA)
+	repository := store.NewRepository(db)
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	queue := func(product string) uuid.UUID {
+		t.Helper()
+		id, err := repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+			SourceKind: "releases-hashicorp", Product: product, Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"},
+		}, store.PluginImportOrigin{CreatedBy: "alice", Kind: "import"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	old, recent, queued := queue("packer-plugin-old"), queue("packer-plugin-recent"), queue("packer-plugin-queued")
+	for _, id := range []uuid.UUID{old, recent} {
+		if claimed, err := repository.ClaimPluginImport(ctx, time.Minute); err != nil || claimed == nil || claimed.ID != id {
+			t.Fatalf("claim = %+v %v", claimed, err)
+		}
+		if err := repository.RecordPluginImport(ctx, tenant, id, "succeeded", []string{}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Row-level security hides the rows from a bare connection; age the job as the tenant.
+	aged, err := store.BeginOrganizationTenant(ctx, db, orgA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := aged.ExecContext(ctx, `UPDATE plugin_imports SET finished_at = now() - interval '40 days' WHERE id = $1`, old); err != nil {
+		t.Fatal(err)
+	}
+	if err := aged.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	before, err := repository.GetPluginPrune(ctx, tenant)
+	if err != nil || before.Enabled || before.AgeDays != 30 || before.Schedule != "0 3 * * *" || before.WouldClear != 1 || before.Unfinished != 1 || before.Kept != 3 || before.OldestFinishedAt == nil {
+		t.Fatalf("defaults = %+v %v; want off, 30 days, daily 03:00, one job to clear", before, err)
+	}
+	// Off: nothing is claimed. On with a run due now: exactly one claim across two callers.
+	if claimed, err := repository.ClaimPluginPrune(ctx); err != nil || claimed != nil {
+		t.Fatalf("claim while off = %+v %v", claimed, err)
+	}
+	due := time.Now().Add(-time.Minute)
+	if err := repository.SetPluginPrune(ctx, tenant, true, 30, "0 3 * * *", &due); err != nil {
+		t.Fatal(err)
+	}
+	first, err := repository.ClaimPluginPrune(ctx)
+	if err != nil || first == nil || first.AgeDays != 30 || first.Schedule != "0 3 * * *" {
+		t.Fatalf("first claim = %+v %v", first, err)
+	}
+	if second, err := repository.ClaimPluginPrune(ctx); err != nil || second != nil {
+		t.Fatalf("second claim = %+v %v; the run is due once", second, err)
+	}
+	cleared, err := repository.PrunePluginImports(ctx, tenant, time.Now().AddDate(0, 0, -30))
+	if err != nil || cleared != 1 {
+		t.Fatalf("pruned %d %v, want the one old finished job", cleared, err)
+	}
+	next := time.Now().Add(24 * time.Hour)
+	if err := repository.RecordPluginPrune(ctx, tenant, cleared, "", &next); err != nil {
+		t.Fatal(err)
+	}
+	after, err := repository.GetPluginPrune(ctx, tenant)
+	if err != nil || after.LastCleared != 1 || after.LastRunAt == nil || after.NextAt == nil || after.Kept != 2 || after.WouldClear != 0 {
+		t.Fatalf("after = %+v %v", after, err)
+	}
+	for _, id := range []uuid.UUID{recent, queued} {
+		if _, err := repository.GetPluginImport(ctx, tenant, id); err != nil {
+			t.Fatalf("job %s was pruned: %v", id, err)
+		}
+	}
+	if claimed, err := repository.ClaimPluginPrune(ctx); err != nil || claimed != nil {
+		t.Fatalf("claim before the next run = %+v %v", claimed, err)
+	}
+}

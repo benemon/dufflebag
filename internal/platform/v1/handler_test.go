@@ -522,6 +522,7 @@ type fakeTenancyRepository struct {
 	pluginVersions        map[string][]store.PluginVersionSummary
 	pluginSource          store.PluginSource
 	imports               []store.PluginImport
+	prune                 store.PluginPrune
 	defaultPlatforms      []string
 	listProjectsErr       error
 	createProjectErr      error
@@ -735,6 +736,51 @@ func (r *fakeTenancyRepository) GetPluginImport(_ context.Context, _ store.Organ
 		}
 	}
 	return store.PluginImport{}, registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) GetPluginPrune(context.Context, store.OrganizationTenant) (store.PluginPrune, error) {
+	if !r.pluginRegistry.Enabled {
+		return store.PluginPrune{}, store.ErrPluginRegistryNotEnabled
+	}
+	prune := r.prune
+	cutoff := initTestTime.AddDate(0, 0, -prune.AgeDays)
+	for _, job := range r.imports {
+		prune.Kept++
+		if job.State == "queued" || job.State == "running" {
+			prune.Unfinished++
+		} else if job.FinishedAt != nil && job.FinishedAt.Before(cutoff) {
+			prune.WouldClear++
+		}
+	}
+	return prune, nil
+}
+
+func (r *fakeTenancyRepository) SetPluginPrune(_ context.Context, _ store.OrganizationTenant, enabled bool, ageDays int, schedule string, nextAt *time.Time) error {
+	if !r.pluginRegistry.Enabled {
+		return store.ErrPluginRegistryNotEnabled
+	}
+	r.prune.Enabled, r.prune.AgeDays, r.prune.Schedule, r.prune.NextAt = enabled, ageDays, schedule, nextAt
+	return nil
+}
+
+func (r *fakeTenancyRepository) PrunePluginImports(_ context.Context, _ store.OrganizationTenant, before time.Time) (int, error) {
+	kept := r.imports[:0:0]
+	cleared := 0
+	for _, job := range r.imports {
+		if job.State != "queued" && job.State != "running" && job.FinishedAt != nil && job.FinishedAt.Before(before) {
+			cleared++
+			continue
+		}
+		kept = append(kept, job)
+	}
+	r.imports = kept
+	return cleared, nil
+}
+
+func (r *fakeTenancyRepository) RecordPluginPrune(_ context.Context, _ store.OrganizationTenant, cleared int, runErr string, nextAt *time.Time) error {
+	now := initTestTime
+	r.prune.LastRunAt, r.prune.LastCleared, r.prune.LastError, r.prune.NextAt = &now, cleared, runErr, nextAt
+	return nil
 }
 
 func (r *fakeTenancyRepository) DeletePluginImport(_ context.Context, _ store.OrganizationTenant, id uuid.UUID) error {

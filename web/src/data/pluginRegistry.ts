@@ -333,6 +333,78 @@ export function getPluginImport(token: string, organizationID: string, id: strin
   return platformGet<PluginImport>(token, path(organizationID, `imports/${encodeURIComponent(id)}`))
 }
 
+export type PluginPrune = {
+  enabled: boolean
+  age_days: number
+  schedule: string
+  next_run_at?: string
+  last_run_at?: string
+  last_run_cleared: number
+  last_error: string
+  would_clear: number
+  unfinished: number
+  kept: number
+  oldest_finished_at?: string
+}
+
+export type PluginPruneRequest = { enabled: boolean; age_days: number; schedule: string }
+
+export const pruneAges = [1, 7, 14, 30, 60, 90, 180, 365]
+
+export const pruneSchedules: { key: 'hourly' | 'daily' | 'weekly'; text: string; expression: string; words: string }[] = [
+  { key: 'hourly', text: 'Hourly', expression: '0 * * * *', words: 'every hour, on the hour' },
+  { key: 'daily', text: 'Daily', expression: '0 3 * * *', words: 'every day at 03:00 UTC' },
+  { key: 'weekly', text: 'Weekly', expression: '0 3 * * 0', words: 'every Sunday at 03:00 UTC' },
+]
+
+export function scheduleWords(schedule: string): string {
+  return pruneSchedules.find((preset) => preset.expression === schedule)?.words ?? `on the schedule ${schedule} (UTC)`
+}
+
+// A five-field cron expression's first problem, field by field, or null.
+// The server parses the expression itself; this keeps Save honest before it is pressed.
+export function cronProblem(schedule: string): string | null {
+  const fields = schedule.trim().split(/\s+/).filter(Boolean)
+  if (fields.length !== 5) return `A schedule has 5 fields (minute, hour, day of month, month, day of week); this has ${fields.length}.`
+  const names: [string, number, number][] = [['minute', 0, 59], ['hour', 0, 23], ['day of month', 1, 31], ['month', 1, 12], ['day of week', 0, 7]]
+  for (const [index, field] of fields.entries()) {
+    const [name, low, high] = names[index] as [string, number, number]
+    for (const part of field.split(',')) {
+      const match = /^(\*|(\d+)(?:-(\d+))?)(?:\/(\d+))?$/.exec(part)
+      if (!match) return `The ${name} field "${part}" is not a number, range, list or step.`
+      const numbers = [match[2], match[3]].filter((v) => v !== undefined).map(Number)
+      if (numbers.some((n) => n < low || n > high)) return `The ${name} field must be ${low} to ${high}.`
+      if (match[4] !== undefined && Number(match[4]) === 0) return `The ${name} field's step cannot be 0.`
+    }
+  }
+  return null
+}
+
+export function prunePreview(prune: PluginPrune, enabled: boolean, ageDays: number): string {
+  const jobs = (n: number) => `${n} ${n === 1 ? 'job' : 'jobs'}`
+  if (!enabled) {
+    const oldest = prune.oldest_finished_at ? `, the oldest finished ${new Date(prune.oldest_finished_at).toLocaleDateString()}` : ''
+    return `Nothing is pruned while this is off. ${jobs(prune.kept)} ${prune.kept === 1 ? 'is' : 'are'} kept${oldest}.`
+  }
+  const cutoff = new Date(Date.now() - ageDays * 86400000).toLocaleDateString()
+  const untouched = `${jobs(prune.unfinished)} queued or running ${prune.unfinished === 1 ? 'is' : 'are'} never touched.`
+  if (ageDays !== prune.age_days) return `Save to see what ${ageDays} days would clear now. ${untouched}`
+  if (prune.would_clear === 0) return `If it ran now, it would clear nothing: no finished job is older than ${ageDays} days. ${untouched}`
+  return `If it ran now, it would clear ${jobs(prune.would_clear)} that finished before ${cutoff}. ${untouched}`
+}
+
+export function getPluginPrune(token: string, organizationID: string): Promise<PluginPrune> {
+  return platformGet<PluginPrune>(token, path(organizationID, 'prune'))
+}
+
+export function setPluginPrune(token: string, organizationID: string, request: PluginPruneRequest): Promise<PluginPrune> {
+  return platformPut<PluginPrune>(token, path(organizationID, 'prune'), request)
+}
+
+export function runPluginPrune(token: string, organizationID: string): Promise<PluginPrune> {
+  return platformPost<PluginPrune>(token, path(organizationID, 'prune/run'))
+}
+
 export async function getDefaultPlatforms(token: string, organizationID: string): Promise<string[]> {
   return (await platformGet<{ platforms: string[] }>(token, path(organizationID, 'default-platforms'))).platforms
 }

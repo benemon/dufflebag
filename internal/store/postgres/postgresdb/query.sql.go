@@ -63,6 +63,30 @@ func (q *Queries) ClaimPluginImport(ctx context.Context, arg ClaimPluginImportPa
 	return i, err
 }
 
+const claimPluginPrune = `-- name: ClaimPluginPrune :one
+UPDATE plugin_registries SET prune_last_run_at = now(), prune_next_at = now() + interval '1 hour'
+WHERE organization_id = (
+    SELECT candidate.organization_id FROM plugin_registries AS candidate
+    WHERE candidate.organization_id = $1 AND candidate.prune_enabled
+      AND candidate.prune_next_at IS NOT NULL AND candidate.prune_next_at <= now()
+    FOR UPDATE SKIP LOCKED
+)
+RETURNING organization_id, prune_age_days, prune_schedule
+`
+
+type ClaimPluginPruneRow struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	PruneAgeDays   int32     `json:"prune_age_days"`
+	PruneSchedule  string    `json:"prune_schedule"`
+}
+
+func (q *Queries) ClaimPluginPrune(ctx context.Context, organizationID uuid.UUID) (ClaimPluginPruneRow, error) {
+	row := q.db.QueryRowContext(ctx, claimPluginPrune, organizationID)
+	var i ClaimPluginPruneRow
+	err := row.Scan(&i.OrganizationID, &i.PruneAgeDays, &i.PruneSchedule)
+	return i, err
+}
+
 const claimPluginUpdateCheck = `-- name: ClaimPluginUpdateCheck :one
 UPDATE plugins SET update_checked_at = now()
 WHERE id = (
@@ -1574,6 +1598,49 @@ func (q *Queries) GetPluginImport(ctx context.Context, arg GetPluginImportParams
 		&i.RetryOf,
 		&i.QueuedAhead,
 		&i.Total,
+	)
+	return i, err
+}
+
+const getPluginPrune = `-- name: GetPluginPrune :one
+SELECT r.prune_enabled, r.prune_age_days, r.prune_schedule, r.prune_next_at, r.prune_last_run_at, r.prune_last_cleared, r.prune_last_error,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id
+          AND j.state NOT IN ('queued', 'running') AND j.finished_at < now() - make_interval(days => r.prune_age_days))::integer AS would_clear,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id AND j.state IN ('queued', 'running'))::integer AS unfinished,
+       (SELECT count(*) FROM plugin_imports j WHERE j.organization_id = r.organization_id)::integer AS kept,
+       COALESCE((SELECT min(j.finished_at) FROM plugin_imports j WHERE j.organization_id = r.organization_id), '0001-01-01'::timestamptz)::timestamptz AS oldest_finished_at
+FROM plugin_registries r WHERE r.organization_id = $1
+`
+
+type GetPluginPruneRow struct {
+	PruneEnabled     bool         `json:"prune_enabled"`
+	PruneAgeDays     int32        `json:"prune_age_days"`
+	PruneSchedule    string       `json:"prune_schedule"`
+	PruneNextAt      sql.NullTime `json:"prune_next_at"`
+	PruneLastRunAt   sql.NullTime `json:"prune_last_run_at"`
+	PruneLastCleared int32        `json:"prune_last_cleared"`
+	PruneLastError   string       `json:"prune_last_error"`
+	WouldClear       int32        `json:"would_clear"`
+	Unfinished       int32        `json:"unfinished"`
+	Kept             int32        `json:"kept"`
+	OldestFinishedAt time.Time    `json:"oldest_finished_at"`
+}
+
+func (q *Queries) GetPluginPrune(ctx context.Context, organizationID uuid.UUID) (GetPluginPruneRow, error) {
+	row := q.db.QueryRowContext(ctx, getPluginPrune, organizationID)
+	var i GetPluginPruneRow
+	err := row.Scan(
+		&i.PruneEnabled,
+		&i.PruneAgeDays,
+		&i.PruneSchedule,
+		&i.PruneNextAt,
+		&i.PruneLastRunAt,
+		&i.PruneLastCleared,
+		&i.PruneLastError,
+		&i.WouldClear,
+		&i.Unfinished,
+		&i.Kept,
+		&i.OldestFinishedAt,
 	)
 	return i, err
 }
@@ -3837,6 +3904,24 @@ func (q *Queries) PruneOrganizationWebhookDeliveries(ctx context.Context, webhoo
 	return err
 }
 
+const prunePluginImports = `-- name: PrunePluginImports :execrows
+DELETE FROM plugin_imports
+WHERE organization_id = $1 AND state NOT IN ('queued', 'running') AND finished_at < $2::timestamptz
+`
+
+type PrunePluginImportsParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Before         time.Time `json:"before"`
+}
+
+func (q *Queries) PrunePluginImports(ctx context.Context, arg PrunePluginImportsParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, prunePluginImports, arg.OrganizationID, arg.Before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const pruneWebhookDeliveries = `-- name: PruneWebhookDeliveries :exec
 DELETE FROM webhook_deliveries AS doomed
 WHERE doomed.webhook_id = $1 AND doomed.id IN (
@@ -4085,6 +4170,29 @@ type RecordPluginImportParams struct {
 
 func (q *Queries) RecordPluginImport(ctx context.Context, arg RecordPluginImportParams) error {
 	_, err := q.db.ExecContext(ctx, recordPluginImport, arg.ID, arg.State, arg.Outcomes)
+	return err
+}
+
+const recordPluginPrune = `-- name: RecordPluginPrune :exec
+UPDATE plugin_registries
+SET prune_last_run_at = now(), prune_last_cleared = $2, prune_last_error = $3, prune_next_at = $4
+WHERE organization_id = $1
+`
+
+type RecordPluginPruneParams struct {
+	OrganizationID   uuid.UUID    `json:"organization_id"`
+	PruneLastCleared int32        `json:"prune_last_cleared"`
+	PruneLastError   string       `json:"prune_last_error"`
+	PruneNextAt      sql.NullTime `json:"prune_next_at"`
+}
+
+func (q *Queries) RecordPluginPrune(ctx context.Context, arg RecordPluginPruneParams) error {
+	_, err := q.db.ExecContext(ctx, recordPluginPrune,
+		arg.OrganizationID,
+		arg.PruneLastCleared,
+		arg.PruneLastError,
+		arg.PruneNextAt,
+	)
 	return err
 }
 
@@ -4412,6 +4520,31 @@ type SetOrganizationWebhookOutboxAvailableAtParams struct {
 
 func (q *Queries) SetOrganizationWebhookOutboxAvailableAt(ctx context.Context, arg SetOrganizationWebhookOutboxAvailableAtParams) error {
 	_, err := q.db.ExecContext(ctx, setOrganizationWebhookOutboxAvailableAt, arg.EventID, arg.AvailableAt)
+	return err
+}
+
+const setPluginPrune = `-- name: SetPluginPrune :exec
+UPDATE plugin_registries
+SET prune_enabled = $2, prune_age_days = $3, prune_schedule = $4, prune_next_at = $5
+WHERE organization_id = $1
+`
+
+type SetPluginPruneParams struct {
+	OrganizationID uuid.UUID    `json:"organization_id"`
+	PruneEnabled   bool         `json:"prune_enabled"`
+	PruneAgeDays   int32        `json:"prune_age_days"`
+	PruneSchedule  string       `json:"prune_schedule"`
+	PruneNextAt    sql.NullTime `json:"prune_next_at"`
+}
+
+func (q *Queries) SetPluginPrune(ctx context.Context, arg SetPluginPruneParams) error {
+	_, err := q.db.ExecContext(ctx, setPluginPrune,
+		arg.OrganizationID,
+		arg.PruneEnabled,
+		arg.PruneAgeDays,
+		arg.PruneSchedule,
+		arg.PruneNextAt,
+	)
 	return err
 }
 

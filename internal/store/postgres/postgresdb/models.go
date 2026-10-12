@@ -262,6 +262,13 @@ type PluginRegistry struct {
 	EnabledAt        time.Time    `json:"enabled_at"`
 	ExposedAt        sql.NullTime `json:"exposed_at"`
 	DefaultPlatforms []string     `json:"default_platforms"`
+	PruneEnabled     bool         `json:"prune_enabled"`
+	PruneAgeDays     int32        `json:"prune_age_days"`
+	PruneSchedule    string       `json:"prune_schedule"`
+	PruneNextAt      sql.NullTime `json:"prune_next_at"`
+	PruneLastRunAt   sql.NullTime `json:"prune_last_run_at"`
+	PruneLastCleared int32        `json:"prune_last_cleared"`
+	PruneLastError   string       `json:"prune_last_error"`
 }
 
 type PluginVersion struct {

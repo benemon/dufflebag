@@ -586,6 +586,42 @@ func (e PluginImportVersionOutcomeOutcome) Valid() bool {
 	}
 }
 
+// Defines values for PluginPruneRequestAgeDays.
+const (
+	N1   PluginPruneRequestAgeDays = 1
+	N14  PluginPruneRequestAgeDays = 14
+	N180 PluginPruneRequestAgeDays = 180
+	N30  PluginPruneRequestAgeDays = 30
+	N365 PluginPruneRequestAgeDays = 365
+	N60  PluginPruneRequestAgeDays = 60
+	N7   PluginPruneRequestAgeDays = 7
+	N90  PluginPruneRequestAgeDays = 90
+)
+
+// Valid indicates whether the value is a known member of the PluginPruneRequestAgeDays enum.
+func (e PluginPruneRequestAgeDays) Valid() bool {
+	switch e {
+	case N1:
+		return true
+	case N14:
+		return true
+	case N180:
+		return true
+	case N30:
+		return true
+	case N365:
+		return true
+	case N60:
+		return true
+	case N7:
+		return true
+	case N90:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginSourceKind.
 const (
 	PluginSourceKindGithub            PluginSourceKind = "github"
@@ -1602,6 +1638,46 @@ type PluginPlatformList struct {
 	Platforms []string `json:"platforms"`
 }
 
+// PluginPrune defines model for PluginPrune.
+type PluginPrune struct {
+	AgeDays int  `json:"age_days"`
+	Enabled bool `json:"enabled"`
+
+	// Kept Every job the organization holds.
+	Kept int `json:"kept"`
+
+	// LastError Why the last run cleared nothing; empty when it succeeded.
+	LastError string     `json:"last_error"`
+	LastRunAt *time.Time `json:"last_run_at,omitempty"`
+
+	// LastRunCleared Jobs the last run cleared.
+	LastRunCleared int `json:"last_run_cleared"`
+
+	// NextRunAt Absent while pruning is off.
+	NextRunAt        *time.Time `json:"next_run_at,omitempty"`
+	OldestFinishedAt *time.Time `json:"oldest_finished_at,omitempty"`
+	Schedule         string     `json:"schedule"`
+
+	// Unfinished Queued and running jobs
+	Unfinished int `json:"unfinished"`
+
+	// WouldClear Finished jobs older than the age limit now.
+	WouldClear int `json:"would_clear"`
+}
+
+// PluginPruneRequest defines model for PluginPruneRequest.
+type PluginPruneRequest struct {
+	// AgeDays Finished jobs older than this many days are cleared.
+	AgeDays PluginPruneRequestAgeDays `json:"age_days"`
+	Enabled bool                      `json:"enabled"`
+
+	// Schedule A five-field cron expression
+	Schedule string `json:"schedule"`
+}
+
+// PluginPruneRequestAgeDays Finished jobs older than this many days are cleared.
+type PluginPruneRequestAgeDays int
+
 // PluginRegistry defines model for PluginRegistry.
 type PluginRegistry struct {
 	Enabled bool `json:"enabled"`
@@ -2136,6 +2212,9 @@ type SetPluginUpdateCheckJSONRequestBody SetPluginUpdateCheckJSONBody
 
 // PublishPluginVersionMultipartRequestBody defines body for PublishPluginVersion for multipart/form-data ContentType.
 type PublishPluginVersionMultipartRequestBody PublishPluginVersionMultipartBody
+
+// SetPluginPruneJSONRequestBody defines body for SetPluginPrune for application/json ContentType.
+type SetPluginPruneJSONRequestBody = PluginPruneRequest
 
 // SyncCatalogueJSONRequestBody defines body for SyncCatalogue for application/json ContentType.
 type SyncCatalogueJSONRequestBody SyncCatalogueJSONBody
@@ -2674,6 +2753,40 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 	RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginPrune The job-pruning schedule and what a run would clear now
+	//
+	// Requires `maintainer`.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/prune (the `GetPluginPrune` operationId).
+	GetPluginPrune(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPluginPruneWithBody Replace the job-pruning schedule
+	//
+	// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+	// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+	SetPluginPruneWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// SetPluginPrune Replace the job-pruning schedule
+	//
+	// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+	// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+	//
+	// Takes a body of the `application/json` content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+	SetPluginPrune(ctx context.Context, organizationId OrganizationId, body SetPluginPruneJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// RunPluginPrune Prune now
+	//
+	// Requires `maintainer`. Runs one prune with the stored age limit, whether or not the schedule is on, and records it.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run (the `RunPluginPrune` operationId).
+	RunPluginPrune(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SyncCatalogueWithBody Bring selected plugins up to their newest stable release
 	//
@@ -4142,6 +4255,80 @@ func (c *Client) RestorePluginVersion(ctx context.Context, organizationId Organi
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 func (c *Client) RevokePluginVersion(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewRevokePluginVersionRequest(c.Server, organizationId, pluginName, version)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginPrune The job-pruning schedule and what a run would clear now
+//
+// Requires `maintainer`.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/prune (the `GetPluginPrune` operationId).
+func (c *Client) GetPluginPrune(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginPruneRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetPluginPruneWithBody Replace the job-pruning schedule
+//
+// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+func (c *Client) SetPluginPruneWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginPruneRequestWithBody(c.Server, organizationId, contentType, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// SetPluginPrune Replace the job-pruning schedule
+//
+// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+//
+// Takes a body of the `application/json` content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+func (c *Client) SetPluginPrune(ctx context.Context, organizationId OrganizationId, body SetPluginPruneJSONRequestBody, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewSetPluginPruneRequest(c.Server, organizationId, body)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// RunPluginPrune Prune now
+//
+// Requires `maintainer`. Runs one prune with the stored age limit, whether or not the schedule is on, and records it.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run (the `RunPluginPrune` operationId).
+func (c *Client) RunPluginPrune(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewRunPluginPruneRequest(c.Server, organizationId)
 	if err != nil {
 		return nil, err
 	}
@@ -6831,6 +7018,121 @@ func NewRevokePluginVersionRequest(server string, organizationId OrganizationId,
 	return req, nil
 }
 
+// NewGetPluginPruneRequest constructs an http.Request for the GetPluginPrune method
+func NewGetPluginPruneRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/prune", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewSetPluginPruneRequest calls the generic SetPluginPrune builder with application/json body
+func NewSetPluginPruneRequest(server string, organizationId OrganizationId, body SetPluginPruneJSONRequestBody) (*http.Request, error) {
+	var bodyReader io.Reader
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return nil, err
+	}
+	bodyReader = bytes.NewReader(buf)
+	return NewSetPluginPruneRequestWithBody(server, organizationId, "application/json", bodyReader)
+}
+
+// NewSetPluginPruneRequestWithBody constructs an http.Request for the SetPluginPrune method, with any body, and a specified content type
+func NewSetPluginPruneRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/prune", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
+
+	return req, nil
+}
+
+// NewRunPluginPruneRequest constructs an http.Request for the RunPluginPrune method
+func NewRunPluginPruneRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/prune/run", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
 // NewSyncCatalogueRequest calls the generic SyncCatalogue builder with application/json body
 func NewSyncCatalogueRequest(server string, organizationId OrganizationId, body SyncCatalogueJSONRequestBody) (*http.Request, error) {
 	var bodyReader io.Reader
@@ -9398,6 +9700,44 @@ type ClientWithResponsesInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke (the `RevokePluginVersion` operationId).
 	RevokePluginVersionWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber, reqEditors ...RequestEditorFn) (*RevokePluginVersionResponse, error)
+
+	// GetPluginPruneWithResponse The job-pruning schedule and what a run would clear now
+	//
+	// Requires `maintainer`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/prune (the `GetPluginPrune` operationId).
+	GetPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginPruneResponse, error)
+
+	// SetPluginPruneWithBodyWithResponse Replace the job-pruning schedule
+	//
+	// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+	// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+	SetPluginPruneWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginPruneResponse, error)
+
+	// SetPluginPruneWithResponse Replace the job-pruning schedule
+	//
+	// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+	// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+	//
+	// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+	SetPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, body SetPluginPruneJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginPruneResponse, error)
+
+	// RunPluginPruneWithResponse Prune now
+	//
+	// Requires `maintainer`. Runs one prune with the stored age limit, whether or not the schedule is on, and records it.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run (the `RunPluginPrune` operationId).
+	RunPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*RunPluginPruneResponse, error)
 
 	// SyncCatalogueWithBodyWithResponse Bring selected plugins up to their newest stable release
 	//
@@ -12305,6 +12645,220 @@ func (r RevokePluginVersionResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r RevokePluginVersionResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginPruneResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginPrune
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginPruneResponse) GetJSON200() *PluginPrune {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginPruneResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetPluginPruneResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginPruneResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetPluginPruneResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginPruneResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginPruneResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginPruneResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginPruneResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type SetPluginPruneResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginPrune
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *BadRequest
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r SetPluginPruneResponse) GetJSON200() *PluginPrune {
+	return r.JSON200
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r SetPluginPruneResponse) GetJSON400() *BadRequest {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r SetPluginPruneResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r SetPluginPruneResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r SetPluginPruneResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r SetPluginPruneResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r SetPluginPruneResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r SetPluginPruneResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r SetPluginPruneResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r SetPluginPruneResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type RunPluginPruneResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginPrune
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r RunPluginPruneResponse) GetJSON200() *PluginPrune {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r RunPluginPruneResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r RunPluginPruneResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r RunPluginPruneResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r RunPluginPruneResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r RunPluginPruneResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r RunPluginPruneResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r RunPluginPruneResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r RunPluginPruneResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16056,6 +16610,68 @@ func (c *ClientWithResponses) RevokePluginVersionWithResponse(ctx context.Contex
 	return ParseRevokePluginVersionResponse(rsp)
 }
 
+// GetPluginPruneWithResponse The job-pruning schedule and what a run would clear now
+//
+// Requires `maintainer`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/prune (the `GetPluginPrune` operationId).
+func (c *ClientWithResponses) GetPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginPruneResponse, error) {
+	rsp, err := c.GetPluginPrune(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginPruneResponse(rsp)
+}
+
+// SetPluginPruneWithBodyWithResponse Replace the job-pruning schedule
+//
+// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+func (c *ClientWithResponses) SetPluginPruneWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*SetPluginPruneResponse, error) {
+	rsp, err := c.SetPluginPruneWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginPruneResponse(rsp)
+}
+
+// SetPluginPruneWithResponse Replace the job-pruning schedule
+//
+// Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+// than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+//
+// Takes a body of the `application/json` content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/prune (the `SetPluginPrune` operationId).
+func (c *ClientWithResponses) SetPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, body SetPluginPruneJSONRequestBody, reqEditors ...RequestEditorFn) (*SetPluginPruneResponse, error) {
+	rsp, err := c.SetPluginPrune(ctx, organizationId, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseSetPluginPruneResponse(rsp)
+}
+
+// RunPluginPruneWithResponse Prune now
+//
+// Requires `maintainer`. Runs one prune with the stored age limit, whether or not the schedule is on, and records it.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run (the `RunPluginPrune` operationId).
+func (c *ClientWithResponses) RunPluginPruneWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*RunPluginPruneResponse, error) {
+	rsp, err := c.RunPluginPrune(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseRunPluginPruneResponse(rsp)
+}
+
 // SyncCatalogueWithBodyWithResponse Bring selected plugins up to their newest stable release
 //
 // Queues one ordinary import job per plugin with an update available, for the newest stable upstream
@@ -18862,6 +19478,175 @@ func ParseRevokePluginVersionResponse(rsp *http.Response) (*RevokePluginVersionR
 	return response, nil
 }
 
+// ParseGetPluginPruneResponse parses an HTTP response from a GetPluginPruneWithResponse call
+func ParseGetPluginPruneResponse(rsp *http.Response) (*GetPluginPruneResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginPruneResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginPrune
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseSetPluginPruneResponse parses an HTTP response from a SetPluginPruneWithResponse call
+func ParseSetPluginPruneResponse(rsp *http.Response) (*SetPluginPruneResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &SetPluginPruneResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginPrune
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest BadRequest
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseRunPluginPruneResponse parses an HTTP response from a RunPluginPruneWithResponse call
+func ParseRunPluginPruneResponse(rsp *http.Response) (*RunPluginPruneResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &RunPluginPruneResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginPrune
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
 // ParseSyncCatalogueResponse parses an HTTP response from a SyncCatalogueWithResponse call
 func ParseSyncCatalogueResponse(rsp *http.Response) (*SyncCatalogueResponse, error) {
 	bodyBytes, err := io.ReadAll(rsp.Body)
@@ -21353,6 +22138,15 @@ type ServerInterface interface {
 	// RevokePluginVersion Stop serving a plugin version; restorable
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
 	RevokePluginVersion(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName, version PluginVersionNumber)
+	// GetPluginPrune The job-pruning schedule and what a run would clear now
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/prune)
+	GetPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// SetPluginPrune Replace the job-pruning schedule
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/prune)
+	SetPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// RunPluginPrune Prune now
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run)
+	RunPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// SyncCatalogue Bring selected plugins up to their newest stable release
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/sync)
 	SyncCatalogue(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -22438,6 +23232,84 @@ func (siw *ServerInterfaceWrapper) RevokePluginVersion(w http.ResponseWriter, r 
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.RevokePluginVersion(w, r, organizationId, pluginName, version)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginPrune operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginPrune(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginPrune(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// SetPluginPrune operation middleware
+func (siw *ServerInterfaceWrapper) SetPluginPrune(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.SetPluginPrune(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// RunPluginPrune operation middleware
+func (siw *ServerInterfaceWrapper) RunPluginPrune(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.RunPluginPrune(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -24231,6 +25103,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/disable", wrapper.DisablePluginRegistry)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/default-platforms", wrapper.GetPluginDefaultPlatforms)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/default-platforms", wrapper.SetPluginDefaultPlatforms)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune", wrapper.GetPluginPrune)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune", wrapper.SetPluginPrune)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune/run", wrapper.RunPluginPrune)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
@@ -26560,6 +27435,255 @@ func (response RevokePluginVersion404JSONResponse) VisitRevokePluginVersionRespo
 type RevokePluginVersion409JSONResponse Error
 
 func (response RevokePluginVersion409JSONResponse) VisitRevokePluginVersionResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginPruneRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type GetPluginPruneResponseObject interface {
+	VisitGetPluginPruneResponse(w http.ResponseWriter) error
+}
+
+type GetPluginPrune200JSONResponse PluginPrune
+
+func (response GetPluginPrune200JSONResponse) VisitGetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginPrune401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginPrune401JSONResponse) VisitGetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginPrune403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetPluginPrune403JSONResponse) VisitGetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginPrune404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPluginPrune404JSONResponse) VisitGetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginPrune409JSONResponse Error
+
+func (response GetPluginPrune409JSONResponse) VisitGetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPruneRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *SetPluginPruneJSONRequestBody
+}
+
+type SetPluginPruneResponseObject interface {
+	VisitSetPluginPruneResponse(w http.ResponseWriter) error
+}
+
+type SetPluginPrune200JSONResponse PluginPrune
+
+func (response SetPluginPrune200JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPrune400JSONResponse struct{ BadRequestJSONResponse }
+
+func (response SetPluginPrune400JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPrune401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response SetPluginPrune401JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPrune403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response SetPluginPrune403JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPrune404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response SetPluginPrune404JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type SetPluginPrune409JSONResponse Error
+
+func (response SetPluginPrune409JSONResponse) VisitSetPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunPluginPruneRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type RunPluginPruneResponseObject interface {
+	VisitRunPluginPruneResponse(w http.ResponseWriter) error
+}
+
+type RunPluginPrune200JSONResponse PluginPrune
+
+func (response RunPluginPrune200JSONResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunPluginPrune401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response RunPluginPrune401JSONResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunPluginPrune403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response RunPluginPrune403JSONResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunPluginPrune404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response RunPluginPrune404JSONResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type RunPluginPrune409JSONResponse Error
+
+func (response RunPluginPrune409JSONResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
 
 	var buf bytes.Buffer
 	if err := json.NewEncoder(&buf).Encode(response); err != nil {
@@ -30019,6 +31143,15 @@ type StrictServerInterface interface {
 	// RevokePluginVersion Stop serving a plugin version; restorable
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke)
 	RevokePluginVersion(ctx context.Context, request RevokePluginVersionRequestObject) (RevokePluginVersionResponseObject, error)
+	// GetPluginPrune The job-pruning schedule and what a run would clear now
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/prune)
+	GetPluginPrune(ctx context.Context, request GetPluginPruneRequestObject) (GetPluginPruneResponseObject, error)
+	// SetPluginPrune Replace the job-pruning schedule
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/prune)
+	SetPluginPrune(ctx context.Context, request SetPluginPruneRequestObject) (SetPluginPruneResponseObject, error)
+	// RunPluginPrune Prune now
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/prune/run)
+	RunPluginPrune(ctx context.Context, request RunPluginPruneRequestObject) (RunPluginPruneResponseObject, error)
 	// SyncCatalogue Bring selected plugins up to their newest stable release
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/sync)
 	SyncCatalogue(ctx context.Context, request SyncCatalogueRequestObject) (SyncCatalogueResponseObject, error)
@@ -31091,6 +32224,91 @@ func (sh *strictHandler) RevokePluginVersion(w http.ResponseWriter, r *http.Requ
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(RevokePluginVersionResponseObject); ok {
 		if err := validResponse.VisitRevokePluginVersionResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginPrune operation middleware
+func (sh *strictHandler) GetPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request GetPluginPruneRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginPrune(ctx, request.(GetPluginPruneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginPrune")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginPruneResponseObject); ok {
+		if err := validResponse.VisitGetPluginPruneResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// SetPluginPrune operation middleware
+func (sh *strictHandler) SetPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request SetPluginPruneRequestObject
+
+	request.OrganizationId = organizationId
+
+	var body SetPluginPruneJSONRequestBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode JSON body: %w", err))
+		return
+	}
+	request.Body = &body
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.SetPluginPrune(ctx, request.(SetPluginPruneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "SetPluginPrune")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(SetPluginPruneResponseObject); ok {
+		if err := validResponse.VisitSetPluginPruneResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// RunPluginPrune operation middleware
+func (sh *strictHandler) RunPluginPrune(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request RunPluginPruneRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.RunPluginPrune(ctx, request.(RunPluginPruneRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "RunPluginPrune")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(RunPluginPruneResponseObject); ok {
+		if err := validResponse.VisitRunPluginPruneResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

@@ -703,6 +703,79 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/prune:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginPrune
+      summary: The job-pruning schedule and what a run would clear now
+      description: Requires `maintainer`.
+      responses:
+        "200":
+          description: The schedule.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginPrune" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    put:
+      tags: [plugin-registry]
+      operationId: setPluginPrune
+      summary: Replace the job-pruning schedule
+      description: |
+        Requires `maintainer`. On a schedule, every job that is not queued or running and finished more
+        than `age_days` ago is cleared. The schedule is a five-field cron expression in UTC. Off by default.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/PluginPruneRequest" }
+      responses:
+        "200":
+          description: Stored.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginPrune" }
+        "400": { $ref: "#/components/responses/BadRequest" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/prune/run:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: runPluginPrune
+      summary: Prune now
+      description: Requires `maintainer`. Runs one prune with the stored age limit, whether or not the schedule is on, and records it.
+      responses:
+        "200":
+          description: The schedule after the run.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginPrune" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -3100,6 +3173,33 @@ components:
         platforms: { type: array, minItems: 1, items: { type: string } }
         retry_of: { type: string, format: uuid, description: The failed job this one retries; it must be one of the organization's jobs. }
       required: [source, product, versions, platforms]
+
+    PluginPruneRequest:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        age_days:
+          type: integer
+          enum: [1, 7, 14, 30, 60, 90, 180, 365]
+          description: Finished jobs older than this many days are cleared.
+        schedule: { type: string, description: A five-field cron expression, UTC, such as `0 3 * * *`. }
+      required: [enabled, age_days, schedule]
+
+    PluginPrune:
+      type: object
+      properties:
+        enabled: { type: boolean }
+        age_days: { type: integer }
+        schedule: { type: string }
+        next_run_at: { type: string, format: date-time, description: Absent while pruning is off. }
+        last_run_at: { type: string, format: date-time }
+        last_run_cleared: { type: integer, description: Jobs the last run cleared. }
+        last_error: { type: string, description: Why the last run cleared nothing; empty when it succeeded. }
+        would_clear: { type: integer, description: Finished jobs older than the age limit now. }
+        unfinished: { type: integer, description: Queued and running jobs, which are never pruned. }
+        kept: { type: integer, description: Every job the organization holds. }
+        oldest_finished_at: { type: string, format: date-time }
+      required: [enabled, age_days, schedule, last_run_cleared, last_error, would_clear, unfinished, kept]
 
     PluginImportConflict:
       type: object

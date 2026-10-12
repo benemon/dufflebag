@@ -271,6 +271,7 @@ func main() {
 		log.Fatal(err)
 	}
 	go pluginimport.NewChecker(repository, pluginUpstream, pluginGitHub, pluginUpdateInterval, logger).Run(importCtx)
+	go pluginimport.NewPruner(repository, audit.NewPluginPruneEmitter(broker), time.Minute, logger).Run(importCtx)
 
 	// One process, two surfaces. In HCP these are separate hosts — auth at
 	// HCP_AUTH_URL, the registry at HCP_API_ADDRESS — and keeping them on
