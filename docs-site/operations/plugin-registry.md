@@ -31,9 +31,9 @@ see [Installing plugins](https://developer.hashicorp.com/packer/docs/plugins/ins
 
 | Action | Role at the organization |
 |---|---|
-| View the registry and its plugins | `reader` |
-| Upload, import, sync, revoke, restore or remove plugin versions | `publisher` |
-| Enable, expose, unexpose or disable the registry; set default platforms | `maintainer` |
+| View the registry, its plugins, its jobs and its checks | `reader` |
+| Upload, import, sync, revoke, restore or remove plugin versions; clear jobs; turn checks on or off | `publisher` |
+| Enable, expose, unexpose or disable the registry; set default platforms; schedule pruning | `maintainer` |
 
 Packer itself presents no credential. Exposure is what grants it access.
 
@@ -66,7 +66,7 @@ Prerequisites: the `publisher` role, and outbound HTTPS from dufflebag to
 
 1. Open **Plugins** and choose **Browse HashiCorp**. The list shows each plugin
    HashiCorp publishes, how many of its versions you mirror, and any plugin
-   whose name is held by another source.
+   whose name is held by another source or reserved by a queued import.
 2. Choose a plugin. Its releases list the version, release date, lifecycle
    state, platform count, a changelog link, and which versions you already
    hold. Prereleases are hidden unless you show them, and the platform
@@ -79,7 +79,8 @@ Prerequisites: the `publisher` role, and outbound HTTPS from dufflebag to
    version publishes cannot be ticked.
 4. Choose **Import N versions**. The import runs in the background as one
    job, and its page shows the outcome of each version, with any platform
-   that failed.
+   that failed. An import identical to one already queued or running is
+   refused on the spot, naming that job.
 
 Before storing a version, dufflebag verifies its SHA256SUMS against
 [HashiCorp's release-signing key](https://www.hashicorp.com/.well-known/pgp-key.txt)
@@ -101,7 +102,7 @@ asset.
    or `.../releases/latest`, and choose **Resolve**. dufflebag shows what it
    inferred: the repository, the plugin name, the version and tag, the
    release date, the checksum file, and whether the name is new, already
-   mirrored, or held by another source. A `latest` link is resolved to its
+   mirrored, held by another source, or reserved by a queued import. A `latest` link is resolved to its
    tag now, and the import uses that tag even if a newer release appears.
    A release without a SHA256SUMS asset cannot be imported.
 3. Tick platforms; a first import preselects the organization's defaults
@@ -257,7 +258,7 @@ for newer releases. Uploaded plugins have no source to check.
 
 1. Open the plugin and turn on **Check daily for a newer stable version**
    in its Update check card, which also shows when the last check ran and
-   its last error.
+   its last error; or flip the plugin's switch in the **Checks** facet.
 2. dufflebag asks the source for its newest stable release within a minute,
    then once every `DFBG_PLUGIN_UPDATE_INTERVAL` (24 hours by default).
    Prereleases are ignored.
@@ -293,9 +294,10 @@ an hour after GitHub refuses one.
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag
-serves only the zips it holds. The plugin's page in the console shows, for each
-version, which platforms are held (●), listed but not held (○), or not
-published (–).
+serves only the zips it holds. The plugin's page shows each version's coverage
+as a strip of one mark per platform, in the legend's words: mirrored, revoked,
+will be added, upstream (published but not held) or not published; expand the
+row to read the same by operating system.
 
 On a platform with no zip, Packer moves to the next older version that the
 template's [version constraint](https://developer.hashicorp.com/packer/docs/plugins/install)
