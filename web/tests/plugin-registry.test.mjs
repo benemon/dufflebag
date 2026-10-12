@@ -17,6 +17,7 @@ let pruneLabels
 let pruneSavedMessage
 let cronProblem
 let prunePreview
+let describeCron
 let PluginErrorCard
 let TypedConfirmModalView
 let disablePluginRegistry
@@ -99,7 +100,7 @@ before(async () => {
   ;({ PluginGithubView } = await vite.ssrLoadModule('/src/screens/PluginGithub.tsx'))
   ;({ PluginRegistrySettingsView, pruneLabels, pruneSavedMessage } =
     await vite.ssrLoadModule('/src/screens/PluginRegistrySettings.tsx'))
-  ;({ cronProblem, prunePreview } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
+  ;({ cronProblem, prunePreview, describeCron } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
 })
 
 after(async () => { await vite.close() })
@@ -1329,11 +1330,20 @@ test('the prune schedule is validated field by field and previewed honestly', ()
   assert.match(prunePreview(pruneState({ would_clear: 0, unfinished: 1 }), true, 30), /^If it ran now, it would clear nothing: no finished job is older than 30 days\. 1 job queued or running is never touched\.$/)
   assert.match(prunePreview(pruneState(), true, 7), /^Save to see what 7 days would clear now\./)
   assert.deepEqual(pruneLabels(pruneState()), [{ text: 'Off', color: 'grey' }])
-  assert.deepEqual(pruneLabels(pruneState({ enabled: true })), [{ text: 'On · daily', color: 'green' }])
-  assert.deepEqual(pruneLabels(pruneState({ enabled: true, schedule: '0 */6 * * *', last_error: 'database is locked' })), [{ text: 'On · custom schedule', color: 'green' }, { text: 'Last run failed', color: 'red' }])
+  assert.deepEqual(pruneLabels(pruneState({ enabled: true })), [{ text: 'On', color: 'green' }])
+  assert.deepEqual(pruneLabels(pruneState({ enabled: true, schedule: '0 */6 * * *', last_error: 'database is locked' })), [{ text: 'On', color: 'green' }, { text: 'Last run failed', color: 'red' }])
   assert.equal(pruneSavedMessage(pruneState()), 'Pruning is off. Jobs are kept until they are cleared by hand.')
   assert.match(pruneSavedMessage(pruneState({ enabled: true, next_run_at: '2026-10-13T03:00:00Z' })), /^Finished jobs older than 30 days are cleared every day at 03:00 UTC\. Next run .+\.$/)
-  assert.match(pruneSavedMessage(pruneState({ enabled: true, schedule: '0 */6 * * *' })), /cleared on the schedule 0 \*\/6 \* \* \* \(UTC\)\./)
+  assert.match(pruneSavedMessage(pruneState({ enabled: true, schedule: '0 */6 * * *' })), /cleared every 6 hours, on the hour UTC\./)
+  // The schedule read back in plain English, UTC; null where cronProblem takes over.
+  for (const [expression, words] of [
+    ['0 3 * * *', 'Every day at 03:00 UTC'], ['0 * * * *', 'Every hour, on the hour UTC'], ['0 3 * * 0', 'Every Sunday at 03:00 UTC'],
+    ['0 7 5 * 0', 'Every Sunday and on day 5 of the month at 07:00 UTC'], ['*/15 * * * *', 'Every 15 minutes UTC'],
+    ['30 7 * * 1-5', 'Every Monday to Friday at 07:30 UTC'], ['0 */6 * * *', 'Every 6 hours, on the hour UTC'],
+    ['0 3 1,15 * *', 'On days 1 and 15 of the month at 03:00 UTC'], ['0 3 * 3,9 *', 'Every day in March and September at 03:00 UTC'],
+    ['0 9,17 * * *', 'Every day at 09:00 and 17:00 UTC'], ['* * * * *', 'Every minute UTC'], ['5 4 * * 7', 'Every Sunday at 04:05 UTC'],
+    ['15 2 */10 * *', 'Every 10 days at 02:15 UTC'], ['0 3 * *', null], ['0 25 * * *', null],
+  ]) assert.equal(describeCron(expression), words, expression)
 })
 
 test('the Prune jobs card is maintainer-only and reflects the schedule, the last run and its error', () => {
@@ -1348,15 +1358,16 @@ test('the Prune jobs card is maintainer-only and reflects the schedule, the last
   assert.match(off, />Off</)
   assert.match(off, /id="prune-enabled"[^>]*type="checkbox"/)
   assert.match(off, /aria-label="Age limit in days"[^>]*value="30"/)
-  assert.match(off, /aria-label="Prune schedule"/)
+  assert.doesNotMatch(off, /Hourly|Weekly|>Custom</, 'one field, no presets')
   assert.match(off, /id="prune-schedule"[^>]*value="0 3 \* \* \*"/)
-  assert.match(off, /Runs every day at 03:00 UTC\. Choose Custom to write your own expression\./)
+  assert.match(off, /Every day at 03:00 UTC/, 'the expression read back in English')
+  assert.match(off, /Counted from when each job finished\./)
   assert.match(off, /Nothing is pruned while this is off\. 27 jobs are kept/)
   assert.match(off, /<dd[^>]*>[\s\S]{0,80}Never</, 'no run yet')
   assert.match(off, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Save prune schedule</, 'Save waits for a change')
   assert.match(off, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Prune now</, 'Prune now needs the schedule on')
   const on = settingsWith(pruneState({ enabled: true, next_run_at: '2026-10-13T03:00:00Z', last_run_at: '2026-10-12T03:00:00Z', last_run_cleared: 2 }))
-  assert.match(on, />On · daily</)
+  assert.match(on, />On</)
   assert.match(on, /cleared 2/)
   assert.doesNotMatch(on, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Prune now</)
   const failed = settingsWith(pruneState({ enabled: true, last_error: 'database is locked (SQLITE_BUSY)' }))
