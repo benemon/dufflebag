@@ -53,12 +53,6 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
         title="Audit"
         onRefresh={reload}
         refreshing={loading}
-        description={(
-          <>
-            Audit targets are append-only files that receive every request and response record.
-            Up to three can be active at once. This configuration is visible only to root.
-          </>
-        )}
         actions={!creating && !loading && (failure || targets.length > 0) ? (
           <RoleRestrictedButton
             action="configureAudit"

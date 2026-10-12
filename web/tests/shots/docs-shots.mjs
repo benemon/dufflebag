@@ -1060,7 +1060,7 @@ async function captureSeededScreens(seeded) {
   await capture('instance.png')
 
   await page.goto(`${base}/principals`, { waitUntil: 'domcontentloaded' })
-  await waitForText('Service principals')
+  await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
   await waitForText('image-builder')
   await waitForText('release-manager')
   await waitForText('catalog-reader')

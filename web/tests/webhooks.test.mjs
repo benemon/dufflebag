@@ -240,7 +240,7 @@ test('webhook deliveries paginate the in-memory listing', () => {
 
 test('an organization scope offers only organization events and says so', () => {
   const organization = view({ scope: 'organization' })
-  assert.match(organization, /signed organization events, such as a plugin update becoming available/)
+  assert.match(organization, /Create a webhook to send signed organization events\./, 'the scope is named in the empty state; the header carries no subtitle')
   const form = renderToStaticMarkup(React.createElement(CreateWebhookForm, {
     operations: ORGANIZATION_WEBHOOK_OPERATIONS, callerRole: 'maintainer', onCreate: async () => {}, onCancel: () => {},
   }))

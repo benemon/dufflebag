@@ -82,7 +82,10 @@ insufficient role gets a 403.
 
 The **Principals** screen is available to maintainers. It creates
 principals, issues secrets with an expiry choice, revokes secrets, and
-deletes principals. One-time secrets are shown exactly once. The same
+deletes principals. One-time secrets are shown exactly once. A service
+principal authenticates with its client id and secret and receives a
+short-lived token. The organization and project pickers in the masthead
+set the scope of what the screen lists and of any principal it creates. The same
 operations are in the [platform API reference](/platform-api.html) under
 `principals`.
 

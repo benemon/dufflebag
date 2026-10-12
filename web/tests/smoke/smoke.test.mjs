@@ -1149,7 +1149,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // listing is that PROJECT's principals — empty — and never the
     // platform-scoped bootstrap principal (exact scope, not subtree, duf-4qr).
     await clickByText('a', 'Principals')
-    await waitForText('Service principals')
+    await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
     await waitForText('No service principals are visible to you')
     assert.doesNotMatch(await bodyText(), /initial administrator/)
     // At project standing the form offers the four tenancy roles, never root.
@@ -1270,7 +1270,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
   await t.test('nothing selected is platform standing: root only, platform principals only', async () => {
     await clickByText('a', 'Principals')
-    await waitForText('Service principals')
+    await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
     // The platform listing holds exactly the platform-scoped principals: the
     // bootstrap root, and never the org-scoped builder seeded into acme.
     await waitForText('initial administrator')
@@ -1364,7 +1364,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(await buttonDisabled('Add target'), true, 'the fourth target control is live')
     const failingRow = await until('the full audit target to report failing', async () => {
       await clickByText('a', 'Principals')
-      await waitForText('Service principals')
+      await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
       await clickByText('a', 'Audit')
       await waitForText(auditFull)
       const text = await rowText(auditFull)
@@ -2614,7 +2614,6 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     const stub = await startMirrorStub()
     try {
     await clickByText('a', 'Bag Drop')
-    await waitForText('Mirror selected buckets to another registry')
     // Unconfigured is a rendered state, not a blank.
     await waitForText('Bag Drop is not configured')
     // One-step Enable against an unreachable destination persists NOTHING —
@@ -2844,7 +2843,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // anywhere (duf-4qr).
     await stepUpToProject()
     await clickByText('a', 'Principals')
-    await waitForText('Service principals')
+    await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
     await clickByText('button', 'Create principal')
     await waitForText('New service principal')
     assert.deepEqual(await roleOptions(), ['reader', 'builder', 'publisher', 'maintainer'])
@@ -3008,7 +3007,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Bucket details')
     await waitForText('Principals')
     await clickByText('a', 'Principals')
-    await waitForText('Service principals')
+    await until('the Principals screen', () => page.$$eval('h1', (titles) => titles.some((title) => title.textContent.trim() === 'Principals')))
     // The carried bucket is the standing: the listing answers exactly the
     // bucket's principals, which is none yet.
     await waitForText('No bucket-scoped principals')
