@@ -16,11 +16,12 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, activeJobFor, catalogueRows, deletePluginImport, enablePluginRegistry, getPluginRegistry, listPluginImports,
-  listPlugins, planCatalogueSync, retryPluginImport, sourceLabel, syncCatalogue,
+  listPlugins, planCatalogueSync, retryPluginImport, setPluginUpdateCheck, sourceLabel, syncCatalogue,
   jobTitle, type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type JobStateFilter, type Plugin, type PluginImport,
   type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
+import { PluginChecksFacet } from './PluginChecks'
 import { PluginJobsFacet, jobsPageSize, type ClearOutcome, type JobsFilter } from './PluginJobs'
 import { FacetRail, knownCount } from './RegistryFacets'
 
@@ -31,7 +32,7 @@ export function Plugins() {
   const token = state?.token ?? ''
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
-  const facet = searchParams.get('facet') === 'jobs' ? 'jobs' : 'plugins'
+  const facet = searchParams.get('facet') === 'jobs' ? 'jobs' : searchParams.get('facet') === 'checks' ? 'checks' : 'plugins'
   const jobsFilter = parseJobsFilter(searchParams)
   const jobsPage = Math.max(1, Number(searchParams.get('page')) || 1)
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
@@ -112,7 +113,18 @@ export function Plugins() {
       plugins={plugins}
       unfinished={unfinished}
       facet={facet}
-      onFacet={(next) => setQuery({ facet: next === 'jobs' ? 'jobs' : undefined, page: undefined })}
+      onFacet={(next) => setQuery({ facet: next === 'plugins' ? undefined : next, page: undefined })}
+      onToggleCheck={(name, enabled) => void (async () => {
+        setJobsBusy(true)
+        try {
+          await setPluginUpdateCheck(token, organizationID, name, enabled)
+          await reload(true)
+        } catch (error: unknown) {
+          if (!signOutIfUnauthorized(error, signOut)) setFailure(pluginRegistryErrorMessage(error, 'The check could not be changed.'))
+        } finally {
+          setJobsBusy(false)
+        }
+      })()}
       jobs={jobs} jobsFilter={jobsFilter} jobsPage={jobsPage} jobsFailure={jobsFailure} jobsBusy={jobsBusy}
       onJobsFilter={(filter) => setQuery({ state: filter.states.join(',') || undefined, plugin: filter.plugins.join(',') || undefined, page: undefined })}
       clearOutcome={clearOutcome}
@@ -194,8 +206,9 @@ type PluginRegistryViewProps = {
   registry: PluginRegistry | null
   plugins: Plugin[]
   unfinished: PluginImport[]
-  facet: 'plugins' | 'jobs'
-  onFacet: (facet: 'plugins' | 'jobs') => void
+  facet: 'plugins' | 'jobs' | 'checks'
+  onFacet: (facet: 'plugins' | 'jobs' | 'checks') => void
+  onToggleCheck: (name: string, enabled: boolean) => void
   jobs: { imports: PluginImport[]; total: number } | null
   jobsFilter: JobsFilter
   jobsPage: number
@@ -299,7 +312,7 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 
 function EnabledRegistry({
   organizationName, callerRole, registry, plugins, unfinished, facet, onFacet, jobs, jobsFilter, jobsPage, jobsFailure, jobsBusy,
-  onJobsFilter, onJobsPage, onRetryJob, clearOutcome, onDismissClearOutcome, onMatchingJobs, onClearJobs,
+  onJobsFilter, onJobsPage, onRetryJob, clearOutcome, onDismissClearOutcome, onMatchingJobs, onClearJobs, onToggleCheck,
   onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected, onRefresh,
 }: PluginRegistryViewProps) {
   const exposed = registry?.exposed ?? false
@@ -347,6 +360,15 @@ function EnabledRegistry({
                 onFilter={onJobsFilter} onPage={onJobsPage} onOpenJob={onOpenImport} onRetry={onRetryJob} onRefresh={onRefresh}
                 onClear={onClearJobs} onMatching={onMatchingJobs} onDismissOutcome={onDismissClearOutcome}
               />
+            </>
+          ),
+        },
+        {
+          key: 'checks', label: 'Checks',
+          content: (
+            <>
+              {notExposed}
+              <PluginChecksFacet plugins={plugins} unfinished={unfinished} canPublish={canPublish} busy={jobsBusy} onToggle={onToggleCheck} onOpenPlugin={onOpenPlugin} />
             </>
           ),
         },

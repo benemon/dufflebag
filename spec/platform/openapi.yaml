@@ -3079,6 +3079,7 @@ components:
         error: { type: string, description: Why the last check failed. Absent after a successful check. }
         latest: { type: string, description: The newest stable upstream version seen. }
         latest_tag: { type: string, description: The release tag of latest, for a GitHub plugin; equal to latest for releases.hashicorp.com. }
+        next_check_at: { type: string, format: date-time, description: When the next check is due. Absent while checks are off, and for an uploaded plugin. }
       required: [enabled]
 
     PluginPlatform:

@@ -13,7 +13,8 @@
         "checked_at": "2026-07-30T10:00:00Z",
         "enabled": true,
         "latest": "1.8.3",
-        "latest_tag": "1.8.3"
+        "latest_tag": "1.8.3",
+        "next_check_at": "2026-07-31T10:00:00Z"
       }
     },
     {
@@ -29,7 +30,8 @@
         "checked_at": "2026-07-30T10:00:00Z",
         "enabled": true,
         "error": "releases.hashicorp.com could not be reached",
-        "latest": "1.1.4"
+        "latest": "1.1.4",
+        "next_check_at": "2026-07-31T10:00:00Z"
       }
     },
     {

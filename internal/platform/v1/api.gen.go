@@ -1717,6 +1717,9 @@ type PluginUpdateCheck struct {
 
 	// LatestTag The release tag of latest
 	LatestTag *string `json:"latest_tag,omitempty"`
+
+	// NextCheckAt When the next check is due. Absent while checks are off
+	NextCheckAt *time.Time `json:"next_check_at,omitempty"`
 }
 
 // PluginVersion defines model for PluginVersion.

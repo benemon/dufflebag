@@ -703,8 +703,16 @@ func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject
 
 // renderUpdateCheck reports an update only against every stored version, so
 // a revoked newest version is not offered again.
-func renderUpdateCheck(summary store.PluginSummary) (PluginUpdateCheck, bool) {
+func (s *server) renderUpdateCheck(summary store.PluginSummary) (PluginUpdateCheck, bool) {
 	check := PluginUpdateCheck{Enabled: summary.Update.Enabled, CheckedAt: summary.Update.CheckedAt}
+	// The checker takes a never-checked plugin first, so its check is due now.
+	if summary.Update.Enabled && summary.Source.Kind != "upload" {
+		next := s.now()
+		if summary.Update.CheckedAt != nil {
+			next = summary.Update.CheckedAt.Add(s.pluginUpdateInterval)
+		}
+		check.NextCheckAt = &next
+	}
 	if summary.Update.Error != "" {
 		check.Error = &summary.Update.Error
 	}
@@ -802,7 +810,7 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 			response.Results = append(response.Results, result)
 		}
 		summary, found := byName[name]
-		if _, available := renderUpdateCheck(summary); !found || !available {
+		if _, available := s.renderUpdateCheck(summary); !found || !available {
 			refuse(map[bool]string{false: "no such plugin", true: "no update available"}[found])
 			continue
 		}

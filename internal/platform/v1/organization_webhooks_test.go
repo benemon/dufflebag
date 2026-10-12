@@ -43,7 +43,7 @@ func organizationWebhookHandler(scope identity.Scope, role identity.Role, servic
 	actor := pinIdentity{id: "actor-" + string(role), role: role, scope: scope}
 	return newHandlerWithServices(
 		pluginRegistryRepository(store.PluginRegistry{}), &fakeInstanceRepository{}, actor, actor, testLogger(),
-		nil, nil, nil, nil, nil, service, BuildInfo{}, DefaultPluginUploadBytes, nil, func() time.Time { return initTestTime },
+		nil, nil, nil, nil, nil, service, BuildInfo{}, DefaultPluginUploadBytes, DefaultPluginUpdateInterval, nil, func() time.Time { return initTestTime },
 	)
 }
 

@@ -329,7 +329,8 @@ func main() {
 	<-webhookDispatcher.Started()
 	platformPlane := platform.NewHandler(
 		repository, repository, issuer, repository, logger, repository, broker,
-		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes, pluginimport.Catalogue{Upstream: pluginUpstream, GitHub: pluginGitHub},
+		encryptionService, platformScanner, bagDropRuntime, webhookService, build, pluginUploadBytes, pluginUpdateInterval,
+		pluginimport.Catalogue{Upstream: pluginUpstream, GitHub: pluginGitHub},
 	)
 	applicationHandler := composeHandler(
 		broker,

@@ -33,7 +33,7 @@ export async function disablePluginRegistry(token: string, organizationID: strin
 
 export type PluginSource = { kind: 'upload' | 'releases-hashicorp' | 'github'; repository?: string }
 
-export type PluginUpdateCheck = { enabled: boolean; checked_at?: string; error?: string; latest?: string; latest_tag?: string }
+export type PluginUpdateCheck = { enabled: boolean; checked_at?: string; error?: string; latest?: string; latest_tag?: string; next_check_at?: string }
 
 export type Plugin = {
   name: string

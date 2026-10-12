@@ -177,7 +177,13 @@ type server struct {
 	build         BuildInfo
 	openAuditSink func(string) (auditTargetSink, error)
 	configMu      sync.Mutex
+	// How often the checker asks each opted-in plugin's source for a newer
+	// release; a plugin's next check is due that long after its last.
+	pluginUpdateInterval time.Duration
 }
+
+// DefaultPluginUpdateInterval matches DFBG_PLUGIN_UPDATE_INTERVAL's default.
+const DefaultPluginUpdateInterval = 24 * time.Hour
 
 // NewHandler serves the platform API.
 func NewHandler(
@@ -185,11 +191,11 @@ func NewHandler(
 	auth Authenticator, principals Principals, logger *slog.Logger,
 	auditTargets AuditTargetRepository, auditBroker AuditTargetBroker,
 	encryption EncryptionService, scanner Scanner, bagDrop BagDropService, webhooks WebhookService, build BuildInfo,
-	pluginUploadLimit int64, catalogue PluginCatalogue,
+	pluginUploadLimit int64, pluginUpdateInterval time.Duration, catalogue PluginCatalogue,
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger,
-		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, pluginUploadLimit, catalogue, time.Now,
+		auditTargets, auditBroker, encryption, scanner, bagDrop, webhooks, build, pluginUploadLimit, pluginUpdateInterval, catalogue, time.Now,
 	)
 }
 
@@ -236,7 +242,7 @@ func newHandlerWithBuildAndAudit(
 ) http.Handler {
 	return newHandlerWithServices(
 		repository, instance, auth, principals, logger, auditTargets, auditBroker,
-		encryption, scanner, nil, nil, build, DefaultPluginUploadBytes, nil, now,
+		encryption, scanner, nil, nil, build, DefaultPluginUploadBytes, DefaultPluginUpdateInterval, nil, now,
 	)
 }
 
@@ -246,7 +252,7 @@ func newHandlerWithBagDrop(
 	bagDrop BagDropService, now func() time.Time,
 ) http.Handler {
 	return newHandlerWithServices(
-		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, DefaultPluginUploadBytes, nil, now,
+		repository, instance, auth, principals, logger, nil, nil, nil, nil, bagDrop, nil, BuildInfo{}, DefaultPluginUploadBytes, DefaultPluginUpdateInterval, nil, now,
 	)
 }
 
@@ -264,23 +270,25 @@ func newHandlerWithServices(
 	webhooks WebhookService,
 	build BuildInfo,
 	pluginUploadLimit int64,
+	pluginUpdateInterval time.Duration,
 	catalogue PluginCatalogue,
 	now func() time.Time,
 ) http.Handler {
 	s := &server{
-		catalogue:    catalogue,
-		repository:   repository,
-		instance:     instance,
-		auth:         auth,
-		principals:   principals,
-		logger:       logger,
-		now:          now,
-		auditTargets: auditTargets,
-		auditBroker:  auditBroker,
-		encryption:   encryption,
-		scanner:      scanner,
-		bagDrop:      bagDrop,
-		webhooks:     webhooks,
+		catalogue:            catalogue,
+		pluginUpdateInterval: pluginUpdateInterval,
+		repository:           repository,
+		instance:             instance,
+		auth:                 auth,
+		principals:           principals,
+		logger:               logger,
+		now:                  now,
+		auditTargets:         auditTargets,
+		auditBroker:          auditBroker,
+		encryption:           encryption,
+		scanner:              scanner,
+		bagDrop:              bagDrop,
+		webhooks:             webhooks,
 		build: BuildInfo{
 			Version: build.Version, Commit: build.Commit,
 			APIVersions: append([]string(nil), build.APIVersions...),
