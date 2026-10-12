@@ -943,7 +943,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('No plugins mirrored yet')
 
     await clickByText('button', 'Upload plugin files')
-    await waitForText('Upload plugin binaries built in-house')
+    await waitForText('Drag plugin files here')
     const chooser = await page.waitForSelector('input[aria-label="Choose plugin files"]')
     await chooser.uploadFile(...pluginReleaseFiles('1.0.0', '1.1.0'))
     await waitForText('probe · 2 versions')

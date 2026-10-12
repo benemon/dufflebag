@@ -320,7 +320,6 @@ test('the catalogue lists plugins with their source, newest version and count', 
     registry: { enabled: true, exposed: true },
     plugins: [{ name: 'git', source: { kind: 'upload' }, published_versions: 2, newest_version: '0.6.3' }],
   })
-  assert.match(html, /packer init resolves them from dufflebag\.example\.com\/plugins\/acme/)
   assert.match(html, />git</)
   assert.match(html, />Local</)
   assert.match(html, />0\.6\.3</)
@@ -369,7 +368,6 @@ test('the upload view groups the files by version with each file\'s standing, th
   ] } }
   const ready = uploadView({ plan, held })
   assert.match(ready, /Drag plugin files here/)
-  assert.match(ready, /Upload plugin binaries built in-house/)
   assert.match(ready, /git · 2 versions/)
   assert.match(ready, /grouped from 6 files; nothing has been sent yet/)
   assert.match(ready, /<code>0\.6\.3<\/code>[\s\S]{0,400}?>New version<[\s\S]{0,300}?2 files/)
@@ -893,8 +891,8 @@ const catalogue = JSON.parse(readFileSync(new URL('./fixtures/plugin-catalogue.j
 
 test('the catalogue is the designed card: toolbar filters, Updates column, kebab, pager', () => {
   const html = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue })
-  // Header carries the description and the three ways in (design 1.0).
-  assert.match(html, /Packer plugins mirrored for acme\. packer init resolves them from dufflebag\.example\.com\/plugins\/acme\./)
+  // Header carries the title and the three ways in, and no subtitle (design 1.0).
+  assert.doesNotMatch(html, /packer init resolves them from/)
   for (const action of ['Browse HashiCorp', 'Import from GitHub', 'Upload']) assert.match(html, new RegExp(`<button[^>]*>(?:<span[^>]*>)?${action}<`))
   // Toolbar: name filter, source filter, Update available, selection text, Sync selected, pager.
   assert.match(html, /aria-label="Filter plugins by name"/)
@@ -924,7 +922,6 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.doesNotMatch(html, /The registry is exposed/)
 
   const reader = render({ registry: { enabled: true, exposed: true }, callerRole: 'reader', plugins: catalogue })
-  assert.match(reader, /You have read-only access; publishers add and sync plugins\./)
   assert.match(reader, /Update available · 1\.8\.3/)
   assert.doesNotMatch(reader, /Sync selected|aria-label="Kebab toggle"|Select amazon to sync|Browse HashiCorp/)
 })
@@ -1032,7 +1029,7 @@ test('the detail header carries the update pills and the update-check card its l
   assert.match(failed, /Check daily for a newer stable version/)
   assert.match(failed, /\(failed\)/)
   assert.match(failed, /no such host The update pill reflects the last successful check\./)
-  assert.match(failed, /releases\.hashicorp\.com · github\.com\/hashicorp\/packer-plugin-amazon/)
+  assert.doesNotMatch(failed, /releases\.hashicorp\.com · github\.com/, 'the header carries no source subtitle')
   assert.doesNotMatch(failed, />Show older upstream versions</, 'older upstream paging belongs to the All scope')
   const off = view({ enabled: false }, false)
   assert.doesNotMatch(off, /Update available/)

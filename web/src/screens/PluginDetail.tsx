@@ -290,7 +290,6 @@ export function PluginDetailView({
             {check?.enabled && check.error ? <Label isCompact color="red">Last check failed</Label> : null}
           </>
         ) : name}
-        description={detail ? sourceLine(detail) : undefined}
         onRefresh={onRefresh} refreshing={loading}
       />
       <PageSection variant="secondary" isFilled>
@@ -529,17 +528,6 @@ export function versionConfirmation(
       body: `This deletes ${files}. Templates pinned to ${row.version} will fail packer init. This can’t be undone. To stop serving it but keep the files, revoke it instead.${lastVersion
         ? ` It is ${name}'s last version, so ${name} is removed and its name can be used by another source.` : ''}`,
       verb: `Remove ${row.version}`, danger: true,
-    }
-  }
-}
-
-function sourceLine(detail: PluginVersions): string {
-  switch (detail.source.kind) {
-    case 'releases-hashicorp': return `releases.hashicorp.com · github.com/hashicorp/${detail.source.repository ?? ''}`
-    case 'github': return `github.com/${detail.source.repository ?? ''}`
-    default: {
-      const first = [...detail.versions].sort((a, b) => a.created_at.localeCompare(b.created_at))[0]
-      return first ? `Uploaded · first version on ${new Date(first.created_at).toLocaleDateString()}` : 'Uploaded'
     }
   }
 }
