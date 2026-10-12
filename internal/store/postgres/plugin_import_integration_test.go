@@ -198,3 +198,64 @@ func TestPluginImportWorkerMirrorsASignedRelease(t *testing.T) {
 		t.Fatalf("after the first finished, the second has %d ahead, %v", last.QueuedAhead, err)
 	}
 }
+
+func TestPluginImportsListAndStartedAt(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseOrganizationTenant(orgA)
+	repository := store.NewRepository(db)
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	queue := func(product string) uuid.UUID {
+		t.Helper()
+		id, err := repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+			SourceKind: "releases-hashicorp", Product: product, Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"},
+		}, store.PluginImportOrigin{CreatedBy: "alice", Kind: "import"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	probe, other, again := queue("packer-plugin-probe"), queue("packer-plugin-other"), queue("packer-plugin-probe")
+	all, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Limit: 10})
+	if err != nil || total != 3 || len(all) != 3 || all[0].ID != again || all[1].ID != other || all[2].ID != probe || all[0].Plugin != "probe" {
+		t.Fatalf("list = %v total %d %+v, want newest first", err, total, all)
+	}
+	if all[2].QueuedAhead != 0 || all[0].QueuedAhead != 2 {
+		t.Fatalf("queued ahead = %d, %d", all[2].QueuedAhead, all[0].QueuedAhead)
+	}
+	byPlugin, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Plugin: "probe", Limit: 10})
+	if err != nil || total != 2 || len(byPlugin) != 2 {
+		t.Fatalf("by plugin = %v total %d, %d rows", err, total, len(byPlugin))
+	}
+	page, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Limit: 2, Offset: 2})
+	if err != nil || total != 3 || len(page) != 1 || page[0].ID != probe {
+		t.Fatalf("last page = %v total %d %+v", err, total, page)
+	}
+	past, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Limit: 2, Offset: 5})
+	if err != nil || total != 3 || len(past) != 0 {
+		t.Fatalf("page past the end = %v total %d, %d rows; the total must survive an empty page", err, total, len(past))
+	}
+
+	claimed, err := repository.ClaimPluginImport(ctx, time.Minute)
+	if err != nil || claimed == nil || claimed.ID != probe {
+		t.Fatalf("claim = %+v %v, want the oldest job", claimed, err)
+	}
+	running, err := repository.GetPluginImport(ctx, tenant, probe)
+	if err != nil || running.State != "running" || running.StartedAt == nil {
+		t.Fatalf("claimed job = %+v %v, want running with started_at", running, err)
+	}
+	if err := repository.RecordPluginImport(ctx, tenant, probe, "succeeded", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	finished, err := repository.GetPluginImport(ctx, tenant, probe)
+	if err != nil || finished.StartedAt == nil || !finished.StartedAt.Equal(*running.StartedAt) || finished.FinishedAt == nil {
+		t.Fatalf("finished job = %+v %v, want started_at kept", finished, err)
+	}
+	unfinished, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: []string{"queued", "running"}, Limit: 10})
+	if err != nil || total != 2 || len(unfinished) != 2 {
+		t.Fatalf("unfinished = %v total %d, %d rows", err, total, len(unfinished))
+	}
+}

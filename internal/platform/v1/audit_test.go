@@ -58,6 +58,7 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"SyncPlugin":                        {"plugin.sync", "plugin", "pluginName"},
 		"CreatePluginImport":                {"plugin.import.create", "plugin_import_collection", "organizationId"},
 		"GetPluginImport":                   {"plugin.import.read", "plugin_import", "importId"},
+		"ListPluginImports":                 {"plugin.import.list", "plugin_import_collection", "organizationId"},
 		"PublishPluginVersion":              {"plugin.version.publish", "plugin_version", "version"},
 		"ListProjects":                      {"project.list", "project_collection", ""},
 		"CreateProject":                     {"project.create", "project", ""},

@@ -14,6 +14,8 @@ import (
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/pluginimport"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/google/uuid"
+	openapi_types "github.com/oapi-codegen/runtime/types"
 )
 
 // PluginCatalogue is HashiCorp's release service, as the import screen reads it.
@@ -137,16 +139,25 @@ func (s *server) ListHashicorpPlugins(
 	for _, summary := range held {
 		byName[summary.Name] = summary
 	}
+	reserved, err := s.reservedPluginNames(ctx, store.ParseOrganizationTenant(organizationID))
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
 	response := ListHashicorpPlugins200JSONResponse{Plugins: make([]HashicorpPlugin, 0, len(products))}
 	for _, product := range products {
 		rendered := HashicorpPlugin{Product: product, Name: strings.TrimPrefix(product, "packer-plugin-")}
+		own := store.PluginSource{Kind: "releases-hashicorp", Repository: product}
 		if summary, ok := byName[rendered.Name]; ok {
-			if summary.Source == (store.PluginSource{Kind: "releases-hashicorp", Repository: product}) {
+			if summary.Source == own {
 				rendered.MirroredVersions = len(summary.PublishedVersions)
 			} else {
 				source := renderPluginSource(summary.Source)
 				rendered.HeldBy = &source
 			}
+		} else if source, ok := reserved[rendered.Name]; ok && source != own {
+			held := renderPluginSource(source)
+			rendered.HeldBy = &held
 		}
 		response.Plugins = append(response.Plugins, rendered)
 	}
@@ -237,9 +248,24 @@ func (s *server) CreatePluginImport(
 		return badRequestResponse{message: "an import needs a packer-plugin product (or owner/packer-plugin-<name> repository for github), 1 to 50 versions and 1 to 32 distinct OS_ARCH platforms"}, nil
 	}
 	tenant := store.ParseOrganizationTenant(organizationID)
-	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
-		SourceKind: string(body.Source), Product: body.Product, Versions: body.Versions, Platforms: body.Platforms,
-	}, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginImport)})
+	wanted := store.PluginImportRequest{SourceKind: string(body.Source), Product: body.Product, Versions: body.Versions, Platforms: body.Platforms}
+	if conflict, err := s.pluginImportConflict(ctx, tenant, wanted); err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	} else if conflict != nil {
+		audited.failed(conflict.reason)
+		return CreatePluginImport409JSONResponse(conflict.response), nil
+	}
+	retryOf, ok, err := s.retryOf(ctx, tenant, body.RetryOf)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if !ok {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "retry_of names no job of this organization"}, nil
+	}
+	id, err := s.repository.CreatePluginImport(ctx, tenant, wanted, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginImport), RetryOf: retryOf})
 	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
 		audited.failed("not_enabled")
 		return CreatePluginImport409JSONResponse{Message: "plugin registry is not enabled"}, nil
@@ -259,6 +285,153 @@ func (s *server) CreatePluginImport(
 		return nil, err
 	}
 	return CreatePluginImport202JSONResponse(rendered), nil
+}
+
+func (s *server) ListPluginImports(
+	ctx context.Context, request ListPluginImportsRequestObject,
+) (ListPluginImportsResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	refused, err := s.admitPluginRead(ctx, audited, request.OrganizationId)
+	if err != nil {
+		return nil, err
+	}
+	if refused != permitted {
+		return newRefusal(refused), nil
+	}
+	filter := store.PluginImportFilter{Limit: 25}
+	if request.Params.State != nil {
+		if *request.Params.State == ListPluginImportsParamsStateUnfinished {
+			filter.States = unfinishedStates
+		} else {
+			filter.States = []string{string(*request.Params.State)}
+		}
+	}
+	if request.Params.Plugin != nil {
+		filter.Plugin = *request.Params.Plugin
+	}
+	if request.Params.Limit != nil {
+		filter.Limit = *request.Params.Limit
+	}
+	if request.Params.Offset != nil {
+		filter.Offset = *request.Params.Offset
+	}
+	if filter.Limit < 1 || filter.Limit > 100 || filter.Offset < 0 {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "limit is 1 to 100 and offset is 0 or more"}, nil
+	}
+	jobs, total, err := s.repository.ListPluginImports(ctx, store.ParseOrganizationTenant(request.OrganizationId.String()), filter)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	response := ListPluginImports200JSONResponse{Imports: make([]PluginImport, 0, len(jobs)), Total: total}
+	for _, job := range jobs {
+		rendered, err := renderPluginImport(job)
+		if err != nil {
+			return nil, err
+		}
+		response.Imports = append(response.Imports, rendered)
+	}
+	audited.succeeded(request.OrganizationId.String(), "")
+	return response, nil
+}
+
+var unfinishedStates = []string{"queued", "running"}
+
+type importConflict struct {
+	reason   string
+	response PluginImportConflict
+}
+
+// pluginImportConflict is why a job must not be queued: a job asking the
+// same thing is unfinished, or the plugin's name belongs to another source,
+// held by stored versions or reserved by an unfinished job (ADR-0027 A2).
+func (s *server) pluginImportConflict(ctx context.Context, tenant store.OrganizationTenant, wanted store.PluginImportRequest) (*importConflict, error) {
+	name := store.PluginNameOf(wanted.Product)
+	held, err := s.repository.ListPlugins(ctx, tenant)
+	if err != nil {
+		return nil, err
+	}
+	// A sync's product is the plugin's name; its source is the held plugin's.
+	sourceOf := func(request store.PluginImportRequest) store.PluginSource {
+		if len(request.Changes) > 0 {
+			for _, summary := range held {
+				if summary.Name == name {
+					return summary.Source
+				}
+			}
+		}
+		return store.PluginSource{Kind: request.SourceKind, Repository: request.Product}
+	}
+	source := sourceOf(wanted)
+	for _, summary := range held {
+		if summary.Name == name && summary.Source != source {
+			return &importConflict{reason: "name_held", response: PluginImportConflict{
+				Message: fmt.Sprintf("%s comes from %s; a name belongs to one source per organization", name, describePluginSource(summary.Source)),
+			}}, nil
+		}
+	}
+	unfinished, _, err := s.repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: unfinishedStates, Plugin: name, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	// Oldest first, so the conflict names the job that runs first.
+	for _, job := range slices.Backward(unfinished) {
+		id := openapi_types.UUID(job.ID)
+		if sourceOf(job.Request) != source {
+			return &importConflict{reason: "name_reserved", response: PluginImportConflict{
+				Message:  fmt.Sprintf("%s is reserved by a %s job from %s", name, job.State, describePluginSource(sourceOf(job.Request))),
+				ImportId: &id,
+			}}, nil
+		}
+		if sameSet(job.Request.Versions, wanted.Versions) && sameSet(job.Request.Platforms, wanted.Platforms) && slices.EqualFunc(job.Request.Changes, wanted.Changes, sameChange) {
+			return &importConflict{reason: "already_queued", response: PluginImportConflict{
+				Message: fmt.Sprintf("an identical job for %s is already %s", name, job.State), ImportId: &id,
+			}}, nil
+		}
+	}
+	return nil, nil
+}
+
+func sameSet(a, b []string) bool {
+	return len(a) == len(b) && slices.Equal(slices.Sorted(slices.Values(a)), slices.Sorted(slices.Values(b)))
+}
+
+func sameChange(a, b store.PluginChange) bool {
+	return a.Version == b.Version && a.Action == b.Action && sameSet(a.Platforms, b.Platforms)
+}
+
+// reservedPluginNames maps each name an unfinished job will mirror to that
+// job's source.
+func (s *server) reservedPluginNames(ctx context.Context, tenant store.OrganizationTenant) (map[string]store.PluginSource, error) {
+	unfinished, _, err := s.repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: unfinishedStates, Limit: 100})
+	if err != nil {
+		return nil, err
+	}
+	reserved := map[string]store.PluginSource{}
+	for _, job := range unfinished {
+		// A sync is of a held plugin, whose source the plugin list reports.
+		if _, taken := reserved[job.Plugin]; !taken && len(job.Request.Changes) == 0 {
+			reserved[job.Plugin] = store.PluginSource{Kind: job.Request.SourceKind, Repository: job.Request.Product}
+		}
+	}
+	return reserved, nil
+}
+
+// retryOf resolves a request's retry_of to a job of the organization; ok is
+// false when it names none.
+func (s *server) retryOf(ctx context.Context, tenant store.OrganizationTenant, requested *openapi_types.UUID) (*uuid.UUID, bool, error) {
+	if requested == nil {
+		return nil, true, nil
+	}
+	id := uuid.UUID(*requested)
+	if _, err := s.repository.GetPluginImport(ctx, tenant, id); errors.Is(err, registry.ErrNotFound) {
+		return nil, false, nil
+	} else if err != nil {
+		return nil, false, err
+	}
+	return &id, true, nil
 }
 
 func (s *server) GetPluginImport(
@@ -292,12 +465,16 @@ func (s *server) GetPluginImport(
 
 func renderPluginImport(job store.PluginImport) (PluginImport, error) {
 	rendered := PluginImport{
-		Id: job.ID, Source: job.Request.SourceKind, Product: job.Request.Product,
+		Id: job.ID, Source: job.Request.SourceKind, Product: job.Request.Product, Plugin: job.Plugin,
 		Versions: append([]string{}, job.Request.Versions...), Platforms: append([]string{}, job.Request.Platforms...), Changes: []PluginChange{},
-		State: PluginImportState(job.State), CreatedAt: job.CreatedAt, FinishedAt: job.FinishedAt,
+		State: PluginImportState(job.State), CreatedAt: job.CreatedAt, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
 		CreatedBy: job.Origin.CreatedBy, Origin: PluginImportOrigin(job.Origin.Kind),
 		BatchIndex: max(job.Origin.BatchIndex, 1), BatchSize: max(job.Origin.BatchSize, 1), QueuedAhead: job.QueuedAhead,
 		Outcomes: []PluginImportVersionOutcome{},
+	}
+	if job.Origin.RetryOf != nil {
+		retryOf := openapi_types.UUID(*job.Origin.RetryOf)
+		rendered.RetryOf = &retryOf
 	}
 	for _, change := range job.Request.Changes {
 		rendered.Changes = append(rendered.Changes, PluginChange{Version: change.Version, Action: PluginChangeAction(change.Action)})
@@ -364,10 +541,22 @@ func (s *server) ResolveGithubRelease(
 		audited.failed("storage_failed")
 		return nil, err
 	}
+	own := store.PluginSource{Kind: "github", Repository: release.Repository}
 	for _, held := range plugins {
-		if held.Name == release.Name && held.Source != (store.PluginSource{Kind: "github", Repository: release.Repository}) {
+		if held.Name == release.Name && held.Source != own {
 			source := renderPluginSource(held.Source)
 			rendered.HeldBy = &source
+		}
+	}
+	if rendered.HeldBy == nil {
+		reserved, err := s.reservedPluginNames(ctx, store.ParseOrganizationTenant(organizationID))
+		if err != nil {
+			audited.failed("storage_failed")
+			return nil, err
+		}
+		if source, ok := reserved[release.Name]; ok && source != own {
+			held := renderPluginSource(source)
+			rendered.HeldBy = &held
 		}
 	}
 	audited.succeeded(organizationID, "")
@@ -439,9 +628,24 @@ func (s *server) SyncPlugin(ctx context.Context, request SyncPluginRequestObject
 		seen[change.Version] = true
 		changes = append(changes, store.PluginChange{Version: change.Version, Action: string(change.Action), Platforms: platforms})
 	}
-	id, err := s.repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
-		SourceKind: source.Kind, Product: request.PluginName, Changes: changes,
-	}, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginPlugin)})
+	wanted := store.PluginImportRequest{SourceKind: source.Kind, Product: request.PluginName, Changes: changes}
+	if conflict, err := s.pluginImportConflict(ctx, tenant, wanted); err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	} else if conflict != nil {
+		audited.failed(conflict.reason)
+		return SyncPlugin409JSONResponse(conflict.response), nil
+	}
+	retryOf, ok, err := s.retryOf(ctx, tenant, request.Body.RetryOf)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if !ok {
+		audited.failed("invalid_request")
+		return badRequestResponse{message: "retry_of names no job of this organization"}, nil
+	}
+	id, err := s.repository.CreatePluginImport(ctx, tenant, wanted, store.PluginImportOrigin{CreatedBy: caller.Name, Kind: string(PluginImportOriginPlugin), RetryOf: retryOf})
 	if errors.Is(err, store.ErrPluginRegistryNotEnabled) {
 		audited.failed("not_enabled")
 		return SyncPlugin409JSONResponse{Message: "plugin registry is not enabled"}, nil
@@ -590,10 +794,19 @@ func (s *server) SyncCatalogue(ctx context.Context, request SyncCatalogueRequest
 		if summary.Source.Kind == "github" {
 			version = summary.Update.LatestTag
 		}
+		wanted := store.PluginImportRequest{SourceKind: summary.Source.Kind, Product: summary.Source.Repository, Versions: []string{version}, Platforms: platforms}
+		conflict, err := s.pluginImportConflict(ctx, tenant, wanted)
+		if err != nil {
+			audited.failed("storage_failed")
+			return nil, err
+		}
+		if conflict != nil {
+			result.ImportId = conflict.response.ImportId
+			refuse(conflict.response.Message)
+			continue
+		}
 		response.Results = append(response.Results, result)
-		batch = append(batch, planned{index: len(response.Results) - 1, summary: summary, request: store.PluginImportRequest{
-			SourceKind: summary.Source.Kind, Product: summary.Source.Repository, Versions: []string{version}, Platforms: platforms,
-		}})
+		batch = append(batch, planned{index: len(response.Results) - 1, summary: summary, request: wanted})
 	}
 	for position, job := range batch {
 		id, err := s.repository.CreatePluginImport(ctx, tenant, job.request, store.PluginImportOrigin{

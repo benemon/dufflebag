@@ -1138,16 +1138,31 @@ UPDATE plugin_registries SET default_platforms = $2 WHERE organization_id = $1
 RETURNING default_platforms;
 
 -- name: InsertPluginImport :exec
-INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms, changes, created_by, origin, batch_index, batch_size)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11);
+INSERT INTO plugin_imports (id, organization_id, source_kind, product, plugin, versions, platforms, changes, created_by, origin, batch_index, batch_size, retry_of)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13);
 
 -- name: GetPluginImport :one
-SELECT job.id, job.source_kind, job.product, job.versions, job.platforms, job.changes, job.state, job.outcomes, job.created_at, job.finished_at,
-       job.created_by, job.origin, job.batch_index, job.batch_size,
+SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platforms, job.changes, job.state, job.outcomes,
+       job.created_at, job.started_at, job.finished_at, job.created_by, job.origin, job.batch_index, job.batch_size, job.retry_of,
        (SELECT count(*) FROM plugin_imports ahead
         WHERE ahead.organization_id = job.organization_id
-          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead
+          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead,
+       count(*) OVER ()::integer AS total
 FROM plugin_imports job WHERE job.organization_id = $1 AND job.id = $2;
+
+-- name: ListPluginImports :many
+SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platforms, job.changes, job.state, job.outcomes,
+       job.created_at, job.started_at, job.finished_at, job.created_by, job.origin, job.batch_index, job.batch_size, job.retry_of,
+       (SELECT count(*) FROM plugin_imports ahead
+        WHERE ahead.organization_id = job.organization_id
+          AND ahead.state IN ('queued', 'running') AND ahead.created_at < job.created_at)::integer AS queued_ahead,
+       count(*) OVER ()::integer AS total
+FROM plugin_imports job
+WHERE job.organization_id = $1
+  AND (cardinality(sqlc.arg(states)::text[]) = 0 OR job.state = ANY(sqlc.arg(states)::text[]))
+  AND (sqlc.arg(plugin)::text = '' OR job.plugin = sqlc.arg(plugin)::text)
+ORDER BY job.created_at DESC, job.id DESC
+LIMIT sqlc.arg(page_size)::integer OFFSET sqlc.arg(page_offset)::integer;
 
 -- name: ClaimPluginImport :one
 SELECT id, source_kind, product, versions, platforms, changes
@@ -1158,7 +1173,7 @@ ORDER BY created_at
 FOR UPDATE SKIP LOCKED LIMIT 1;
 
 -- name: MarkPluginImportRunning :exec
-UPDATE plugin_imports SET state = 'running', claimed_at = now(), outcomes = '[]' WHERE id = $1;
+UPDATE plugin_imports SET state = 'running', claimed_at = now(), started_at = COALESCE(started_at, now()), outcomes = '[]' WHERE id = $1;
 
 -- name: RecordPluginImport :exec
 UPDATE plugin_imports
