@@ -12,11 +12,12 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  getPluginImport, getPluginRegistry, importJobRows, importJobSummary, retryPluginImport, templateStanza,
-  terminalImportStates, type ImportVersionOutcome, type PluginImport, type PluginRegistry,
+  firstError, getPluginImport, getPluginRegistry, importJobRows, importJobSummary, jobName, jobOrigin, jobTitle, retryPluginImport,
+  templateStanza, terminalImportStates, type ImportVersionOutcome, type PluginImport, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 import { NotExposedAlert, TemplateStanzaBlock } from './PluginDetail'
+import { stateLabel } from './PluginJobs'
 import { pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginImportJob() {
@@ -85,14 +86,6 @@ export function PluginImportJob() {
   )
 }
 
-export const stateLabel = {
-  queued: <Label color="grey">Queued</Label>,
-  running: <Label color="blue">Running</Label>,
-  succeeded: <Label color="green">Succeeded</Label>,
-  partially_succeeded: <Label color="yellow">Partially succeeded</Label>,
-  failed: <Label color="red">Failed</Label>,
-}
-
 const outcomeLabel = {
   imported: <Label isCompact color="green">Imported</Label>,
   already_mirrored: <Label isCompact color="grey">Already mirrored</Label>,
@@ -101,23 +94,6 @@ const outcomeLabel = {
   failed: <Label isCompact color="red">Failed</Label>,
 }
 
-export function jobName(job: PluginImport): string {
-  return job.product.replace(/^.*packer-plugin-/, '')
-}
-
-export function jobTitle(job: PluginImport): string {
-  const verb = job.origin === 'upload' ? 'Upload' : job.changes.length ? 'Sync' : 'Import'
-  return `${verb} ${jobName(job)}`
-}
-
-export function jobOrigin(job: PluginImport): string {
-  switch (job.origin) {
-    case 'plugin': return `from the plugin page, ${job.changes.length} ${job.changes.length === 1 ? 'change' : 'changes'}`
-    case 'catalogue': return `from Sync selected (${job.batch_index} of ${job.batch_size} ${job.batch_size === 1 ? 'job' : 'jobs'})`
-    case 'upload': return 'from Upload'
-    default: return job.source === 'github' ? `from Import from GitHub (${job.product})` : `from Browse HashiCorp (${job.product})`
-  }
-}
 
 export function PluginImportJobView({
   id, job, registry, loading, failure, organizationName, host, callerRole, busy, actionFailure,
@@ -279,15 +255,6 @@ export function PluginImportJobView({
       </PageSection>
     </>
   )
-}
-
-export function firstError(outcomes: ImportVersionOutcome[]): string | undefined {
-  for (const outcome of outcomes) {
-    if (outcome.error) return outcome.error
-    const platform = outcome.platforms?.find((p) => p.error)
-    if (platform?.error) return `${platform.platform}: ${platform.error}`
-  }
-  return undefined
 }
 
 function failedPlatforms(outcome: ImportVersionOutcome | undefined): string[] {

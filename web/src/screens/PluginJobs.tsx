@@ -7,8 +7,15 @@ import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { ApiError } from '../api/client'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
-import { importJobRows, jobWhat, type JobStateFilter, type PluginImport } from '../data/pluginRegistry'
-import { firstError, jobOrigin, jobTitle, stateLabel } from './PluginImportJob'
+import { firstError, importJobRows, jobOrigin, jobTitle, jobWhat, type JobStateFilter, type PluginImport } from '../data/pluginRegistry'
+
+export const stateLabel = {
+  queued: <Label color="grey">Queued</Label>,
+  running: <Label color="blue">Running</Label>,
+  succeeded: <Label color="green">Succeeded</Label>,
+  partially_succeeded: <Label color="yellow">Partially succeeded</Label>,
+  failed: <Label color="red">Failed</Label>,
+}
 
 export const jobsPageSize = 10
 
@@ -72,7 +79,7 @@ export function PluginJobsFacet({
   }
   return (
     <Card>
-      <CardTitle>All jobs</CardTitle>
+      <CardTitle>Jobs</CardTitle>
       <CardBody>
         <Toolbar id="jobs-toolbar" clearAllFilters={() => onFilter({})}>
           <ToolbarContent alignItems="center">
@@ -188,7 +195,7 @@ export function ImportRefusalAlert({ refusal, onOpenJob, onJobs }: { refusal: Im
       actionLinks={(
         <>
           <AlertActionLink onClick={() => onOpenJob(job.id)}>Open job {id}</AlertActionLink>
-          <AlertActionLink onClick={onJobs}>All jobs</AlertActionLink>
+          <AlertActionLink onClick={onJobs}>Jobs</AlertActionLink>
         </>
       )}
     >

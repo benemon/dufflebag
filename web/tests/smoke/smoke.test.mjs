@@ -995,7 +995,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Import smoke-missing')
     await waitForText('Job failed')
     await clickByText('button', 'Jobs')
-    await waitForText('All jobs')
+    await waitForText('Import smoke-missing')
     await clickFacet('Plugin facets', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
     await clickByText('button', 'probe')

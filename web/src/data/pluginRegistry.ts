@@ -339,6 +339,33 @@ export async function setDefaultPlatforms(token: string, organizationID: string,
 
 export const terminalImportStates = new Set(['succeeded', 'partially_succeeded', 'failed'])
 
+export function jobName(job: PluginImport): string {
+  return job.product.replace(/^.*packer-plugin-/, '')
+}
+
+export function jobTitle(job: PluginImport): string {
+  const verb = job.origin === 'upload' ? 'Upload' : job.changes.length ? 'Sync' : 'Import'
+  return `${verb} ${jobName(job)}`
+}
+
+export function jobOrigin(job: PluginImport): string {
+  switch (job.origin) {
+    case 'plugin': return `from the plugin page, ${job.changes.length} ${job.changes.length === 1 ? 'change' : 'changes'}`
+    case 'catalogue': return `from Sync selected (${job.batch_index} of ${job.batch_size} ${job.batch_size === 1 ? 'job' : 'jobs'})`
+    case 'upload': return 'from Upload'
+    default: return job.source === 'github' ? `from Import from GitHub (${job.product})` : `from Browse HashiCorp (${job.product})`
+  }
+}
+
+export function firstError(outcomes: ImportVersionOutcome[]): string | undefined {
+  for (const outcome of outcomes) {
+    if (outcome.error) return outcome.error
+    const platform = outcome.platforms?.find((p) => p.error)
+    if (platform?.error) return `${platform.platform}: ${platform.error}`
+  }
+  return undefined
+}
+
 export type GithubRelease = {
   repository: string
   name: string

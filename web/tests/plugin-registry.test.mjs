@@ -11,6 +11,7 @@ let ApiError
 let DisablePluginRegistryConfirmation
 let PluginRegistryConfirmationView
 let PluginRegistryView
+let PluginCatalogue
 let PluginRegistrySettingsView
 let PluginErrorCard
 let TypedConfirmModalView
@@ -69,7 +70,7 @@ before(async () => {
   ;({ ApiError } = await vite.ssrLoadModule('/src/api/client.ts'))
   ;({
     DisablePluginRegistryConfirmation, PluginRegistryConfirmationView,
-    PluginRegistryView, CatalogueSyncConfirmationView,
+    PluginRegistryView, PluginCatalogue, CatalogueSyncConfirmationView,
     pluginRegistryErrorMessage, pendingFirstImports, catalogueJobLabel,
   } = await vite.ssrLoadModule('/src/screens/Plugins.tsx'))
   ;({ PluginJobsFacet, ImportRefusalAlert, jobProgress, importSelectionKey } = await vite.ssrLoadModule('/src/screens/PluginJobs.tsx'))
@@ -106,6 +107,15 @@ const props = (over = {}) => ({
 const render = (over = {}) => renderToStaticMarkup(
   React.createElement(PluginRegistryView, props(over)),
 )
+// The catalogue on its own. A PatternFly table rendered inside the facet
+// rail costs seconds per row in this SSR harness (measured 2026-10-12:
+// 108ms alone, 5s inside Tabs, 250s inside the full screen), so the rail is
+// asserted once with an empty catalogue and the rows are asserted here.
+const renderCatalogue = (over = {}) => renderToStaticMarkup(React.createElement(PluginCatalogue, {
+  organizationName: 'acme', plugins: catalogue, unfinished: [], canPublish: true,
+  onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {}, onImportGithub: () => {}, onOpenImport: () => {}, onPlanSync: async () => [], onSyncSelected: async () => [],
+  ...over,
+}))
 
 test('screen renders loading, error, disabled reader, and disabled maintainer states honestly', () => {
   assert.match(render({ loading: true, registry: null }), /Loading plugins…/)
@@ -329,9 +339,8 @@ test('upload planning refuses incomplete versions and unknown files before sendi
 })
 
 test('the catalogue lists plugins with their source, newest version and count', () => {
-  const html = render({
-    registry: { enabled: true, exposed: true },
-    plugins: [{ name: 'git', source: { kind: 'upload' }, published_versions: 2, newest_version: '0.6.3' }],
+  const html = renderCatalogue({
+    plugins: [{ name: 'git', source: { kind: 'upload' }, published_versions: 2, newest_version: '0.6.3', update_available: false, update_check: { enabled: false } }],
   })
   assert.match(html, />git</)
   assert.match(html, />Local</)
@@ -903,10 +912,12 @@ test('a GitHub import sends the repository and the pinned tag', async () => {
 const catalogue = JSON.parse(readFileSync(new URL('./fixtures/plugin-catalogue.json', import.meta.url), 'utf8')).plugins
 
 test('the catalogue is the designed card: toolbar filters, Updates column, kebab, pager', () => {
-  const html = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue })
   // Header carries the title and the three ways in, and no subtitle (design 1.0).
-  assert.doesNotMatch(html, /packer init resolves them from/)
-  for (const action of ['Browse HashiCorp', 'Import from GitHub', 'Upload']) assert.match(html, new RegExp(`<button[^>]*>(?:<span[^>]*>)?${action}<`))
+  const screen = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: [] })
+  assert.doesNotMatch(screen, /packer init resolves them from/)
+  for (const action of ['Browse HashiCorp', 'Import from GitHub', 'Upload']) assert.match(screen, new RegExp(`<button[^>]*>(?:<span[^>]*>)?${action}<`))
+  assert.doesNotMatch(render({ registry: { enabled: true, exposed: true }, callerRole: 'reader', plugins: [] }), /Browse HashiCorp/)
+  const html = renderCatalogue()
   // Toolbar: name filter, source filter, Update available, selection text, Sync selected, pager.
   assert.match(html, /aria-label="Filter plugins by name"/)
   assert.match(html, />All sources</)
@@ -923,7 +934,7 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.match(html, /<code>ethanmdavidson\/packer-plugin-git<\/code>/)
   assert.match(html, /aria-label="Kebab toggle"/)
   // The house selectable-table cells: a select-all header over the rows with an update, PF's row checkboxes.
-  assert.match(html, /All plugins<\/[\s\S]{0,600}?id="plugins-toolbar"/, 'the catalogue card carries a title and a toolbar like the other list screens')
+  assert.match(html, /<div class="pf-v6-c-card__title-text">Plugins<\/div>[\s\S]{0,600}?id="plugins-toolbar"/, 'the catalogue card carries a title and a toolbar like the other list screens')
   assert.match(html, /aria-label="Select plugins with an update"/)
   const box = (row) => html.match(new RegExp(`<input[^>]*id="select-${row}"[^>]*>`))[0]
   assert.doesNotMatch(box(0), /disabled/, 'amazon has an update to sync')
@@ -934,9 +945,9 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   assert.doesNotMatch(html, /Save default platforms/)
   assert.doesNotMatch(html, /The registry is exposed/)
 
-  const reader = render({ registry: { enabled: true, exposed: true }, callerRole: 'reader', plugins: catalogue })
+  const reader = renderCatalogue({ canPublish: false })
   assert.match(reader, /Update available · 1\.8\.3/)
-  assert.doesNotMatch(reader, /Sync selected|aria-label="Kebab toggle"|Select amazon to sync|Browse HashiCorp/)
+  assert.doesNotMatch(reader, /Sync selected|aria-label="Kebab toggle"|Select amazon to sync/)
 })
 
 test('the enabled empty catalogue offers Browse HashiCorp and two links', () => {
@@ -1156,9 +1167,12 @@ test('the Jobs facet lists jobs newest first with state, progress, reason and Re
 
 test('the catalogue shows a plugin\'s unfinished job and a first import\'s row, and the rail counts unfinished jobs', () => {
   const unfinished = [queuedImport('kubevirt', { queued_ahead: 1 }), runningSync('amazon')]
-  const html = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue, unfinished })
-  assert.match(html, /aria-label="Plugin facets"/)
-  assert.match(html, new RegExp(`>Plugins<[\\s\\S]{0,200}?>${catalogue.length}<[\\s\\S]*?>Jobs<[\\s\\S]{0,200}?<span class="pf-v6-c-badge pf-m-unread">2<`), 'Plugins counts held plugins; Jobs counts unfinished jobs, unread')
+  // The rail with an empty catalogue: a sync's job adds no row, so the badge is asserted without a table in the rail (see renderCatalogue).
+  const rail = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: [], unfinished: [runningSync('amazon'), runningSync('qemu')] })
+  assert.match(rail, /aria-label="Plugin facets"/)
+  assert.match(rail, />Plugins<[\s\S]{0,200}?>0<[\s\S]{0,400}?>Jobs<[\s\S]{0,200}?<span class="pf-v6-c-badge pf-m-unread">2</, 'Plugins counts held plugins; Jobs counts unfinished jobs, unread')
+  assert.match(renderCatalogue({ plugins: [], unfinished: [queuedImport('kubevirt')] }), /kubevirt[\s\S]{0,600}?>None yet</, 'a first import on an empty registry shows its row, not the empty state')
+  const html = renderCatalogue({ unfinished })
   assert.match(html, />Sync running · 1 of 3</, 'amazon\'s running sync replaces its update pill')
   assert.doesNotMatch(html, /Update available · 1\.8\.3/)
   assert.match(html, /title="A job for amazon is already running"/)
@@ -1168,9 +1182,7 @@ test('the catalogue shows a plugin\'s unfinished job and a first import\'s row, 
   assert.deepEqual(pendingFirstImports(catalogue, unfinished).map((plugin) => [plugin.name, plugin.source.kind, plugin.source.repository, plugin.published_versions]),
     [['kubevirt', 'releases-hashicorp', 'packer-plugin-kubevirt', 0]])
   assert.deepEqual(pendingFirstImports(catalogue, [runningSync('amazon'), queuedImport('amazon')]), [], 'a held plugin\'s jobs add no row')
-  const none = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue })
-  assert.doesNotMatch(none, /pf-m-unread/, 'the Jobs badge hides at zero')
-  assert.match(render({ registry: { enabled: true, exposed: true }, plugins: [], unfinished: [queuedImport('kubevirt')] }), /kubevirt/, 'a first import on an empty registry shows its row, not the empty state')
+  assert.doesNotMatch(render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: [] }), /pf-m-unread/, 'the Jobs badge hides at zero')
 })
 
 test('the plugin page notice follows its job and the header links to its jobs', () => {
@@ -1209,11 +1221,11 @@ test('a duplicate import is refused inline, naming the job, until the selection 
   const refusal = { job, message: 'an identical job for vsphere is already queued', selection: importSelectionKey(['1.0.0'], ['linux_amd64']) }
   const alert = renderToStaticMarkup(React.createElement(ImportRefusalAlert, { refusal, onOpenJob: () => {}, onJobs: () => {} }))
   assert.match(alert, /This import is already queued/)
-  assert.match(alert, /Job 01KZJVSP imports 1\.0\.0 · 3 platforms\. It was queued by alice@acme at [^ ]+ and has 2 jobs ahead of it\. Starting another would only record “already mirrored”\./)
-  assert.match(alert, />Open job 01KZJVSP<[\s\S]*?>All jobs</)
+  assert.match(alert, /Job 01KZJVSP imports 1\.0\.0 · 3 platforms\. It was queued by alice@acme at .+? and has 2 jobs ahead of it\. Starting another would only record “already mirrored”\./)
+  assert.match(alert, />Open job 01KZJVSP<[\s\S]*?>Jobs</)
   const running = renderToStaticMarkup(React.createElement(ImportRefusalAlert, { refusal: { ...refusal, job: { ...job, state: 'running', started_at: '2026-10-12T14:12:00Z' } }, onOpenJob: () => {}, onJobs: () => {} }))
   assert.match(running, /This import is already running/)
-  assert.match(running, /It started at [^ ]+ and is 0 of 1 version in\./)
+  assert.match(running, /It started at .+? and is 0 of 1 version in\./)
 
   // Browse HashiCorp: the alert and a disabled Import while the refused selection stands; the rail and the row name the job.
   const vsphere = { product: 'packer-plugin-vsphere', name: 'vsphere', mirrored_versions: 0 }

@@ -18,10 +18,9 @@ import {
   listPluginVersions, listPlugins, pendingItems, pluginChanges, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
   sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginRegistry,
   type PluginVersions,
-  activeJobFor, getPluginImport, importJobSummary, jobWhat, listPluginImports, terminalImportStates, type PluginImport,
+  activeJobFor, firstError, getPluginImport, importJobSummary, jobTitle, jobWhat, listPluginImports, terminalImportStates, type PluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
-import { firstError, jobTitle } from './PluginImportJob'
 import { PluginRegistryConfirmation, pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginDetail() {

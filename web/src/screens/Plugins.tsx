@@ -17,11 +17,10 @@ import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
   PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, activeJobFor, catalogueRows, enablePluginRegistry, getPluginRegistry, listPluginImports, listPlugins,
   planCatalogueSync, retryPluginImport, sourceLabel, syncCatalogue,
-  type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type JobStateFilter, type Plugin, type PluginImport,
+  jobTitle, type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type JobStateFilter, type Plugin, type PluginImport,
   type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
-import { jobTitle } from './PluginImportJob'
 import { PluginJobsFacet, jobsPageSize, type JobsFilter } from './PluginJobs'
 import { FacetRail, knownCount } from './RegistryFacets'
 
@@ -513,7 +512,7 @@ export function PluginCatalogue({
         </Alert>
       ) : null}
       <Card>
-        <CardTitle>All plugins</CardTitle>
+        <CardTitle>Plugins</CardTitle>
         <CardBody>
         <Toolbar id="plugins-toolbar">
           <ToolbarContent alignItems="center">
