@@ -1055,7 +1055,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Save prune schedule')
     await waitForText('Prune schedule saved')
     await waitForText('Finished jobs older than 30 days are cleared every day at 03:00 UTC.')
-    await waitForText('On · daily')
+    await waitForText('Every day at 03:00 UTC')
     await clickByText('button', 'Prune now')
     await until('the run to be recorded', async () => /cleared 0/.test(await bodyText()))
     await clickByText('button', 'Expose')

@@ -351,14 +351,83 @@ export type PluginPruneRequest = { enabled: boolean; age_days: number; schedule:
 
 export const pruneAges = [1, 7, 14, 30, 60, 90, 180, 365]
 
-export const pruneSchedules: { key: 'hourly' | 'daily' | 'weekly'; text: string; expression: string; words: string }[] = [
-  { key: 'hourly', text: 'Hourly', expression: '0 * * * *', words: 'every hour, on the hour' },
-  { key: 'daily', text: 'Daily', expression: '0 3 * * *', words: 'every day at 03:00 UTC' },
-  { key: 'weekly', text: 'Weekly', expression: '0 3 * * 0', words: 'every Sunday at 03:00 UTC' },
-]
+export const defaultPruneSchedule = '0 3 * * *'
+
+type CronField = { any: true } | { values: number[] } | { every: number; from?: number }
+
+function parseCronField(field: string, low: number, high: number): CronField | null {
+  if (field === '*') return { any: true }
+  const step = /^(\*|(\d+)-(\d+))\/(\d+)$/.exec(field)
+  if (step) {
+    const every = Number(step[4])
+    if (every === 0) return null
+    if (step[1] === '*') return { every }
+    const [from, to] = [Number(step[2]), Number(step[3])]
+    if (from < low || to > high || from > to) return null
+    return { every, from }
+  }
+  const values: number[] = []
+  for (const part of field.split(',')) {
+    const match = /^(\d+)(?:-(\d+))?$/.exec(part)
+    if (!match) return null
+    const from = Number(match[1])
+    const to = match[2] === undefined ? from : Number(match[2])
+    if (from < low || to > high || from > to) return null
+    for (let n = from; n <= to; n++) values.push(n)
+  }
+  return { values: [...new Set(values)].sort((a, b) => a - b) }
+}
+
+const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December']
+const andList = (words: string[]) => (words.length <= 1 ? words.join('') : `${words.slice(0, -1).join(', ')} and ${words[words.length - 1]}`)
+const pad = (n: number) => String(n).padStart(2, '0')
+
+// A five-field cron expression in plain English, UTC: "Every day at 03:00 UTC",
+// "Every Monday and Friday at 07:30 UTC", "Every 15 minutes on day 1 of the month UTC".
+// Null for an expression it cannot read, which cronProblem then explains.
+export function describeCron(schedule: string): string | null {
+  const fields = schedule.trim().split(/\s+/).filter(Boolean)
+  if (fields.length !== 5) return null
+  const [minute, hour, dom, month, dow] = [[0, 59], [0, 23], [1, 31], [1, 12], [0, 7]].map(([low, high], index) => parseCronField(fields[index] ?? '', low as number, high as number))
+  if (!minute || !hour || !dom || !month || !dow) return null
+  const single = (field: CronField) => ('values' in field && field.values.length === 1 ? field.values[0] : undefined)
+  const values = (field: CronField) => ('values' in field ? field.values : [])
+  const isAny = (field: CronField) => 'any' in field
+
+  let when: string
+  const m = single(minute)
+  const h = single(hour)
+  if (m !== undefined && h !== undefined) when = `at ${pad(h)}:${pad(m)}`
+  else if (m !== undefined && 'values' in hour) when = `at ${andList(hour.values.map((value) => `${pad(value)}:${pad(m)}`))}`
+  else if (h !== undefined && 'values' in minute) when = `at ${andList(minute.values.map((value) => `${pad(h)}:${pad(value)}`))}`
+  else if (m !== undefined && isAny(hour)) when = m === 0 ? 'every hour, on the hour' : `every hour at ${m} past`
+  else if (m !== undefined && 'every' in hour) when = `every ${hour.every} hours${m === 0 ? ', on the hour' : ` at ${m} past`}`
+  else if ('every' in minute && isAny(hour)) when = `every ${minute.every} minutes`
+  else if ('every' in minute && h !== undefined) when = `every ${minute.every} minutes during ${pad(h)}:00`
+  else if (isAny(minute) && isAny(hour)) when = 'every minute'
+  else if (isAny(minute) && h !== undefined) when = `every minute during ${pad(h)}:00`
+  else return null
+
+  const days: string[] = []
+  const dowValues = [...new Set(values(dow).map((value) => value % 7))].sort((a, b) => a - b)
+  const contiguous = dowValues.length >= 3 && dowValues.every((value, index) => index === 0 || value === (dowValues[index - 1] ?? -1) + 1)
+  if (dowValues.length) days.push(`every ${contiguous ? `${dayNames[dowValues[0] ?? 0]} to ${dayNames[dowValues[dowValues.length - 1] ?? 0]}` : andList(dowValues.map((value) => dayNames[value] ?? ''))}`)
+  if ('every' in dow) days.push(`every ${dow.every} days of the week`)
+  if (values(dom).length) days.push(`on ${values(dom).length === 1 ? 'day' : 'days'} ${andList(values(dom).map(String))} of the month`)
+  if ('every' in dom) days.push(`every ${dom.every} days${dom.from !== undefined ? ` from day ${dom.from}` : ''}`)
+  let where = days.length ? days.join(' and ') : 'every day'
+  if (values(month).length) where += ` in ${andList(values(month).map((value) => monthNames[value - 1] ?? ''))}`
+  if ('every' in month) where += ` every ${month.every} months`
+
+  const timed = when.startsWith('at ')
+  const sentence = timed ? `${where} ${when}` : days.length || !isAny(month) ? `${when} ${where}` : when
+  return `${sentence.charAt(0).toUpperCase()}${sentence.slice(1)} UTC`
+}
 
 export function scheduleWords(schedule: string): string {
-  return pruneSchedules.find((preset) => preset.expression === schedule)?.words ?? `on the schedule ${schedule} (UTC)`
+  const described = describeCron(schedule)
+  return described ? `${described.charAt(0).toLowerCase()}${described.slice(1)}` : `on the schedule ${schedule} (UTC)`
 }
 
 // A five-field cron expression's first problem, field by field, or null.

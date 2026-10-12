@@ -2,7 +2,6 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, DescriptionList, DescriptionListDescription,
   DescriptionListGroup, DescriptionListTerm, Flex, FlexItem, Label, NumberInput, PageSection, Switch, TextInput,
-  ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 
 import { signOutIfUnauthorized } from '../api/client'
@@ -11,8 +10,8 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  cronProblem, disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginPrune,
-  getPluginRegistry, pruneAges, prunePreview, pruneSchedules, runPluginPrune, scheduleWords, setDefaultPlatforms, setPluginPrune,
+  cronProblem, describeCron, disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginPrune,
+  getPluginRegistry, pruneAges, prunePreview, runPluginPrune, scheduleWords, setDefaultPlatforms, setPluginPrune,
   templateStanza, unexposePluginRegistry, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { TemplateStanzaBlock } from './PluginDetail'
@@ -155,6 +154,7 @@ export function PluginRegistrySettingsView({
             <Card aria-label="Plugin registry">
               <CardTitle>Registry</CardTitle>
               <CardBody>
+                <Flex direction={{ default: 'column' }} gap={{ default: 'gapMd' }}>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
                     <DescriptionListTerm>Status</DescriptionListTerm>
@@ -200,6 +200,7 @@ export function PluginRegistrySettingsView({
                   </ActionGroup>
                 ) : null}
                 {registry.exposed ? <Content component="small">Unexpose the registry first before disabling it.</Content> : null}
+                </Flex>
               </CardBody>
             </Card>
             {registry.exposed ? (
@@ -277,8 +278,7 @@ export function PluginRegistrySettingsView({
 // The schedule's labels: Off, or On with its cadence, plus the last run's failure.
 export function pruneLabels(prune: PluginPrune): { text: string; color: 'grey' | 'green' | 'red' }[] {
   if (!prune.enabled) return [{ text: 'Off', color: 'grey' }, ...(prune.last_error ? [{ text: 'Last run failed', color: 'red' as const }] : [])]
-  const preset = pruneSchedules.find((candidate) => candidate.expression === prune.schedule)
-  return [{ text: `On · ${preset ? preset.key : 'custom schedule'}`, color: 'green' }, ...(prune.last_error ? [{ text: 'Last run failed', color: 'red' as const }] : [])]
+  return [{ text: 'On', color: 'green' }, ...(prune.last_error ? [{ text: 'Last run failed', color: 'red' as const }] : [])]
 }
 
 export function pruneSavedMessage(prune: PluginPrune): string {
@@ -296,20 +296,19 @@ export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {
   const [enabled, setEnabled] = useState(prune.enabled)
   const [ageDays, setAgeDays] = useState(prune.age_days)
   const [schedule, setSchedule] = useState(prune.schedule)
-  const [custom, setCustom] = useState(!pruneSchedules.some((preset) => preset.expression === prune.schedule))
   const [saved, setSaved] = useState<string | null>(null)
   useEffect(() => {
     setEnabled(prune.enabled)
     setAgeDays(prune.age_days)
     setSchedule(prune.schedule)
-    setCustom(!pruneSchedules.some((preset) => preset.expression === prune.schedule))
   }, [prune])
   const problem = cronProblem(schedule)
   const dirty = enabled !== prune.enabled || ageDays !== prune.age_days || schedule !== prune.schedule
   const step = pruneAges.indexOf(ageDays)
   const format = (value: string | undefined) => (value ? new Date(value).toLocaleString() : '—')
+  const described = describeCron(schedule)
   return (
-    <>
+    <Flex direction={{ default: 'column' }} gap={{ default: 'gapMd' }}>
       {saved ? <Alert variant="success" isInline title="Prune schedule saved" actionLinks={<Button variant="link" isInline onClick={() => setSaved(null)}>Dismiss</Button>}><Content component="p">{saved}</Content></Alert> : null}
       <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
         {pruneLabels(prune).map((label) => <FlexItem key={label.text}><Label isCompact color={label.color}>{label.text}</Label></FlexItem>)}
@@ -318,38 +317,27 @@ export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {
         id="prune-enabled" label="Clear finished jobs on a schedule" isChecked={enabled} isDisabled={busy}
         onChange={(_event, checked) => setEnabled(checked)}
       />
-      <DescriptionList isHorizontal isCompact style={{ marginTop: 12 }}>
+      <DescriptionList isHorizontal isCompact>
         <DescriptionListGroup>
           <DescriptionListTerm>Age limit</DescriptionListTerm>
           <DescriptionListDescription>
             <NumberInput
-              value={ageDays} unit={ageDays === 1 ? 'day after a job finished' : 'days after a job finished'} widthChars={4} isDisabled={busy || !enabled}
+              value={ageDays} unit={ageDays === 1 ? 'day' : 'days'} widthChars={4} isDisabled={busy || !enabled}
               inputAriaLabel="Age limit in days" minusBtnAriaLabel="Shorter age limit" plusBtnAriaLabel="Longer age limit"
               onMinus={() => setAgeDays(pruneAges[Math.max(0, step - 1)] ?? ageDays)} onPlus={() => setAgeDays(pruneAges[Math.min(pruneAges.length - 1, step + 1)] ?? ageDays)}
               inputProps={{ readOnly: true }}
             />
+            <Content component="small">Counted from when each job finished.</Content>
           </DescriptionListDescription>
         </DescriptionListGroup>
         <DescriptionListGroup>
           <DescriptionListTerm>Schedule</DescriptionListTerm>
           <DescriptionListDescription>
-            <ToggleGroup aria-label="Prune schedule">
-              {pruneSchedules.map((preset) => (
-                <ToggleGroupItem
-                  key={preset.key} text={preset.text} buttonId={`prune-schedule-${preset.key}`} isDisabled={busy || !enabled}
-                  isSelected={!custom && schedule === preset.expression}
-                  onChange={() => { setCustom(false); setSchedule(preset.expression) }}
-                />
-              ))}
-              <ToggleGroupItem text="Custom" buttonId="prune-schedule-custom" isDisabled={busy || !enabled} isSelected={custom} onChange={() => setCustom(true)} />
-            </ToggleGroup>
             <TextInput
-              id="prune-schedule" aria-label="Cron expression, UTC" value={schedule} readOnlyVariant={custom ? undefined : 'default'} isDisabled={busy || !enabled}
-              validated={problem ? 'error' : 'default'} onChange={(_event, value) => setSchedule(value)} style={{ marginTop: 8, fontFamily: 'var(--pf-t--global--font--family--mono)' }}
+              id="prune-schedule" aria-label="Cron expression, UTC" value={schedule} isDisabled={busy || !enabled}
+              validated={problem ? 'error' : 'default'} onChange={(_event, value) => setSchedule(value)} style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}
             />
-            <Content component="small">
-              {problem ?? (custom ? `Five fields, UTC: minute, hour, day of month, month, day of week. Runs ${scheduleWords(schedule)}.` : `Runs ${scheduleWords(schedule)}. Choose Custom to write your own expression.`)}
-            </Content>
+            <Content component="small">{problem ?? described ?? `Runs ${scheduleWords(schedule)}.`}</Content>
           </DescriptionListDescription>
         </DescriptionListGroup>
         <DescriptionListGroup>
@@ -369,7 +357,7 @@ export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {
           <DescriptionListDescription style={prune.last_error ? { color: 'var(--pf-t--global--color--status--danger--default)' } : undefined}>{prune.last_error || 'None'}</DescriptionListDescription>
         </DescriptionListGroup>
       </DescriptionList>
-      <ActionGroup>
+      <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
         <Button
           variant="primary" isLoading={busy} isDisabled={busy || !dirty || problem !== null}
           onClick={() => void Promise.resolve(onSave({ enabled, age_days: ageDays, schedule })).then(() => setSaved(pruneSavedMessage({ ...prune, enabled, age_days: ageDays, schedule })))}
@@ -377,8 +365,8 @@ export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {
           Save prune schedule
         </Button>
         <Button variant="secondary" isDisabled={busy || !prune.enabled || problem !== null} onClick={() => void onPruneNow()}>Prune now</Button>
-        {dirty ? <Button variant="link" isDisabled={busy} onClick={() => { setEnabled(prune.enabled); setAgeDays(prune.age_days); setSchedule(prune.schedule); setCustom(!pruneSchedules.some((p) => p.expression === prune.schedule)) }}>Reset</Button> : null}
-      </ActionGroup>
-    </>
+        {dirty ? <Button variant="link" isDisabled={busy} onClick={() => { setEnabled(prune.enabled); setAgeDays(prune.age_days); setSchedule(prune.schedule) }}>Reset</Button> : null}
+      </Flex>
+    </Flex>
   )
 }

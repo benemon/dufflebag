@@ -991,6 +991,13 @@ async function captureSeededScreens(seeded) {
   await waitForText('Checks off')
   await capture('plugin-checks.png')
 
+  // The Plugin registry administration screen: lifecycle, default platforms and the prune schedule.
+  await page.goto(`${base}/plugin-registry/settings`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Every day at 03:00 UTC')
+  await capture('plugin-registry-settings.png')
+  await page.$eval('[aria-label="Prune jobs"]', (card) => card.scrollIntoView({ block: 'start' }))
+  await capture('plugin-registry-prune.png')
+
   // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
   await waitForText('version = "1.1.0"')

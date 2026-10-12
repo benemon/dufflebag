@@ -50,6 +50,8 @@ organization's plugins from, `https://<host>/plugins/<organization>`, with a
 `required_plugins` stanza to copy; each plugin's own page shows the stanza
 pinned to its newest available version.
 
+![The Plugin registry administration screen: lifecycle, default platforms and the prune schedule](/screenshots/plugin-registry-settings.png)
+
 **Plugin registry** (under **Administration**) also holds the organization's default platforms, ticked
 from the platforms HashiCorp builds Packer plugins for (grouped by operating system), and the
 two other lifecycle controls. **Unexpose** removes that access. A `packer init` in progress gets 404 on its
@@ -242,14 +244,17 @@ the job finishes.
 Finished job records can be cleared on a schedule. It is off by default;
 jobs are kept until a publisher clears them. A maintainer turns it on
 under **Administration › Plugin registry › Prune jobs**, choosing an age
-limit (1 to 365 days, counted from when each job finished) and a schedule:
-hourly, daily at 03:00 UTC, weekly on Sunday, or a five-field cron
-expression read in UTC. The card previews what a run would clear now,
+limit (1 to 365 days, counted from when each job finished) and a schedule
+as a five-field cron expression read in UTC (`0 3 * * *`, every day at
+03:00, by default); the card reads the expression back in plain English
+as you type. It previews what a run would clear now,
 shows the next and last runs and the last error, and offers **Prune
 now**. Queued and running jobs are never pruned. A run happens once per
 organization, whatever the number of replicas, and writes one audit
 event naming how many jobs it cleared. A pruned job's page says it was
 cleared.
+
+![The Prune jobs card: the switch, the age limit, the schedule read back in English, the preview and the last run](/screenshots/plugin-registry-prune.png)
 
 ## Check for updates
 
