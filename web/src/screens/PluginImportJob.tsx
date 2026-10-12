@@ -61,6 +61,7 @@ export function PluginImportJob() {
       id={id} loading={!job && !failure} callerRole={self?.role ?? null} busy={busy} actionFailure={actionFailure}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToPlugins={() => navigate('/plugin-registry')}
+      onJobs={() => navigate('/plugin-registry?facet=jobs')}
       onRefresh={() => {
         setJob(null)
         setFailure(null)
@@ -84,7 +85,7 @@ export function PluginImportJob() {
   )
 }
 
-const stateLabel = {
+export const stateLabel = {
   queued: <Label color="grey">Queued</Label>,
   running: <Label color="blue">Running</Label>,
   succeeded: <Label color="green">Succeeded</Label>,
@@ -120,7 +121,7 @@ export function jobOrigin(job: PluginImport): string {
 
 export function PluginImportJobView({
   id, job, registry, loading, failure, organizationName, host, callerRole, busy, actionFailure,
-  onBackToRegistry, onBackToPlugins, onRefresh, onOpen, onRetry,
+  onBackToRegistry, onBackToPlugins, onJobs, onRefresh, onOpen, onRetry,
 }: {
   id: string
   job: PluginImport | null
@@ -134,6 +135,7 @@ export function PluginImportJobView({
   actionFailure: string | null
   onBackToRegistry: () => void
   onBackToPlugins: () => void
+  onJobs: () => void
   onRefresh: () => void | Promise<void>
   onOpen: (name: string) => void
   onRetry: () => void
@@ -154,7 +156,7 @@ export function PluginImportJobView({
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
             <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
-            <BreadcrumbItem component="button" onClick={() => name && onOpen(name)}>{name || 'Plugin'}</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onJobs}>Jobs</BreadcrumbItem>
             <BreadcrumbItem isActive>Job {(job?.id ?? id).slice(0, 8)}</BreadcrumbItem>
           </Breadcrumb>
         )}
@@ -279,7 +281,7 @@ export function PluginImportJobView({
   )
 }
 
-function firstError(outcomes: ImportVersionOutcome[]): string | undefined {
+export function firstError(outcomes: ImportVersionOutcome[]): string | undefined {
   for (const outcome of outcomes) {
     if (outcome.error) return outcome.error
     const platform = outcome.platforms?.find((p) => p.error)

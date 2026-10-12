@@ -23,6 +23,16 @@ let unexposePluginRegistry
 let planPluginUploads
 let templateStanza
 let PluginDetailView
+let JobNotice
+let PluginJobsFacet
+let ImportRefusalAlert
+let jobProgress
+let importSelectionKey
+let pendingFirstImports
+let catalogueJobLabel
+let jobWhat
+let activeJobFor
+let listPluginImports
 let versionConfirmation
 let PluginUploadView
 let listPlugins
@@ -60,17 +70,18 @@ before(async () => {
   ;({
     DisablePluginRegistryConfirmation, PluginRegistryConfirmationView,
     PluginRegistryView, CatalogueSyncConfirmationView,
-    pluginRegistryErrorMessage,
+    pluginRegistryErrorMessage, pendingFirstImports, catalogueJobLabel,
   } = await vite.ssrLoadModule('/src/screens/Plugins.tsx'))
+  ;({ PluginJobsFacet, ImportRefusalAlert, jobProgress, importSelectionKey } = await vite.ssrLoadModule('/src/screens/PluginJobs.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ PluginErrorCard } = await vite.ssrLoadModule('/src/components/PluginLoadState.tsx'))
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport, jobWhat, activeJobFor, listPluginImports,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
-  ;({ PluginDetailView, versionConfirmation } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
+  ;({ PluginDetailView, versionConfirmation, JobNotice } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
@@ -87,7 +98,9 @@ const props = (over = {}) => ({
   onBackToRegistry: () => {},
   onOpenPlugin: () => {}, onUpload: () => {}, onBrowse: () => {}, onImportGithub: () => {},
   onOpenImport: () => {}, onPlanSync: async () => [], onSyncSelected: async () => [],
-  onRefresh: async () => {}, onEnable: async () => {}, ...over,
+  onRefresh: async () => {}, onEnable: async () => {},
+  unfinished: [], facet: 'plugins', onFacet: () => {}, jobs: null, jobsFilter: {}, jobsPage: 1, jobsFailure: null, jobsBusy: false,
+  onJobsFilter: () => {}, onJobsPage: () => {}, onRetryJob: () => {}, ...over,
 })
 
 const render = (over = {}) => renderToStaticMarkup(
@@ -129,7 +142,7 @@ test('all six plugin screens pin their breadcrumb, loading card, and retryable e
       })),
     },
     {
-      name: 'job', crumbs: ['Registry', 'Plugins', 'Plugin', 'Job 01KZF3QW'], loading: 'Loading job…', error: 'Job could not be loaded',
+      name: 'job', crumbs: ['Registry', 'Plugins', 'Jobs', 'Job 01KZF3QW'], loading: 'Loading job…', error: 'Job could not be loaded',
       view: (loading, failure) => renderToStaticMarkup(React.createElement(PluginImportJobView, {
         ...callbacks, id: '01KZF3QW7N', job: null, registry: null, loading, failure,
         organizationName: 'acme', host: 'dufflebag.example.com', onOpen: () => {},
@@ -690,7 +703,7 @@ test('a held plugin explains the hold and offers no import; a first import prese
 const jobViewProps = {
   id: 'job', registry: { enabled: true, exposed: true }, loading: false, failure: null, organizationName: 'acme', host: 'dufflebag.example.com',
   callerRole: 'publisher', busy: false, actionFailure: null,
-  onBackToRegistry: () => {}, onBackToPlugins: () => {}, onRefresh: () => {}, onOpen: () => {}, onRetry: () => {},
+  onBackToRegistry: () => {}, onBackToPlugins: () => {}, onJobs: () => {}, onRefresh: () => {}, onOpen: () => {}, onRetry: () => {},
 }
 const importJob = (state, outcomes, extra = {}) => ({
   id: '01KZF3QW7N00000000000000000', source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.3', '1.8.2', '1.8.1'],
@@ -768,14 +781,14 @@ test('retrying a job queues only its failed part', async () => {
     assert.deepEqual(posted.at(-1).body, { changes: [
       { version: '1.8.3', action: 'add', platforms: ['windows_386'] },
       { version: '1.8.2', action: 'add', platforms: ['linux_arm64'] },
-    ] }, 'a partially failed add keeps only its failed platforms; a succeeded restore is not repeated')
+    ], retry_of: sync.id }, 'a partially failed add keeps only its failed platforms; a succeeded restore is not repeated; the retry names its job')
     assert.match(posted.at(-1).path, /plugins\/amazon\/sync$/)
     await retryPluginImport('token', 'org', importJob('partially_succeeded', [
       { version: '1.8.3', outcome: 'imported' }, { version: '1.8.2', outcome: 'failed', error: 'x' }, { version: '1.8.1', outcome: 'failed', error: 'y' },
     ]))
-    assert.deepEqual(posted.at(-1).body, { source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.2', '1.8.1'], platforms: ['linux_amd64', 'windows_386'] })
+    assert.deepEqual(posted.at(-1).body, { source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.2', '1.8.1'], platforms: ['linux_amd64', 'windows_386'], retry_of: '01KZF3QW7N00000000000000000' })
     await retryPluginImport('token', 'org', importJob('failed', [{ version: 'v0.6.4', outcome: 'failed', error: 'x' }], { source: 'github', product: 'owner/packer-plugin-git', versions: ['v0.6.4'] }))
-    assert.deepEqual(posted.at(-1).body, { source: 'github', product: 'owner/packer-plugin-git', versions: ['v0.6.4'], platforms: ['linux_amd64', 'windows_386'] })
+    assert.deepEqual(posted.at(-1).body, { source: 'github', product: 'owner/packer-plugin-git', versions: ['v0.6.4'], platforms: ['linux_amd64', 'windows_386'], retry_of: '01KZF3QW7N00000000000000000' })
   } finally {
     globalThis.fetch = originalFetch
   }
@@ -1061,4 +1074,163 @@ test('the platform list is the generated snapshot, grouped by operating system i
   assert.deepEqual([...PLUGIN_ARCHITECTURES], [...PLUGIN_ARCHITECTURES].sort(), 'the snapshot is sorted, so the groups are too')
   assert.deepEqual(groupPlatforms(['darwin_amd64', 'darwin_arm64', 'linux_386', 'linux_amd64']), [['darwin', ['amd64', 'arm64']], ['linux', ['386', 'amd64']]])
   assert.deepEqual(PLUGIN_OS_GROUPS.flatMap(([os, arches]) => arches.map((arch) => `${os}_${arch}`)), [...PLUGIN_ARCHITECTURES])
+})
+
+// Jobs are the producer's shape: the sync fixture comes from the handler; imports follow importJob().
+const queuedImport = (plugin, extra = {}) => importJob('queued', [], { id: `01KZJ${plugin.toUpperCase()}000000000000000000`.slice(0, 26), product: `packer-plugin-${plugin}`, plugin, versions: ['1.0.0'], platforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], queued_ahead: 1, ...extra })
+const runningSync = (plugin) => ({
+  ...JSON.parse(readFileSync(new URL('./fixtures/plugin-sync-job.json', import.meta.url), 'utf8')),
+  id: '01KZG7WQ3K000000000000000', plugin, product: plugin, state: 'running', queued_ahead: 0, finished_at: undefined,
+  outcomes: [{ version: '1.8.3', outcome: 'imported' }],
+})
+
+test('job wording: what a job does, where it is in the queue, and the catalogue label', () => {
+  assert.equal(jobWhat(queuedImport('kubevirt')), '1.0.0 · 3 platforms')
+  assert.equal(jobWhat(importJob('queued', [])), '1.8.3, 1.8.2, 1.8.1 · 2 platforms')
+  assert.equal(jobWhat(runningSync('amazon')), '3 additions')
+  assert.equal(jobWhat(importJob('succeeded', [], { origin: 'upload', versions: ['1.0.0', '1.1.0'] })), '2 versions')
+  assert.deepEqual(jobProgress(queuedImport('kubevirt', { queued_ahead: 0 })), { text: 'Runs next' })
+  assert.deepEqual(jobProgress(queuedImport('kubevirt', { queued_ahead: 2 })), { text: '2 jobs ahead' })
+  assert.deepEqual(jobProgress(runningSync('amazon')), { text: '1 of 3 additions', percent: 33 })
+  assert.equal(jobProgress(importJob('succeeded', [])), null)
+  assert.equal(catalogueJobLabel(queuedImport('kubevirt', { queued_ahead: 2 })), 'Import queued · 2 ahead')
+  assert.equal(catalogueJobLabel(runningSync('amazon')), 'Sync running · 1 of 3')
+  // The list is newest first; the plugin's job that runs first is the oldest.
+  const older = queuedImport('vsphere', { id: 'older' }), newer = queuedImport('vsphere', { id: 'newer' })
+  assert.equal(activeJobFor([newer, older], 'vsphere').id, 'older')
+  assert.equal(activeJobFor([newer, older], 'qemu'), undefined)
+  assert.equal(importSelectionKey(['1.1.0', '1.0.0'], ['linux_arm64', 'linux_amd64']), '1.0.0,1.1.0|linux_amd64,linux_arm64')
+})
+
+test('the jobs list asks the API with the facet filters and paging', async () => {
+  const originalFetch = globalThis.fetch
+  const seen = []
+  globalThis.fetch = async (path) => {
+    seen.push(path)
+    return new Response(JSON.stringify({ imports: [], total: 0 }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await listPluginImports('token', 'org', { state: 'unfinished', limit: 100 })
+    await listPluginImports('token', 'org', { state: 'failed', plugin: 'amazon', limit: 10, offset: 20 })
+    await listPluginImports('token', 'org')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.deepEqual(seen, [
+    '/api/v1/organizations/org/plugin-registry/imports?state=unfinished&limit=100',
+    '/api/v1/organizations/org/plugin-registry/imports?state=failed&plugin=amazon&limit=10&offset=20',
+    '/api/v1/organizations/org/plugin-registry/imports',
+  ])
+})
+
+const jobsFacet = (over = {}) => renderToStaticMarkup(React.createElement(PluginJobsFacet, {
+  jobs: [], total: 0, filter: {}, plugins: ['amazon', 'kubevirt'], page: 1, loading: false, failure: null, canPublish: true, busy: false,
+  onFilter: () => {}, onPage: () => {}, onOpenJob: () => {}, onRetry: () => {}, onRefresh: () => {}, ...over,
+}))
+
+test('the Jobs facet lists jobs newest first with state, progress, reason and Retry gated by role', () => {
+  const failed = importJob('failed', [{ version: '1.8.3', outcome: 'failed', error: 'releases.hashicorp.com unreachable: dial tcp: i/o timeout' }], { id: '01KZFAILED000000000000000', finished_at: '2026-10-09T14:03:00Z' })
+  const jobs = [queuedImport('kubevirt', { queued_ahead: 1 }), runningSync('amazon'), failed]
+  const html = jobsFacet({ jobs, total: 3 })
+  assert.match(html, /aria-label="Jobs"/)
+  assert.match(html, />Queued<[\s\S]*?>Running<[\s\S]*?>Failed</, 'rows in the order given, newest first')
+  assert.match(html, />Import kubevirt<[\s\S]{0,300}?1\.0\.0 · 3 platforms · Job 01KZJKUB/)
+  assert.match(html, /1 job ahead/)
+  assert.match(html, />Sync amazon<[\s\S]{0,300}?3 additions/)
+  assert.match(html, /aria-label="Sync amazon progress"/)
+  assert.match(html, /1 of 3 additions/)
+  assert.match(html, /releases\.hashicorp\.com unreachable: dial tcp: i\/o timeout/, 'a failed row carries its first error')
+  assert.match(html, /from Browse HashiCorp \(packer-plugin-kubevirt\)/)
+  assert.equal((html.match(/>Retry</g) ?? []).length, 1, 'Retry on the failed job only')
+  assert.doesNotMatch(jobsFacet({ jobs, total: 3, callerRole: 'reader', canPublish: false }), />Retry</)
+  assert.match(html, /aria-label="Jobs pagination"/)
+  assert.match(html, />All states<[\s\S]*?>All plugins</)
+  const filtered = jobsFacet({ jobs: [], total: 0, filter: { state: 'failed', plugin: 'qemu' } })
+  assert.match(filtered, /No jobs match\./)
+  assert.match(filtered, />Failed<[\s\S]*?>qemu</, 'the active filters show as chips')
+  assert.doesNotMatch(filtered, /No jobs yet/)
+  assert.match(jobsFacet(), /No jobs yet/)
+  assert.match(jobsFacet({ loading: true }), /Loading jobs…/)
+  assert.match(jobsFacet({ failure: 'GET …/imports: 502' }), /Jobs could not be loaded[\s\S]*502/)
+})
+
+test('the catalogue shows a plugin\'s unfinished job and a first import\'s row, and the rail counts unfinished jobs', () => {
+  const unfinished = [queuedImport('kubevirt', { queued_ahead: 1 }), runningSync('amazon')]
+  const html = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue, unfinished })
+  assert.match(html, /aria-label="Plugin facets"/)
+  assert.match(html, new RegExp(`>Plugins<[\\s\\S]{0,200}?>${catalogue.length}<[\\s\\S]*?>Jobs<[\\s\\S]{0,200}?<span class="pf-v6-c-badge pf-m-unread">2<`), 'Plugins counts held plugins; Jobs counts unfinished jobs, unread')
+  assert.match(html, />Sync running · 1 of 3</, 'amazon\'s running sync replaces its update pill')
+  assert.doesNotMatch(html, /Update available · 1\.8\.3/)
+  assert.match(html, /title="A job for amazon is already running"/)
+  assert.match(html, /<span style="color:var\(--pf-t--global--text--color--subtle\)">kubevirt<\/span>/, 'a first import\'s name is not a link yet')
+  assert.match(html, /kubevirt[\s\S]{0,600}?>None yet</)
+  assert.match(html, />Import queued · 1 ahead</)
+  assert.deepEqual(pendingFirstImports(catalogue, unfinished).map((plugin) => [plugin.name, plugin.source.kind, plugin.source.repository, plugin.published_versions]),
+    [['kubevirt', 'releases-hashicorp', 'packer-plugin-kubevirt', 0]])
+  assert.deepEqual(pendingFirstImports(catalogue, [runningSync('amazon'), queuedImport('amazon')]), [], 'a held plugin\'s jobs add no row')
+  const none = render({ registry: { enabled: true, exposed: true }, callerRole: 'publisher', plugins: catalogue })
+  assert.doesNotMatch(none, /pf-m-unread/, 'the Jobs badge hides at zero')
+  assert.match(render({ registry: { enabled: true, exposed: true }, plugins: [], unfinished: [queuedImport('kubevirt')] }), /kubevirt/, 'a first import on an empty registry shows its row, not the empty state')
+})
+
+test('the plugin page notice follows its job and the header links to its jobs', () => {
+  const view = (over) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, upstream: [], summary: null, onOlderUpstream: () => {}, hasOlderUpstream: false,
+    onSync: () => {}, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {}, onBackToRegistry: () => {}, onBackToPlugins: () => {}, onToggleUpdates: () => {},
+    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: [
+      { version: '1.8.2', revoked: false, created_at: '2026-10-01T00:00:00Z', listed_platforms: [], stored_platforms: [{ os: 'linux', arch: 'amd64' }] },
+    ] },
+    ...over,
+  }))
+  const running = view({ activeJob: runningSync('amazon') })
+  assert.match(running, />Jobs for amazon</)
+  assert.match(running, /Sync amazon is running/)
+  assert.match(running, /Job 01KZG7WQ: 3 additions\. Versions below update as each one is stored\./)
+  assert.match(running, /aria-label="Job progress"/)
+  assert.match(running, />Open job<[\s\S]*?>All jobs for amazon</)
+  const queued = view({ activeJob: queuedImport('amazon', { queued_ahead: 2 }) })
+  assert.match(queued, /Import amazon is queued/)
+  assert.match(queued, /2 jobs for acme run first; nothing below changes until it runs\./)
+  const done = view({ finishedJob: { ...runningSync('amazon'), state: 'succeeded', finished_at: '2026-10-12T14:06:00Z' } })
+  assert.match(done, /Sync amazon succeeded/)
+  assert.match(done, /The versions below are up to date\./)
+  const failed = renderToStaticMarkup(React.createElement(JobNotice, {
+    job: importJob('failed', [{ version: '1.8.3', outcome: 'failed', error: 'no such host' }]), organizationName: 'acme', onOpenJob: () => {}, onJobs: () => {},
+  }))
+  assert.match(failed, /Import amazon failed/)
+  assert.match(failed, /no such host Nothing below changed\./)
+  assert.doesNotMatch(view({}), /Open job/, 'no notice without a job')
+})
+
+test('a duplicate import is refused inline, naming the job, until the selection changes', () => {
+  const job = queuedImport('vsphere', { queued_ahead: 2, created_by: 'alice@acme' })
+  const refusal = { job, message: 'an identical job for vsphere is already queued', selection: importSelectionKey(['1.0.0'], ['linux_amd64']) }
+  const alert = renderToStaticMarkup(React.createElement(ImportRefusalAlert, { refusal, onOpenJob: () => {}, onJobs: () => {} }))
+  assert.match(alert, /This import is already queued/)
+  assert.match(alert, /Job 01KZJVSP imports 1\.0\.0 · 3 platforms\. It was queued by alice@acme at [^ ]+ and has 2 jobs ahead of it\. Starting another would only record “already mirrored”\./)
+  assert.match(alert, />Open job 01KZJVSP<[\s\S]*?>All jobs</)
+  const running = renderToStaticMarkup(React.createElement(ImportRefusalAlert, { refusal: { ...refusal, job: { ...job, state: 'running', started_at: '2026-10-12T14:12:00Z' } }, onOpenJob: () => {}, onJobs: () => {} }))
+  assert.match(running, /This import is already running/)
+  assert.match(running, /It started at [^ ]+ and is 0 of 1 version in\./)
+
+  // Browse HashiCorp: the alert and a disabled Import while the refused selection stands; the rail and the row name the job.
+  const vsphere = { product: 'packer-plugin-vsphere', name: 'vsphere', mirrored_versions: 0 }
+  const releases = [{ version: '1.0.0', created_at: '2026-09-24T00:00:00Z', prerelease: false, platforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], mirrored: false }]
+  const withJob = hashicorpView({ plugins: [vsphere], selected: vsphere, versions: releases, heldVersions: [], hasMore: false, preselected: ['linux_amd64'], unfinished: [job], refusal: null })
+  assert.match(withJob, /vsphere · queued/)
+  assert.match(withJob, /In job 01KZJVSP \(queued\)/)
+  // The view's selection starts as the preselected platforms with nothing chosen, so a refusal for that selection shows.
+  const refusedNow = hashicorpView({ plugins: [vsphere], selected: vsphere, versions: releases, heldVersions: [], hasMore: false, preselected: ['linux_amd64'], unfinished: [job],
+    refusal: { ...refusal, selection: importSelectionKey([], ['linux_amd64']) } })
+  assert.match(refusedNow, /This import is already queued/)
+  assert.doesNotMatch(hashicorpView({ plugins: [vsphere], selected: vsphere, versions: releases, heldVersions: [], hasMore: false, preselected: ['linux_amd64'], unfinished: [job], refusal }), /This import is already queued/, 'a refusal for another selection is not shown')
+
+  // Import from GitHub: the same alert keyed on the release tag and platforms.
+  const githubJob = { ...job, source: 'github', product: 'ethanmdavidson/packer-plugin-git', plugin: 'git', versions: ['v0.6.3'] }
+  const refused = githubView(gitRelease, { refusal: { job: githubJob, message: 'identical', selection: importSelectionKey(['v0.6.3'], ['linux_amd64']) } })
+  assert.match(refused, /This import is already queued/)
+  assert.match(refused, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Import v0\.6\.3 · 1 platform</)
+  assert.doesNotMatch(githubView(gitRelease, { refusal: { job: githubJob, message: 'identical', selection: importSelectionKey(['v0.6.3'], ['darwin_arm64']) } }), /This import is already queued/)
 })

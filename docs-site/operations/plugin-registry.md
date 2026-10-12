@@ -209,6 +209,27 @@ The API equivalents are `POST .../plugins/{name}/sync` with a list of
 changes, `POST .../versions/{version}/revoke`,
 `POST .../versions/{version}/restore` and `DELETE .../versions/{version}`.
 
+## Jobs
+
+Every import and sync runs as a job: queued, then run by the server one at
+a time in the order queued, whether or not anyone is watching. The **Jobs**
+facet of the Plugins screen lists the organization's jobs newest first,
+with each one's state, what it does, who queued it and from where, and the
+first error of a failed one. Filter by state or plugin; a failed or partly
+failed job offers **Retry** to publishers. The facet's badge counts the
+jobs queued or running.
+
+![The Jobs facet listing the organization's import and sync jobs](/screenshots/plugin-jobs.png)
+
+A plugin with a queued or running job shows it on its catalogue row in
+place of the update pill, and its page carries a notice with the job's
+progress that turns to the outcome when it finishes. A first import whose
+plugin has no version yet still has a row, marked **None yet**. Queuing an
+import identical to one already queued or running is refused: the import
+screen names that job and offers to open it. A first import also reserves
+its name, so the same plugin cannot be queued from another source until
+the job finishes.
+
 ## Check for updates
 
 A plugin imported from releases.hashicorp.com or GitHub can check its source

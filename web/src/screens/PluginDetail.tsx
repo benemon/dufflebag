@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  Alert, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
-  Pagination, SearchInput, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
+  Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
+  Pagination, Progress, ProgressMeasureLocation, SearchInput, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
   CodeBlockAction, CodeBlockCode, Content, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Flex, FlexItem, Label, PageSection, Switch,
 } from '@patternfly/react-core'
@@ -18,8 +18,10 @@ import {
   listPluginVersions, listPlugins, pendingItems, pluginChanges, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
   sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginRegistry,
   type PluginVersions,
+  activeJobFor, getPluginImport, importJobSummary, jobWhat, listPluginImports, terminalImportStates, type PluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
+import { firstError, jobTitle } from './PluginImportJob'
 import { PluginRegistryConfirmation, pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginDetail() {
@@ -38,17 +40,21 @@ export function PluginDetail() {
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
+  const [activeJob, setActiveJob] = useState<PluginImport | null>(null)
+  const [finishedJob, setFinishedJob] = useState<PluginImport | null>(null)
 
-  const reload = useCallback(async () => {
+  const reload = useCallback(async (quiet = false) => {
     if (!organizationID || token === '') return
-    setLoading(true)
+    if (!quiet) setLoading(true)
     try {
-      const [nextRegistry, nextDetail, plugins] = await Promise.all([
+      const [nextRegistry, nextDetail, plugins, jobs] = await Promise.all([
         getPluginRegistry(token, organizationID), listPluginVersions(token, organizationID, name), listPlugins(token, organizationID),
+        listPluginImports(token, organizationID, { state: 'unfinished', plugin: name, limit: 100 }),
       ])
       setRegistry(nextRegistry)
       setDetail(nextDetail)
       setSummary(plugins.find((plugin) => plugin.name === name) ?? null)
+      setActiveJob(activeJobFor(jobs.imports, name) ?? null)
       setFailure(null)
       if (nextDetail.source.kind === 'releases-hashicorp' && nextDetail.source.repository) {
         const page = await listHashicorpPluginVersions(token, organizationID, nextDetail.source.repository)
@@ -82,10 +88,32 @@ export function PluginDetail() {
   }
 
   useEffect(() => { void reload() }, [reload])
+  // While the plugin has a job, poll it; when it finishes, the notice turns
+  // to its outcome and the versions reload.
+  useEffect(() => {
+    if (!activeJob) return
+    const timer = setTimeout(() => void (async () => {
+      try {
+        const latest = await getPluginImport(token, organizationID ?? '', activeJob.id)
+        if (terminalImportStates.has(latest.state)) {
+          setFinishedJob(latest)
+          await reload(true)
+        } else {
+          setActiveJob(latest)
+        }
+      } catch (error: unknown) {
+        if (!signOutIfUnauthorized(error, signOut)) setActionFailure(pluginRegistryErrorMessage(error, 'The job could not be read.'))
+      }
+    })(), 3000)
+    return () => clearTimeout(timer)
+  }, [activeJob, organizationID, reload, signOut, token])
 
   return (
     <PluginDetailView
       name={name} organizationName={tenant.organization} host={window.location.hostname}
+      activeJob={activeJob} finishedJob={activeJob ? null : finishedJob}
+      onOpenJob={(id) => navigate(`/plugin-registry/imports/${id}`)}
+      onJobs={() => navigate(`/plugin-registry?facet=jobs&plugin=${encodeURIComponent(name)}`)}
       callerRole={self?.role ?? null} registry={registry} detail={detail} summary={summary}
       upstream={upstream} hasOlderUpstream={olderUpstream !== undefined}
       loading={loading} failure={failure} onRefresh={reload}
@@ -144,7 +172,8 @@ const MARK_WORD: Record<MarkKind, string> = {
 
 const MARK_STYLE: Record<MarkKind, { background: string; boxShadow?: string }> = {
   mirrored: { background: 'var(--pf-t--global--color--brand--default)' },
-  revoked: { background: 'var(--pf-t--global--color--nonstatus--gray--default)' },
+  // Darker than the secondary surface an unpublished platform shows, so the two marks read apart.
+  revoked: { background: 'var(--pf-t--global--color--nonstatus--gray--clicked)' },
   add: { background: 'var(--pf-t--global--color--nonstatus--blue--default)' },
   free: { background: 'var(--pf-t--global--background--color--primary--default)', boxShadow: 'inset 0 0 0 1px var(--pf-t--global--border--color--default)' },
   upstream: { background: 'var(--pf-t--global--background--color--primary--default)', boxShadow: 'inset 0 0 0 1px var(--pf-t--global--border--color--disabled)' },
@@ -172,10 +201,15 @@ export function PluginDetailView({
   name, organizationName, host, callerRole, registry, detail, summary, upstream, hasOlderUpstream, loading, failure,
   onRefresh, onBackToRegistry, onBackToPlugins, onUpload, busy, actionFailure, onToggleUpdates,
   onOlderUpstream, onSync, onRevoke, onRestore, onRemove,
+  activeJob = null, finishedJob = null, onOpenJob = () => {}, onJobs = () => {},
 }: {
   name: string
   organizationName: string
   host: string
+  activeJob?: PluginImport | null
+  finishedJob?: PluginImport | null
+  onOpenJob?: (id: string) => void
+  onJobs?: () => void
   callerRole: Role | null
   registry: PluginRegistry | null
   detail: PluginVersions | null
@@ -290,10 +324,12 @@ export function PluginDetailView({
             {check?.enabled && check.error ? <Label isCompact color="red">Last check failed</Label> : null}
           </>
         ) : name}
+        actions={detail ? <Button variant="link" onClick={onJobs}>Jobs for {name}</Button> : undefined}
         onRefresh={onRefresh} refreshing={loading}
       />
       <PageSection variant="secondary" isFilled>
         {detail && !registry?.exposed && registry ? <NotExposedAlert registry={registry} /> : null}
+        {activeJob ?? finishedJob ? <JobNotice job={(activeJob ?? finishedJob) as PluginImport} organizationName={organizationName} onOpenJob={onOpenJob} onJobs={onJobs} /> : null}
         {actionFailure ? <Alert variant="danger" isInline title="The action failed"><Content component="p">{actionFailure}</Content></Alert> : null}
         {loading && !detail ? <PluginLoadingCard message={`Loading ${name}…`} /> : null}
         {failure ? <PluginErrorCard title={`${name} could not be loaded`} error={failure} onRetry={onRefresh} /> : null}
@@ -537,6 +573,45 @@ function checkedAt(check: Plugin['update_check'] | undefined): string {
   if (!check.checked_at) return 'Not checked yet'
   const when = new Date(check.checked_at).toLocaleString()
   return check.error ? `${when} (failed)` : when
+}
+
+// The plugin page's notice for its unfinished job, and for that job's
+// outcome once it finishes while the page is open.
+export function JobNotice({ job, organizationName, onOpenJob, onJobs }: {
+  job: PluginImport
+  organizationName: string
+  onOpenJob: (id: string) => void
+  onJobs: () => void
+}) {
+  const id = job.id.slice(0, 8)
+  const name = jobTitle(job).split(' ').slice(1).join(' ')
+  const ahead = job.queued_ahead
+  const copy: Record<PluginImport['state'], { variant: 'info' | 'success' | 'warning' | 'danger'; title: string; body: string }> = {
+    queued: {
+      variant: 'info', title: `${jobTitle(job)} is queued`,
+      body: `Job ${id}: ${jobWhat(job)}. ${ahead ? `${ahead} ${ahead === 1 ? 'job' : 'jobs'} for ${organizationName} run first; nothing below changes until it runs.` : 'It runs next; nothing below changes until it does.'}`,
+    },
+    running: { variant: 'info', title: `${jobTitle(job)} is running`, body: `Job ${id}: ${jobWhat(job)}. Versions below update as each one is stored.` },
+    succeeded: { variant: 'success', title: `${jobTitle(job)} succeeded`, body: `Job ${id}: ${jobWhat(job)}. The versions below are up to date.` },
+    partially_succeeded: { variant: 'warning', title: `${jobTitle(job)} partly succeeded`, body: `Job ${id}: ${jobWhat(job)}. ${firstError(job.outcomes) ?? ''} The versions below show what landed.` },
+    failed: { variant: 'danger', title: `${jobTitle(job)} failed`, body: `Job ${id}: ${jobWhat(job)}. ${firstError(job.outcomes) ?? ''} Nothing below changed.` },
+  }
+  const { variant, title, body } = copy[job.state]
+  const progress = job.state === 'running' ? importJobSummary(job).progress : undefined
+  return (
+    <Alert
+      variant={variant} isInline title={title}
+      actionLinks={(
+        <>
+          <AlertActionLink onClick={() => onOpenJob(job.id)}>Open job</AlertActionLink>
+          <AlertActionLink onClick={onJobs}>All jobs for {name}</AlertActionLink>
+        </>
+      )}
+    >
+      <Content component="p">{body}</Content>
+      {progress !== undefined ? <Progress value={progress} aria-label="Job progress" measureLocation={ProgressMeasureLocation.none} size="sm" /> : null}
+    </Alert>
+  )
 }
 
 export function NotExposedAlert({ registry }: { registry: PluginRegistry | null }) {

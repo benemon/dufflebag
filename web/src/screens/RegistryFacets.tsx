@@ -4,7 +4,7 @@ import { Badge, Tab, Tabs, TabTitleText } from '@patternfly/react-core'
 import './RegistryFacets.css'
 
 export type FacetCount =
-  | { status: 'known'; value: number }
+  | { status: 'known'; value: number; unread?: boolean }
   | { status: 'unknown' }
 
 export type RegistryFacet<Key extends string> = {
@@ -49,7 +49,7 @@ export function FacetRail<Key extends string>({
                 <>
                   <TabTitleText>{facet.label}</TabTitleText>
                   {facet.count?.status === 'known' ? (
-                    <Badge isRead>{facet.count.value}</Badge>
+                    <Badge isRead={!facet.count.unread}>{facet.count.value}</Badge>
                   ) : null}
                 </>
               )}

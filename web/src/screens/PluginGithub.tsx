@@ -13,8 +13,10 @@ import { ScreenHeader } from '../components/ScreenHeader'
 import {
   createGithubImport, getDefaultPlatforms, githubRateLimit, listPluginVersions, resolveGithubRelease, sourceLabel,
   type GithubRelease,
+  getPluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
+import { ImportRefusalAlert, importSelectionKey, isDuplicateImportRefusal, type ImportRefusal } from './PluginJobs'
 import { pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginGithub() {
@@ -29,6 +31,7 @@ export function PluginGithub() {
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [link, setLink] = useState('')
+  const [refusal, setRefusal] = useState<ImportRefusal | null>(null)
 
   const guard = async (work: () => Promise<void>, fallback: string) => {
     setBusy(true)
@@ -67,10 +70,20 @@ export function PluginGithub() {
       onLinkChange={(value) => { setLink(value); setRelease(null) }}
       onResolve={() => void resolve()}
       onRefresh={() => void resolve()}
+      refusal={refusal}
+      onOpenJob={(id) => navigate(`/plugin-registry/imports/${id}`)}
+      onJobs={() => navigate('/plugin-registry?facet=jobs')}
       onImport={(platforms) => void guard(async () => {
         if (!release) return
-        const job = await createGithubImport(token, organizationID, release.repository, release.tag, platforms)
-        navigate(`/plugin-registry/imports/${job.id}`)
+        setRefusal(null)
+        try {
+          const job = await createGithubImport(token, organizationID, release.repository, release.tag, platforms)
+          navigate(`/plugin-registry/imports/${job.id}`)
+        } catch (error: unknown) {
+          if (!isDuplicateImportRefusal(error)) throw error
+          const job = await getPluginImport(token, organizationID, error.importID)
+          setRefusal({ job, message: error.message, selection: importSelectionKey([release.tag], platforms) })
+        }
       }, 'The import could not be queued.')}
     />
   )
@@ -78,8 +91,12 @@ export function PluginGithub() {
 
 export function PluginGithubView({
   organizationName, link, release, mirroredVersions, preselected, loading, failure, busy,
+  refusal = null, onOpenJob = () => {}, onJobs = () => {},
   onBackToRegistry, onBackToPlugins, onLinkChange, onResolve, onRefresh, onImport,
 }: {
+  refusal?: ImportRefusal | null
+  onOpenJob?: (id: string) => void
+  onJobs?: () => void
   organizationName: string
   link: string
   release: GithubRelease | null
@@ -237,8 +254,14 @@ export function PluginGithubView({
                       </FlexItem>
                     ))}
                   </Flex>
+                  {refusal && refusal.selection === importSelectionKey([release.tag], chosen)
+                    ? <div style={{ marginTop: 16 }}><ImportRefusalAlert refusal={refusal} onOpenJob={onOpenJob} onJobs={onJobs} /></div> : null}
                   <Flex gap={{ default: 'gapSm' }} style={{ marginTop: 16 }}>
-                    <Button variant="primary" isLoading={busy} isDisabled={busy || chosen.length === 0} onClick={() => onImport(chosen)}>
+                    <Button
+                      variant="primary" isLoading={busy}
+                      isDisabled={busy || chosen.length === 0 || refusal?.selection === importSelectionKey([release.tag], chosen)}
+                      onClick={() => onImport(chosen)}
+                    >
                       Import {release.tag} · {chosen.length} {chosen.length === 1 ? 'platform' : 'platforms'}
                     </Button>
                     <Button variant="link" isDisabled={busy} onClick={onBackToPlugins}>Cancel</Button>

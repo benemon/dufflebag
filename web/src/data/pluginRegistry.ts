@@ -201,6 +201,7 @@ export type PluginImport = {
   id: string
   source: string
   product: string
+  plugin: string
   versions: string[]
   platforms: string[]
   changes: PluginChange[]
@@ -210,9 +211,38 @@ export type PluginImport = {
   batch_index: number
   batch_size: number
   queued_ahead: number
+  retry_of?: string
   created_at: string
+  started_at?: string
   finished_at?: string
   outcomes: ImportVersionOutcome[]
+}
+
+export type JobStateFilter = PluginImport['state'] | 'unfinished'
+
+export type PluginImportFilter = { state?: JobStateFilter; plugin?: string; limit?: number; offset?: number }
+
+export function listPluginImports(token: string, organizationID: string, filter: PluginImportFilter = {}): Promise<{ imports: PluginImport[]; total: number }> {
+  const query = new URLSearchParams()
+  if (filter.state) query.set('state', filter.state)
+  if (filter.plugin) query.set('plugin', filter.plugin)
+  if (filter.limit !== undefined) query.set('limit', String(filter.limit))
+  if (filter.offset) query.set('offset', String(filter.offset))
+  const suffix = query.size ? `?${query}` : ''
+  return platformGet(token, path(organizationID, `imports${suffix}`))
+}
+
+// What a job does, in the words of the Jobs table: "1.0.0 · 3 platforms",
+// "2 additions", "3 versions".
+export function jobWhat(job: PluginImport): string {
+  if (job.changes.length) return `${job.changes.length} ${job.changes.length === 1 ? 'addition' : 'additions'}`
+  if (job.origin === 'upload') return `${job.versions.length} ${job.versions.length === 1 ? 'version' : 'versions'}`
+  return `${job.versions.join(', ')} · ${job.platforms.length} ${job.platforms.length === 1 ? 'platform' : 'platforms'}`
+}
+
+// The plugin's unfinished job that runs first; a listing is newest first.
+export function activeJobFor(unfinished: PluginImport[], plugin: string): PluginImport | undefined {
+  return [...unfinished].reverse().find((job) => job.plugin === plugin)
 }
 
 // A job's rows are its sync changes, or the versions an import requested;
@@ -269,12 +299,12 @@ export function retryPluginImport(token: string, organizationID: string, job: Pl
       const failedPlatforms = (job.outcomes[index]?.platforms ?? []).filter((p) => p.outcome === 'failed').map((p) => p.platform)
       return [{ ...change, platforms: failedPlatforms.length ? failedPlatforms : change.platforms }]
     })
-    return syncPlugin(token, organizationID, job.product, changes)
+    return syncPlugin(token, organizationID, job.product, changes, job.id)
   }
   const failedVersions = job.versions.filter((_, index) => failed(index))
   const versions = failedVersions.length ? failedVersions : job.versions
-  if (job.source === 'github') return createGithubImport(token, organizationID, job.product, versions[0] ?? '', job.platforms)
-  return createPluginImport(token, organizationID, job.product, versions, job.platforms)
+  if (job.source === 'github') return createGithubImport(token, organizationID, job.product, versions[0] ?? '', job.platforms, job.id)
+  return createPluginImport(token, organizationID, job.product, versions, job.platforms, job.id)
 }
 
 export async function listHashicorpPlugins(token: string, organizationID: string): Promise<HashicorpPlugin[]> {
@@ -290,9 +320,9 @@ export function listHashicorpPluginVersions(
 }
 
 export function createPluginImport(
-  token: string, organizationID: string, product: string, versions: string[], platforms: string[],
+  token: string, organizationID: string, product: string, versions: string[], platforms: string[], retryOf?: string,
 ): Promise<PluginImport> {
-  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'releases-hashicorp', product, versions, platforms })
+  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'releases-hashicorp', product, versions, platforms, ...(retryOf ? { retry_of: retryOf } : {}) })
 }
 
 export function getPluginImport(token: string, organizationID: string, id: string): Promise<PluginImport> {
@@ -334,13 +364,13 @@ export function resolveGithubRelease(token: string, organizationID: string, rele
 }
 
 export function createGithubImport(
-  token: string, organizationID: string, repository: string, tag: string, platforms: string[],
+  token: string, organizationID: string, repository: string, tag: string, platforms: string[], retryOf?: string,
 ): Promise<PluginImport> {
-  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'github', product: repository, versions: [tag], platforms })
+  return platformPost<PluginImport>(token, path(organizationID, 'imports'), { source: 'github', product: repository, versions: [tag], platforms, ...(retryOf ? { retry_of: retryOf } : {}) })
 }
 
-export function syncPlugin(token: string, organizationID: string, name: string, changes: PluginChange[]): Promise<PluginImport> {
-  return platformPost<PluginImport>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/sync`), { changes })
+export function syncPlugin(token: string, organizationID: string, name: string, changes: PluginChange[], retryOf?: string): Promise<PluginImport> {
+  return platformPost<PluginImport>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/sync`), { changes, ...(retryOf ? { retry_of: retryOf } : {}) })
 }
 
 const platformKey = (p: PluginPlatform) => `${p.os}_${p.arch}`
