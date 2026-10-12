@@ -275,6 +275,15 @@ import job per plugin for the newest release, with the platforms it already
 has, so one plugin's failure does not hold back the rest. A GitHub plugin is
 imported from the release tag the check saw.
 
+The **Checks** facet of the Plugins screen lists every imported plugin
+with its check switch, when it was last checked, the result (up to date, a
+newer version, or the failure's reason) and when the next check is due;
+its tabs filter to the plugins with a newer version, the failed checks and
+the plugins with checks off. Uploaded plugins are counted but not listed:
+an upload has no upstream.
+
+![The Checks facet listing each imported plugin's last check and next due time](/screenshots/plugin-checks.png)
+
 A failed check is shown on the plugin's page with its reason and is retried
 at the next interval. It raises no alert, so a deployment without internet
 access simply never sees an update. GitHub checks share the 60 calls an hour

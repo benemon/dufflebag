@@ -30,6 +30,8 @@ let templateStanza
 let PluginDetailView
 let JobNotice
 let PluginJobsFacet
+let PluginChecksFacet
+let checkState
 let ImportRefusalAlert
 let jobProgress
 let importSelectionKey
@@ -81,6 +83,7 @@ before(async () => {
     pluginRegistryErrorMessage, pendingFirstImports, catalogueJobLabel, parseJobsFilter,
   } = await vite.ssrLoadModule('/src/screens/Plugins.tsx'))
   ;({ PluginJobsFacet, ImportRefusalAlert, jobProgress, importSelectionKey, clearConfirmation, clearOutcomeAlert } = await vite.ssrLoadModule('/src/screens/PluginJobs.tsx'))
+  ;({ PluginChecksFacet, checkState } = await vite.ssrLoadModule('/src/screens/PluginChecks.tsx'))
   ;({ TypedConfirmModalView } =
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ PluginErrorCard } = await vite.ssrLoadModule('/src/components/PluginLoadState.tsx'))
@@ -109,7 +112,8 @@ const props = (over = {}) => ({
   onOpenImport: () => {}, onPlanSync: async () => [], onSyncSelected: async () => [],
   onRefresh: async () => {}, onEnable: async () => {},
   unfinished: [], facet: 'plugins', onFacet: () => {}, jobs: null, jobsFilter: {}, jobsPage: 1, jobsFailure: null, jobsBusy: false,
-  onJobsFilter: () => {}, onJobsPage: () => {}, onRetryJob: () => {}, ...over,
+  onJobsFilter: () => {}, onJobsPage: () => {}, onRetryJob: () => {}, clearOutcome: null, onDismissClearOutcome: () => {}, onMatchingJobs: async () => [], onClearJobs: () => {},
+  onToggleCheck: () => {}, ...over,
 })
 
 const render = (over = {}) => renderToStaticMarkup(
@@ -1360,4 +1364,37 @@ test('the Prune jobs card is maintainer-only and reflects the schedule, the last
   assert.match(failed, /database is locked \(SQLITE_BUSY\)/)
   assert.doesNotMatch(settingsWith(null), /Prune jobs/, 'no schedule, no card')
   assert.doesNotMatch(settingsWith(pruneState(), 'publisher'), /Prune jobs/, 'publishers do not see the card')
+})
+
+test('the Checks facet lists each imported plugin\'s last check, result and next due time', () => {
+  const checksFacet = (over = {}) => renderToStaticMarkup(React.createElement(PluginChecksFacet, {
+    plugins: catalogue, unfinished: [], canPublish: true, busy: false, onToggle: () => {}, onOpenPlugin: () => {}, ...over,
+  }))
+  const states = Object.fromEntries(catalogue.map((plugin) => [plugin.name, checkState(plugin, [])]))
+  assert.equal(states.amazon.kind, 'newer', 'the fixture\'s amazon has an update')
+  assert.deepEqual(checkState({ name: 'x', source: { kind: 'github' }, update_available: false, update_check: { enabled: false } }, []), { kind: 'off', text: 'Checks off' })
+  assert.deepEqual(checkState({ name: 'x', source: { kind: 'github' }, update_available: false, update_check: { enabled: true, error: 'GitHub rate limit reached; resets 08:41 UTC.' } }, []), { kind: 'failed', text: 'GitHub rate limit reached; resets 08:41 UTC.' })
+  assert.deepEqual(checkState({ name: 'x', source: { kind: 'github' }, update_available: false, update_check: { enabled: true } }, []), { kind: 'pending', text: 'Not checked yet' })
+  assert.deepEqual(checkState({ name: 'x', source: { kind: 'github' }, update_available: false, update_check: { enabled: true, checked_at: '2026-10-12T08:00:00Z' } }, []), { kind: 'ok', text: 'Up to date' })
+  assert.deepEqual(checkState({ name: 'vsphere', source: { kind: 'releases-hashicorp' }, update_available: true, update_check: { enabled: true, latest: '1.4.3' } }, [queuedImport('vsphere')]), { kind: 'newer', text: 'Import queued' })
+  const html = checksFacet()
+  assert.match(html, /aria-label="Update checks"/)
+  const checkable = catalogue.filter((plugin) => plugin.source.kind !== 'upload')
+  const uploads = catalogue.length - checkable.length
+  assert.match(html, new RegExp(`All · ${checkable.length}`))
+  assert.match(html, /Newer found · 1/)
+  assert.match(html, new RegExp(`${uploads} uploaded plugin${uploads === 1 ? ' isn’t' : 's aren’t'} checked`))
+  const upload = catalogue.find((plugin) => plugin.source.kind === 'upload').name
+  assert.doesNotMatch(html, new RegExp(`id="check-${upload}"`), 'an uploaded plugin has no row')
+  assert.match(html, /id="check-amazon"[^>]*type="checkbox"[^>]*checked/)
+  assert.match(html, />Newer · 1\.8\.3</)
+  assert.match(html, /<th[^>]*>Next due</)
+  const reader = checksFacet({ canPublish: false })
+  assert.match(reader, /id="check-amazon"[^>]*disabled/, 'readers see the switch but cannot flip it')
+  assert.match(checksFacet({ plugins: catalogue.filter((plugin) => plugin.source.kind === 'upload') }), /No plugin to check/)
+  const failed = checksFacet({ plugins: [{ name: 'docker', source: { kind: 'github', repository: 'acme-infra/packer-plugin-docker' }, published_versions: 1, update_available: false, update_check: { enabled: true, checked_at: '2026-10-12T08:00:00Z', error: 'GitHub rate limit reached; resets 08:41 UTC.', next_check_at: '2026-10-13T08:00:00Z' } }] })
+  assert.match(failed, />Failed<[\s\S]{0,300}?GitHub rate limit reached; resets 08:41 UTC\./)
+  assert.match(failed, /Failed · 1/)
+  // The rail carries the third facet.
+  assert.match(render({ registry: { enabled: true, exposed: true }, plugins: [] }), />Plugins<[\s\S]*?>Jobs<[\s\S]*?>Checks</)
 })

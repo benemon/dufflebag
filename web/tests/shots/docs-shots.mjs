@@ -986,6 +986,11 @@ async function captureSeededScreens(seeded) {
   await waitForText('Import ansible')
   await capture('plugin-jobs.png')
 
+  // The Checks facet: the imported plugin's check, off, with its next due time absent.
+  await page.goto(`${base}/plugin-registry?facet=checks`, { waitUntil: 'domcontentloaded' })
+  await waitForText('Checks off')
+  await capture('plugin-checks.png')
+
   // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
   await waitForText('version = "1.1.0"')

@@ -1009,6 +1009,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('This job was cleared')
     await clickByText('button', 'Jobs')
     await waitForText('No jobs yet')
+    // Checks: the smoke's only plugin is an upload, which has no upstream to check.
+    await clickFacet('Plugin facets', 'Checks')
+    await waitForText('No plugin to check')
+    await waitForText('1 uploaded plugin isn’t checked')
     await clickFacet('Plugin facets', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
     await clickByText('button', 'probe')

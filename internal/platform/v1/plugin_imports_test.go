@@ -42,7 +42,7 @@ func (f fakeCatalogue) Versions(_ context.Context, product, _ string) ([]plugini
 func importHandler(role identity.Role, repository *fakeTenancyRepository, catalogue PluginCatalogue) http.Handler {
 	actor := testRoles{role: role, scope: identity.Scope{OrganizationID: uuid.MustParse(testOrgID)}}
 	return newHandlerWithServices(repository, &fakeInstanceRepository{}, testAuth{}, actor, testLogger(),
-		nil, nil, nil, nil, nil, nil, BuildInfo{}, DefaultPluginUploadBytes, catalogue, func() time.Time { return initTestTime })
+		nil, nil, nil, nil, nil, nil, BuildInfo{}, DefaultPluginUploadBytes, DefaultPluginUpdateInterval, catalogue, func() time.Time { return initTestTime })
 }
 
 func TestHashicorpCatalogueMarksMirroredAndHeldPlugins(t *testing.T) {
@@ -684,5 +684,34 @@ func TestPluginPruneScheduleAndPruneNow(t *testing.T) {
 	disabled := pluginRegistryRepository(store.PluginRegistry{})
 	if response := call(t, importHandler(identity.RoleMaintainer, disabled, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("prune"), nil, testToken); response.Code != http.StatusConflict {
 		t.Fatalf("prune of a disabled registry = %d, want 409", response.Code)
+	}
+}
+
+func TestPluginListSaysWhenTheNextCheckIsDue(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	checked := initTestTime.Add(-20 * time.Hour)
+	repository.plugins = []store.PluginSummary{
+		{Name: "amazon", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-amazon"}, Update: store.PluginUpdateCheck{Enabled: true, CheckedAt: &checked}},
+		{Name: "docker", Source: store.PluginSource{Kind: "github", Repository: "acme-infra/packer-plugin-docker"}, Update: store.PluginUpdateCheck{Enabled: true}},
+		{Name: "qemu", Source: store.PluginSource{Kind: "releases-hashicorp", Repository: "packer-plugin-qemu"}, Update: store.PluginUpdateCheck{Enabled: false, CheckedAt: &checked}},
+		{Name: "git", Source: store.PluginSource{Kind: "upload"}, Update: store.PluginUpdateCheck{Enabled: true}},
+	}
+	response := call(t, importHandler(identity.RoleReader, repository, fakeCatalogue{}), http.MethodGet, pluginRegistryPath("plugins"), nil, testToken)
+	var body struct{ Plugins []Plugin }
+	if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &body) != nil || len(body.Plugins) != 4 {
+		t.Fatalf("plugins = %d %s", response.Code, response.Body.String())
+	}
+	next := map[string]*time.Time{}
+	for _, plugin := range body.Plugins {
+		next[plugin.Name] = plugin.UpdateCheck.NextCheckAt
+	}
+	if next["amazon"] == nil || !next["amazon"].Equal(checked.Add(DefaultPluginUpdateInterval)) {
+		t.Fatalf("amazon next check = %v, want the last check plus the interval", next["amazon"])
+	}
+	if next["docker"] == nil || !next["docker"].Equal(initTestTime) {
+		t.Fatalf("a never-checked plugin is due now, got %v", next["docker"])
+	}
+	if next["qemu"] != nil || next["git"] != nil {
+		t.Fatalf("checks off or an upload carry no next check: %v %v", next["qemu"], next["git"])
 	}
 }
