@@ -46,13 +46,6 @@ export function EncryptionView({
         title="Encryption"
         onRefresh={reload}
         refreshing={loading}
-        description={(
-          <>
-            Encryption at rest protects stored data with a keyring backed by an external key
-            service. This state is visible only to root; other roles can open this page but the
-            server refuses access.
-          </>
-        )}
       />
 
       <PageSection variant="secondary" isFilled>

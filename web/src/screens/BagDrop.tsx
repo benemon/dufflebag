@@ -305,7 +305,6 @@ export function BagDropView(props: BagDropViewProps) {
         title="Bag Drop"
         onRefresh={props.onRefresh}
         refreshing={props.refreshing}
-        description="Mirror selected buckets to another registry while keeping this project authoritative."
       />
       <PageSection variant="secondary" isFilled hasBodyWrapper={false}>
         {/* MUTATION_ROLE_GATE: configuration is maintainer-only. */}

@@ -90,14 +90,8 @@ export function Webhooks() {
 }
 
 const scopeCopy = {
-  organization: {
-    description: 'Send signed organization events, such as a plugin update becoming available, to an HTTP endpoint after its activation handshake succeeds.',
-    empty: 'Create a webhook to send signed organization events.',
-  },
-  project: {
-    description: 'Send signed project events to an HTTP endpoint after its activation handshake succeeds.',
-    empty: 'Create a webhook to send signed project events.',
-  },
+  organization: { empty: 'Create a webhook to send signed organization events.' },
+  project: { empty: 'Create a webhook to send signed project events.' },
 }
 
 export function WebhooksView({
@@ -133,7 +127,6 @@ export function WebhooksView({
         title="Webhooks"
         onRefresh={onRefresh}
         refreshing={loading}
-        description={scopeCopy[scope].description}
         actions={!creating && (loading || failure || webhooks.length > 0) ? (
           <RoleRestrictedButton
             action="configureWebhooks" callerRole={callerRole} variant="primary"

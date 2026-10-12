@@ -137,13 +137,6 @@ export function PluginRegistrySettingsView({
     <>
       <ScreenHeader
         title="Plugin registry"
-        description={(
-          <>
-            Mirrors Packer plugins for {organizationName}, so packer init resolves them from dufflebag
-            instead of the internet. Turn it on, expose it to Packer, and set the platforms a first
-            import selects.
-          </>
-        )}
         onRefresh={onRefresh}
         refreshing={loading}
       />

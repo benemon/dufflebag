@@ -90,13 +90,6 @@ export function PrincipalsView({
         title="Principals"
         onRefresh={reload}
         refreshing={loading}
-        description={(
-          <>
-            Service principals authenticate with a client id and secret, and receive a
-            short-lived token. Two secrets can be active at once, so rotation needs no window.
-            New ones are created in the context selected above.
-          </>
-        )}
         actions={!creating && (loading || failure || principals.length > 0) ? (
           <RoleRestrictedButton
             action="managePrincipals" callerRole={callerRole}

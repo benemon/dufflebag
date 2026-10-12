@@ -22,7 +22,8 @@ that produced it.
 
 ### File targets
 
-Audit entries go to **file targets**. A `root` can create and remove up to three
+Audit entries go to **file targets**: append-only files that receive every
+request and response record. A `root` can create and remove up to three
 paths. Each target reports a `healthy` or `failing` status, consecutive and
 cumulative failure counts, the last failure time, and the last successful
 reopen.

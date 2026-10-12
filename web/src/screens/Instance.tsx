@@ -118,7 +118,6 @@ export function InstanceView({
     <>
       <ScreenHeader
         title="Instance"
-        description="What a client needs to point at this registry."
         onRefresh={onRefresh}
         refreshing={loading}
       />

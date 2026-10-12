@@ -296,9 +296,7 @@ export function VersionsView({
             ))}
           </span>
         )}
-        description={bucketData
-          ? bucketData.description || 'No description has been recorded.'
-          : null}
+        description={bucketData?.description || null}
         actions={!loading && !failure && !gap ? (
           <>
             <RoleRestrictedButton
