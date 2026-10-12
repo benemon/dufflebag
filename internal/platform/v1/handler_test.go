@@ -717,7 +717,7 @@ func (r *fakeTenancyRepository) ListPluginImports(_ context.Context, _ store.Org
 	var matching []store.PluginImport
 	for i := len(r.imports) - 1; i >= 0; i-- {
 		job := r.imports[i]
-		if (len(filter.States) == 0 || slices.Contains(filter.States, job.State)) && (filter.Plugin == "" || job.Plugin == filter.Plugin) {
+		if (len(filter.States) == 0 || slices.Contains(filter.States, job.State)) && (len(filter.Plugins) == 0 || slices.Contains(filter.Plugins, job.Plugin)) {
 			matching = append(matching, job)
 		}
 	}
@@ -735,6 +735,20 @@ func (r *fakeTenancyRepository) GetPluginImport(_ context.Context, _ store.Organ
 		}
 	}
 	return store.PluginImport{}, registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) DeletePluginImport(_ context.Context, _ store.OrganizationTenant, id uuid.UUID) error {
+	for i, job := range r.imports {
+		if job.ID != id {
+			continue
+		}
+		if job.State == "running" {
+			return store.ErrPluginImportRunning
+		}
+		r.imports = append(r.imports[:i], r.imports[i+1:]...)
+		return nil
+	}
+	return registry.ErrNotFound
 }
 
 func (r *fakeTenancyRepository) PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error) {

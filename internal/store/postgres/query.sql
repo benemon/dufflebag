@@ -1160,9 +1160,12 @@ SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platf
 FROM plugin_imports job
 WHERE job.organization_id = $1
   AND (cardinality(sqlc.arg(states)::text[]) = 0 OR job.state = ANY(sqlc.arg(states)::text[]))
-  AND (sqlc.arg(plugin)::text = '' OR job.plugin = sqlc.arg(plugin)::text)
+  AND (cardinality(sqlc.arg(plugins)::text[]) = 0 OR job.plugin = ANY(sqlc.arg(plugins)::text[]))
 ORDER BY job.created_at DESC, job.id DESC
 LIMIT sqlc.arg(page_size)::integer OFFSET sqlc.arg(page_offset)::integer;
+
+-- name: DeletePluginImport :execrows
+DELETE FROM plugin_imports WHERE organization_id = $1 AND id = $2 AND state <> 'running';
 
 -- name: ClaimPluginImport :one
 SELECT id, source_kind, product, versions, platforms, changes

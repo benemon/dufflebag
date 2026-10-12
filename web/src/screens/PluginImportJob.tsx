@@ -1,12 +1,12 @@
 import { Fragment, useEffect, useState } from 'react'
 import {
-  Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content, Flex, FlexItem, Label,
-  PageSection, Progress, ProgressMeasureLocation, Spinner,
+  Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Content, EmptyState, EmptyStateActions,
+  EmptyStateBody, EmptyStateFooter, Flex, FlexItem, Label, PageSection, Progress, ProgressMeasureLocation, Spinner,
 } from '@patternfly/react-core'
 import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
 
-import { signOutIfUnauthorized } from '../api/client'
+import { ApiError, signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
@@ -30,6 +30,7 @@ export function PluginImportJob() {
   const [job, setJob] = useState<PluginImport | null>(null)
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [failure, setFailure] = useState<string | null>(null)
+  const [cleared, setCleared] = useState(false)
   const [actionFailure, setActionFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [revision, setRevision] = useState(0)
@@ -49,7 +50,10 @@ export function PluginImportJob() {
         setFailure(null)
         if (!terminalImportStates.has(nextJob.state)) timer = setTimeout(() => void poll(), 2000)
       } catch (error: unknown) {
-        if (!signOutIfUnauthorized(error, signOut)) setFailure(pluginRegistryErrorMessage(error, 'The import could not be loaded.'))
+        if (signOutIfUnauthorized(error, signOut)) return
+        // A job that answers 404 was cleared, by hand or by pruning; its page was open while it went.
+        if (error instanceof ApiError && error.status === 404) setCleared(true)
+        else setFailure(pluginRegistryErrorMessage(error, 'The import could not be loaded.'))
       }
     }
     void poll()
@@ -58,14 +62,15 @@ export function PluginImportJob() {
 
   return (
     <PluginImportJobView
-      job={job} registry={registry} failure={failure} organizationName={tenant.organization} host={window.location.hostname}
-      id={id} loading={!job && !failure} callerRole={self?.role ?? null} busy={busy} actionFailure={actionFailure}
+      job={job} registry={registry} failure={failure} cleared={cleared} organizationName={tenant.organization} host={window.location.hostname}
+      id={id} loading={!job && !failure && !cleared} callerRole={self?.role ?? null} busy={busy} actionFailure={actionFailure}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToPlugins={() => navigate('/plugin-registry')}
       onJobs={() => navigate('/plugin-registry?facet=jobs')}
       onRefresh={() => {
         setJob(null)
         setFailure(null)
+        setCleared(false)
         setRevision((current) => current + 1)
       }}
       onOpen={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
@@ -96,7 +101,7 @@ const outcomeLabel = {
 
 
 export function PluginImportJobView({
-  id, job, registry, loading, failure, organizationName, host, callerRole, busy, actionFailure,
+  id, job, registry, loading, failure, cleared = false, organizationName, host, callerRole, busy, actionFailure,
   onBackToRegistry, onBackToPlugins, onJobs, onRefresh, onOpen, onRetry,
 }: {
   id: string
@@ -104,6 +109,7 @@ export function PluginImportJobView({
   registry: PluginRegistry | null
   loading: boolean
   failure: string | null
+  cleared?: boolean
   organizationName: string
   host: string
   callerRole: Role | null
@@ -152,6 +158,11 @@ export function PluginImportJobView({
         {actionFailure ? <Alert variant="danger" isInline title="The retry could not be queued"><Content component="p">{actionFailure}</Content></Alert> : null}
         {loading ? (
           <PluginLoadingCard message="Loading job…" />
+        ) : cleared ? (
+          <EmptyState titleText="This job was cleared" headingLevel="h2">
+            <EmptyStateBody>Its record was deleted, by hand or by pruning. Any versions it mirrored are unchanged.</EmptyStateBody>
+            <EmptyStateFooter><EmptyStateActions><Button variant="primary" onClick={onJobs}>Jobs</Button></EmptyStateActions></EmptyStateFooter>
+          </EmptyState>
         ) : failure ? (
           <PluginErrorCard title="Job could not be loaded" error={failure} onRetry={onRefresh} />
         ) : null}

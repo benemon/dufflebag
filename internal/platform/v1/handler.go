@@ -46,6 +46,7 @@ type PlatformRepository interface {
 	CreatePluginImport(context.Context, store.OrganizationTenant, store.PluginImportRequest, store.PluginImportOrigin) (uuid.UUID, error)
 	GetPluginImport(context.Context, store.OrganizationTenant, uuid.UUID) (store.PluginImport, error)
 	ListPluginImports(context.Context, store.OrganizationTenant, store.PluginImportFilter) ([]store.PluginImport, int, error)
+	DeletePluginImport(context.Context, store.OrganizationTenant, uuid.UUID) error
 	PluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant) ([]string, error)
 	SetPluginRegistryDefaultPlatforms(context.Context, store.OrganizationTenant, []string) ([]string, error)
 	ListProjectsForPrincipal(context.Context, *identity.Principal, uuid.UUID) ([]store.Project, error)

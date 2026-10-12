@@ -561,3 +561,67 @@ func TestSyncPluginRefusesAnIdenticalUnfinishedSync(t *testing.T) {
 		t.Fatalf("a different sync with retry_of = %d %s", other.Code, other.Body.String())
 	}
 }
+
+func TestPluginImportsClearUnlessRunning(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	handler, trail := auditedPlatform(t, importHandler(identity.RolePublisher, repository, fakeCatalogue{}))
+	queue := func(product string) PluginImport {
+		t.Helper()
+		body := map[string]any{"source": "releases-hashicorp", "product": product, "versions": []string{"1.0.0"}, "platforms": []string{"linux_amd64"}}
+		response := call(t, handler, http.MethodPost, pluginRegistryPath("imports"), body, testToken)
+		var job PluginImport
+		if response.Code != http.StatusAccepted || json.Unmarshal(response.Body.Bytes(), &job) != nil {
+			t.Fatalf("queue = %d %s", response.Code, response.Body.String())
+		}
+		return job
+	}
+	queued, running := queue("packer-plugin-amazon"), queue("packer-plugin-qemu")
+	repository.imports[1].State = "running"
+	for name, tc := range map[string]struct {
+		role identity.Role
+		id   string
+		want int
+	}{
+		"reader cannot clear":  {identity.RoleReader, queued.Id.String(), http.StatusForbidden},
+		"builder cannot clear": {identity.RoleBuilder, queued.Id.String(), http.StatusForbidden},
+		"unknown job":          {identity.RolePublisher, uuid.NewString(), http.StatusNotFound},
+		"running job":          {identity.RolePublisher, running.Id.String(), http.StatusConflict},
+	} {
+		if response := call(t, importHandler(tc.role, repository, fakeCatalogue{}), http.MethodDelete, pluginRegistryPath("imports/"+tc.id), nil, testToken); response.Code != tc.want {
+			t.Fatalf("%s = %d %s, want %d", name, response.Code, response.Body.String(), tc.want)
+		}
+	}
+	if response := call(t, handler, http.MethodDelete, pluginRegistryPath("imports/"+queued.Id.String()), nil, testToken); response.Code != http.StatusNoContent {
+		t.Fatalf("clear a queued job = %d %s", response.Code, response.Body.String())
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin.import.delete", "outcome": "success", "reason": "cleared"})
+	if len(repository.imports) != 1 || repository.imports[0].ID != running.Id {
+		t.Fatalf("imports after clear = %+v", repository.imports)
+	}
+	if response := call(t, handler, http.MethodGet, pluginRegistryPath("imports/"+queued.Id.String()), nil, testToken); response.Code != http.StatusNotFound {
+		t.Fatalf("a cleared job reads as %d, want 404", response.Code)
+	}
+}
+
+func TestPluginImportsListTakesSeveralStatesAndPlugins(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	handler := importHandler(identity.RolePublisher, repository, fakeCatalogue{})
+	for _, product := range []string{"packer-plugin-amazon", "packer-plugin-qemu", "packer-plugin-vsphere"} {
+		body := map[string]any{"source": "releases-hashicorp", "product": product, "versions": []string{"1.0.0"}, "platforms": []string{"linux_amd64"}}
+		if response := call(t, handler, http.MethodPost, pluginRegistryPath("imports"), body, testToken); response.Code != http.StatusAccepted {
+			t.Fatalf("queue %s = %d", product, response.Code)
+		}
+	}
+	repository.imports[0].State = "failed"
+	repository.imports[1].State = "succeeded"
+	for query, want := range map[string]int{
+		"?state=failed,succeeded": 2, "?state=queued": 1, "?state=unfinished,failed": 2,
+		"?plugin=amazon,vsphere": 2, "?plugin=amazon,vsphere&state=failed": 1, "?plugin=qemu&state=failed": 0,
+	} {
+		response := call(t, handler, http.MethodGet, pluginRegistryPath("imports"+query), nil, testToken)
+		var page ListPluginImports200JSONResponse
+		if response.Code != http.StatusOK || json.Unmarshal(response.Body.Bytes(), &page) != nil || page.Total != want {
+			t.Fatalf("list %s = %d total %d, want %d: %s", query, response.Code, page.Total, want, response.Body.String())
+		}
+	}
+}

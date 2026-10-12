@@ -71,13 +71,17 @@ type PluginImport struct {
 	QueuedAhead int
 }
 
-// PluginImportFilter narrows a job listing. Empty States means every state.
+// PluginImportFilter narrows a job listing. Empty States or Plugins means
+// every one.
 type PluginImportFilter struct {
-	States []string
-	Plugin string
-	Limit  int
-	Offset int
+	States  []string
+	Plugins []string
+	Limit   int
+	Offset  int
 }
+
+// ErrPluginImportRunning refuses to clear a job a worker holds.
+var ErrPluginImportRunning = errors.New("plugin import is running")
 
 // PluginNameOf is the plugin a product names: packer-plugin-amazon and
 // acme/packer-plugin-amazon are both amazon; an uploaded plugin's product
@@ -158,7 +162,7 @@ func (r *Repository) ListPluginImports(ctx context.Context, tenant OrganizationT
 	}
 	defer func() { _ = tx.Rollback() }()
 	rows, err := q.ListPluginImports(ctx, postgresdb.ListPluginImportsParams{
-		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugin: filter.Plugin,
+		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugins: nonNil(filter.Plugins),
 		PageSize: int32(filter.Limit), PageOffset: int32(filter.Offset),
 	})
 	if err != nil {
@@ -186,7 +190,7 @@ func (r *Repository) ListPluginImports(ctx context.Context, tenant OrganizationT
 // A page past the end has no row to carry the window count.
 func (r *Repository) countPluginImports(ctx context.Context, q *postgresdb.Queries, tenant OrganizationTenant, filter PluginImportFilter) (int, error) {
 	rows, err := q.ListPluginImports(ctx, postgresdb.ListPluginImportsParams{
-		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugin: filter.Plugin, PageSize: 1, PageOffset: 0,
+		OrganizationID: tenant.OrganizationID, States: nonNil(filter.States), Plugins: nonNil(filter.Plugins), PageSize: 1, PageOffset: 0,
 	})
 	if err != nil {
 		return 0, fmt.Errorf("count plugin imports: %w", err)
@@ -195,6 +199,29 @@ func (r *Repository) countPluginImports(ctx context.Context, q *postgresdb.Queri
 		return 0, nil
 	}
 	return int(rows[0].Total), nil
+}
+
+// DeletePluginImport clears a job that is not running: one statement, so a
+// job claimed between the read and the delete is kept.
+func (r *Repository) DeletePluginImport(ctx context.Context, tenant OrganizationTenant, id uuid.UUID) error {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	deleted, err := q.DeletePluginImport(ctx, postgresdb.DeletePluginImportParams{OrganizationID: tenant.OrganizationID, ID: id})
+	if err != nil {
+		return fmt.Errorf("delete plugin import: %w", err)
+	}
+	if deleted == 0 {
+		if _, err := q.GetPluginImport(ctx, postgresdb.GetPluginImportParams{OrganizationID: tenant.OrganizationID, ID: id}); errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("%w: plugin import %s", registry.ErrNotFound, id)
+		} else if err != nil {
+			return fmt.Errorf("get plugin import: %w", err)
+		}
+		return ErrPluginImportRunning
+	}
+	return tx.Commit()
 }
 
 // GetPluginImport and ListPluginImports select the same columns; the Get

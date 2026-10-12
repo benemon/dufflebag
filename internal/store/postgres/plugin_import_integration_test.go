@@ -226,7 +226,7 @@ func TestPluginImportsListAndStartedAt(t *testing.T) {
 	if all[2].QueuedAhead != 0 || all[0].QueuedAhead != 2 {
 		t.Fatalf("queued ahead = %d, %d", all[2].QueuedAhead, all[0].QueuedAhead)
 	}
-	byPlugin, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Plugin: "probe", Limit: 10})
+	byPlugin, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Plugins: []string{"probe"}, Limit: 10})
 	if err != nil || total != 2 || len(byPlugin) != 2 {
 		t.Fatalf("by plugin = %v total %d, %d rows", err, total, len(byPlugin))
 	}
@@ -257,5 +257,51 @@ func TestPluginImportsListAndStartedAt(t *testing.T) {
 	unfinished, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: []string{"queued", "running"}, Limit: 10})
 	if err != nil || total != 2 || len(unfinished) != 2 {
 		t.Fatalf("unfinished = %v total %d, %d rows", err, total, len(unfinished))
+	}
+}
+
+func TestPluginImportsClearOnlyWhenNotRunning(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseOrganizationTenant(orgA)
+	repository := store.NewRepository(db)
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	queue := func(product string) uuid.UUID {
+		t.Helper()
+		id, err := repository.CreatePluginImport(ctx, tenant, store.PluginImportRequest{
+			SourceKind: "releases-hashicorp", Product: product, Versions: []string{"1.0.0"}, Platforms: []string{"linux_amd64"},
+		}, store.PluginImportOrigin{CreatedBy: "alice", Kind: "import"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return id
+	}
+	first, second := queue("packer-plugin-probe"), queue("packer-plugin-other")
+	if claimed, err := repository.ClaimPluginImport(ctx, time.Minute); err != nil || claimed == nil || claimed.ID != first {
+		t.Fatalf("claim = %+v %v", claimed, err)
+	}
+	if err := repository.DeletePluginImport(ctx, tenant, first); !errors.Is(err, store.ErrPluginImportRunning) {
+		t.Fatalf("clearing a running job = %v, want ErrPluginImportRunning", err)
+	}
+	if err := repository.DeletePluginImport(ctx, tenant, second); err != nil {
+		t.Fatalf("clearing a queued job = %v", err)
+	}
+	if _, err := repository.GetPluginImport(ctx, tenant, second); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("cleared job still reads: %v", err)
+	}
+	if err := repository.DeletePluginImport(ctx, tenant, second); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("clearing twice = %v, want ErrNotFound", err)
+	}
+	if err := repository.RecordPluginImport(ctx, tenant, first, "failed", []string{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeletePluginImport(ctx, tenant, first); err != nil {
+		t.Fatalf("clearing a finished job = %v", err)
+	}
+	if _, total, err := repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{Limit: 10}); err != nil || total != 0 {
+		t.Fatalf("after clearing = %d jobs, %v", total, err)
 	}
 }

@@ -905,6 +905,23 @@ func (q *Queries) DeletePluginIfEmpty(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const deletePluginImport = `-- name: DeletePluginImport :execrows
+DELETE FROM plugin_imports WHERE organization_id = $1 AND id = $2 AND state <> 'running'
+`
+
+type DeletePluginImportParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	ID             uuid.UUID `json:"id"`
+}
+
+func (q *Queries) DeletePluginImport(ctx context.Context, arg DeletePluginImportParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deletePluginImport, arg.OrganizationID, arg.ID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const deletePluginVersion = `-- name: DeletePluginVersion :one
 DELETE FROM plugin_versions
 USING plugins
@@ -2809,7 +2826,7 @@ SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platf
 FROM plugin_imports job
 WHERE job.organization_id = $1
   AND (cardinality($2::text[]) = 0 OR job.state = ANY($2::text[]))
-  AND ($3::text = '' OR job.plugin = $3::text)
+  AND (cardinality($3::text[]) = 0 OR job.plugin = ANY($3::text[]))
 ORDER BY job.created_at DESC, job.id DESC
 LIMIT $5::integer OFFSET $4::integer
 `
@@ -2817,7 +2834,7 @@ LIMIT $5::integer OFFSET $4::integer
 type ListPluginImportsParams struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	States         []string  `json:"states"`
-	Plugin         string    `json:"plugin"`
+	Plugins        []string  `json:"plugins"`
 	PageOffset     int32     `json:"page_offset"`
 	PageSize       int32     `json:"page_size"`
 }
@@ -2848,7 +2865,7 @@ func (q *Queries) ListPluginImports(ctx context.Context, arg ListPluginImportsPa
 	rows, err := q.db.QueryContext(ctx, listPluginImports,
 		arg.OrganizationID,
 		pq.Array(arg.States),
-		arg.Plugin,
+		pq.Array(arg.Plugins),
 		arg.PageOffset,
 		arg.PageSize,
 	)

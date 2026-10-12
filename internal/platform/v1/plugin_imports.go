@@ -301,14 +301,16 @@ func (s *server) ListPluginImports(
 	}
 	filter := store.PluginImportFilter{Limit: 25}
 	if request.Params.State != nil {
-		if *request.Params.State == ListPluginImportsParamsStateUnfinished {
-			filter.States = unfinishedStates
-		} else {
-			filter.States = []string{string(*request.Params.State)}
+		for _, state := range *request.Params.State {
+			if state == ListPluginImportsParamsStateUnfinished {
+				filter.States = append(filter.States, unfinishedStates...)
+			} else {
+				filter.States = append(filter.States, string(state))
+			}
 		}
 	}
 	if request.Params.Plugin != nil {
-		filter.Plugin = *request.Params.Plugin
+		filter.Plugins = *request.Params.Plugin
 	}
 	if request.Params.Limit != nil {
 		filter.Limit = *request.Params.Limit
@@ -372,7 +374,7 @@ func (s *server) pluginImportConflict(ctx context.Context, tenant store.Organiza
 			}}, nil
 		}
 	}
-	unfinished, _, err := s.repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: unfinishedStates, Plugin: name, Limit: 100})
+	unfinished, _, err := s.repository.ListPluginImports(ctx, tenant, store.PluginImportFilter{States: unfinishedStates, Plugins: []string{name}, Limit: 100})
 	if err != nil {
 		return nil, err
 	}
@@ -432,6 +434,38 @@ func (s *server) retryOf(ctx context.Context, tenant store.OrganizationTenant, r
 		return nil, false, err
 	}
 	return &id, true, nil
+}
+
+func (s *server) DeletePluginImport(
+	ctx context.Context, request DeletePluginImportRequestObject,
+) (DeletePluginImportResponseObject, error) {
+	audited := s.beginLifecycleAudit()
+	defer func() { audited.log(ctx) }()
+	organizationID := request.OrganizationId.String()
+	caller, refused, err := s.admitOrganization(ctx, identity.RolePublisher, organizationID)
+	if err != nil {
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	if refused != permitted {
+		audited.refused(refused.reason())
+		return newRefusal(refused), nil
+	}
+	audited.actor(caller)
+	err = s.repository.DeletePluginImport(ctx, store.ParseOrganizationTenant(organizationID), request.ImportId)
+	switch {
+	case errors.Is(err, registry.ErrNotFound):
+		audited.failed("not_found")
+		return DeletePluginImport404JSONResponse{NotFoundJSONResponse: NotFoundJSONResponse{Message: "import not found"}}, nil
+	case errors.Is(err, store.ErrPluginImportRunning):
+		audited.failed("running")
+		return DeletePluginImport409JSONResponse{Message: "the job is running; a running job cannot be cleared"}, nil
+	case err != nil:
+		audited.failed("storage_failed")
+		return nil, err
+	}
+	audited.succeeded(organizationID, "cleared")
+	return DeletePluginImport204Response{}, nil
 }
 
 func (s *server) GetPluginImport(

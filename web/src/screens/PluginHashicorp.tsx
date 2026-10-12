@@ -50,7 +50,7 @@ export function PluginHashicorp() {
     if (!organizationID || token === '') return
     setPlugins(null)
     await guard(async () => {
-      const [catalogue, jobs] = await Promise.all([listHashicorpPlugins(token, organizationID), listPluginImports(token, organizationID, { state: 'unfinished', limit: 100 })])
+      const [catalogue, jobs] = await Promise.all([listHashicorpPlugins(token, organizationID), listPluginImports(token, organizationID, { states: ['unfinished'], limit: 100 })])
       setPlugins(catalogue)
       setUnfinished(jobs.imports)
     }, 'releases.hashicorp.com could not be reached.')
