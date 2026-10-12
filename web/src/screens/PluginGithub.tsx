@@ -113,7 +113,6 @@ export function PluginGithubView({
           </Breadcrumb>
         )}
         title="Import from GitHub"
-        description="Mirror a plugin from a public GitHub release. Binaries are verified against the release’s checksum file."
       />
       <PageSection variant="secondary" isFilled>
         {rateLimit ? (

@@ -160,7 +160,6 @@ export function PluginUploadView({
           </Breadcrumb>
         )}
         title="Upload plugin"
-        description="Upload plugin binaries built in-house. Uploaded plugins have no upstream, so update checks don’t apply."
       />
       <PageSection variant="secondary" isFilled>
         {loading ? (

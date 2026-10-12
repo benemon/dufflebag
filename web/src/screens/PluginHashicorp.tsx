@@ -305,7 +305,6 @@ export function PluginHashicorpView({
           </Breadcrumb>
         )}
         title="Browse HashiCorp"
-        description="Plugins HashiCorp publishes at releases.hashicorp.com. Pick versions and platforms; the import runs as one job."
       />
       <PageSection
         variant="secondary" isFilled hasBodyWrapper={false}

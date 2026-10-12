@@ -62,7 +62,6 @@ export function Plugins() {
     <PluginRegistryView
       organizationName={tenant.organization}
       callerRole={self?.role ?? null}
-      host={window.location.hostname}
       registry={registry}
       plugins={plugins}
       onBackToRegistry={() => navigate('/buckets')}
@@ -95,7 +94,6 @@ export function pluginRegistryErrorMessage(error: unknown, fallback: string): st
 type PluginRegistryViewProps = {
   organizationName: string
   callerRole: Role | null
-  host: string
   registry: PluginRegistry | null
   plugins: Plugin[]
   onBackToRegistry: () => void
@@ -140,8 +138,6 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
           </Breadcrumb>
         )}
         title="Plugins"
-        description={`Packer plugins mirrored for ${props.organizationName}. packer init resolves them from ${props.host}/plugins/${props.organizationName}.${
-          canPublish ? '' : ' You have read-only access; publishers add and sync plugins.'}`}
         actions={canPublish && props.registry?.enabled ? (
           <>
             <Button variant="primary" onClick={props.onBrowse}>Browse HashiCorp</Button>{' '}
