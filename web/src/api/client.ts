@@ -13,6 +13,7 @@ export class ApiError extends Error {
     readonly status: number,
     message: string,
     readonly reason?: string,
+    readonly importID?: string,
   ) {
     super(message)
   }
@@ -60,7 +61,7 @@ async function request<T>(
     // 404 means "nothing you can reach", not necessarily "does not exist".
     // 403 means the opposite: visible, but your role is insufficient (ADR-0017).
     const failure = await failureMessage(response, path)
-    throw new ApiError(response.status, failure.message, failure.reason)
+    throw new ApiError(response.status, failure.message, failure.reason, failure.importID)
   }
   if (response.status === 204) return null
   return (await response.json()) as T
@@ -77,10 +78,10 @@ async function request<T>(
 async function failureMessage(
   response: Response,
   path: string,
-): Promise<{ message: string; reason?: string }> {
+): Promise<{ message: string; reason?: string; importID?: string }> {
   try {
-    const body = (await response.json()) as { message?: string; reason?: string }
-    if (body.message) return { message: body.message, reason: body.reason }
+    const body = (await response.json()) as { message?: string; reason?: string; import_id?: string }
+    if (body.message) return { message: body.message, reason: body.reason, importID: body.import_id }
   } catch {
     // Not JSON, or empty. Fall through to the status line.
   }
@@ -105,7 +106,7 @@ async function getWithHeaders<T>(
   })
   if (!response.ok) {
     const failure = await failureMessage(response, path)
-    throw new ApiError(response.status, failure.message, failure.reason)
+    throw new ApiError(response.status, failure.message, failure.reason, failure.importID)
   }
   if (response.status === 204) return { body: null, headers: response.headers }
   return { body: (await response.json()) as T, headers: response.headers }
@@ -600,7 +601,7 @@ export async function downloadSbom(
   const response = await fetch(path, { headers: { Authorization: `Bearer ${token}` } })
   if (!response.ok) {
     const failure = await failureMessage(response, path)
-    throw new ApiError(response.status, failure.message, failure.reason)
+    throw new ApiError(response.status, failure.message, failure.reason, failure.importID)
   }
   return response.arrayBuffer()
 }
@@ -1028,7 +1029,7 @@ export async function enableBagDrop(
   }
   if (!response.ok) {
     const failure = await failureMessage(response, path)
-    throw new ApiError(response.status, failure.message, failure.reason)
+    throw new ApiError(response.status, failure.message, failure.reason, failure.importID)
   }
   return { kind: 'enabled', config: (await response.json()) as ApiBagDropConfig }
 }
@@ -1154,7 +1155,7 @@ export async function platformPutForm<T>(token: string, path: string, form: Form
   })
   if (!response.ok) {
     const failure = await failureMessage(response, path)
-    throw new ApiError(response.status, failure.message, failure.reason)
+    throw new ApiError(response.status, failure.message, failure.reason, failure.importID)
   }
   return (await response.json()) as T
 }

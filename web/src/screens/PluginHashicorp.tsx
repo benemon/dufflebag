@@ -14,8 +14,10 @@ import { FacetRail, knownCount } from './RegistryFacets'
 import {
   PLUGIN_OS_GROUPS, createPluginImport, getDefaultPlatforms, listHashicorpPluginVersions, listHashicorpPlugins,
   listPluginVersions, sourceLabel, type HashicorpPlugin, type HashicorpPluginVersion, type PluginVersion,
+  activeJobFor, getPluginImport, listPluginImports, type PluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
+import { ImportRefusalAlert, importSelectionKey, isDuplicateImportRefusal, type ImportRefusal } from './PluginJobs'
 import { pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginHashicorp() {
@@ -32,6 +34,8 @@ export function PluginHashicorp() {
   const [preselected, setPreselected] = useState<string[]>([])
   const [failure, setFailure] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [unfinished, setUnfinished] = useState<PluginImport[]>([])
+  const [refusal, setRefusal] = useState<ImportRefusal | null>(null)
 
   const guard = useCallback(async (work: () => Promise<void>, fallback: string) => {
     try {
@@ -45,7 +49,11 @@ export function PluginHashicorp() {
   const reload = useCallback(async () => {
     if (!organizationID || token === '') return
     setPlugins(null)
-    await guard(async () => setPlugins(await listHashicorpPlugins(token, organizationID)), 'releases.hashicorp.com could not be reached.')
+    await guard(async () => {
+      const [catalogue, jobs] = await Promise.all([listHashicorpPlugins(token, organizationID), listPluginImports(token, organizationID, { state: 'unfinished', limit: 100 })])
+      setPlugins(catalogue)
+      setUnfinished(jobs.imports)
+    }, 'releases.hashicorp.com could not be reached.')
   }, [guard, organizationID, token])
 
   useEffect(() => { void reload() }, [reload])
@@ -85,12 +93,22 @@ export function PluginHashicorp() {
         setVersions((current) => [...(current ?? []), ...page.versions])
         setNext(page.next)
       }, 'More releases could not be loaded.')}
+      refusal={refusal} unfinished={unfinished}
+      onOpenJob={(id) => navigate(`/plugin-registry/imports/${id}`)}
+      onJobs={() => navigate('/plugin-registry?facet=jobs')}
       onImport={async (chosenVersions, platforms) => {
         if (!selected) return
         setBusy(true)
+        setRefusal(null)
         await guard(async () => {
-          const job = await createPluginImport(token, organizationID, selected.product, chosenVersions, platforms)
-          navigate(`/plugin-registry/imports/${job.id}`)
+          try {
+            const job = await createPluginImport(token, organizationID, selected.product, chosenVersions, platforms)
+            navigate(`/plugin-registry/imports/${job.id}`)
+          } catch (error: unknown) {
+            if (!isDuplicateImportRefusal(error)) throw error
+            const job = await getPluginImport(token, organizationID, error.importID)
+            setRefusal({ job, message: error.message, selection: importSelectionKey(chosenVersions, platforms) })
+          }
         }, 'The import could not be queued.')
         setBusy(false)
       }}
@@ -105,9 +123,14 @@ export function hashicorpPluginNote(plugin: HashicorpPlugin): string {
 
 export function PluginHashicorpView({
   organizationName, plugins, selected, versions, heldVersions, hasMore, preselected, loading, failure, busy,
+  refusal = null, unfinished = [], onOpenJob = () => {}, onJobs = () => {},
   onBackToRegistry, onBackToPlugins, onRefresh, onChoose, onMore, onImport,
 }: {
   organizationName: string
+  refusal?: ImportRefusal | null
+  unfinished?: PluginImport[]
+  onOpenJob?: (id: string) => void
+  onJobs?: () => void
   plugins: HashicorpPlugin[] | null
   selected: HashicorpPlugin | null
   versions: HashicorpPluginVersion[] | null
@@ -142,6 +165,8 @@ export function PluginHashicorpView({
   const firstImport = (selected?.mirrored_versions ?? 0) === 0
   const toggle = (list: string[], value: string) => (list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
   const heldByVersion = new Map(heldVersions.map((v) => [v.version, v]))
+  const jobWith = (version: string) => (selected ? unfinished.find((job) => job.plugin === selected.name && job.versions.includes(version)) : undefined)
+  const refused = refusal !== null && refusal.selection === importSelectionKey(chosen, selectedPlatforms)
   const choosable = shownVersions.filter((v) => !v.mirrored && !held).map((v) => v.version)
   const allChosen = choosable.length > 0 && choosable.every((v) => chosen.includes(v))
 
@@ -232,7 +257,8 @@ export function PluginHashicorpView({
                       <Td dataLabel="In dufflebag">
                         {version.mirrored
                           ? <>{mirrored?.revoked ? <Label isCompact color="grey">Revoked</Label> : <Label isCompact color="green">Available</Label>}{mirrored ? <> <Content component="small">{mirrored.stored_platforms.length} platforms</Content></> : null}</>
-                          : held ? <Content component="small">Not importable</Content> : null}
+                          : held ? <Content component="small">Not importable</Content>
+                          : jobWith(version.version) ? <Content component="small">In job {jobWith(version.version)?.id.slice(0, 8)} ({jobWith(version.version)?.state})</Content> : null}
                       </Td>
                     </Tr>
                   )
@@ -274,9 +300,10 @@ export function PluginHashicorpView({
                 </FlexItem>
               ))}
             </Flex>
+            {refused && refusal ? <div style={{ marginTop: 16 }}><ImportRefusalAlert refusal={refusal} onOpenJob={onOpenJob} onJobs={onJobs} /></div> : null}
             <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 16 }}>
               <Button
-                variant="primary" isLoading={busy} isDisabled={busy || !importable}
+                variant="primary" isLoading={busy} isDisabled={busy || !importable || refused}
                 onClick={() => void onImport(chosen, selectedPlatforms)}
               >
                 {chosen.length ? `Import ${chosen.length} ${chosen.length === 1 ? 'version' : 'versions'} · ${selectedPlatforms.length} platforms` : 'Import'}
@@ -323,7 +350,7 @@ export function PluginHashicorpView({
             unmountOnExit
             facets={plugins.map((plugin) => ({
               key: plugin.product,
-              label: plugin.held_by ? `${plugin.name} · held` : plugin.name,
+              label: plugin.held_by ? `${plugin.name} · held` : activeJobFor(unfinished, plugin.name) ? `${plugin.name} · ${activeJobFor(unfinished, plugin.name)?.state}` : plugin.name,
               count: plugin.mirrored_versions ? knownCount(plugin.mirrored_versions) : undefined,
               content: selected?.product === plugin.product ? releases : null,
             }))}

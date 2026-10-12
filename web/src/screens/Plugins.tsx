@@ -6,7 +6,7 @@ import {
   Toolbar, ToolbarContent, ToolbarItem,
 } from '@patternfly/react-core'
 import { ActionsColumn, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
-import { useNavigate } from 'react-router'
+import { useNavigate, useSearchParams } from 'react-router'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -15,11 +15,14 @@ import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadStat
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TypedConfirmModal } from '../components/TypedConfirmModal'
 import {
-  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, catalogueRows, enablePluginRegistry, getPluginRegistry, listPlugins, planCatalogueSync, sourceLabel, syncCatalogue,
-  type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type Plugin,
+  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, activeJobFor, catalogueRows, enablePluginRegistry, getPluginRegistry, listPluginImports, listPlugins,
+  planCatalogueSync, retryPluginImport, sourceLabel, syncCatalogue,
+  jobTitle, type CatalogueSourceFilter, type CatalogueSyncPlan, type CatalogueSyncResult, type JobStateFilter, type Plugin, type PluginImport,
   type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
+import { PluginJobsFacet, jobsPageSize, type JobsFilter } from './PluginJobs'
+import { FacetRail, knownCount } from './RegistryFacets'
 
 export function Plugins() {
   const { state, self, selectedOrganization, signOut } = useAuth()
@@ -27,21 +30,37 @@ export function Plugins() {
   const organizationID = selectedOrganization ?? state?.claims.organizationID ?? null
   const token = state?.token ?? ''
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const facet = searchParams.get('facet') === 'jobs' ? 'jobs' : 'plugins'
+  const jobsFilter: JobsFilter = {
+    state: (searchParams.get('state') as JobStateFilter | null) ?? undefined,
+    plugin: searchParams.get('plugin') ?? undefined,
+  }
+  const jobsPage = Math.max(1, Number(searchParams.get('page')) || 1)
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [plugins, setPlugins] = useState<Plugin[]>([])
+  const [unfinished, setUnfinished] = useState<PluginImport[]>([])
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
+  const [jobs, setJobs] = useState<{ imports: PluginImport[]; total: number } | null>(null)
+  const [jobsFailure, setJobsFailure] = useState<string | null>(null)
+  const [jobsBusy, setJobsBusy] = useState(false)
 
-  const reload = useCallback(async () => {
+  // quiet reloads (polling) keep the page as it is instead of showing the loading card.
+  const reload = useCallback(async (quiet = false) => {
     if (!organizationID || token === '') {
       setRegistry(null)
       setLoading(false)
       return
     }
-    setLoading(true)
+    if (!quiet) setLoading(true)
     try {
       const next = await getPluginRegistry(token, organizationID)
-      setPlugins(next.enabled ? await listPlugins(token, organizationID) : [])
+      const [nextPlugins, nextJobs] = next.enabled
+        ? await Promise.all([listPlugins(token, organizationID), listPluginImports(token, organizationID, { state: 'unfinished', limit: 100 })])
+        : [[], { imports: [], total: 0 }]
+      setPlugins(nextPlugins)
+      setUnfinished(nextJobs.imports)
       setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
@@ -52,7 +71,36 @@ export function Plugins() {
     }
   }, [organizationID, signOut, token])
 
+  const loadJobs = useCallback(async (quiet = false) => {
+    if (!organizationID || token === '' || facet !== 'jobs') return
+    if (!quiet) setJobs(null)
+    try {
+      setJobs(await listPluginImports(token, organizationID, { ...jobsFilter, limit: jobsPageSize, offset: (jobsPage - 1) * jobsPageSize }))
+      setJobsFailure(null)
+    } catch (error: unknown) {
+      if (!signOutIfUnauthorized(error, signOut)) setJobsFailure(pluginRegistryErrorMessage(error, 'Jobs could not be loaded.'))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [organizationID, token, facet, jobsFilter.state, jobsFilter.plugin, jobsPage, signOut])
+
   useEffect(() => { void reload() }, [reload])
+  useEffect(() => { void loadJobs() }, [loadJobs])
+  // Poll only while a queued or running job is on screen, in the catalogue's
+  // unfinished set or on the Jobs page; the worker finishes them in order.
+  useEffect(() => {
+    const onScreen = unfinished.length > 0 || (jobs?.imports ?? []).some((job) => job.state === 'queued' || job.state === 'running')
+    if (!onScreen) return
+    const timer = setTimeout(() => { void reload(true); void loadJobs(true) }, 3000)
+    return () => clearTimeout(timer)
+  }, [unfinished, jobs, reload, loadJobs])
+
+  const setQuery = (changes: Record<string, string | undefined>) => {
+    const next = new URLSearchParams(searchParams)
+    for (const [key, value] of Object.entries(changes)) {
+      if (value === undefined) next.delete(key); else next.set(key, value)
+    }
+    setSearchParams(next)
+  }
 
   if (!organizationID) {
     return <PageSection><Alert variant="info" isInline title="Select an organization to manage plugins" /></PageSection>
@@ -64,6 +112,23 @@ export function Plugins() {
       callerRole={self?.role ?? null}
       registry={registry}
       plugins={plugins}
+      unfinished={unfinished}
+      facet={facet}
+      onFacet={(next) => setQuery({ facet: next === 'jobs' ? 'jobs' : undefined, page: undefined })}
+      jobs={jobs} jobsFilter={jobsFilter} jobsPage={jobsPage} jobsFailure={jobsFailure} jobsBusy={jobsBusy}
+      onJobsFilter={(filter) => setQuery({ state: filter.state, plugin: filter.plugin, page: undefined })}
+      onJobsPage={(page) => setQuery({ page: page > 1 ? String(page) : undefined })}
+      onRetryJob={(job) => void (async () => {
+        setJobsBusy(true)
+        try {
+          const next = await retryPluginImport(token, organizationID, job)
+          navigate(`/plugin-registry/imports/${next.id}`)
+        } catch (error: unknown) {
+          if (!signOutIfUnauthorized(error, signOut)) setJobsFailure(pluginRegistryErrorMessage(error, 'The retry could not be queued.'))
+        } finally {
+          setJobsBusy(false)
+        }
+      })()}
       onBackToRegistry={() => navigate('/buckets')}
       onOpenPlugin={(name) => navigate(`/plugin-registry/${encodeURIComponent(name)}`)}
       onUpload={() => navigate('/plugin-registry/upload')}
@@ -78,7 +143,7 @@ export function Plugins() {
       }}
       loading={loading}
       failure={failure}
-      onRefresh={reload}
+      onRefresh={() => Promise.all([reload(), loadJobs()]).then(() => undefined)}
       onEnable={async () => {
         const next = await enablePluginRegistry(token, organizationID)
         setRegistry(next)
@@ -96,6 +161,17 @@ type PluginRegistryViewProps = {
   callerRole: Role | null
   registry: PluginRegistry | null
   plugins: Plugin[]
+  unfinished: PluginImport[]
+  facet: 'plugins' | 'jobs'
+  onFacet: (facet: 'plugins' | 'jobs') => void
+  jobs: { imports: PluginImport[]; total: number } | null
+  jobsFilter: JobsFilter
+  jobsPage: number
+  jobsFailure: string | null
+  jobsBusy: boolean
+  onJobsFilter: (filter: JobsFilter) => void
+  onJobsPage: (page: number) => void
+  onRetryJob: (job: PluginImport) => void
   onBackToRegistry: () => void
   onOpenPlugin: (name: string) => void
   onUpload: () => void
@@ -148,7 +224,10 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
         onRefresh={props.onRefresh}
         refreshing={props.loading}
       />
-      <PageSection variant="secondary" isFilled>
+      <PageSection
+        variant="secondary" isFilled hasBodyWrapper={false}
+        padding={{ default: props.loading || props.failure || !props.registry?.enabled ? 'padding' : 'noPadding' }}
+      >
         {actionFailure ? (
           <Alert variant="danger" isInline title="The action failed">
             <Content component="p">{actionFailure}</Content>
@@ -183,28 +262,58 @@ export function PluginRegistryView(props: PluginRegistryViewProps) {
 }
 
 function EnabledRegistry({
-  organizationName, callerRole, registry, plugins, onOpenPlugin, onUpload, onBrowse, onImportGithub,
-  onOpenImport, onPlanSync, onSyncSelected,
+  organizationName, callerRole, registry, plugins, unfinished, facet, onFacet, jobs, jobsFilter, jobsPage, jobsFailure, jobsBusy,
+  onJobsFilter, onJobsPage, onRetryJob, onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected, onRefresh,
 }: PluginRegistryViewProps) {
   const exposed = registry?.exposed ?? false
+  const canPublish = permitsAction(callerRole, 'publishPlugin')
+  const notExposed = !exposed ? (
+    <Alert variant="info" isInline title="The registry is enabled but not exposed">
+      <Content component="p">
+        Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed.
+      </Content>
+      <Button component="a" variant="link" isInline href="/plugin-registry/settings">Plugin registry</Button>
+    </Alert>
+  ) : null
 
   return (
-    <>
-      {!exposed ? (
-        <Alert variant="info" isInline title="The registry is enabled but not exposed">
-          <Content component="p">
-            Plugins below are stored and can be managed, but Packer can’t reach them until the registry is exposed.
-          </Content>
-          <Button component="a" variant="link" isInline href="/plugin-registry/settings">Plugin registry</Button>
-        </Alert>
-      ) : null}
-      <PluginCatalogue
-        organizationName={organizationName} plugins={plugins}
-        canPublish={permitsAction(callerRole, 'publishPlugin')}
-        onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse} onImportGithub={onImportGithub}
-        onOpenImport={onOpenImport} onPlanSync={onPlanSync} onSyncSelected={onSyncSelected}
-      />
-    </>
+    <FacetRail
+      active={facet}
+      onSelect={onFacet}
+      heading="Plugins"
+      label="Plugin facets"
+      unmountOnExit
+      facets={[
+        {
+          key: 'plugins', label: 'Plugins', count: knownCount(plugins.length),
+          content: (
+            <>
+              {notExposed}
+              <PluginCatalogue
+                organizationName={organizationName} plugins={plugins} unfinished={unfinished} canPublish={canPublish}
+                onOpenPlugin={onOpenPlugin} onUpload={onUpload} onBrowse={onBrowse} onImportGithub={onImportGithub}
+                onOpenImport={onOpenImport} onPlanSync={onPlanSync} onSyncSelected={onSyncSelected}
+              />
+            </>
+          ),
+        },
+        {
+          // The badge counts queued and running jobs, and hides at zero: a total of every job says nothing useful.
+          key: 'jobs', label: 'Jobs', count: unfinished.length ? { status: 'known', value: unfinished.length, unread: true } : undefined,
+          content: (
+            <>
+              {notExposed}
+              <PluginJobsFacet
+                jobs={jobs?.imports ?? []} total={jobs?.total ?? 0} filter={jobsFilter} page={jobsPage}
+                plugins={[...new Set([...plugins.map((plugin) => plugin.name), ...unfinished.map((job) => job.plugin)])].sort()}
+                loading={!jobs && !jobsFailure} failure={jobsFailure} canPublish={canPublish} busy={jobsBusy}
+                onFilter={onJobsFilter} onPage={onJobsPage} onOpenJob={onOpenImport} onRetry={onRetryJob} onRefresh={onRefresh}
+              />
+            </>
+          ),
+        },
+      ]}
+    />
   )
 }
 
@@ -281,11 +390,34 @@ function updateNote(plugin: Plugin): string {
   return plugin.update_check.enabled ? 'Up to date' : 'Checks off'
 }
 
+// A first import has no plugin row until a version is stored; the catalogue
+// shows the job's row meanwhile, so the import never looks cancelled.
+export function pendingFirstImports(plugins: Plugin[], unfinished: PluginImport[]): Plugin[] {
+  const held = new Set(plugins.map((plugin) => plugin.name))
+  const rows: Plugin[] = []
+  for (const job of [...unfinished].reverse()) {
+    if (held.has(job.plugin) || job.changes.length) continue
+    held.add(job.plugin)
+    rows.push({
+      name: job.plugin, source: { kind: job.source as Plugin['source']['kind'], repository: job.source === 'upload' ? undefined : job.product },
+      published_versions: 0, update_available: false, update_check: { enabled: false },
+    })
+  }
+  return rows
+}
+
+export function catalogueJobLabel(job: PluginImport): string {
+  const verb = jobTitle(job).split(' ')[0]
+  if (job.state === 'running') return `${verb} running · ${job.outcomes.length} of ${job.changes.length || job.versions.length}`
+  return `${verb} queued · ${job.queued_ahead} ahead`
+}
+
 export function PluginCatalogue({
-  organizationName, plugins, canPublish, onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected,
+  organizationName, plugins, unfinished, canPublish, onOpenPlugin, onUpload, onBrowse, onImportGithub, onOpenImport, onPlanSync, onSyncSelected,
 }: {
   organizationName: string
   plugins: Plugin[]
+  unfinished: PluginImport[]
   canPublish: boolean
   onOpenPlugin: (name: string) => void
   onUpload: () => void
@@ -307,7 +439,8 @@ export function PluginCatalogue({
   const [syncing, setSyncing] = useState(false)
   const [syncFailure, setSyncFailure] = useState<string | null>(null)
 
-  if (plugins.length === 0) {
+  const pending = pendingFirstImports(plugins, unfinished)
+  if (plugins.length === 0 && pending.length === 0) {
     return (
       <EmptyState titleText="No plugins mirrored yet" headingLevel="h2">
         <EmptyStateBody>
@@ -327,10 +460,10 @@ export function PluginCatalogue({
     )
   }
 
-  const queuedNames = new Set(queued.filter((r) => r.import_id).map((r) => r.plugin))
-  const rows = catalogueRows(plugins, { name: filter, source, updatesOnly })
+  const jobFor = (plugin: Plugin) => activeJobFor(unfinished, plugin.name)
+  const rows = catalogueRows([...plugins, ...pending], { name: filter, source, updatesOnly })
   const shown = rows.slice((page - 1) * pageSize, page * pageSize)
-  const selectable = (plugin: Plugin) => plugin.update_available && !queuedNames.has(plugin.name)
+  const selectable = (plugin: Plugin) => plugin.update_available && !jobFor(plugin)
   const pageSelectable = shown.filter(selectable).map((plugin) => plugin.name)
   const chosen = plugins.filter((plugin) => selected.includes(plugin.name))
 
@@ -379,7 +512,7 @@ export function PluginCatalogue({
         </Alert>
       ) : null}
       <Card>
-        <CardTitle>All plugins</CardTitle>
+        <CardTitle>Plugins</CardTitle>
         <CardBody>
         <Toolbar id="plugins-toolbar">
           <ToolbarContent alignItems="center">
@@ -442,7 +575,7 @@ export function PluginCatalogue({
               <Tr key={plugin.name} isSelectable={canPublish && selectable(plugin)} isRowSelected={selected.includes(plugin.name)}>
                 {canPublish ? (
                   <Td
-                    title={selectable(plugin) ? undefined : 'Only plugins with an update available can be synced'}
+                    title={selectable(plugin) ? undefined : jobFor(plugin) ? `A job for ${plugin.name} is already ${jobFor(plugin)?.state}` : 'Only plugins with an update available can be synced'}
                     select={{
                       rowIndex: (page - 1) * pageSize + index,
                       isSelected: selected.includes(plugin.name),
@@ -452,18 +585,23 @@ export function PluginCatalogue({
                   />
                 ) : null}
                 <Td dataLabel="Name">
-                  <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>
+                  {plugin.published_versions === 0 && jobFor(plugin)
+                    ? <span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{plugin.name}</span>
+                    : <Button variant="link" isInline onClick={() => onOpenPlugin(plugin.name)}>{plugin.name}</Button>}
                   <Content component="small"> {organizationName}/{plugin.name}</Content>
                 </Td>
                 <Td dataLabel="Source">
                   <Label isCompact>{sourceLabel(plugin.source)}</Label>
                   {plugin.source.repository ? <> <code>{plugin.source.repository}</code></> : null}
                 </Td>
-                <Td dataLabel="Newest mirrored">{plugin.newest_version ?? 'None available'}</Td>
+                <Td dataLabel="Newest mirrored">{plugin.newest_version ?? (jobFor(plugin) ? 'None yet' : 'None available')}</Td>
                 <Td dataLabel="Versions">{plugin.published_versions}</Td>
                 <Td dataLabel="Updates">
-                  {queuedNames.has(plugin.name) ? <Label isCompact color="blue">Sync queued</Label>
-                    : plugin.update_available ? <Label isCompact color="purple">Update available · {plugin.update_check.latest}</Label>
+                  {jobFor(plugin) ? (
+                    <Button variant="link" isInline onClick={() => onOpenImport(jobFor(plugin)?.id ?? '')}>
+                      <Label isCompact color="blue" variant={jobFor(plugin)?.state === 'running' ? 'filled' : 'outline'}>{catalogueJobLabel(jobFor(plugin) as PluginImport)}</Label>
+                    </Button>
+                  ) : plugin.update_available ? <Label isCompact color="purple">Update available · {plugin.update_check.latest}</Label>
                     : <Content component="small">{updateNote(plugin)}</Content>}
                 </Td>
                 {canPublish ? (

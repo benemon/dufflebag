@@ -976,6 +976,28 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
     assert.equal(await buttonDisabled('Sync selected'), true)
+
+    // Jobs persist beyond the page they were queued from and are found in the
+    // Jobs facet. An import of a product HashiCorp never published fails at
+    // the worker within seconds, whatever the network says, and leaves a row.
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
+    const wizardOrg = organizations.find((o) => o.name === wizardOrganizationName)
+    const missing = await api(rootToken, 'POST', `/api/v1/organizations/${wizardOrg.id}/plugin-registry/imports`,
+      { source: 'releases-hashicorp', product: 'packer-plugin-smoke-missing', versions: ['1.0.0'], platforms: ['linux_amd64'] })
+    assert.equal(missing.plugin, 'smoke-missing')
+    await clickFacet('Plugin facets', 'Jobs')
+    await waitForText('Import smoke-missing')
+    await waitForText(`Job ${missing.id.slice(0, 8)}`)
+    await until('the import to fail', async () => /Failed/.test(await bodyText()), 60000)
+    await waitForText('Retry')
+    // The job page is reached from the row, and its Jobs crumb comes back here.
+    await clickByText('button', 'Import smoke-missing')
+    await waitForText('Job failed')
+    await clickByText('button', 'Jobs')
+    await waitForText('Import smoke-missing')
+    await clickFacet('Plugin facets', 'Plugins')
+    await waitForText(`${wizardOrganizationName}/probe`)
     await clickByText('button', 'probe')
     // Remove version lives in the row menu (design frame 5.5); the newest row's menu is first.
     const removeVersion = async (version) => {

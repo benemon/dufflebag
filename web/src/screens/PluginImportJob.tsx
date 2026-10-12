@@ -12,11 +12,12 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  getPluginImport, getPluginRegistry, importJobRows, importJobSummary, retryPluginImport, templateStanza,
-  terminalImportStates, type ImportVersionOutcome, type PluginImport, type PluginRegistry,
+  firstError, getPluginImport, getPluginRegistry, importJobRows, importJobSummary, jobName, jobOrigin, jobTitle, retryPluginImport,
+  templateStanza, terminalImportStates, type ImportVersionOutcome, type PluginImport, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
 import { NotExposedAlert, TemplateStanzaBlock } from './PluginDetail'
+import { stateLabel } from './PluginJobs'
 import { pluginRegistryErrorMessage } from './Plugins'
 
 export function PluginImportJob() {
@@ -61,6 +62,7 @@ export function PluginImportJob() {
       id={id} loading={!job && !failure} callerRole={self?.role ?? null} busy={busy} actionFailure={actionFailure}
       onBackToRegistry={() => navigate('/buckets')}
       onBackToPlugins={() => navigate('/plugin-registry')}
+      onJobs={() => navigate('/plugin-registry?facet=jobs')}
       onRefresh={() => {
         setJob(null)
         setFailure(null)
@@ -84,14 +86,6 @@ export function PluginImportJob() {
   )
 }
 
-const stateLabel = {
-  queued: <Label color="grey">Queued</Label>,
-  running: <Label color="blue">Running</Label>,
-  succeeded: <Label color="green">Succeeded</Label>,
-  partially_succeeded: <Label color="yellow">Partially succeeded</Label>,
-  failed: <Label color="red">Failed</Label>,
-}
-
 const outcomeLabel = {
   imported: <Label isCompact color="green">Imported</Label>,
   already_mirrored: <Label isCompact color="grey">Already mirrored</Label>,
@@ -100,27 +94,10 @@ const outcomeLabel = {
   failed: <Label isCompact color="red">Failed</Label>,
 }
 
-export function jobName(job: PluginImport): string {
-  return job.product.replace(/^.*packer-plugin-/, '')
-}
-
-export function jobTitle(job: PluginImport): string {
-  const verb = job.origin === 'upload' ? 'Upload' : job.changes.length ? 'Sync' : 'Import'
-  return `${verb} ${jobName(job)}`
-}
-
-export function jobOrigin(job: PluginImport): string {
-  switch (job.origin) {
-    case 'plugin': return `from the plugin page, ${job.changes.length} ${job.changes.length === 1 ? 'change' : 'changes'}`
-    case 'catalogue': return `from Sync selected (${job.batch_index} of ${job.batch_size} ${job.batch_size === 1 ? 'job' : 'jobs'})`
-    case 'upload': return 'from Upload'
-    default: return job.source === 'github' ? `from Import from GitHub (${job.product})` : `from Browse HashiCorp (${job.product})`
-  }
-}
 
 export function PluginImportJobView({
   id, job, registry, loading, failure, organizationName, host, callerRole, busy, actionFailure,
-  onBackToRegistry, onBackToPlugins, onRefresh, onOpen, onRetry,
+  onBackToRegistry, onBackToPlugins, onJobs, onRefresh, onOpen, onRetry,
 }: {
   id: string
   job: PluginImport | null
@@ -134,6 +111,7 @@ export function PluginImportJobView({
   actionFailure: string | null
   onBackToRegistry: () => void
   onBackToPlugins: () => void
+  onJobs: () => void
   onRefresh: () => void | Promise<void>
   onOpen: (name: string) => void
   onRetry: () => void
@@ -154,7 +132,7 @@ export function PluginImportJobView({
           <Breadcrumb>
             <BreadcrumbItem component="button" onClick={onBackToRegistry}>Registry</BreadcrumbItem>
             <BreadcrumbItem component="button" onClick={onBackToPlugins}>Plugins</BreadcrumbItem>
-            <BreadcrumbItem component="button" onClick={() => name && onOpen(name)}>{name || 'Plugin'}</BreadcrumbItem>
+            <BreadcrumbItem component="button" onClick={onJobs}>Jobs</BreadcrumbItem>
             <BreadcrumbItem isActive>Job {(job?.id ?? id).slice(0, 8)}</BreadcrumbItem>
           </Breadcrumb>
         )}
@@ -277,15 +255,6 @@ export function PluginImportJobView({
       </PageSection>
     </>
   )
-}
-
-function firstError(outcomes: ImportVersionOutcome[]): string | undefined {
-  for (const outcome of outcomes) {
-    if (outcome.error) return outcome.error
-    const platform = outcome.platforms?.find((p) => p.error)
-    if (platform?.error) return `${platform.platform}: ${platform.error}`
-  }
-  return undefined
 }
 
 function failedPlatforms(outcome: ImportVersionOutcome | undefined): string[] {
