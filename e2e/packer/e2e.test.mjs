@@ -996,7 +996,7 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     assert.equal(tampered.state, 'partially_succeeded', `tampered import: ${JSON.stringify(tampered)}`)
     const refusedAmazon = tampered.outcomes.find((outcome) => outcome.plugin === 'amazon')
     assert.equal(refusedAmazon?.outcome, 'refused', JSON.stringify(tampered.outcomes))
-    assert.match(refusedAmazon.error, new RegExp(`${amazonZip.name.replace(/\./g, '\\.')} does not match the manifest`))
+    assert.ok(refusedAmazon.error.includes(`${amazonZip.name} does not match the manifest`), refusedAmazon.error)
     assert.deepEqual(outcomeOf(tampered, 'git'), ['imported'])
     assert.deepEqual(outcomeOf(tampered, 'windows-update'), ['imported'])
     assert.equal(tampered.filename_matches, undefined, 'a filename without a digest is not judged')
