@@ -190,7 +190,7 @@ export function PluginGithubView({
               </Alert>
             ) : null}
             <Card>
-              <CardTitle>Inferred from the release</CardTitle>
+              <CardTitle>Release details</CardTitle>
               <CardBody>
                 <DescriptionList isHorizontal isCompact>
                   <DescriptionListGroup>
