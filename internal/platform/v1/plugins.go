@@ -24,8 +24,9 @@ import (
 	store "github.com/benemon/dufflebag/internal/store/postgres"
 )
 
-// DefaultPluginUploadBytes bounds one plugin version upload (ADR-0027 D12).
-const DefaultPluginUploadBytes int64 = 512 << 20
+// DefaultPluginUploadBytes bounds one plugin version upload (ADR-0027 D12)
+// and a plugin bundle import (ADR-0029 D6). The body spools to disk.
+const DefaultPluginUploadBytes int64 = 4 << 30
 
 // The server's read and write timeouts are sized for API calls; one upload
 // may carry hundreds of megabytes over a slow link.
