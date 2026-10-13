@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -525,6 +526,9 @@ type fakeTenancyRepository struct {
 	pluginDownloadsErr    error
 	imports               []store.PluginImport
 	prune                 store.PluginPrune
+	bundle                *store.PluginBundle
+	bundleHost            string
+	bundleObjects         map[string]string
 	defaultPlatforms      []string
 	listProjectsErr       error
 	createProjectErr      error
@@ -738,6 +742,40 @@ func (r *fakeTenancyRepository) GetPluginImport(_ context.Context, _ store.Organ
 		}
 	}
 	return store.PluginImport{}, registry.ErrNotFound
+}
+
+func (r *fakeTenancyRepository) QueuePluginBundle(_ context.Context, _ store.OrganizationTenant, requestedBy, host string) error {
+	if !r.pluginRegistry.Enabled {
+		return store.ErrPluginRegistryNotEnabled
+	}
+	if r.bundle != nil && (r.bundle.State == "queued" || r.bundle.State == "running") {
+		return store.ErrPluginBundleBusy
+	}
+	previous := r.bundle
+	r.bundle = &store.PluginBundle{State: "queued", RequestedBy: requestedBy, CreatedAt: initTestTime}
+	if previous != nil {
+		r.bundle.Bundle = previous.Bundle
+	}
+	r.bundleHost = host
+	return nil
+}
+
+func (r *fakeTenancyRepository) GetPluginBundle(context.Context, store.OrganizationTenant) (store.PluginBundle, error) {
+	if !r.pluginRegistry.Enabled {
+		return store.PluginBundle{}, store.ErrPluginRegistryNotEnabled
+	}
+	if r.bundle == nil {
+		return store.PluginBundle{}, store.ErrPluginBundleNotFound
+	}
+	return *r.bundle, nil
+}
+
+func (r *fakeTenancyRepository) OpenPluginObject(_ context.Context, key string) (io.ReadCloser, error) {
+	content, ok := r.bundleObjects[key]
+	if !ok {
+		return nil, fmt.Errorf("object %q is not stored", key)
+	}
+	return io.NopCloser(strings.NewReader(content)), nil
 }
 
 func (r *fakeTenancyRepository) GetPluginPrune(context.Context, store.OrganizationTenant) (store.PluginPrune, error) {

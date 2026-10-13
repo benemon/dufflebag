@@ -12,7 +12,7 @@ import { join } from 'node:path'
 import { after, before, test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { crc32, zstdCompressSync } from 'node:zlib'
+import { crc32, gunzipSync, zstdCompressSync } from 'node:zlib'
 
 import puppeteer from 'puppeteer-core'
 
@@ -385,6 +385,21 @@ const buttonDisabled = (text) =>
 
 // A stored (uncompressed) zip holding one file, shaped like a goreleaser
 // plugin release: the binary inside carries the protocol in its name.
+// The entries of an ustar archive, as Go's archive/tar writes it for short names.
+function tarEntries(tar) {
+  const entries = []
+  for (let offset = 0; offset + 512 <= tar.length; ) {
+    const header = tar.subarray(offset, offset + 512)
+    if (header.every((byte) => byte === 0)) break
+    const name = header.toString('utf8', 0, 100).replace(/\0.*$/, '')
+    const size = parseInt(header.toString('utf8', 124, 136).replace(/\0.*$/, '').trim(), 8)
+    const data = tar.subarray(offset + 512, offset + 512 + size)
+    if (header[156] === 0x30 || header[156] === 0) entries.push({ name, data })
+    offset += 512 + Math.ceil(size / 512) * 512
+  }
+  return entries
+}
+
 function storedZip(entryName, content) {
   const name = Buffer.from(entryName)
   const data = Buffer.from(content)
@@ -1082,6 +1097,53 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText(`/plugins/${wizardOrganizationName}/NAME`)
     assert.equal(await buttonDisabled('Disable registry'), true)
     await waitForText('Unexpose the registry first before disabling it.')
+
+    // The whole registry exports as one bundle whose files are the upload contract.
+    // Both probe versions were removed above, so one is uploaded through the API first.
+    const bundledZipName = 'packer-plugin-probe_v1.2.0_x5.0_linux_amd64.zip'
+    const bundledZipBytes = storedZip('packer-plugin-probe_v1.2.0_x5.0_linux_amd64', 'binary 1.2.0')
+    const bundledSumsText = `${createHash('sha256').update(bundledZipBytes).digest('hex')}  ${bundledZipName}\n`
+    const uploadForm = new FormData()
+    uploadForm.append('sha256sums', new Blob([bundledSumsText]), 'packer-plugin-probe_v1.2.0_SHA256SUMS')
+    uploadForm.append('zips', new Blob([bundledZipBytes], { type: 'application/zip' }), bundledZipName)
+    const uploaded = await fetch(`${base}${registryPath}/plugins/probe/versions/1.2.0`, {
+      method: 'PUT', headers: { Authorization: `Bearer ${rootToken}` }, body: uploadForm,
+    })
+    assert.equal(uploaded.status, 201, `probe 1.2.0 upload answered ${uploaded.status}: ${await uploaded.text()}`)
+    await waitForText('Plugin bundle')
+    await waitForText('No bundle yet.')
+    await clickByText('button', 'Export registry')
+    await until('the export to finish', async () => /dufflebag-plugins-[^\s]+\.tar\.gz/.test(await bodyText()), 60000)
+    const bundleState = await api(rootToken, 'GET', `${registryPath}/bundle`)
+    assert.equal(bundleState.state, 'succeeded', JSON.stringify(bundleState))
+    const archiveResponse = await fetch(`${base}${registryPath}/bundle/download`, { headers: { Authorization: `Bearer ${rootToken}` } })
+    assert.equal(archiveResponse.status, 200, `bundle download answered ${archiveResponse.status}`)
+    assert.match(archiveResponse.headers.get('content-disposition') ?? '', /attachment; filename="dufflebag-plugins-/)
+    const archive = Buffer.from(await archiveResponse.arrayBuffer())
+    const archiveDigest = createHash('sha256').update(archive).digest('hex')
+    assert.equal(archiveDigest, bundleState.bundle.sha256, 'the recorded digest is of the archive bytes')
+    assert.ok(bundleState.bundle.filename.includes(archiveDigest.slice(0, 12)), bundleState.bundle.filename)
+    await waitForText(archiveDigest)
+    const entries = tarEntries(gunzipSync(archive))
+    assert.equal(entries[0].name, 'manifest.json')
+    const manifest = JSON.parse(entries[0].data.toString())
+    assert.equal(manifest.format, 1)
+    assert.equal(manifest.instance.organization, wizardOrganizationName)
+    const probeEntry = manifest.plugins.find((plugin) => plugin.name === 'probe')
+    assert.ok(probeEntry?.versions.some((version) => version.version === '1.2.0'), JSON.stringify(manifest))
+    const bundledSums = entries.find((entry) => entry.name === 'plugins/probe/1.2.0/packer-plugin-probe_v1.2.0_SHA256SUMS')
+    const bundledZip = entries.find((entry) => entry.name === 'plugins/probe/1.2.0/packer-plugin-probe_v1.2.0_x5.0_linux_amd64.zip')
+    assert.ok(bundledSums && bundledZip, entries.map((entry) => entry.name).join(', '))
+    // The oracle: a version re-uploaded from the bundle is accepted unchanged elsewhere.
+    const other = await api(rootToken, 'POST', '/api/v1/organizations', { name: 'bundle-check' })
+    await api(rootToken, 'POST', `/api/v1/organizations/${other.id}/plugin-registry/enable`)
+    const reuploadForm = new FormData()
+    reuploadForm.append('sha256sums', new Blob([bundledSums.data]), 'packer-plugin-probe_v1.2.0_SHA256SUMS')
+    reuploadForm.append('zips', new Blob([bundledZip.data], { type: 'application/zip' }), bundledZipName)
+    const reupload = await fetch(`${base}/api/v1/organizations/${other.id}/plugin-registry/plugins/probe/versions/1.2.0`, {
+      method: 'PUT', headers: { Authorization: `Bearer ${rootToken}` }, body: reuploadForm,
+    })
+    assert.equal(reupload.status, 201, `re-upload from the bundle answered ${reupload.status}: ${await reupload.text()}`)
 
     await clickByText('button', 'Unexpose')
     await waitForText('In-flight packer init fails when the registry is unexposed.')

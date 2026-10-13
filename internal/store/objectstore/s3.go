@@ -129,6 +129,11 @@ func PluginKey(organizationID, name, version, filename, digest string) string {
 	)
 }
 
+// BundleKey returns the immutable key for one organization's plugin bundle.
+func BundleKey(organizationID, digest string) string {
+	return fmt.Sprintf("t/%s/b/%s", strings.ReplaceAll(organizationID, "-", ""), digest)
+}
+
 // PutFile stores size bytes read from body. The SDK seeks body to sign the
 // payload and to retry, so it must be seekable rather than a stream.
 func (s *Store) PutFile(ctx context.Context, key string, body io.ReadSeeker, size int64) error {

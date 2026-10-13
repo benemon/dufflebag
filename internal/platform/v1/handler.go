@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"regexp"
@@ -49,6 +50,9 @@ type PlatformRepository interface {
 	ListPluginImports(context.Context, store.OrganizationTenant, store.PluginImportFilter) ([]store.PluginImport, int, error)
 	DeletePluginImport(context.Context, store.OrganizationTenant, uuid.UUID) error
 	GetPluginPrune(context.Context, store.OrganizationTenant) (store.PluginPrune, error)
+	QueuePluginBundle(context.Context, store.OrganizationTenant, string, string) error
+	GetPluginBundle(context.Context, store.OrganizationTenant) (store.PluginBundle, error)
+	OpenPluginObject(context.Context, string) (io.ReadCloser, error)
 	SetPluginPrune(context.Context, store.OrganizationTenant, bool, int, string, *time.Time) error
 	PrunePluginImports(context.Context, store.OrganizationTenant, time.Time) (int, error)
 	RecordPluginPrune(context.Context, store.OrganizationTenant, int, string, *time.Time) error

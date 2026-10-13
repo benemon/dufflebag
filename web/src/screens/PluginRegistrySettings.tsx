@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ActionGroup, Alert, Button, Card, CardBody, CardTitle, Content, DescriptionList, DescriptionListDescription,
-  DescriptionListGroup, DescriptionListTerm, Flex, FlexItem, Label, NumberInput, PageSection, Switch, TextInput,
+  ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, ClipboardCopyVariant, Content, DescriptionList,
+  DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, Flex, FlexItem, Label, NumberInput, PageSection, Switch, TextInput,
 } from '@patternfly/react-core'
 
 import { signOutIfUnauthorized } from '../api/client'
@@ -10,9 +10,10 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  cronProblem, describeCron, disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getDefaultPlatforms, getPluginPrune,
-  getPluginRegistry, pruneAges, prunePreview, runPluginPrune, scheduleWords, setDefaultPlatforms, setPluginPrune,
-  templateStanza, unexposePluginRegistry, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
+  cronProblem, describeCron, disablePluginRegistry, downloadPluginBundle, enablePluginRegistry, exportPluginBundle, exposePluginRegistry,
+  getDefaultPlatforms, getPluginBundle, getPluginPrune, getPluginRegistry, pluginBundleDownloadPath, pruneAges, prunePreview, runPluginPrune,
+  scheduleWords, setDefaultPlatforms, setPluginPrune, templateStanza, unexposePluginRegistry,
+  type PluginBundle, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { TemplateStanzaBlock } from './PluginDetail'
 import { useTenant } from '../data/tenant'
@@ -29,6 +30,8 @@ export function PluginRegistrySettings() {
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [defaultPlatforms, setDefaultPlatformsState] = useState<string[]>([])
   const [prune, setPrune] = useState<PluginPrune | null>(null)
+  const [bundle, setBundle] = useState<PluginBundle | null>(null)
+  const [bundleShown, setBundleShown] = useState(false)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
 
@@ -45,6 +48,8 @@ export function PluginRegistrySettings() {
       setDefaultPlatformsState(next.enabled ? await getDefaultPlatforms(token, organizationID) : [])
       // The schedule is maintainer-only on the API, like the rest of this page's controls.
       setPrune(next.enabled && configures ? await getPluginPrune(token, organizationID) : null)
+      setBundle(next.enabled && configures ? await getPluginBundle(token, organizationID) : null)
+      setBundleShown(next.enabled && configures)
       setRegistry(next)
       setFailure(null)
     } catch (error: unknown) {
@@ -56,6 +61,14 @@ export function PluginRegistrySettings() {
   }, [organizationID, self?.role, signOut, token])
 
   useEffect(() => { void reload() }, [reload])
+  // An export is queued or running: ask again until it settles.
+  useEffect(() => {
+    if (!organizationID || token === '' || !bundle || (bundle.state !== 'queued' && bundle.state !== 'running')) return
+    const timer = setTimeout(() => {
+      getPluginBundle(token, organizationID).then(setBundle).catch(() => {})
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [bundle, organizationID, token])
 
   if (!organizationID) {
     return <PageSection><Alert variant="info" isInline title="Select an organization to manage its plugin registry" /></PageSection>
@@ -71,6 +84,19 @@ export function PluginRegistrySettings() {
       prune={prune}
       onSetPrune={async (request) => { setPrune(await setPluginPrune(token, organizationID, request)) }}
       onPruneNow={async () => { setPrune(await runPluginPrune(token, organizationID)) }}
+      bundle={bundleShown ? { current: bundle, organizationID } : null}
+      onExportBundle={async () => { setBundle(await exportPluginBundle(token, organizationID)) }}
+      onDownloadBundle={async () => {
+        const current = bundle?.bundle
+        if (!current) return
+        const bytes = await downloadPluginBundle(token, organizationID)
+        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/gzip' }))
+        const anchor = document.createElement('a')
+        anchor.href = url
+        anchor.download = current.filename
+        anchor.click()
+        URL.revokeObjectURL(url)
+      }}
       loading={loading}
       failure={failure}
       onRefresh={reload}
@@ -82,6 +108,8 @@ export function PluginRegistrySettings() {
         setRegistry({ enabled: false, exposed: false })
         setDefaultPlatformsState([])
         setPrune(null)
+        setBundle(null)
+        setBundleShown(false)
       }}
       onSetDefaultPlatforms={async (platforms) => {
         setDefaultPlatformsState(await setDefaultPlatforms(token, organizationID, platforms))
@@ -94,10 +122,14 @@ export function PluginRegistrySettingsView({
   organizationName, host, callerRole, registry, defaultPlatforms, loading, failure,
   onRefresh, onEnable, onExpose, onUnexpose, onDisable, onSetDefaultPlatforms,
   prune = null, onSetPrune = async () => {}, onPruneNow = async () => {},
+  bundle = null, onExportBundle = async () => {}, onDownloadBundle = async () => {},
 }: {
   prune?: PluginPrune | null
   onSetPrune?: (request: PluginPruneRequest) => Promise<void>
   onPruneNow?: () => Promise<void>
+  bundle?: { current: PluginBundle | null; organizationID: string } | null
+  onExportBundle?: () => Promise<void>
+  onDownloadBundle?: () => Promise<void>
   organizationName: string
   host: string
   callerRole: Role | null
@@ -240,6 +272,17 @@ export function PluginRegistrySettingsView({
                 </CardBody>
               </Card>
             ) : null}
+            {registry.enabled && canConfigure && bundle ? (
+              <Card aria-label="Plugin bundle">
+                <CardTitle>Plugin bundle</CardTitle>
+                <CardBody>
+                  <PluginBundleCard
+                    bundle={bundle.current} organizationID={bundle.organizationID} busy={busy}
+                    onExport={() => run(onExportBundle)} onDownload={() => run(onDownloadBundle)}
+                  />
+                </CardBody>
+              </Card>
+            ) : null}
           </>
         )}
         {confirming === 'expose' ? (
@@ -285,6 +328,79 @@ export function pruneSavedMessage(prune: PluginPrune): string {
   if (!prune.enabled) return 'Pruning is off. Jobs are kept until they are cleared by hand.'
   const next = prune.next_run_at ? ` Next run ${new Date(prune.next_run_at).toLocaleString()}.` : ''
   return `Finished jobs older than ${prune.age_days} days are cleared ${scheduleWords(prune.schedule)}.${next}`
+}
+
+const bundleNumber = new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 })
+
+export function bundleLabels(bundle: PluginBundle | null): { text: string; color: 'grey' | 'blue' | 'red' }[] {
+  if (!bundle) return []
+  switch (bundle.state) {
+    case 'queued': return [{ text: 'Queued', color: 'blue' }]
+    case 'running': return [{ text: 'Exporting', color: 'blue' }]
+    case 'failed': return [{ text: 'Last export failed', color: 'red' }]
+    default: return []
+  }
+}
+
+export function PluginBundleCard({ bundle, organizationID, busy, onExport, onDownload }: {
+  bundle: PluginBundle | null
+  organizationID: string
+  busy: boolean
+  onExport: () => Promise<void> | void
+  onDownload: () => Promise<void> | void
+}) {
+  const exporting = bundle?.state === 'queued' || bundle?.state === 'running'
+  const current = bundle?.bundle
+  const origin = typeof window === 'undefined' ? '' : window.location.origin
+  return (
+    <Flex direction={{ default: 'column' }} gap={{ default: 'gapMd' }}>
+      {bundleLabels(bundle).length ? (
+        <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          {bundleLabels(bundle).map((label) => <FlexItem key={label.text}><Label isCompact color={label.color}>{label.text}</Label></FlexItem>)}
+        </Flex>
+      ) : null}
+      {bundle?.state === 'failed' && bundle.error ? <Content component="p"><span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{bundle.error}</span></Content> : null}
+      {current ? (
+        <DescriptionList isHorizontal isCompact>
+          <DescriptionListGroup>
+            <DescriptionListTerm>File</DescriptionListTerm>
+            <DescriptionListDescription><span style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>{current.filename}</span></DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Exported</DescriptionListTerm>
+            <DescriptionListDescription>{new Date(current.exported_at).toLocaleString()}</DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Size</DescriptionListTerm>
+            <DescriptionListDescription>{bundleNumber.format(current.size / (1024 * 1024))} MiB</DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>Contents</DescriptionListTerm>
+            <DescriptionListDescription>{current.plugin_count} {current.plugin_count === 1 ? 'plugin' : 'plugins'}, {current.version_count} {current.version_count === 1 ? 'version' : 'versions'}</DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>SHA-256</DescriptionListTerm>
+            <DescriptionListDescription>
+              <ClipboardCopy id="bundle-sha256" hoverTip="Copy" clickTip="Copied" variant={ClipboardCopyVariant.inlineCompact} isReadOnly>
+                {current.sha256}
+              </ClipboardCopy>
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+        </DescriptionList>
+      ) : <Content component="p">No bundle yet.</Content>}
+      <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+        <Button variant="primary" isLoading={exporting} isDisabled={busy || exporting} onClick={() => void onExport()}>
+          {exporting ? 'Exporting…' : 'Export registry'}
+        </Button>
+        {current ? <Button variant="secondary" isDisabled={busy} onClick={() => void onDownload()}>Download</Button> : null}
+      </Flex>
+      {current ? (
+        <Content component="small">
+          For a large bundle: <code>curl -H "Authorization: Bearer $TOKEN" -o {current.filename} {origin}{pluginBundleDownloadPath(organizationID)}</code>
+        </Content>
+      ) : null}
+    </Flex>
+  )
 }
 
 export function PruneJobsEditor({ prune, busy, onSave, onPruneNow }: {

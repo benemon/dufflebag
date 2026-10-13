@@ -1283,3 +1283,62 @@ WHERE organization_id = $1 AND state NOT IN ('queued', 'running') AND finished_a
 UPDATE plugin_registries
 SET prune_last_run_at = now(), prune_last_cleared = $2, prune_last_error = $3, prune_next_at = $4
 WHERE organization_id = $1;
+
+-- name: QueuePluginBundle :execrows
+INSERT INTO plugin_bundles (organization_id, state, requested_by, requested_host)
+SELECT plugin_registries.organization_id, 'queued', sqlc.arg(requested_by), sqlc.arg(requested_host)
+FROM plugin_registries
+WHERE plugin_registries.organization_id = sqlc.arg(organization_id)
+ON CONFLICT (organization_id) DO UPDATE
+SET state = 'queued', requested_by = EXCLUDED.requested_by, requested_host = EXCLUDED.requested_host,
+    created_at = now(), claimed_at = NULL, started_at = NULL, finished_at = NULL, error = ''
+WHERE plugin_bundles.state NOT IN ('queued', 'running');
+
+-- name: ClaimPluginBundle :one
+UPDATE plugin_bundles
+SET state = 'running', claimed_at = now(), started_at = COALESCE(started_at, now())
+WHERE organization_id = (
+    SELECT candidate.organization_id
+    FROM plugin_bundles AS candidate
+    WHERE candidate.organization_id = sqlc.arg(organization_id)
+      AND (candidate.state = 'queued'
+           OR (candidate.state = 'running'
+               AND candidate.claimed_at < now() - make_interval(secs => sqlc.arg(stale_seconds)::float8)))
+    ORDER BY candidate.created_at
+    FOR UPDATE SKIP LOCKED LIMIT 1
+)
+RETURNING requested_by, requested_host, created_at, object_key;
+
+-- name: RecordPluginBundle :exec
+UPDATE plugin_bundles
+SET state = sqlc.arg(state), finished_at = now(), error = sqlc.arg(error),
+    exported_at = CASE WHEN sqlc.arg(state) = 'succeeded' THEN now() ELSE exported_at END,
+    object_key = COALESCE(sqlc.narg(object_key), object_key),
+    filename = COALESCE(sqlc.narg(filename), filename),
+    size = COALESCE(sqlc.narg(size), size),
+    sha256 = COALESCE(sqlc.narg(sha256), sha256),
+    plugin_count = COALESCE(sqlc.narg(plugin_count), plugin_count),
+    version_count = COALESCE(sqlc.narg(version_count), version_count)
+WHERE organization_id = sqlc.arg(organization_id);
+
+-- name: GetPluginBundle :one
+SELECT state, requested_by, requested_host, created_at, started_at, finished_at, exported_at, error,
+       object_key, filename, size, sha256, plugin_count, version_count
+FROM plugin_bundles
+WHERE organization_id = $1;
+
+-- name: ListExportablePluginVersions :many
+SELECT plugin_versions.id, plugins.name, plugins.source_kind, plugins.source_repository,
+       plugin_versions.version, plugin_versions.sums_key, plugin_versions.sums_size,
+       plugin_versions.signature_key, plugin_versions.signature_size,
+       plugin_versions.manifest_key, plugin_versions.manifest_size
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND NOT plugin_versions.revoked
+ORDER BY plugins.name;
+
+-- name: ListStoredPluginVersionFiles :many
+SELECT filename, os, arch, sha256, size, object_key
+FROM plugin_files
+WHERE version_id = $1
+ORDER BY os, arch, filename;

@@ -311,6 +311,43 @@ remain available in the version selector with their state.
 
 ![A plugin detail page showing the Downloads card and rolling windows](/screenshots/plugin-detail.png)
 
+## Plugin bundle
+
+A plugin bundle carries the whole registry across an airgap. It is a
+`tar.gz` of every plugin's release files, whatever their source, in the
+layout the upload API accepts, so a disconnected dufflebag needs nothing it
+does not already have to take it in. Revoked versions are left out, and a
+plugin whose versions are all revoked is left out entirely. The airgapped
+registry keeps its own view of what is revoked: a revocation on the
+connected side after a bundle is imported does not propagate.
+
+A maintainer exports under **Administration › Plugin registry › Plugin
+bundle**. The export runs in the background and the card shows the current
+bundle: its filename, when it was exported, its size, how many plugins and
+versions it holds, and its SHA-256, copyable. One export runs at a time, and
+a new export replaces the previous bundle, so an organization holds one
+bundle. A failed export keeps the previous bundle and says why it failed.
+
+**Download** saves the bundle through the browser. For a large bundle, the
+card shows the curl form:
+
+```shell
+curl -H "Authorization: Bearer $TOKEN" -o dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz \
+  https://dufflebag.example.com/api/v1/organizations/$ORG_ID/plugin-registry/bundle/download
+```
+
+The filename ends in the first twelve characters of the archive's SHA-256,
+and the card shows the full digest, so a copied bundle can be matched to the
+export it came from without a second file. Inside, `manifest.json` comes
+first and names the exporting instance, the export time, and every plugin
+with its origin, versions, platforms and file digests; the release files
+follow under `plugins/<name>/<version>/`.
+
+![The Plugin bundle card showing an exported registry with its digest and Download](/screenshots/plugin-registry-bundle.png)
+
+Importing a bundle on a disconnected dufflebag is the subject of a later
+release.
+
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag
@@ -352,7 +389,11 @@ Every read Packer makes is recorded in the audit log, with route
 When audit is enabled and a record cannot be written, the read is refused, so
 an audit outage stops `packer init`. Reading a plugin's download counts is
 the platform operation `plugin.downloads.read`, with the plugin as its
-target. See [audit](../administration/audit.md).
+target. A bundle export is `plugin_registry.bundle.export`, reading its
+state `plugin_registry.bundle.read`, the download
+`plugin_registry.bundle.download`, and the build itself is recorded by
+`system:plugin-bundler` as `plugin_registry.bundle.build`. See
+[audit](../administration/audit.md).
 
 ## Where to go next
 

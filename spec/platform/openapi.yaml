@@ -776,6 +776,87 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/bundle/export:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    post:
+      tags: [plugin-registry]
+      operationId: exportPluginBundle
+      summary: Queue an export of the whole plugin registry
+      description: Requires `maintainer`.
+      responses:
+        "202":
+          description: Queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginBundle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: An export is already queued or running, or the registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/bundle:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginBundle
+      summary: Get the current plugin bundle export
+      responses:
+        "200":
+          description: The current export and last successful bundle.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginBundle" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No export has been queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
+  /api/v1/organizations/{organizationId}/plugin-registry/bundle/download:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    get:
+      tags: [plugin-registry]
+      operationId: downloadPluginBundle
+      summary: Download the last successful plugin bundle
+      description: Requires `maintainer`.
+      responses:
+        "200":
+          description: The bundle archive.
+          headers:
+            Content-Disposition:
+              schema: { type: string }
+            Content-Length:
+              schema: { type: integer, format: int64 }
+          content:
+            application/gzip:
+              schema: { type: string, format: binary }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No successful bundle exists.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -3264,6 +3345,28 @@ components:
         kept: { type: integer, description: Every job the organization holds. }
         oldest_finished_at: { type: string, format: date-time }
       required: [enabled, age_days, schedule, last_run_cleared, last_error, would_clear, unfinished, kept]
+
+    PluginBundle:
+      type: object
+      properties:
+        state: { type: string, enum: [queued, running, succeeded, failed] }
+        requested_by: { type: string }
+        created_at: { type: string, format: date-time, description: When the current export was queued. }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        error: { type: string, description: Why the last export failed; empty otherwise. }
+        bundle:
+          type: object
+          description: The last successful export, kept until a later one replaces it; absent before the first success.
+          properties:
+            filename: { type: string }
+            size: { type: integer, format: int64 }
+            sha256: { type: string }
+            exported_at: { type: string, format: date-time }
+            plugin_count: { type: integer }
+            version_count: { type: integer }
+          required: [filename, size, sha256, exported_at, plugin_count, version_count]
+      required: [state, requested_by, created_at, error]
 
     PluginImportConflict:
       type: object

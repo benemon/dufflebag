@@ -15,6 +15,8 @@ let PluginCatalogue
 let PluginRegistrySettingsView
 let pruneLabels
 let pruneSavedMessage
+let PluginBundleCard
+let bundleLabels
 let cronProblem
 let prunePreview
 let describeCron
@@ -100,7 +102,7 @@ before(async () => {
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
   ;({ PluginGithubView } = await vite.ssrLoadModule('/src/screens/PluginGithub.tsx'))
-  ;({ PluginRegistrySettingsView, pruneLabels, pruneSavedMessage } =
+  ;({ PluginRegistrySettingsView, pruneLabels, pruneSavedMessage, PluginBundleCard, bundleLabels } =
     await vite.ssrLoadModule('/src/screens/PluginRegistrySettings.tsx'))
   ;({ cronProblem, prunePreview, describeCron } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
 })
@@ -1403,6 +1405,57 @@ test('the prune schedule is validated field by field and previewed honestly', ()
     ['0 9,17 * * *', 'Every day at 09:00 and 17:00 UTC'], ['* * * * *', 'Every minute UTC'], ['5 4 * * 7', 'Every Sunday at 04:05 UTC'],
     ['15 2 */10 * *', 'Every 10 days at 02:15 UTC'], ['0 3 * *', null], ['0 25 * * *', null],
   ]) assert.equal(describeCron(expression), words, expression)
+})
+
+// Fixture shape: spec/platform/openapi.yaml PluginBundle.
+const bundleState = (over = {}) => ({
+  state: 'succeeded', requested_by: 'alice', created_at: '2026-10-13T09:00:00Z', started_at: '2026-10-13T09:00:01Z', finished_at: '2026-10-13T09:00:40Z', error: '',
+  bundle: {
+    filename: 'dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz', size: 431 * 1024 * 1024 + 500000,
+    sha256: '0123456789ab' + 'c'.repeat(52), exported_at: '2026-10-13T09:00:40Z', plugin_count: 3, version_count: 7,
+  },
+  ...over,
+})
+
+test('the Plugin bundle card offers one export, shows the current bundle with its digest, and keeps it through a failure', () => {
+  const card = (bundle) => renderToStaticMarkup(React.createElement(PluginBundleCard, {
+    bundle, organizationID: 'org-id', busy: false, onExport: () => {}, onDownload: () => {},
+  }))
+  const none = card(null)
+  assert.match(none, /No bundle yet\./)
+  assert.doesNotMatch(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export registry</, 'the first export is available at once')
+  assert.doesNotMatch(none, />Download</)
+  assert.deepEqual(bundleLabels(null), [])
+
+  const done = card(bundleState())
+  assert.match(done, /dufflebag-plugins-acme-20261013T090040Z-0123456789ab\.tar\.gz/)
+  assert.match(done, /431\.5 MiB/)
+  assert.match(done, /3 plugins, 7 versions/)
+  assert.match(done, new RegExp('0123456789ab' + 'c'.repeat(52)), 'the full digest is on the card')
+  assert.match(done, /id="bundle-sha256"/, 'the digest is copyable')
+  assert.match(done, />Download</)
+  assert.match(done, /curl -H &quot;Authorization: Bearer \$TOKEN&quot; -o dufflebag-plugins-acme-20261013T090040Z-0123456789ab\.tar\.gz [^<]*\/api\/v1\/organizations\/org-id\/plugin-registry\/bundle\/download/)
+  assert.deepEqual(bundleLabels(bundleState()), [])
+
+  const running = card(bundleState({ state: 'running', finished_at: undefined }))
+  assert.match(running, /<button[^>]*disabled[^>]*>[\s\S]{0,300}Exporting…</, 'one export at a time')
+  assert.deepEqual(bundleLabels(bundleState({ state: 'running' })), [{ text: 'Exporting', color: 'blue' }])
+  assert.deepEqual(bundleLabels(bundleState({ state: 'queued' })), [{ text: 'Queued', color: 'blue' }])
+
+  const failed = card(bundleState({ state: 'failed', error: 'object storage unavailable' }))
+  assert.match(failed, />Last export failed</)
+  assert.match(failed, /object storage unavailable/)
+  assert.match(failed, />Download</, 'the previous bundle is still offered')
+  assert.doesNotMatch(failed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export registry</, 'and a new export can be tried')
+
+  const settings = (bundle, callerRole = 'maintainer') => renderToStaticMarkup(React.createElement(PluginRegistrySettingsView, {
+    organizationName: 'acme', host: 'dufflebag.example.com', callerRole, registry: { enabled: true, exposed: true },
+    defaultPlatforms: ['linux_amd64'], loading: false, failure: null, prune: null, bundle,
+    onRefresh: () => {}, onEnable: async () => {}, onExpose: async () => {}, onUnexpose: async () => {}, onDisable: async () => {}, onSetDefaultPlatforms: async () => {},
+  }))
+  assert.match(settings({ current: null, organizationID: 'org-id' }), /aria-label="Plugin bundle"/)
+  assert.doesNotMatch(settings(null), /Plugin bundle/, 'nothing loaded, no card')
+  assert.doesNotMatch(settings({ current: bundleState(), organizationID: 'org-id' }, 'publisher'), /Plugin bundle/, 'publishers do not see the card')
 })
 
 test('the Prune jobs card is maintainer-only and reflects the schedule, the last run and its error', () => {
