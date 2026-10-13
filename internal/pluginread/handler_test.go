@@ -11,18 +11,29 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/google/uuid"
 )
+
+type countedDownload struct {
+	tenant   store.OrganizationTenant
+	pluginID uuid.UUID
+	version  string
+	platform string
+	day      time.Time
+}
 
 type fakeRepository struct {
 	versions  map[string][]string
 	files     map[string]store.ServedPluginFile
 	objects   map[string]string
 	openError error
+	counts    []countedDownload
 }
 
 func (f *fakeRepository) ServedPluginVersions(_ context.Context, organization, name string) ([]string, error) {
@@ -50,14 +61,27 @@ func (f *fakeRepository) OpenPluginObject(_ context.Context, key string) (io.Rea
 	return io.NopCloser(strings.NewReader(f.objects[key])), nil
 }
 
+func (f *fakeRepository) CountPluginDownload(
+	_ context.Context, tenant store.OrganizationTenant, pluginID uuid.UUID, version, platform string, day time.Time,
+) error {
+	f.counts = append(f.counts, countedDownload{tenant: tenant, pluginID: pluginID, version: version, platform: platform, day: day})
+	return nil
+}
+
 func amazonRepository() *fakeRepository {
 	zip := "packer-plugin-amazon_1.8.2_linux_amd64.zip"
+	organizationID := uuid.MustParse("00000000-0000-4000-8000-000000000001")
+	pluginID := uuid.MustParse("00000000-0000-4000-8000-000000000002")
+	served := func(file store.ServedPluginFile) store.ServedPluginFile {
+		file.OrganizationID, file.PluginID = organizationID, pluginID
+		return file
+	}
 	return &fakeRepository{
 		versions: map[string][]string{"acme/amazon": {"1.8.2", "1.8.1"}},
 		files: map[string]store.ServedPluginFile{
-			"acme/amazon/1.8.2/" + plugin.SumsName("amazon", "1.8.2"):     {ObjectKey: "sums", Size: 4},
-			"acme/amazon/1.8.2/" + plugin.ManifestName("amazon", "1.8.2"): {Content: plugin.RenderManifest("5.0")},
-			"acme/amazon/1.8.2/" + zip:                                    {ObjectKey: "zip", Size: 3},
+			"acme/amazon/1.8.2/" + plugin.SumsName("amazon", "1.8.2"):     served(store.ServedPluginFile{ObjectKey: "sums", Size: 4}),
+			"acme/amazon/1.8.2/" + plugin.ManifestName("amazon", "1.8.2"): served(store.ServedPluginFile{Content: plugin.RenderManifest("5.0")}),
+			"acme/amazon/1.8.2/" + zip:                                    served(store.ServedPluginFile{ObjectKey: "zip", Size: 3}),
 		},
 		objects: map[string]string{"sums": "sums", "zip": "zip"},
 	}
@@ -147,5 +171,63 @@ func TestStorageFailureIsNotDisguisedAsAbsence(t *testing.T) {
 	response, record := get(t, repository, http.MethodGet, "/plugins/acme/packer-plugin-amazon/1.8.2/packer-plugin-amazon_1.8.2_linux_amd64.zip")
 	if response.Code != http.StatusServiceUnavailable || record["reason"] != "unavailable" {
 		t.Fatalf("storage failure = %d, audit %#v", response.Code, record)
+	}
+}
+
+func TestAServedZipCountsOnceWithTheRightPluginVersionAndPlatform(t *testing.T) {
+	repository := amazonRepository()
+	response, _ := get(t, repository, http.MethodGet, "/plugins/acme/packer-plugin-amazon/1.8.2/packer-plugin-amazon_1.8.2_linux_amd64.zip")
+	if response.Code != http.StatusOK || len(repository.counts) != 1 {
+		t.Fatalf("served zip status = %d, counts = %d; want 200 and one count", response.Code, len(repository.counts))
+	}
+	count := repository.counts[0]
+	wantPlugin := uuid.MustParse("00000000-0000-4000-8000-000000000002")
+	if count.tenant.OrganizationID != uuid.MustParse("00000000-0000-4000-8000-000000000001") ||
+		count.pluginID != wantPlugin || count.version != "1.8.2" || count.platform != "linux_amd64" ||
+		count.day.Location() != time.UTC || count.day.Hour() != 0 || count.day.Minute() != 0 || count.day.Second() != 0 {
+		t.Fatalf("count = %+v, want the served plugin, version, platform and UTC day", count)
+	}
+}
+
+func TestIndexSumsSignatureAndManifestServesCountNothing(t *testing.T) {
+	repository := amazonRepository()
+	reference := repository.files["acme/amazon/1.8.2/"+plugin.SumsName("amazon", "1.8.2")]
+	reference.ObjectKey, reference.Size = "signature", 9
+	repository.files["acme/amazon/1.8.2/"+plugin.SignatureName("amazon", "1.8.2")] = reference
+	repository.objects["signature"] = "signature"
+	paths := []string{
+		"/plugins/acme/packer-plugin-amazon/index.json",
+		"/plugins/acme/packer-plugin-amazon/1.8.2/" + plugin.SumsName("amazon", "1.8.2"),
+		"/plugins/acme/packer-plugin-amazon/1.8.2/" + plugin.SignatureName("amazon", "1.8.2"),
+		"/plugins/acme/packer-plugin-amazon/1.8.2/" + plugin.ManifestName("amazon", "1.8.2"),
+	}
+	for _, path := range paths {
+		response, _ := get(t, repository, http.MethodGet, path)
+		if response.Code != http.StatusOK {
+			t.Fatalf("%s = %d, want 200", path, response.Code)
+		}
+	}
+	if len(repository.counts) != 0 {
+		t.Fatalf("non-zip serves recorded %d downloads, want none", len(repository.counts))
+	}
+}
+
+func TestAnInterruptedStreamCountsNothing(t *testing.T) {
+	repository := amazonRepository()
+	key := "acme/amazon/1.8.2/packer-plugin-amazon_1.8.2_linux_amd64.zip"
+	file := repository.files[key]
+	file.Size++
+	repository.files[key] = file
+	_, record := get(t, repository, http.MethodGet, "/plugins/acme/packer-plugin-amazon/1.8.2/packer-plugin-amazon_1.8.2_linux_amd64.zip")
+	if record["reason"] != "stream_interrupted" || len(repository.counts) != 0 {
+		t.Fatalf("interrupted audit = %#v, counts = %d; want interrupted and no count", record, len(repository.counts))
+	}
+}
+
+func TestA404CountsNothing(t *testing.T) {
+	repository := amazonRepository()
+	response, _ := get(t, repository, http.MethodGet, "/plugins/acme/packer-plugin-amazon/1.8.2/packer-plugin-amazon_1.8.2_plan9_amd64.zip")
+	if response.Code != http.StatusNotFound || len(repository.counts) != 0 {
+		t.Fatalf("missing zip status = %d, counts = %d; want 404 and no count", response.Code, len(repository.counts))
 	}
 }

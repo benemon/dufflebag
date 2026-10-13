@@ -296,6 +296,19 @@ access simply never sees an update. GitHub checks share the 60 calls an hour
 that imports use: dufflebag makes at most one every two minutes, and none for
 an hour after GitHub refuses one.
 
+## Downloads
+
+One download is one plugin zip served completely to `packer init`. Version
+indexes, SHA256SUMS files, signatures, manifests, interrupted transfers and
+missing files do not count. Counts are kept per plugin version and platform.
+
+The Downloads card on the plugin page shows totals for all versions or one
+version. Its rolling windows cover the last 7, 30 and 365 UTC calendar days,
+ending today, plus all time. Removed and revoked versions keep their counts and
+remain available in the version selector with their state.
+
+![A plugin detail page showing the Downloads card and rolling windows](/screenshots/plugin-detail.png)
+
 ## Platforms
 
 The SHA256SUMS file may list platforms whose zips you did not upload. dufflebag
@@ -335,7 +348,9 @@ plugin name. Run `packer init` as usual.
 Every read Packer makes is recorded in the audit log, with route
 `root.plugins`, operation `plugin.read` and the requested file as the target.
 When audit is enabled and a record cannot be written, the read is refused, so
-an audit outage stops `packer init`. See [audit](../administration/audit.md).
+an audit outage stops `packer init`. Reading a plugin's download counts is
+the platform operation `plugin.downloads.read`, with the plugin as its
+target. See [audit](../administration/audit.md).
 
 ## Where to go next
 

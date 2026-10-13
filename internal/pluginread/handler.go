@@ -13,11 +13,13 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/audit"
 	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	store "github.com/benemon/dufflebag/internal/store/postgres"
+	"github.com/google/uuid"
 )
 
 // Prefix is the root path the read plane owns.
@@ -28,6 +30,7 @@ type Repository interface {
 	ServedPluginVersions(ctx context.Context, organization, name string) ([]string, error)
 	ServedPluginFile(ctx context.Context, organization, name, version string, kind store.PluginFileKind, filename string) (store.ServedPluginFile, error)
 	OpenPluginObject(ctx context.Context, key string) (io.ReadCloser, error)
+	CountPluginDownload(ctx context.Context, tenant store.OrganizationTenant, pluginID uuid.UUID, version, platform string, day time.Time) error
 }
 
 // NewHandler serves the read plane. Every path it does not serve answers the
@@ -45,6 +48,7 @@ func NewHandler(repository Repository, logger *slog.Logger) http.Handler {
 		handle.Enrich(audit.Enrichment{TargetID: strings.TrimPrefix(r.URL.Path, Prefix)})
 
 		var served store.ServedPluginFile
+		var kind store.PluginFileKind
 		var err error
 		switch {
 		case len(parts) == 3 && parts[2] == "index.json":
@@ -52,7 +56,8 @@ func NewHandler(repository Repository, logger *slog.Logger) http.Handler {
 			return
 		case len(parts) == 4:
 			version, file := parts[2], parts[3]
-			kind, ok := fileKind(name, version, file)
+			var ok bool
+			kind, ok = fileKind(name, version, file)
 			if !ok {
 				notFound(w, handle)
 				return
@@ -70,7 +75,19 @@ func NewHandler(repository Repository, logger *slog.Logger) http.Handler {
 			unavailable(r.Context(), w, logger, handle, err)
 			return
 		}
-		serveFile(w, r.Context(), repository, logger, handle, served, contentType(parts[3]))
+		if !serveFile(w, r.Context(), repository, logger, handle, served, contentType(parts[3])) || kind != store.ServedZip {
+			return
+		}
+		zip, ok := plugin.ParseZipName(name, parts[2], parts[3])
+		if !ok {
+			logger.Warn("served plugin zip has an invalid name", "filename", parts[3], "correlation_id", audit.CorrelationID(r.Context()))
+			return
+		}
+		day := time.Now().UTC().Truncate(24 * time.Hour)
+		platform := zip.Platform.OS + "_" + zip.Platform.Arch
+		if err := repository.CountPluginDownload(r.Context(), store.OrganizationTenant{OrganizationID: served.OrganizationID}, served.PluginID, parts[2], platform, day); err != nil {
+			logger.Warn("count plugin download", "error", err, "correlation_id", audit.CorrelationID(r.Context()))
+		}
 	})
 }
 
@@ -133,27 +150,29 @@ func serveIndex(
 func serveFile(
 	w http.ResponseWriter, ctx context.Context, repository Repository, logger *slog.Logger,
 	handle *audit.Handle, served store.ServedPluginFile, kind string,
-) {
+) bool {
 	w.Header().Set("Content-Type", kind)
 	if served.Content != nil {
 		handle.Enrich(audit.Enrichment{Reason: "served"})
 		w.Header().Set("Content-Length", strconv.Itoa(len(served.Content)))
 		_, _ = w.Write(served.Content)
-		return
+		return true
 	}
 	body, err := repository.OpenPluginObject(ctx, served.ObjectKey)
 	if err != nil {
 		unavailable(ctx, w, logger, handle, err)
-		return
+		return false
 	}
 	defer func() { _ = body.Close() }()
 	w.Header().Set("Content-Length", strconv.FormatInt(served.Size, 10))
-	if _, err := io.Copy(w, body); err != nil {
+	written, err := io.Copy(w, body)
+	if err != nil || written != served.Size {
 		handle.Enrich(audit.Enrichment{Reason: "stream_interrupted"})
-		logger.Warn("plugin download interrupted", "object_key", served.ObjectKey, "error", err)
-		return
+		logger.Warn("plugin download interrupted", "object_key", served.ObjectKey, "written", written, "expected", served.Size, "error", err)
+		return false
 	}
 	handle.Enrich(audit.Enrichment{Reason: "served"})
+	return true
 }
 
 func notFound(w http.ResponseWriter, handle *audit.Handle) {

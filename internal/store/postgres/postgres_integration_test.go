@@ -120,7 +120,7 @@ func openTestDatabase(t *testing.T) (*sql.DB, string, func()) {
 	// catch, and the only hook that proves isolation comes from RLS rather
 	// than from application predicates.
 	rlsTables := []string{
-		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
+		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports", "plugin_downloads", "buckets", "versions", "builds", "artifacts", "channels", "channel_assignments", "pins", "bagdrop_configs", "bagdrop_associations",
 		"webhooks", "webhook_outbox", "webhook_deliveries",
 		"organization_webhooks", "organization_webhook_outbox", "organization_webhook_deliveries",
 		"sboms", "sbom_packages", "scan_run_counters", "scan_runs", "scan_findings", "scan_transcripts",
@@ -234,7 +234,7 @@ func TestTenantIsolation(t *testing.T) {
 	seedPluginRows(t, ctx, db, orgA)
 	seedPluginRows(t, ctx, db, orgB)
 	for _, table := range []string{
-		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports",
+		"plugin_registries", "plugins", "plugin_versions", "plugin_files", "plugin_imports", "plugin_downloads",
 		"organization_webhooks", "organization_webhook_outbox", "organization_webhook_deliveries",
 	} {
 		t.Run(table, func(t *testing.T) {
@@ -854,6 +854,8 @@ func seedPluginRows(t *testing.T, ctx context.Context, db *sql.DB, organization 
 			VALUES ($1, $2, 'f.zip', 'linux', 'amd64', 'd', 1, 'k')`, []any{organization, versionID}},
 		{`INSERT INTO plugin_imports (id, organization_id, source_kind, product, versions, platforms)
 			VALUES ($1, $2, 'releases-hashicorp', 'packer-plugin-probe', '{1.0.0}', '{linux_amd64}')`, []any{uuid.NewString(), organization}},
+		{`INSERT INTO plugin_downloads (organization_id, plugin_id, version, platform, day, count)
+			VALUES ($1, $2, '1.0.0', 'linux_amd64', current_date, 1)`, []any{organization, pluginID}},
 		{`INSERT INTO organization_webhooks (organization_id, id, name, url, created_at, updated_at)
 			VALUES ($1, $2, 'w', 'https://example.com', now(), now())`, []any{organization, webhookID}},
 		{`INSERT INTO organization_webhook_outbox (organization_id, event_id, occurred_at, operation, target, actor, payload, available_at)

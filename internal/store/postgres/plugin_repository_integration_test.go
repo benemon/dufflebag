@@ -11,6 +11,7 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
@@ -99,6 +100,81 @@ func TestPluginVersionPublishListAndDisable(t *testing.T) {
 	plugins, err = repository.ListPlugins(ctx, tenant)
 	if err != nil || len(plugins) != 0 {
 		t.Fatalf("re-enabled registry plugins = %+v, %v; want empty", plugins, err)
+	}
+}
+
+func TestPluginDownloadsUseRollingUTCWindowsAndKeepRemovedVersions(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	_, objects := openTestObjectStore(t)
+	ctx := context.Background()
+	repository := store.NewRepositoryWithObjectStore(db, objects)
+	tenant := store.ParseOrganizationTenant(orgA)
+	if _, err := repository.EnablePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	for _, version := range []string{"1.8.0", "1.9.0", "1.10.0"} {
+		if err := repository.PublishPluginVersion(ctx, tenant, pluginVersion(version, store.PluginSource{Kind: "upload"})); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := repository.ExposePluginRegistry(ctx, tenant); err != nil {
+		t.Fatal(err)
+	}
+	served, err := repository.ServedPluginFile(ctx, "organization-a", "probe", "1.10.0", store.ServedZip,
+		"packer-plugin-probe_v1.10.0_x5.0_linux_amd64.zip")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pluginID := served.PluginID
+	today := time.Date(2026, 10, 13, 23, 45, 0, 0, time.FixedZone("west", -7*60*60))
+	utcToday := today.UTC().Truncate(24 * time.Hour)
+	for _, offset := range []int{0, -6, -7, -29, -30, -364, -365} {
+		if err := repository.CountPluginDownload(ctx, tenant, pluginID, "1.10.0", "linux_amd64", utcToday.AddDate(0, 0, offset)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := repository.CountPluginDownload(ctx, tenant, pluginID, "1.10.0", "darwin_arm64", utcToday); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CountPluginDownload(ctx, tenant, pluginID, "1.9.0", "linux_amd64", utcToday); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.CountPluginDownload(ctx, tenant, pluginID, "1.8.0", "linux_amd64", utcToday); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.SetPluginVersionRevoked(ctx, tenant, "probe", "1.9.0", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := repository.DeletePluginVersion(ctx, tenant, "probe", "1.8.0"); err != nil {
+		t.Fatal(err)
+	}
+
+	downloads, err := repository.PluginDownloads(ctx, tenant, "probe", today)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !downloads.Today.Equal(utcToday) {
+		t.Fatalf("today = %s, want %s", downloads.Today, utcToday)
+	}
+	if len(downloads.Versions) != 3 || downloads.Versions[0].Version != "1.10.0" || downloads.Versions[1].Version != "1.9.0" || downloads.Versions[2].Version != "1.8.0" {
+		t.Fatalf("versions = %+v, want semantic-version order", downloads.Versions)
+	}
+	newest := downloads.Versions[0]
+	if newest.Last7Days != 3 {
+		t.Fatalf("1.10.0 last 7 days = %d, want 3", newest.Last7Days)
+	}
+	if newest.Last30Days != 5 || newest.Last365Days != 7 || newest.AllTime != 8 {
+		t.Fatalf("1.10.0 windows = %+v, want 3/5/7/8", newest.PluginDownloadWindows)
+	}
+	if newest.State != "available" || downloads.Versions[1].State != "revoked" || downloads.Versions[2].State != "removed" {
+		t.Fatalf("version states = %+v, want available, revoked, removed", downloads.Versions)
+	}
+	if downloads.AllVersions != (store.PluginDownloadWindows{Last7Days: 5, Last30Days: 7, Last365Days: 9, AllTime: 10}) {
+		t.Fatalf("all-version windows = %+v, want 5/7/9/10", downloads.AllVersions)
+	}
+	if _, err := repository.PluginDownloads(ctx, tenant, "absent", today); !errors.Is(err, registry.ErrNotFound) {
+		t.Fatalf("unknown plugin = %v, want ErrNotFound", err)
 	}
 }
 

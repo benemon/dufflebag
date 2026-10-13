@@ -643,6 +643,27 @@ func (e PluginSourceKind) Valid() bool {
 	}
 }
 
+// Defines values for PluginVersionDownloadsState.
+const (
+	PluginVersionDownloadAvailable PluginVersionDownloadsState = "available"
+	PluginVersionDownloadRemoved   PluginVersionDownloadsState = "removed"
+	PluginVersionDownloadRevoked   PluginVersionDownloadsState = "revoked"
+)
+
+// Valid indicates whether the value is a known member of the PluginVersionDownloadsState enum.
+func (e PluginVersionDownloadsState) Valid() bool {
+	switch e {
+	case PluginVersionDownloadAvailable:
+		return true
+	case PluginVersionDownloadRemoved:
+		return true
+	case PluginVersionDownloadRevoked:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for Role.
 const (
 	Builder    Role = "builder"
@@ -1536,6 +1557,30 @@ type PluginChange struct {
 // PluginChangeAction defines model for PluginChange.Action.
 type PluginChangeAction string
 
+// PluginDownloadWindows defines model for PluginDownloadWindows.
+type PluginDownloadWindows struct {
+	// AllTime Downloads over all UTC calendar days.
+	AllTime int64 `json:"all_time"`
+
+	// Last30Days Downloads in the 30 UTC calendar days ending today, where day is at least today minus 29 days.
+	Last30Days int64 `json:"last_30_days"`
+
+	// Last365Days Downloads in the 365 UTC calendar days ending today, where day is at least today minus 364 days.
+	Last365Days int64 `json:"last_365_days"`
+
+	// Last7Days Downloads in the 7 UTC calendar days ending today, where day is at least today minus 6 days.
+	Last7Days int64 `json:"last_7_days"`
+}
+
+// PluginDownloads defines model for PluginDownloads.
+type PluginDownloads struct {
+	AllVersions PluginDownloadWindows `json:"all_versions"`
+
+	// Today The UTC day the windows end on.
+	Today    openapi_types.Date       `json:"today"`
+	Versions []PluginVersionDownloads `json:"versions"`
+}
+
 // PluginImport defines model for PluginImport.
 type PluginImport struct {
 	// BatchIndex This job's position in its batch
@@ -1734,6 +1779,28 @@ type PluginVersion struct {
 	StoredPlatforms []PluginPlatform `json:"stored_platforms"`
 	Version         string           `json:"version"`
 }
+
+// PluginVersionDownloads defines model for PluginVersionDownloads.
+type PluginVersionDownloads struct {
+	// AllTime Downloads over all UTC calendar days.
+	AllTime int64 `json:"all_time"`
+
+	// Last30Days Downloads in the 30 UTC calendar days ending today, where day is at least today minus 29 days.
+	Last30Days int64 `json:"last_30_days"`
+
+	// Last365Days Downloads in the 365 UTC calendar days ending today, where day is at least today minus 364 days.
+	Last365Days int64 `json:"last_365_days"`
+
+	// Last7Days Downloads in the 7 UTC calendar days ending today, where day is at least today minus 6 days.
+	Last7Days int64 `json:"last_7_days"`
+
+	// State removed when the version is no longer held but its counts are kept.
+	State   PluginVersionDownloadsState `json:"state"`
+	Version string                      `json:"version"`
+}
+
+// PluginVersionDownloadsState removed when the version is no longer held but its counts are kept.
+type PluginVersionDownloadsState string
 
 // PluginVersions defines model for PluginVersions.
 type PluginVersions struct {
@@ -2674,6 +2741,11 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 	ListPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginDownloads Get a plugin's download counts
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads (the `GetPluginDownloads` operationId).
+	GetPluginDownloads(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// SyncPluginWithBody Apply one plugin's changes as one import job
 	//
@@ -4086,6 +4158,21 @@ func (c *Client) GetPluginImport(ctx context.Context, organizationId Organizatio
 // Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 func (c *Client) ListPlugins(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewListPluginsRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginDownloads Get a plugin's download counts
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads (the `GetPluginDownloads` operationId).
+func (c *Client) GetPluginDownloads(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginDownloadsRequest(c.Server, organizationId, pluginName)
 	if err != nil {
 		return nil, err
 	}
@@ -6661,6 +6748,47 @@ func NewListPluginsRequest(server string, organizationId OrganizationId) (*http.
 	}
 
 	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginDownloadsRequest constructs an http.Request for the GetPluginDownloads method
+func NewGetPluginDownloadsRequest(server string, organizationId OrganizationId, pluginName PluginName) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	var pathParam1 string
+
+	pathParam1, err = runtime.StyleParamWithOptions("simple", false, "pluginName", pluginName, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: ""})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/plugins/%s/downloads", pathParam0, pathParam1)
 	if operationPath[0] == '/' {
 		operationPath = "." + operationPath
 	}
@@ -9614,6 +9742,13 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins (the `ListPlugins` operationId).
 	ListPluginsWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ListPluginsResponse, error)
 
+	// GetPluginDownloadsWithResponse Get a plugin's download counts
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads (the `GetPluginDownloads` operationId).
+	GetPluginDownloadsWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*GetPluginDownloadsResponse, error)
+
 	// SyncPluginWithBodyWithResponse Apply one plugin's changes as one import job
 	//
 	// Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
@@ -12186,6 +12321,68 @@ func (r ListPluginsResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ListPluginsResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginDownloadsResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginDownloads
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginDownloadsResponse) GetJSON200() *PluginDownloads {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginDownloadsResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginDownloadsResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetPluginDownloadsResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginDownloadsResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginDownloadsResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginDownloadsResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginDownloadsResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16469,6 +16666,19 @@ func (c *ClientWithResponses) ListPluginsWithResponse(ctx context.Context, organ
 	return ParseListPluginsResponse(rsp)
 }
 
+// GetPluginDownloadsWithResponse Get a plugin's download counts
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads (the `GetPluginDownloads` operationId).
+func (c *ClientWithResponses) GetPluginDownloadsWithResponse(ctx context.Context, organizationId OrganizationId, pluginName PluginName, reqEditors ...RequestEditorFn) (*GetPluginDownloadsResponse, error) {
+	rsp, err := c.GetPluginDownloads(ctx, organizationId, pluginName, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginDownloadsResponse(rsp)
+}
+
 // SyncPluginWithBodyWithResponse Apply one plugin's changes as one import job
 //
 // Changes apply in order (ADR-0027 A7). `add` adds platforms to a mirrored version, admitting a zip
@@ -19106,6 +19316,53 @@ func ParseListPluginsResponse(rsp *http.Response) (*ListPluginsResponse, error) 
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginDownloadsResponse parses an HTTP response from a GetPluginDownloadsWithResponse call
+func ParseGetPluginDownloadsResponse(rsp *http.Response) (*GetPluginDownloadsResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginDownloadsResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginDownloads
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -22120,6 +22377,9 @@ type ServerInterface interface {
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// GetPluginDownloads Get a plugin's download counts
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads)
+	GetPluginDownloads(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
 	// SyncPlugin Apply one plugin's changes as one import job
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
 	SyncPlugin(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName)
@@ -22954,6 +23214,41 @@ func (siw *ServerInterfaceWrapper) ListPlugins(w http.ResponseWriter, r *http.Re
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ListPlugins(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginDownloads operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginDownloads(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	// ------------- Path parameter "pluginName" -------------
+	var pluginName PluginName
+
+	err = runtime.BindStyledParameterWithOptions("simple", "pluginName", r.PathValue("pluginName"), &pluginName, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "pluginName", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginDownloads(w, r, organizationId, pluginName)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -25118,6 +25413,7 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/imports/{importId}", wrapper.GetPluginImport)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins", wrapper.ListPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions", wrapper.ListPluginVersions)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads", wrapper.GetPluginDownloads)
 	m.HandleFunc(http.MethodDelete+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.DeletePluginVersion)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}", wrapper.PublishPluginVersion)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}/revoke", wrapper.RevokePluginVersion)
@@ -26895,6 +27191,71 @@ func (response ListPlugins404JSONResponse) VisitListPluginsResponse(w http.Respo
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDownloadsRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	PluginName     PluginName     `json:"pluginName"`
+}
+
+type GetPluginDownloadsResponseObject interface {
+	VisitGetPluginDownloadsResponse(w http.ResponseWriter) error
+}
+
+type GetPluginDownloads200JSONResponse PluginDownloads
+
+func (response GetPluginDownloads200JSONResponse) VisitGetPluginDownloadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDownloads401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginDownloads401JSONResponse) VisitGetPluginDownloadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDownloads404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response GetPluginDownloads404JSONResponse) VisitGetPluginDownloadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginDownloads409JSONResponse Error
+
+func (response GetPluginDownloads409JSONResponse) VisitGetPluginDownloadsResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -31125,6 +31486,9 @@ type StrictServerInterface interface {
 	// ListPlugins List the organization's plugins
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins)
 	ListPlugins(ctx context.Context, request ListPluginsRequestObject) (ListPluginsResponseObject, error)
+	// GetPluginDownloads Get a plugin's download counts
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads)
+	GetPluginDownloads(ctx context.Context, request GetPluginDownloadsRequestObject) (GetPluginDownloadsResponseObject, error)
 	// SyncPlugin Apply one plugin's changes as one import job
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/sync)
 	SyncPlugin(ctx context.Context, request SyncPluginRequestObject) (SyncPluginResponseObject, error)
@@ -32013,6 +32377,33 @@ func (sh *strictHandler) ListPlugins(w http.ResponseWriter, r *http.Request, org
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ListPluginsResponseObject); ok {
 		if err := validResponse.VisitListPluginsResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginDownloads operation middleware
+func (sh *strictHandler) GetPluginDownloads(w http.ResponseWriter, r *http.Request, organizationId OrganizationId, pluginName PluginName) {
+	var request GetPluginDownloadsRequestObject
+
+	request.OrganizationId = organizationId
+	request.PluginName = pluginName
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginDownloads(ctx, request.(GetPluginDownloadsRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginDownloads")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginDownloadsResponseObject); ok {
+		if err := validResponse.VisitGetPluginDownloadsResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

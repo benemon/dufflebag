@@ -23,12 +23,14 @@ let TypedConfirmModalView
 let disablePluginRegistry
 let enablePluginRegistry
 let exposePluginRegistry
+let getPluginDownloads
 let getPluginRegistry
 let pluginRegistryErrorMessage
 let unexposePluginRegistry
 let planPluginUploads
 let templateStanza
 let PluginDetailView
+let PluginDownloadsCardView
 let JobNotice
 let PluginJobsFacet
 let PluginChecksFacet
@@ -89,11 +91,11 @@ before(async () => {
     await vite.ssrLoadModule('/src/components/TypedConfirmModal.tsx'))
   ;({ PluginErrorCard } = await vite.ssrLoadModule('/src/components/PluginLoadState.tsx'))
   ;({
-    disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginRegistry,
+    disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginDownloads, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
     deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport, jobWhat, activeJobFor, listPluginImports,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
-  ;({ PluginDetailView, versionConfirmation, JobNotice } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
+  ;({ PluginDetailView, PluginDownloadsCardView, versionConfirmation, JobNotice } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
@@ -383,6 +385,63 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.match(html, /1 of 2</, 'coverage counts stored platforms against published ones')
   assert.match(html, /Upload version/)
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
+})
+
+test('the downloads card shows all-version and selected-version windows, including removed versions', () => {
+  // Fixture shape: spec/platform/openapi.yaml PluginDownloads and its two referenced schemas.
+  const downloads = {
+    today: '2026-10-13',
+    all_versions: { last_7_days: 1234, last_30_days: 2345, last_365_days: 3456, all_time: 4567 },
+    versions: [
+      { version: '1.10.0', state: 'available', last_7_days: 101, last_30_days: 202, last_365_days: 303, all_time: 404 },
+      { version: '1.9.0', state: 'revoked', last_7_days: 11, last_30_days: 22, last_365_days: 33, all_time: 44 },
+      { version: '1.8.0', state: 'removed', last_7_days: 1, last_30_days: 2, last_365_days: 3, all_time: 4 },
+    ],
+  }
+  const view = (selectedVersion) => renderToStaticMarkup(React.createElement(PluginDownloadsCardView, {
+    downloads, selectedVersion, onSelect: () => {},
+  }))
+  const all = view(null)
+  assert.match(all, />All versions</)
+  assert.match(all, /Last 7 days[\s\S]*?1,234[\s\S]*?Last 30 days[\s\S]*?2,345[\s\S]*?Last 365 days[\s\S]*?3,456[\s\S]*?All time[\s\S]*?4,567/)
+
+  const selected = view('1.10.0')
+  assert.match(selected, />1\.10\.0</)
+  assert.match(selected, /Last 7 days[\s\S]*?101[\s\S]*?Last 30 days[\s\S]*?202[\s\S]*?Last 365 days[\s\S]*?303[\s\S]*?All time[\s\S]*?404/)
+  const removed = view('1.8.0')
+  assert.match(removed, />1\.8\.0 \(removed\)</)
+  assert.match(removed, /Last 7 days[\s\S]*?>1<[\s\S]*?Last 30 days[\s\S]*?>2<[\s\S]*?Last 365 days[\s\S]*?>3<[\s\S]*?All time[\s\S]*?>4</)
+})
+
+test('the plugin detail left column stacks Template stanza before Update check', () => {
+  const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
+    name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'reader',
+    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+    busy: false, actionFailure: null, upstream: [], summary: null, onOlderUpstream: () => {}, hasOlderUpstream: false,
+    onSync: () => {}, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {}, onBackToRegistry: () => {}, onBackToPlugins: () => {}, onToggleUpdates: () => {},
+    downloads: { today: '2026-10-13', all_versions: { last_7_days: 0, last_30_days: 0, last_365_days: 0, all_time: 0 }, versions: [] },
+    detail: { name: 'git', source: { kind: 'upload' }, versions: [{
+      version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
+    }] },
+  }))
+  assert.ok(html.indexOf('Template stanza') < html.indexOf('Update check'))
+  assert.ok(html.indexOf('Update check') < html.indexOf('Downloads'))
+  assert.match(html, /Last 7 days[\s\S]*?>0</)
+})
+
+test('getPluginDownloads reads the per-plugin downloads path', async () => {
+  const originalFetch = globalThis.fetch
+  let sent
+  globalThis.fetch = async (path) => {
+    sent = path
+    return new Response(JSON.stringify({ today: '2026-10-13', all_versions: {}, versions: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  }
+  try {
+    await getPluginDownloads('token', 'organization id', 'git plugin')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+  assert.equal(sent, '/api/v1/organizations/organization%20id/plugin-registry/plugins/git%20plugin/downloads')
 })
 
 const uploadView = (props) => renderToStaticMarkup(React.createElement(PluginUploadView, {

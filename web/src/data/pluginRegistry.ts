@@ -56,6 +56,24 @@ export type PluginVersion = {
 
 export type PluginVersions = { name: string; source: PluginSource; versions: PluginVersion[] }
 
+export type PluginDownloadWindows = {
+  last_7_days: number
+  last_30_days: number
+  last_365_days: number
+  all_time: number
+}
+
+export type PluginVersionDownloads = PluginDownloadWindows & {
+  version: string
+  state: 'available' | 'revoked' | 'removed'
+}
+
+export type PluginDownloads = {
+  today: string
+  all_versions: PluginDownloadWindows
+  versions: PluginVersionDownloads[]
+}
+
 export type TemplateStanza = { source: string; version: string; hcl: string }
 
 export type PublishedPluginVersion = { version: PluginVersion; stanza: TemplateStanza }
@@ -67,6 +85,10 @@ export async function listPlugins(token: string, organizationID: string): Promis
 
 export function listPluginVersions(token: string, organizationID: string, name: string): Promise<PluginVersions> {
   return platformGet<PluginVersions>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/versions`))
+}
+
+export function getPluginDownloads(token: string, organizationID: string, name: string): Promise<PluginDownloads> {
+  return platformGet<PluginDownloads>(token, path(organizationID, `plugins/${encodeURIComponent(name)}/downloads`))
 }
 
 export function publishPluginVersion(
