@@ -242,6 +242,28 @@ type PluginBundle struct {
 	VersionCount   sql.NullInt32  `json:"version_count"`
 }
 
+type PluginBundleImport struct {
+	OrganizationID     uuid.UUID       `json:"organization_id"`
+	State              string          `json:"state"`
+	RequestedBy        string          `json:"requested_by"`
+	ObjectKey          string          `json:"object_key"`
+	Filename           string          `json:"filename"`
+	Size               int64           `json:"size"`
+	Sha256             string          `json:"sha256"`
+	CreatedAt          time.Time       `json:"created_at"`
+	ClaimedAt          sql.NullTime    `json:"claimed_at"`
+	StartedAt          sql.NullTime    `json:"started_at"`
+	FinishedAt         sql.NullTime    `json:"finished_at"`
+	Error              string          `json:"error"`
+	BundleHost         string          `json:"bundle_host"`
+	BundleOrganization string          `json:"bundle_organization"`
+	BundleExportedAt   sql.NullTime    `json:"bundle_exported_at"`
+	BundleVersion      string          `json:"bundle_version"`
+	PluginCount        int32           `json:"plugin_count"`
+	VersionCount       int32           `json:"version_count"`
+	Outcomes           json.RawMessage `json:"outcomes"`
+}
+
 type PluginDownload struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	PluginID       uuid.UUID `json:"plugin_id"`

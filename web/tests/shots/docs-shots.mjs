@@ -1015,6 +1015,18 @@ async function captureSeededScreens(seeded) {
   await waitForText('dufflebag-plugins-')
   await page.$eval('[aria-label="Plugin bundle"]', (card) => card.scrollIntoView({ block: 'start' }))
   await capture('plugin-registry-bundle.png')
+  // The same bundle imported back: every version is already held, which is the honest result.
+  const exported = await api(seeded.rootToken, 'GET', `/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle`)
+  const archive = await (await fetch(`${base}/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle/download`, { headers: { Authorization: `Bearer ${seeded.rootToken}` } })).arrayBuffer()
+  const importForm = new FormData()
+  importForm.append('bundle', new Blob([archive], { type: 'application/gzip' }), exported.bundle.filename)
+  await fetch(`${base}/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle/import`, { method: 'PUT', headers: { Authorization: `Bearer ${seeded.rootToken}` }, body: importForm })
+  await until('the bundle import to finish', async () =>
+    ['succeeded', 'partially_succeeded', 'failed'].includes((await api(seeded.rootToken, 'GET', `/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle/import`)).state), 60000)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitForText('already held')
+  await page.$$eval('h3', (headings) => headings.find((heading) => heading.textContent === 'Import')?.scrollIntoView({ block: 'start' }))
+  await capture('plugin-registry-bundle-import.png')
 
   // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })

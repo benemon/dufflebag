@@ -66,6 +66,39 @@ func (q *Queries) ClaimPluginBundle(ctx context.Context, arg ClaimPluginBundlePa
 	return i, err
 }
 
+const claimPluginBundleImport = `-- name: ClaimPluginBundleImport :one
+UPDATE plugin_bundle_imports
+SET state = 'running', claimed_at = now(), started_at = COALESCE(started_at, now())
+WHERE organization_id = (
+    SELECT candidate.organization_id
+    FROM plugin_bundle_imports AS candidate
+    WHERE candidate.organization_id = $1
+      AND (candidate.state = 'queued'
+           OR (candidate.state = 'running'
+               AND candidate.claimed_at < now() - make_interval(secs => $2::float8)))
+    FOR UPDATE SKIP LOCKED LIMIT 1
+)
+RETURNING object_key, filename, sha256
+`
+
+type ClaimPluginBundleImportParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	StaleSeconds   float64   `json:"stale_seconds"`
+}
+
+type ClaimPluginBundleImportRow struct {
+	ObjectKey string `json:"object_key"`
+	Filename  string `json:"filename"`
+	Sha256    string `json:"sha256"`
+}
+
+func (q *Queries) ClaimPluginBundleImport(ctx context.Context, arg ClaimPluginBundleImportParams) (ClaimPluginBundleImportRow, error) {
+	row := q.db.QueryRowContext(ctx, claimPluginBundleImport, arg.OrganizationID, arg.StaleSeconds)
+	var i ClaimPluginBundleImportRow
+	err := row.Scan(&i.ObjectKey, &i.Filename, &i.Sha256)
+	return i, err
+}
+
 const claimPluginImport = `-- name: ClaimPluginImport :one
 SELECT id, source_kind, product, versions, platforms, changes
 FROM plugin_imports
@@ -1650,6 +1683,58 @@ func (q *Queries) GetPluginBundle(ctx context.Context, organizationID uuid.UUID)
 	return i, err
 }
 
+const getPluginBundleImport = `-- name: GetPluginBundleImport :one
+SELECT state, requested_by, object_key, filename, size, sha256, created_at, started_at, finished_at, error,
+       bundle_host, bundle_organization, bundle_exported_at, bundle_version, plugin_count, version_count, outcomes
+FROM plugin_bundle_imports
+WHERE organization_id = $1
+`
+
+type GetPluginBundleImportRow struct {
+	State              string          `json:"state"`
+	RequestedBy        string          `json:"requested_by"`
+	ObjectKey          string          `json:"object_key"`
+	Filename           string          `json:"filename"`
+	Size               int64           `json:"size"`
+	Sha256             string          `json:"sha256"`
+	CreatedAt          time.Time       `json:"created_at"`
+	StartedAt          sql.NullTime    `json:"started_at"`
+	FinishedAt         sql.NullTime    `json:"finished_at"`
+	Error              string          `json:"error"`
+	BundleHost         string          `json:"bundle_host"`
+	BundleOrganization string          `json:"bundle_organization"`
+	BundleExportedAt   sql.NullTime    `json:"bundle_exported_at"`
+	BundleVersion      string          `json:"bundle_version"`
+	PluginCount        int32           `json:"plugin_count"`
+	VersionCount       int32           `json:"version_count"`
+	Outcomes           json.RawMessage `json:"outcomes"`
+}
+
+func (q *Queries) GetPluginBundleImport(ctx context.Context, organizationID uuid.UUID) (GetPluginBundleImportRow, error) {
+	row := q.db.QueryRowContext(ctx, getPluginBundleImport, organizationID)
+	var i GetPluginBundleImportRow
+	err := row.Scan(
+		&i.State,
+		&i.RequestedBy,
+		&i.ObjectKey,
+		&i.Filename,
+		&i.Size,
+		&i.Sha256,
+		&i.CreatedAt,
+		&i.StartedAt,
+		&i.FinishedAt,
+		&i.Error,
+		&i.BundleHost,
+		&i.BundleOrganization,
+		&i.BundleExportedAt,
+		&i.BundleVersion,
+		&i.PluginCount,
+		&i.VersionCount,
+		&i.Outcomes,
+	)
+	return i, err
+}
+
 const getPluginImport = `-- name: GetPluginImport :one
 SELECT job.id, job.source_kind, job.product, job.plugin, job.versions, job.platforms, job.changes, job.state, job.outcomes,
        job.created_at, job.started_at, job.finished_at, job.created_by, job.origin, job.batch_index, job.batch_size, job.retry_of,
@@ -1828,6 +1913,26 @@ func (q *Queries) GetPluginVersionRevoked(ctx context.Context, arg GetPluginVers
 	var revoked bool
 	err := row.Scan(&revoked)
 	return revoked, err
+}
+
+const getPluginVersionSumsKey = `-- name: GetPluginVersionSumsKey :one
+SELECT plugin_versions.sums_key
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
+`
+
+type GetPluginVersionSumsKeyParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	Name           string    `json:"name"`
+	Version        string    `json:"version"`
+}
+
+func (q *Queries) GetPluginVersionSumsKey(ctx context.Context, arg GetPluginVersionSumsKeyParams) (string, error) {
+	row := q.db.QueryRowContext(ctx, getPluginVersionSumsKey, arg.OrganizationID, arg.Name, arg.Version)
+	var sums_key string
+	err := row.Scan(&sums_key)
+	return sums_key, err
 }
 
 const getPrincipalByClientID = `-- name: GetPrincipalByClientID :one
@@ -4245,6 +4350,44 @@ func (q *Queries) QueuePluginBundle(ctx context.Context, arg QueuePluginBundlePa
 	return result.RowsAffected()
 }
 
+const queuePluginBundleImport = `-- name: QueuePluginBundleImport :execrows
+INSERT INTO plugin_bundle_imports (organization_id, state, requested_by, object_key, filename, size, sha256)
+SELECT plugin_registries.organization_id, 'queued', $1, $2, $3, $4, $5
+FROM plugin_registries
+WHERE plugin_registries.organization_id = $6
+ON CONFLICT (organization_id) DO UPDATE
+SET state = 'queued', requested_by = EXCLUDED.requested_by, object_key = EXCLUDED.object_key,
+    filename = EXCLUDED.filename, size = EXCLUDED.size, sha256 = EXCLUDED.sha256,
+    created_at = now(), claimed_at = NULL, started_at = NULL, finished_at = NULL, error = '',
+    bundle_host = '', bundle_organization = '', bundle_exported_at = NULL, bundle_version = '',
+    plugin_count = 0, version_count = 0, outcomes = '[]'
+WHERE plugin_bundle_imports.state NOT IN ('queued', 'running')
+`
+
+type QueuePluginBundleImportParams struct {
+	RequestedBy    string    `json:"requested_by"`
+	ObjectKey      string    `json:"object_key"`
+	Filename       string    `json:"filename"`
+	Size           int64     `json:"size"`
+	Sha256         string    `json:"sha256"`
+	OrganizationID uuid.UUID `json:"organization_id"`
+}
+
+func (q *Queries) QueuePluginBundleImport(ctx context.Context, arg QueuePluginBundleImportParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, queuePluginBundleImport,
+		arg.RequestedBy,
+		arg.ObjectKey,
+		arg.Filename,
+		arg.Size,
+		arg.Sha256,
+		arg.OrganizationID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const recordBagDropAssociationFailure = `-- name: RecordBagDropAssociationFailure :one
 UPDATE bagdrop_associations
 SET last_sync_error = $2,
@@ -4496,6 +4639,45 @@ func (q *Queries) RecordPluginBundle(ctx context.Context, arg RecordPluginBundle
 		arg.Filename,
 		arg.Size,
 		arg.Sha256,
+		arg.PluginCount,
+		arg.VersionCount,
+		arg.OrganizationID,
+	)
+	return err
+}
+
+const recordPluginBundleImport = `-- name: RecordPluginBundleImport :exec
+UPDATE plugin_bundle_imports
+SET state = $1, claimed_at = now(), error = $2, outcomes = $3,
+    bundle_host = $4, bundle_organization = $5,
+    bundle_exported_at = $6, bundle_version = $7,
+    plugin_count = $8, version_count = $9,
+    finished_at = CASE WHEN $1 IN ('succeeded', 'partially_succeeded', 'failed') THEN now() ELSE finished_at END
+WHERE organization_id = $10
+`
+
+type RecordPluginBundleImportParams struct {
+	State              string          `json:"state"`
+	Error              string          `json:"error"`
+	Outcomes           json.RawMessage `json:"outcomes"`
+	BundleHost         string          `json:"bundle_host"`
+	BundleOrganization string          `json:"bundle_organization"`
+	BundleExportedAt   sql.NullTime    `json:"bundle_exported_at"`
+	BundleVersion      string          `json:"bundle_version"`
+	PluginCount        int32           `json:"plugin_count"`
+	VersionCount       int32           `json:"version_count"`
+	OrganizationID     uuid.UUID       `json:"organization_id"`
+}
+
+func (q *Queries) RecordPluginBundleImport(ctx context.Context, arg RecordPluginBundleImportParams) error {
+	_, err := q.db.ExecContext(ctx, recordPluginBundleImport,
+		arg.State,
+		arg.Error,
+		arg.Outcomes,
+		arg.BundleHost,
+		arg.BundleOrganization,
+		arg.BundleExportedAt,
+		arg.BundleVersion,
 		arg.PluginCount,
 		arg.VersionCount,
 		arg.OrganizationID,

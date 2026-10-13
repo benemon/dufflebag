@@ -134,6 +134,12 @@ func BundleKey(organizationID, digest string) string {
 	return fmt.Sprintf("t/%s/b/%s", strings.ReplaceAll(organizationID, "-", ""), digest)
 }
 
+// BundleImportKey returns the key an uploaded bundle waits under until its
+// import job has read it.
+func BundleImportKey(organizationID, digest string) string {
+	return fmt.Sprintf("t/%s/bi/%s", strings.ReplaceAll(organizationID, "-", ""), digest)
+}
+
 // PutFile stores size bytes read from body. The SDK seeks body to sign the
 // payload and to retry, so it must be seekable rather than a stream.
 func (s *Store) PutFile(ctx context.Context, key string, body io.ReadSeeker, size int64) error {

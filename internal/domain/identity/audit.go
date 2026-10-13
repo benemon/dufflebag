@@ -57,6 +57,8 @@ const (
 	// maintainer's Prune now through the API.
 	AuditOperationPluginImportPrune         AuditOperation = "plugin.import.prune"
 	AuditOperationPluginRegistryBundleBuild AuditOperation = "plugin_registry.bundle.build"
+	// An uploaded bundle read into the registry by the bundle importer.
+	AuditOperationPluginRegistryBundleIngest AuditOperation = "plugin_registry.bundle.ingest"
 )
 
 // AuditScope identifies where an operation was attempted.

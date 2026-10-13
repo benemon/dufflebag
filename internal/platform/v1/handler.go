@@ -53,6 +53,10 @@ type PlatformRepository interface {
 	QueuePluginBundle(context.Context, store.OrganizationTenant, string, string) error
 	GetPluginBundle(context.Context, store.OrganizationTenant) (store.PluginBundle, error)
 	OpenPluginObject(context.Context, string) (io.ReadCloser, error)
+	PutPluginBundle(context.Context, store.OrganizationTenant, string, io.ReadSeeker, int64) error
+	DeletePluginBundleObject(context.Context, store.OrganizationTenant, string) error
+	QueuePluginBundleImport(context.Context, store.OrganizationTenant, string, store.PluginBundleUpload) error
+	GetPluginBundleImport(context.Context, store.OrganizationTenant) (store.PluginBundleImport, error)
 	SetPluginPrune(context.Context, store.OrganizationTenant, bool, int, string, *time.Time) error
 	PrunePluginImports(context.Context, store.OrganizationTenant, time.Time) (int, error)
 	RecordPluginPrune(context.Context, store.OrganizationTenant, int, string, *time.Time) error

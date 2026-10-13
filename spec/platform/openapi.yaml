@@ -857,6 +857,76 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/bundle/import:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+    put:
+      tags: [plugin-registry]
+      operationId: importPluginBundle
+      summary: Upload a plugin bundle and queue its import
+      description: |
+        Requires `maintainer`. The bundle is stored and read by a background job that publishes each
+        version as an upload: a version already held is skipped, one held with different checksums is
+        reported as a mismatch, a version whose manifest origin is releases.hashicorp.com is verified
+        against the HashiCorp key and refused when the signature is missing or does not verify, and a
+        plugin held by another source is refused (ADR-0029). The request is bounded by
+        DFBG_PLUGIN_MAX_UPLOAD_BYTES, shared with plugin uploads.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                bundle: { type: string, format: binary }
+              required: [bundle]
+      responses:
+        "202":
+          description: Stored and queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginBundleImport" }
+        "400":
+          description: The request carries no bundle.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: An import is already queued or running, or the registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "413":
+          description: The bundle exceeds the upload limit.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginBundleImport
+      summary: Get the current plugin bundle import
+      responses:
+        "200":
+          description: The current import and its outcomes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginBundleImport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404":
+          description: No import has been queued.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -3367,6 +3437,53 @@ components:
             version_count: { type: integer }
           required: [filename, size, sha256, exported_at, plugin_count, version_count]
       required: [state, requested_by, created_at, error]
+
+    PluginBundleImport:
+      type: object
+      properties:
+        state: { type: string, enum: [queued, running, succeeded, partially_succeeded, failed] }
+        requested_by: { type: string }
+        filename: { type: string, description: The uploaded bundle's filename. }
+        size: { type: integer, format: int64 }
+        sha256: { type: string, description: The digest of the bundle as received. }
+        filename_matches:
+          type: boolean
+          description: Whether the filename's twelve-character digest prefix matches sha256; absent when the filename carries none.
+        created_at: { type: string, format: date-time, description: When the import was queued. }
+        started_at: { type: string, format: date-time }
+        finished_at: { type: string, format: date-time }
+        error: { type: string, description: Why the bundle could not be read; empty when every version was considered. }
+        bundle:
+          type: object
+          description: What the bundle's manifest said about itself; absent until the manifest has been read.
+          properties:
+            host: { type: string }
+            organization: { type: string }
+            exported_at: { type: string, format: date-time }
+            dufflebag_version: { type: string }
+            plugin_count: { type: integer }
+            version_count: { type: integer }
+          required: [host, organization, exported_at, dufflebag_version, plugin_count, version_count]
+        outcomes:
+          type: array
+          description: One entry per bundled version, in manifest order, recorded as each is considered.
+          items: { $ref: "#/components/schemas/PluginBundleVersionOutcome" }
+      required: [state, requested_by, filename, size, sha256, created_at, error, outcomes]
+
+    PluginBundleVersionOutcome:
+      type: object
+      properties:
+        plugin: { type: string }
+        version: { type: string }
+        origin_kind: { type: string, description: The source the connected registry imported it from. }
+        origin_repository: { type: string }
+        outcome:
+          type: string
+          enum: [imported, skipped, mismatch, refused]
+          x-enum-varnames: [PluginBundleVersionImported, PluginBundleVersionSkipped, PluginBundleVersionMismatch, PluginBundleVersionRefused]
+          description: skipped when the version is already held; mismatch when it is held with different checksums.
+        error: { type: string }
+      required: [plugin, version, origin_kind, outcome]
 
     PluginImportConflict:
       type: object

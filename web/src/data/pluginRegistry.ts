@@ -526,6 +526,57 @@ export async function downloadPluginBundle(token: string, organizationID: string
   return response.arrayBuffer()
 }
 
+export type PluginBundleVersionOutcome = {
+  plugin: string
+  version: string
+  origin_kind: string
+  origin_repository?: string
+  outcome: 'imported' | 'skipped' | 'mismatch' | 'refused'
+  error?: string
+}
+
+export type PluginBundleImport = {
+  state: 'queued' | 'running' | 'succeeded' | 'partially_succeeded' | 'failed'
+  requested_by: string
+  filename: string
+  size: number
+  sha256: string
+  filename_matches?: boolean
+  created_at: string
+  started_at?: string
+  finished_at?: string
+  error: string
+  bundle?: { host: string; organization: string; exported_at: string; dufflebag_version: string; plugin_count: number; version_count: number }
+  outcomes: PluginBundleVersionOutcome[]
+}
+
+// The current import, or null before the first one is queued.
+export async function getPluginBundleImport(token: string, organizationID: string): Promise<PluginBundleImport | null> {
+  try {
+    return await platformGet<PluginBundleImport>(token, path(organizationID, 'bundle/import'))
+  } catch (error: unknown) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+export function importPluginBundle(token: string, organizationID: string, file: File): Promise<PluginBundleImport> {
+  const form = new FormData()
+  form.append('bundle', file, file.name)
+  return platformPutForm<PluginBundleImport>(token, path(organizationID, 'bundle/import'), form)
+}
+
+// What an import did, in one sentence: "2 versions imported, 1 skipped, 1 refused."
+export function bundleImportSummary(job: PluginBundleImport): string {
+  const counts = { imported: 0, skipped: 0, mismatch: 0, refused: 0 }
+  for (const outcome of job.outcomes) counts[outcome.outcome]++
+  const parts = [`${counts.imported} ${counts.imported === 1 ? 'version' : 'versions'} imported`]
+  if (counts.skipped) parts.push(`${counts.skipped} already held`)
+  if (counts.mismatch) parts.push(`${counts.mismatch} held with different checksums`)
+  if (counts.refused) parts.push(`${counts.refused} refused`)
+  return `${parts.join(', ')}.`
+}
+
 export function runPluginPrune(token: string, organizationID: string): Promise<PluginPrune> {
   return platformPost<PluginPrune>(token, path(organizationID, 'prune/run'))
 }

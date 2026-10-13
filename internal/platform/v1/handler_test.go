@@ -529,6 +529,7 @@ type fakeTenancyRepository struct {
 	bundle                *store.PluginBundle
 	bundleHost            string
 	bundleObjects         map[string]string
+	bundleImport          *store.PluginBundleImport
 	defaultPlatforms      []string
 	listProjectsErr       error
 	createProjectErr      error
@@ -768,6 +769,44 @@ func (r *fakeTenancyRepository) GetPluginBundle(context.Context, store.Organizat
 		return store.PluginBundle{}, store.ErrPluginBundleNotFound
 	}
 	return *r.bundle, nil
+}
+
+func (r *fakeTenancyRepository) PutPluginBundle(_ context.Context, _ store.OrganizationTenant, key string, body io.ReadSeeker, _ int64) error {
+	data, err := io.ReadAll(body)
+	if err != nil {
+		return err
+	}
+	if r.bundleObjects == nil {
+		r.bundleObjects = map[string]string{}
+	}
+	r.bundleObjects[key] = string(data)
+	return nil
+}
+
+func (r *fakeTenancyRepository) DeletePluginBundleObject(_ context.Context, _ store.OrganizationTenant, key string) error {
+	delete(r.bundleObjects, key)
+	return nil
+}
+
+func (r *fakeTenancyRepository) QueuePluginBundleImport(_ context.Context, _ store.OrganizationTenant, requestedBy string, upload store.PluginBundleUpload) error {
+	if !r.pluginRegistry.Enabled {
+		return store.ErrPluginRegistryNotEnabled
+	}
+	if r.bundleImport != nil && (r.bundleImport.State == "queued" || r.bundleImport.State == "running") {
+		return store.ErrPluginBundleImportBusy
+	}
+	r.bundleImport = &store.PluginBundleImport{State: "queued", RequestedBy: requestedBy, Upload: upload, CreatedAt: initTestTime, Outcomes: []byte("[]")}
+	return nil
+}
+
+func (r *fakeTenancyRepository) GetPluginBundleImport(context.Context, store.OrganizationTenant) (store.PluginBundleImport, error) {
+	if !r.pluginRegistry.Enabled {
+		return store.PluginBundleImport{}, store.ErrPluginRegistryNotEnabled
+	}
+	if r.bundleImport == nil {
+		return store.PluginBundleImport{}, store.ErrPluginBundleImportNotFound
+	}
+	return *r.bundleImport, nil
 }
 
 func (r *fakeTenancyRepository) OpenPluginObject(_ context.Context, key string) (io.ReadCloser, error) {

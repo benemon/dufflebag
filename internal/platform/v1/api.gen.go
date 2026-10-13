@@ -472,6 +472,57 @@ func (e PluginBundleState) Valid() bool {
 	}
 }
 
+// Defines values for PluginBundleImportState.
+const (
+	PluginBundleImportStateFailed             PluginBundleImportState = "failed"
+	PluginBundleImportStatePartiallySucceeded PluginBundleImportState = "partially_succeeded"
+	PluginBundleImportStateQueued             PluginBundleImportState = "queued"
+	PluginBundleImportStateRunning            PluginBundleImportState = "running"
+	PluginBundleImportStateSucceeded          PluginBundleImportState = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the PluginBundleImportState enum.
+func (e PluginBundleImportState) Valid() bool {
+	switch e {
+	case PluginBundleImportStateFailed:
+		return true
+	case PluginBundleImportStatePartiallySucceeded:
+		return true
+	case PluginBundleImportStateQueued:
+		return true
+	case PluginBundleImportStateRunning:
+		return true
+	case PluginBundleImportStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
+// Defines values for PluginBundleVersionOutcomeOutcome.
+const (
+	PluginBundleVersionImported PluginBundleVersionOutcomeOutcome = "imported"
+	PluginBundleVersionMismatch PluginBundleVersionOutcomeOutcome = "mismatch"
+	PluginBundleVersionRefused  PluginBundleVersionOutcomeOutcome = "refused"
+	PluginBundleVersionSkipped  PluginBundleVersionOutcomeOutcome = "skipped"
+)
+
+// Valid indicates whether the value is a known member of the PluginBundleVersionOutcomeOutcome enum.
+func (e PluginBundleVersionOutcomeOutcome) Valid() bool {
+	switch e {
+	case PluginBundleVersionImported:
+		return true
+	case PluginBundleVersionMismatch:
+		return true
+	case PluginBundleVersionRefused:
+		return true
+	case PluginBundleVersionSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginChangeAction.
 const (
 	Add     PluginChangeAction = "add"
@@ -1595,6 +1646,62 @@ type PluginBundle struct {
 // PluginBundleState defines model for PluginBundle.State.
 type PluginBundleState string
 
+// PluginBundleImport defines model for PluginBundleImport.
+type PluginBundleImport struct {
+	// Bundle What the bundle's manifest said about itself; absent until the manifest has been read.
+	Bundle *struct {
+		DufflebagVersion string    `json:"dufflebag_version"`
+		ExportedAt       time.Time `json:"exported_at"`
+		Host             string    `json:"host"`
+		Organization     string    `json:"organization"`
+		PluginCount      int       `json:"plugin_count"`
+		VersionCount     int       `json:"version_count"`
+	} `json:"bundle,omitempty"`
+
+	// CreatedAt When the import was queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Why the bundle could not be read; empty when every version was considered.
+	Error string `json:"error"`
+
+	// Filename The uploaded bundle's filename.
+	Filename string `json:"filename"`
+
+	// FilenameMatches Whether the filename's twelve-character digest prefix matches sha256; absent when the filename carries none.
+	FilenameMatches *bool      `json:"filename_matches,omitempty"`
+	FinishedAt      *time.Time `json:"finished_at,omitempty"`
+
+	// Outcomes One entry per bundled version, in manifest order, recorded as each is considered.
+	Outcomes    []PluginBundleVersionOutcome `json:"outcomes"`
+	RequestedBy string                       `json:"requested_by"`
+
+	// Sha256 The digest of the bundle as received.
+	Sha256    string                  `json:"sha256"`
+	Size      int64                   `json:"size"`
+	StartedAt *time.Time              `json:"started_at,omitempty"`
+	State     PluginBundleImportState `json:"state"`
+}
+
+// PluginBundleImportState defines model for PluginBundleImport.State.
+type PluginBundleImportState string
+
+// PluginBundleVersionOutcome defines model for PluginBundleVersionOutcome.
+type PluginBundleVersionOutcome struct {
+	Error *string `json:"error,omitempty"`
+
+	// OriginKind The source the connected registry imported it from.
+	OriginKind       string  `json:"origin_kind"`
+	OriginRepository *string `json:"origin_repository,omitempty"`
+
+	// Outcome skipped when the version is already held; mismatch when it is held with different checksums.
+	Outcome PluginBundleVersionOutcomeOutcome `json:"outcome"`
+	Plugin  string                            `json:"plugin"`
+	Version string                            `json:"version"`
+}
+
+// PluginBundleVersionOutcomeOutcome skipped when the version is already held; mismatch when it is held with different checksums.
+type PluginBundleVersionOutcomeOutcome string
+
 // PluginChange defines model for PluginChange.
 type PluginChange struct {
 	Action PluginChangeAction `json:"action"`
@@ -2203,6 +2310,11 @@ type CreateOrganizationJSONBody struct {
 	Name string `json:"name"`
 }
 
+// ImportPluginBundleMultipartBody defines parameters for ImportPluginBundle.
+type ImportPluginBundleMultipartBody struct {
+	Bundle openapi_types.File `json:"bundle"`
+}
+
 // ResolveGithubReleaseJSONBody defines parameters for ResolveGithubRelease.
 type ResolveGithubReleaseJSONBody struct {
 	ReleaseUrl string `json:"release_url"`
@@ -2314,6 +2426,9 @@ type CreateAuditTargetJSONRequestBody = AuditTargetCreate
 
 // CreateOrganizationJSONRequestBody defines body for CreateOrganization for application/json ContentType.
 type CreateOrganizationJSONRequestBody CreateOrganizationJSONBody
+
+// ImportPluginBundleMultipartRequestBody defines body for ImportPluginBundle for multipart/form-data ContentType.
+type ImportPluginBundleMultipartRequestBody ImportPluginBundleMultipartBody
 
 // ResolveGithubReleaseJSONRequestBody defines body for ResolveGithubRelease for application/json ContentType.
 type ResolveGithubReleaseJSONRequestBody ResolveGithubReleaseJSONBody
@@ -2686,6 +2801,25 @@ type ClientInterface interface {
 	//
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
 	ExportPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginBundleImport Get the current plugin bundle import
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `GetPluginBundleImport` operationId).
+	GetPluginBundleImport(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ImportPluginBundleWithBody Upload a plugin bundle and queue its import
+	//
+	// Requires `maintainer`. The bundle is stored and read by a background job that publishes each
+	// version as an upload: a version already held is skipped, one held with different checksums is
+	// reported as a mismatch, a version whose manifest origin is releases.hashicorp.com is verified
+	// against the HashiCorp key and refused when the signature is missing or does not verify, and a
+	// plugin held by another source is refused (ADR-0029). The request is bounded by
+	// DFBG_PLUGIN_MAX_UPLOAD_BYTES, shared with plugin uploads.
+	//
+	// Takes any type of body and a specified content type.
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `ImportPluginBundle` operationId).
+	ImportPluginBundleWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ResolveGithubReleaseWithBody Resolve a GitHub release link to an exact tag
 	//
@@ -3992,6 +4126,45 @@ func (c *Client) DownloadPluginBundle(ctx context.Context, organizationId Organi
 // Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
 func (c *Client) ExportPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewExportPluginBundleRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginBundleImport Get the current plugin bundle import
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `GetPluginBundleImport` operationId).
+func (c *Client) GetPluginBundleImport(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginBundleImportRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ImportPluginBundleWithBody Upload a plugin bundle and queue its import
+//
+// Requires `maintainer`. The bundle is stored and read by a background job that publishes each
+// version as an upload: a version already held is skipped, one held with different checksums is
+// reported as a mismatch, a version whose manifest origin is releases.hashicorp.com is verified
+// against the HashiCorp key and refused when the signature is missing or does not verify, and a
+// plugin held by another source is refused (ADR-0029). The request is bounded by
+// DFBG_PLUGIN_MAX_UPLOAD_BYTES, shared with plugin uploads.
+//
+// Takes any type of body and a specified content type.
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `ImportPluginBundle` operationId).
+func (c *Client) ImportPluginBundleWithBody(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewImportPluginBundleRequestWithBody(c.Server, organizationId, contentType, body)
 	if err != nil {
 		return nil, err
 	}
@@ -6389,6 +6562,76 @@ func NewExportPluginBundleRequest(server string, organizationId OrganizationId) 
 	if err != nil {
 		return nil, err
 	}
+
+	return req, nil
+}
+
+// NewGetPluginBundleImportRequest constructs an http.Request for the GetPluginBundleImport method
+func NewGetPluginBundleImportRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/bundle/import", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewImportPluginBundleRequestWithBody constructs an http.Request for the ImportPluginBundle method, with any body, and a specified content type
+func NewImportPluginBundleRequestWithBody(server string, organizationId OrganizationId, contentType string, body io.Reader) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/bundle/import", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPut, queryURL.String(), body)
+	if err != nil {
+		return nil, err
+	}
+
+	req.Header.Add("Content-Type", contentType)
 
 	return req, nil
 }
@@ -9843,6 +10086,27 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
 	ExportPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExportPluginBundleResponse, error)
 
+	// GetPluginBundleImportWithResponse Get the current plugin bundle import
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `GetPluginBundleImport` operationId).
+	GetPluginBundleImportWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginBundleImportResponse, error)
+
+	// ImportPluginBundleWithBodyWithResponse Upload a plugin bundle and queue its import
+	//
+	// Requires `maintainer`. The bundle is stored and read by a background job that publishes each
+	// version as an upload: a version already held is skipped, one held with different checksums is
+	// reported as a mismatch, a version whose manifest origin is releases.hashicorp.com is verified
+	// against the HashiCorp key and refused when the signature is missing or does not verify, and a
+	// plugin held by another source is refused (ADR-0029). The request is bounded by
+	// DFBG_PLUGIN_MAX_UPLOAD_BYTES, shared with plugin uploads.
+	//
+	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `ImportPluginBundle` operationId).
+	ImportPluginBundleWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ImportPluginBundleResponse, error)
+
 	// ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
 	//
 	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
@@ -11890,6 +12154,158 @@ func (r ExportPluginBundleResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r ExportPluginBundleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginBundleImportResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginBundleImport
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginBundleImportResponse) GetJSON200() *PluginBundleImport {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginBundleImportResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetPluginBundleImportResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginBundleImportResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetPluginBundleImportResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginBundleImportResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginBundleImportResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginBundleImportResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginBundleImportResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ImportPluginBundleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *PluginBundleImport
+	// JSON400 the response for an HTTP 400 `application/json` response
+	JSON400 *Error
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// JSON413 the response for an HTTP 413 `application/json` response
+	JSON413 *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON202() *PluginBundleImport {
+	return r.JSON202
+}
+
+// GetJSON400 returns the response for an HTTP 400 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON400() *Error {
+	return r.JSON400
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetJSON413 returns the response for an HTTP 413 `application/json` response
+func (r ImportPluginBundleResponse) GetJSON413() *Error {
+	return r.JSON413
+}
+
+// GetBody returns the raw response body bytes
+func (r ImportPluginBundleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ImportPluginBundleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ImportPluginBundleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ImportPluginBundleResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16922,6 +17338,39 @@ func (c *ClientWithResponses) ExportPluginBundleWithResponse(ctx context.Context
 	return ParseExportPluginBundleResponse(rsp)
 }
 
+// GetPluginBundleImportWithResponse Get the current plugin bundle import
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `GetPluginBundleImport` operationId).
+func (c *ClientWithResponses) GetPluginBundleImportWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginBundleImportResponse, error) {
+	rsp, err := c.GetPluginBundleImport(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginBundleImportResponse(rsp)
+}
+
+// ImportPluginBundleWithBodyWithResponse Upload a plugin bundle and queue its import
+//
+// Requires `maintainer`. The bundle is stored and read by a background job that publishes each
+// version as an upload: a version already held is skipped, one held with different checksums is
+// reported as a mismatch, a version whose manifest origin is releases.hashicorp.com is verified
+// against the HashiCorp key and refused when the signature is missing or does not verify, and a
+// plugin held by another source is refused (ADR-0029). The request is bounded by
+// DFBG_PLUGIN_MAX_UPLOAD_BYTES, shared with plugin uploads.
+//
+// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
+//
+// Corresponds with PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import (the `ImportPluginBundle` operationId).
+func (c *ClientWithResponses) ImportPluginBundleWithBodyWithResponse(ctx context.Context, organizationId OrganizationId, contentType string, body io.Reader, reqEditors ...RequestEditorFn) (*ImportPluginBundleResponse, error) {
+	rsp, err := c.ImportPluginBundleWithBody(ctx, organizationId, contentType, body, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseImportPluginBundleResponse(rsp)
+}
+
 // ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
 //
 // Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
@@ -19303,6 +19752,128 @@ func ParseExportPluginBundleResponse(rsp *http.Response) (*ExportPluginBundleRes
 			return nil, err
 		}
 		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginBundleImportResponse parses an HTTP response from a GetPluginBundleImportWithResponse call
+func ParseGetPluginBundleImportResponse(rsp *http.Response) (*GetPluginBundleImportResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginBundleImportResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginBundleImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseImportPluginBundleResponse parses an HTTP response from a ImportPluginBundleWithResponse call
+func ParseImportPluginBundleResponse(rsp *http.Response) (*ImportPluginBundleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ImportPluginBundleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest PluginBundleImport
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 400:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON400 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 413:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON413 = &dest
 
 	}
 
@@ -23018,6 +23589,12 @@ type ServerInterface interface {
 	// ExportPluginBundle Queue an export of the whole plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export)
 	ExportPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// GetPluginBundleImport Get the current plugin bundle import
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import)
+	GetPluginBundleImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ImportPluginBundle Upload a plugin bundle and queue its import
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import)
+	ImportPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
 	ResolveGithubRelease(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -23536,6 +24113,58 @@ func (siw *ServerInterfaceWrapper) ExportPluginBundle(w http.ResponseWriter, r *
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.ExportPluginBundle(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginBundleImport operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginBundleImport(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginBundleImport(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ImportPluginBundle operation middleware
+func (siw *ServerInterfaceWrapper) ImportPluginBundle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ImportPluginBundle(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -26165,6 +26794,8 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/export", wrapper.ExportPluginBundle)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle", wrapper.GetPluginBundle)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/download", wrapper.DownloadPluginBundle)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/import", wrapper.GetPluginBundleImport)
+	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/import", wrapper.ImportPluginBundle)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
@@ -27225,6 +27856,191 @@ func (response ExportPluginBundle409JSONResponse) VisitExportPluginBundleRespons
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleImportRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type GetPluginBundleImportResponseObject interface {
+	VisitGetPluginBundleImportResponse(w http.ResponseWriter) error
+}
+
+type GetPluginBundleImport200JSONResponse PluginBundleImport
+
+func (response GetPluginBundleImport200JSONResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleImport401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginBundleImport401JSONResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleImport403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetPluginBundleImport403JSONResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleImport404JSONResponse Error
+
+func (response GetPluginBundleImport404JSONResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleImport409JSONResponse Error
+
+func (response GetPluginBundleImport409JSONResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundleRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+	Body           *multipart.Reader
+}
+
+type ImportPluginBundleResponseObject interface {
+	VisitImportPluginBundleResponse(w http.ResponseWriter) error
+}
+
+type ImportPluginBundle202JSONResponse PluginBundleImport
+
+func (response ImportPluginBundle202JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle400JSONResponse Error
+
+func (response ImportPluginBundle400JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(400)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ImportPluginBundle401JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ImportPluginBundle403JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ImportPluginBundle404JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle409JSONResponse Error
+
+func (response ImportPluginBundle409JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ImportPluginBundle413JSONResponse Error
+
+func (response ImportPluginBundle413JSONResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(413)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -32469,6 +33285,12 @@ type StrictServerInterface interface {
 	// ExportPluginBundle Queue an export of the whole plugin registry
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export)
 	ExportPluginBundle(ctx context.Context, request ExportPluginBundleRequestObject) (ExportPluginBundleResponseObject, error)
+	// GetPluginBundleImport Get the current plugin bundle import
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/import)
+	GetPluginBundleImport(ctx context.Context, request GetPluginBundleImportRequestObject) (GetPluginBundleImportResponseObject, error)
+	// ImportPluginBundle Upload a plugin bundle and queue its import
+	// (PUT /api/v1/organizations/{organizationId}/plugin-registry/bundle/import)
+	ImportPluginBundle(ctx context.Context, request ImportPluginBundleRequestObject) (ImportPluginBundleResponseObject, error)
 	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
 	ResolveGithubRelease(ctx context.Context, request ResolveGithubReleaseRequestObject) (ResolveGithubReleaseResponseObject, error)
@@ -33113,6 +33935,65 @@ func (sh *strictHandler) ExportPluginBundle(w http.ResponseWriter, r *http.Reque
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(ExportPluginBundleResponseObject); ok {
 		if err := validResponse.VisitExportPluginBundleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginBundleImport operation middleware
+func (sh *strictHandler) GetPluginBundleImport(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request GetPluginBundleImportRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginBundleImport(ctx, request.(GetPluginBundleImportRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginBundleImport")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginBundleImportResponseObject); ok {
+		if err := validResponse.VisitGetPluginBundleImportResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ImportPluginBundle operation middleware
+func (sh *strictHandler) ImportPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ImportPluginBundleRequestObject
+
+	request.OrganizationId = organizationId
+
+	if reader, err := r.MultipartReader(); err != nil {
+		sh.options.RequestErrorHandlerFunc(w, r, fmt.Errorf("can't decode multipart body: %w", err))
+		return
+	} else {
+		request.Body = reader
+	}
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ImportPluginBundle(ctx, request.(ImportPluginBundleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ImportPluginBundle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ImportPluginBundleResponseObject); ok {
+		if err := validResponse.VisitImportPluginBundleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

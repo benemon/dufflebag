@@ -478,6 +478,12 @@ func (response refusalResponse) VisitGetPluginBundleResponse(w http.ResponseWrit
 func (response refusalResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitImportPluginBundleResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitGetPluginBundleImportResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

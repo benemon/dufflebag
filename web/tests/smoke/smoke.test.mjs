@@ -1144,6 +1144,35 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       method: 'PUT', headers: { Authorization: `Bearer ${rootToken}` }, body: reuploadForm,
     })
     assert.equal(reupload.status, 201, `re-upload from the bundle answered ${reupload.status}: ${await reupload.text()}`)
+    // The import half: the same bundle imported into a fresh organization publishes the version as Local,
+    // and a second import of it skips every version.
+    const offline = await api(rootToken, 'POST', '/api/v1/organizations', { name: 'bundle-import' })
+    const offlinePath = `/api/v1/organizations/${offline.id}/plugin-registry`
+    await api(rootToken, 'POST', `${offlinePath}/enable`)
+    const importBundle = async () => {
+      const form = new FormData()
+      form.append('bundle', new Blob([archive], { type: 'application/gzip' }), bundleState.bundle.filename)
+      const queued = await fetch(`${base}${offlinePath}/bundle/import`, { method: 'PUT', headers: { Authorization: `Bearer ${rootToken}` }, body: form })
+      const queuedText = await queued.text()
+      assert.equal(queued.status, 202, `bundle import answered ${queued.status}: ${queuedText}`)
+      let job = JSON.parse(queuedText)
+      await until('the bundle import to finish', async () => {
+        job = await api(rootToken, 'GET', `${offlinePath}/bundle/import`)
+        return job.state !== 'queued' && job.state !== 'running'
+      }, 60000)
+      return job
+    }
+    const imported = await importBundle()
+    assert.equal(imported.state, 'succeeded', JSON.stringify(imported))
+    assert.equal(imported.sha256, archiveDigest)
+    assert.equal(imported.filename_matches, true)
+    assert.equal(imported.bundle.organization, wizardOrganizationName)
+    assert.deepEqual(imported.outcomes.map((outcome) => [outcome.plugin, outcome.version, outcome.outcome]), [['probe', '1.2.0', 'imported']])
+    const offlinePlugins = await api(rootToken, 'GET', `${offlinePath}/plugins`)
+    const offlineProbe = (offlinePlugins.plugins ?? offlinePlugins).find((plugin) => plugin.name === 'probe')
+    assert.equal(offlineProbe?.source?.kind, 'upload', JSON.stringify(offlinePlugins))
+    const again = await importBundle()
+    assert.deepEqual(again.outcomes.map((outcome) => outcome.outcome), ['skipped'], JSON.stringify(again))
 
     await clickByText('button', 'Unexpose')
     await waitForText('In-flight packer init fails when the registry is unexposed.')
