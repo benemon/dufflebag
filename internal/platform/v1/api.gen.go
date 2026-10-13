@@ -2808,7 +2808,7 @@ type ClientInterface interface {
 	// anything is stored, and any failure stores nothing (ADR-0027). SHA256SUMS and its signature are
 	// stored and served verbatim. Every uploaded zip must be listed in SHA256SUMS with a matching
 	// digest; listed zips may be absent. A manifest listed in SHA256SUMS must be uploaded. Versions are
-	// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 512 MiB).
+	// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 4 GiB).
 	//
 	// Takes any type of body and a specified content type.
 	//
@@ -4304,7 +4304,7 @@ func (c *Client) DeletePluginVersion(ctx context.Context, organizationId Organiz
 // anything is stored, and any failure stores nothing (ADR-0027). SHA256SUMS and its signature are
 // stored and served verbatim. Every uploaded zip must be listed in SHA256SUMS with a matching
 // digest; listed zips may be absent. A manifest listed in SHA256SUMS must be uploaded. Versions are
-// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 512 MiB).
+// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 4 GiB).
 //
 // Takes any type of body and a specified content type.
 //
@@ -9814,7 +9814,7 @@ type ClientWithResponsesInterface interface {
 	// anything is stored, and any failure stores nothing (ADR-0027). SHA256SUMS and its signature are
 	// stored and served verbatim. Every uploaded zip must be listed in SHA256SUMS with a matching
 	// digest; listed zips may be absent. A manifest listed in SHA256SUMS must be uploaded. Versions are
-	// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 512 MiB).
+	// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 4 GiB).
 	//
 	// Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 	//
@@ -16780,7 +16780,7 @@ func (c *ClientWithResponses) DeletePluginVersionWithResponse(ctx context.Contex
 // anything is stored, and any failure stores nothing (ADR-0027). SHA256SUMS and its signature are
 // stored and served verbatim. Every uploaded zip must be listed in SHA256SUMS with a matching
 // digest; listed zips may be absent. A manifest listed in SHA256SUMS must be uploaded. Versions are
-// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 512 MiB).
+// immutable. The request is bounded by DFBG_PLUGIN_MAX_UPLOAD_BYTES (default 4 GiB).
 //
 // Takes any type of body and a specified content type, and returns a wrapper object for the known response body format(s).
 //

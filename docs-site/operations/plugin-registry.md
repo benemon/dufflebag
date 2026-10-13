@@ -160,8 +160,10 @@ must be one Packer accepts. A refusal names the file that failed.
 Versions are immutable: uploading a version that already exists is refused.
 A plugin name belongs to one source per organization.
 
-Uploads are limited by `DFBG_PLUGIN_MAX_UPLOAD_BYTES` (512 MiB by default). An
-upload may take up to 30 minutes. A reverse proxy in front of dufflebag applies
+Uploads are limited by `DFBG_PLUGIN_MAX_UPLOAD_BYTES` (4 GiB by default); a
+plugin bundle import shares the limit. The body is spooled to a file under
+the server's temporary directory while it is checked, so the host or pod
+needs that much scratch space. An upload may take up to 30 minutes. A reverse proxy in front of dufflebag applies
 its own limits: an OpenShift route times out after 30 seconds unless the
 `haproxy.router.openshift.io/timeout` annotation raises it.
 
