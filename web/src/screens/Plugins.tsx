@@ -597,7 +597,7 @@ export function PluginCatalogue({
             {canPublish ? (
               <>
                 <ToolbarItem variant="separator" />
-                <ToolbarItem><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{selected.length ? `${selected.length} selected` : 'Select plugins with an update'}</span></ToolbarItem>
+                {selected.length ? <ToolbarItem><span style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{selected.length} selected</span></ToolbarItem> : null}
                 <ToolbarItem>
                   <Button variant="primary" isDisabled={selected.length === 0} onClick={() => void openConfirm(selected)}>Sync selected</Button>
                 </ToolbarItem>
