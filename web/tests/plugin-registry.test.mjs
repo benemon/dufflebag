@@ -17,6 +17,8 @@ let pruneLabels
 let pruneSavedMessage
 let PluginBundleCard
 let bundleLabels
+let importLabels
+let bundleImportSummary
 let cronProblem
 let prunePreview
 let describeCron
@@ -102,9 +104,9 @@ before(async () => {
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
   ;({ PluginGithubView } = await vite.ssrLoadModule('/src/screens/PluginGithub.tsx'))
-  ;({ PluginRegistrySettingsView, pruneLabels, pruneSavedMessage, PluginBundleCard, bundleLabels } =
+  ;({ PluginRegistrySettingsView, pruneLabels, pruneSavedMessage, PluginBundleCard, bundleLabels, importLabels } =
     await vite.ssrLoadModule('/src/screens/PluginRegistrySettings.tsx'))
-  ;({ cronProblem, prunePreview, describeCron } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
+  ;({ cronProblem, prunePreview, describeCron, bundleImportSummary } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
 })
 
 after(async () => { await vite.close() })
@@ -1456,6 +1458,52 @@ test('the Plugin bundle card offers one export, shows the current bundle with it
   assert.match(settings({ current: null, organizationID: 'org-id' }), /aria-label="Plugin bundle"/)
   assert.doesNotMatch(settings(null), /Plugin bundle/, 'nothing loaded, no card')
   assert.doesNotMatch(settings({ current: bundleState(), organizationID: 'org-id' }, 'publisher'), /Plugin bundle/, 'publishers do not see the card')
+})
+
+// Fixture shape: spec/platform/openapi.yaml PluginBundleImport and PluginBundleVersionOutcome.
+const importState = (over = {}) => ({
+  state: 'partially_succeeded', requested_by: 'alice', filename: 'dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz', size: 1024 * 1024,
+  sha256: '0123456789ab' + 'c'.repeat(52), filename_matches: true, created_at: '2026-10-13T10:00:00Z', started_at: '2026-10-13T10:00:01Z',
+  finished_at: '2026-10-13T10:00:30Z', error: '',
+  bundle: { host: 'connected.example.com', organization: 'acme', exported_at: '2026-10-13T09:00:40Z', dufflebag_version: 'v0.5.0-rc5', plugin_count: 2, version_count: 3 },
+  outcomes: [
+    { plugin: 'amazon', version: '1.8.2', origin_kind: 'releases-hashicorp', origin_repository: 'packer-plugin-amazon', outcome: 'imported' },
+    { plugin: 'git', version: '0.6.3', origin_kind: 'upload', outcome: 'skipped' },
+    { plugin: 'git', version: '0.6.2', origin_kind: 'upload', outcome: 'refused', error: 'git is held by another source (github)' },
+  ],
+  ...over,
+})
+
+test('the Plugin bundle card imports a chosen file and reports the last import version by version', () => {
+  const card = (lastImport) => renderToStaticMarkup(React.createElement(PluginBundleCard, {
+    bundle: null, lastImport, organizationID: 'org-id', busy: false, onExport: () => {}, onDownload: () => {}, onImport: () => {},
+  }))
+  const none = card(null)
+  assert.match(none, /aria-label="Choose a plugin bundle"[^>]*type="file"/)
+  assert.match(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Import bundle</, 'nothing chosen, nothing to import')
+  assert.doesNotMatch(none, /Bundle import outcomes/)
+  assert.deepEqual(importLabels(null), [])
+
+  const done = card(importState())
+  assert.match(done, />Partly imported</)
+  assert.match(done, /Matches the filename\./)
+  assert.match(done, /acme at connected\.example\.com, [^<]*\(v0\.5\.0-rc5\); 2 plugins, 3 versions/)
+  assert.match(done, /1 version imported, 1 already held, 1 refused\./)
+  assert.match(done, /aria-label="Bundle import outcomes"/)
+  assert.match(done, /amazon[\s\S]*?1\.8\.2[\s\S]*?HashiCorp \(packer-plugin-amazon\)[\s\S]*?Imported/)
+  assert.match(done, /git[\s\S]*?0\.6\.3[\s\S]*?Local[\s\S]*?Already held/)
+  assert.match(done, /Refused<small[^>]*> git is held by another source \(github\)/)
+  assert.equal(bundleImportSummary(importState()), '1 version imported, 1 already held, 1 refused.')
+  assert.equal(bundleImportSummary(importState({ outcomes: [{ plugin: 'a', version: '1', origin_kind: 'upload', outcome: 'mismatch' }] })), '0 versions imported, 1 held with different checksums.')
+
+  const renamed = card(importState({ filename: 'copy.tar.gz', filename_matches: false }))
+  assert.match(renamed, /The filename names a different digest\./)
+  const running = card(importState({ state: 'running', finished_at: undefined, outcomes: [] }))
+  assert.match(running, /<button[^>]*disabled[^>]*>[\s\S]{0,300}Importing…</)
+  assert.deepEqual(importLabels(importState({ state: 'running' })), [{ text: 'Importing', color: 'blue' }])
+  const failed = card(importState({ state: 'failed', error: 'the bundle is not a gzip archive: gzip: invalid header', outcomes: [], bundle: undefined }))
+  assert.match(failed, />Import failed</)
+  assert.match(failed, /the bundle is not a gzip archive/)
 })
 
 test('the Prune jobs card is maintainer-only and reflects the schedule, the last run and its error', () => {

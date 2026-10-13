@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { execFile as execFileCb, spawn } from 'node:child_process'
+import { execFile as execFileCb, execFileSync, spawn } from 'node:child_process'
 import { createHash, randomBytes } from 'node:crypto'
 import dns from 'node:dns/promises'
 import {
@@ -14,6 +14,7 @@ import {
 import http from 'node:http'
 import https from 'node:https'
 import net from 'node:net'
+import { gunzipSync } from 'node:zlib'
 import path from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
@@ -143,6 +144,25 @@ function startServer(env) {
   return child
 }
 
+// The entries of an ustar archive, as Go's archive/tar writes it for short names.
+function tarEntries(tar) {
+  const entries = []
+  for (let offset = 0; offset + 512 <= tar.length; ) {
+    const header = tar.subarray(offset, offset + 512)
+    if (header.every((byte) => byte === 0)) break
+    const name = header.toString('utf8', 0, 100).replace(/\0.*$/, '')
+    const size = parseInt(header.toString('utf8', 124, 136).replace(/\0.*$/, '').trim(), 8)
+    const data = tar.subarray(offset + 512, offset + 512 + size)
+    if (header[156] === 0x30 || header[156] === 0) entries.push({ name, data })
+    offset += 512 + Math.ceil(size / 512) * 512
+  }
+  return entries
+}
+
+function execFileSyncVersion(binary) {
+  return execFileSync(binary, ['version']).toString()
+}
+
 function waitForExit(child) {
   return new Promise((resolve) => child.once('exit', (code) => resolve(code)))
 }
@@ -155,14 +175,14 @@ async function stopServer() {
   if (server.exitCode === null) server.kill('SIGKILL')
 }
 
-function request(method, requestPath, body, headers = {}) {
+function request(method, requestPath, body, headers = {}, port = serverPort) {
   return new Promise((resolve, reject) => {
     const encoded = body === undefined
       ? undefined
       : typeof body === 'string' || Buffer.isBuffer(body) ? body : JSON.stringify(body)
     const req = https.request({
       hostname,
-      port: serverPort,
+      port,
       path: requestPath,
       method,
       ca: readFileSync(caFile),
@@ -195,7 +215,7 @@ function request(method, requestPath, body, headers = {}) {
   })
 }
 
-async function tokenFor(credentials) {
+async function tokenFor(credentials, port = serverPort) {
   const response = await request(
     'POST',
     '/oauth2/token',
@@ -207,17 +227,18 @@ async function tokenFor(credentials) {
       Authorization: `Basic ${Buffer.from(`${credentials.client_id}:${credentials.client_secret}`).toString('base64')}`,
       'Content-Type': 'application/x-www-form-urlencoded',
     },
+    port,
   )
   assert.equal(response.status, 200, `token endpoint answered ${response.status}: ${response.body}`)
   assert.ok(response.json?.access_token, 'token endpoint returned no access_token')
   return response.json.access_token
 }
 
-async function api(token, method, requestPath, body) {
+async function api(token, method, requestPath, body, port = serverPort) {
   const response = await request(method, requestPath, body, {
     Authorization: `Bearer ${token}`,
     ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-  })
+  }, port)
   assert.ok(
     response.status >= 200 && response.status < 300,
     `${method} ${requestPath} answered ${response.status}: ${response.body}`,
@@ -839,6 +860,184 @@ test('stock Packer publishes registry metadata with paired file audit records', 
     )
     assert.ok(update.ok, `packer init of the GitHub-imported plugin failed:\n${update.output}`)
     process.stdout.write(`ASSERT imported rgl/packer-plugin-windows-update v0.16.10 from GitHub and installed it with packer init from ${updateSource}\n`)
+  })
+
+  // ADR-0029's oracle: the registry above, holding one plugin of each source,
+  // crosses an airgap as a bundle. The far side is a second dufflebag whose
+  // every upstream call is routed to a proxy nothing listens on, so the import
+  // cannot reach out, and stock Packer installs all three plugins from it.
+  await t.test('a Plugin Bundle carries the registry across an airgap and stock Packer installs from the far side', {
+    skip: (() => {
+      const [, major, minor, patch] = execFileSyncVersion(packer).match(/Packer v(\d+)\.(\d+)\.(\d+)/).map(Number)
+      return major > 1 || minor > 16 || (minor === 16 && patch >= 1) ? false : 'Packer before 1.16.1 has no remote getter'
+    })(),
+  }, async () => {
+    const registryPath = `/api/v1/organizations/${organization.id}/plugin-registry`
+    const arch = { x64: 'amd64', arm64: 'arm64' }[process.arch]
+    await api(rootToken, 'POST', `${registryPath}/bundle/export`)
+    let exported
+    await until('the bundle export to finish', async () => {
+      exported = await api(rootToken, 'GET', `${registryPath}/bundle`)
+      return ['succeeded', 'failed'].includes(exported.state)
+    }, 5 * 60 * 1000, 2000)
+    assert.equal(exported.state, 'succeeded', `bundle export: ${JSON.stringify(exported)}`)
+    const downloaded = await request('GET', `${registryPath}/bundle/download`, undefined, { Authorization: `Bearer ${rootToken}` })
+    assert.equal(downloaded.status, 200, `bundle download answered ${downloaded.status}`)
+    const archive = downloaded.bytes
+    const archiveDigest = createHash('sha256').update(archive).digest('hex')
+    assert.equal(archiveDigest, exported.bundle.sha256)
+    assert.ok(exported.bundle.filename.endsWith(`-${archiveDigest.slice(0, 12)}.tar.gz`), exported.bundle.filename)
+    const entries = tarEntries(gunzipSync(archive))
+    assert.equal(entries[0].name, 'manifest.json')
+    const manifest = JSON.parse(entries[0].data.toString())
+    const origins = Object.fromEntries(manifest.plugins.map((plugin) => [plugin.name, plugin.origin.kind]))
+    assert.deepEqual(origins, { amazon: 'releases-hashicorp', git: 'upload', 'windows-update': 'github' }, JSON.stringify(manifest.plugins))
+    process.stdout.write(`ASSERT exported ${exported.bundle.filename}: ${exported.bundle.plugin_count} plugins (HashiCorp, GitHub, local), ${exported.bundle.version_count} versions, ${exported.bundle.size} bytes\n`)
+
+    // The far side: its own database and bucket, every upstream call sent to a
+    // proxy nothing listens on. Object storage and the database are local.
+    await command(docker, ['exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres', '-c', 'CREATE DATABASE airgap'])
+    const airgapAdmin = `postgres://postgres:postgres@127.0.0.1:${pgPort}/airgap?sslmode=disable`
+    serverOutput = ''
+    const airgapMigrator = startServer({
+      DFBG_DATABASE_URL: airgapAdmin,
+      ...(process.env.DFBG_KEY_PROVIDER ? {} : { DFBG_TOKEN_SIGNING_KEY: signingKey }),
+    })
+    assert.notEqual(await Promise.race([
+      waitForExit(airgapMigrator),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('airgap migration process did not exit')), 60000)),
+    ]), 0, 'airgap migration process served with the PostgreSQL superuser')
+    await command(docker, [
+      'exec', container, 'psql', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'airgap',
+      '-c', 'GRANT CONNECT ON DATABASE airgap TO dufflebag_app',
+      '-c', 'GRANT USAGE ON SCHEMA public TO dufflebag_app',
+      '-c', 'GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dufflebag_app',
+    ])
+    const airgapBucket = 'dufflebag-airgap-e2e'
+    await command(docker, ['exec', objectContainer, 'python3', '/tmp/create-bucket.py', 'testaccess', 'testsecret', airgapBucket])
+    const airgapPort = await freePort()
+    const blackHole = 'http://127.0.0.1:9'
+    const airgap = startServer({
+      ...servingEnv,
+      DFBG_DATABASE_URL: `postgres://dufflebag_app:app@127.0.0.1:${pgPort}/airgap?sslmode=disable`,
+      DFBG_HTTP_ADDR: `127.0.0.1:${airgapPort}`,
+      DFBG_TOKEN_ISSUER: `https://${hostname}:${airgapPort}`,
+      DFBG_OBJECT_STORAGE_BUCKET: airgapBucket,
+      HTTPS_PROXY: blackHole,
+      https_proxy: blackHole,
+      NO_PROXY: '127.0.0.1,localhost',
+      no_proxy: '127.0.0.1,localhost',
+    })
+    t.after(() => { if (airgap.exitCode === null) airgap.kill('SIGKILL') })
+    await until('the airgapped server to answer', async () => {
+      if (airgap.exitCode !== null) throw new Error(`airgapped server exited ${airgap.exitCode}: ${serverOutput}`)
+      return (await request('GET', '/', undefined, {}, airgapPort)).status === 200
+    })
+    const airgapInit = await request('POST', '/sys/init', undefined, {}, airgapPort)
+    assert.equal(airgapInit.status, 200, `airgap POST /sys/init answered ${airgapInit.status}: ${airgapInit.body}`)
+    const airgapToken = await tokenFor(airgapInit.json, airgapPort)
+    const airgapOrganization = await api(airgapToken, 'POST', '/api/v1/organizations', { name: organizationName }, airgapPort)
+    const airgapRegistry = `/api/v1/organizations/${airgapOrganization.id}/plugin-registry`
+    await api(airgapToken, 'POST', `${airgapRegistry}/enable`, undefined, airgapPort)
+
+    // The black hole is proven, not assumed: an upstream import fails at the proxy.
+    const reaching = await api(airgapToken, 'POST', `${airgapRegistry}/imports`, {
+      source: 'releases-hashicorp', product: 'packer-plugin-amazon', versions: ['1.8.2'], platforms: [`linux_${arch}`],
+    }, airgapPort)
+    let reachJob = reaching
+    await until('the airgapped upstream import to fail', async () => {
+      reachJob = await api(airgapToken, 'GET', `${airgapRegistry}/imports/${reaching.id}`, undefined, airgapPort)
+      return ['succeeded', 'partially_succeeded', 'failed'].includes(reachJob.state)
+    }, 2 * 60 * 1000, 2000)
+    assert.equal(reachJob.state, 'failed', `airgapped upstream import: ${JSON.stringify(reachJob)}`)
+    assert.match(JSON.stringify(reachJob.outcomes), /proxyconnect|127\.0\.0\.1:9|connection refused/, JSON.stringify(reachJob.outcomes))
+    process.stdout.write('ASSERT the airgapped instance cannot reach releases.hashicorp.com: its import fails at the black-hole proxy\n')
+
+    const importBundle = async (bytes, filename) => {
+      const boundary = `dufflebag-${randomBytes(8).toString('hex')}`
+      const form = Buffer.concat([
+        Buffer.from(`--${boundary}\r\nContent-Disposition: form-data; name="bundle"; filename="${filename}"\r\nContent-Type: application/gzip\r\n\r\n`),
+        bytes, Buffer.from(`\r\n--${boundary}--\r\n`),
+      ])
+      const queued = await request('PUT', `${airgapRegistry}/bundle/import`, form, {
+        Authorization: `Bearer ${airgapToken}`, 'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      }, airgapPort)
+      assert.equal(queued.status, 202, `bundle import answered ${queued.status}: ${queued.body}`)
+      let job
+      await until('the bundle import to finish', async () => {
+        job = await api(airgapToken, 'GET', `${airgapRegistry}/bundle/import`, undefined, airgapPort)
+        return ['succeeded', 'partially_succeeded', 'failed'].includes(job.state)
+      }, 5 * 60 * 1000, 2000)
+      return job
+    }
+    const outcomeOf = (job, plugin) => job.outcomes.filter((outcome) => outcome.plugin === plugin).map((outcome) => outcome.outcome)
+
+    // Exposed before any import, so what the far side serves is checked, not assumed.
+    await api(airgapToken, 'POST', `${airgapRegistry}/expose`, undefined, airgapPort)
+
+    // A copy altered after export: one byte of amazon's zip flipped, the archive
+    // rebuilt in manifest order. That version is refused by name; the others import.
+    const unpacked = path.join(work, 'bundle')
+    mkdirSync(unpacked, { recursive: true })
+    for (const entry of entries) {
+      mkdirSync(path.dirname(path.join(unpacked, entry.name)), { recursive: true })
+      writeFileSync(path.join(unpacked, entry.name), entry.data)
+    }
+    const amazonZip = manifest.plugins.find((plugin) => plugin.name === 'amazon').versions[0].files.find((file) => file.name.endsWith('.zip'))
+    const amazonZipPath = path.join(unpacked, 'plugins', 'amazon', '1.8.2', amazonZip.name)
+    const zipBytes = readFileSync(amazonZipPath)
+    zipBytes[Math.floor(zipBytes.length / 2)] ^= 0xff
+    writeFileSync(amazonZipPath, zipBytes)
+    const order = ['manifest.json', ...manifest.plugins.flatMap((plugin) => plugin.versions.flatMap((version) =>
+      version.files.map((file) => `plugins/${plugin.name}/${version.version}/${file.name}`)))]
+    writeFileSync(path.join(work, 'bundle-order.txt'), order.join('\n') + '\n')
+    await command('tar', ['-czf', path.join(work, 'tampered.tar.gz'), '-C', unpacked, '-T', path.join(work, 'bundle-order.txt')])
+    const tampered = await importBundle(readFileSync(path.join(work, 'tampered.tar.gz')), 'tampered.tar.gz')
+    assert.equal(tampered.state, 'partially_succeeded', `tampered import: ${JSON.stringify(tampered)}`)
+    const refusedAmazon = tampered.outcomes.find((outcome) => outcome.plugin === 'amazon')
+    assert.equal(refusedAmazon?.outcome, 'refused', JSON.stringify(tampered.outcomes))
+    assert.ok(refusedAmazon.error.includes(`${amazonZip.name} does not match the manifest`), refusedAmazon.error)
+    assert.deepEqual(outcomeOf(tampered, 'git'), ['imported'])
+    assert.deepEqual(outcomeOf(tampered, 'windows-update'), ['imported'])
+    assert.equal(tampered.filename_matches, undefined, 'a filename without a digest is not judged')
+    const gitIndex = await request('GET', `/plugins/${organizationName}/packer-plugin-git/index.json`, undefined, {}, airgapPort)
+    assert.equal(gitIndex.status, 200, `the airgapped read plane does not serve the imported git: ${gitIndex.status}`)
+    const amazonIndex = await request('GET', `/plugins/${organizationName}/packer-plugin-amazon/index.json`, undefined, {}, airgapPort)
+    assert.equal(amazonIndex.status, 404, 'the airgapped read plane served a refused plugin')
+    process.stdout.write(`ASSERT a bundle altered after export: ${amazonZip.name} refused by name, git and windows-update imported, amazon never served\n`)
+
+    // The genuine bundle: amazon imports with its HashiCorp signature verified
+    // offline; the versions the tampered copy brought are skipped, not refused.
+    const genuine = await importBundle(archive, exported.bundle.filename)
+    assert.equal(genuine.state, 'succeeded', `bundle import: ${JSON.stringify(genuine)}`)
+    assert.equal(genuine.sha256, archiveDigest)
+    assert.equal(genuine.filename_matches, true)
+    assert.equal(genuine.bundle.organization, organizationName)
+    assert.deepEqual(outcomeOf(genuine, 'amazon'), ['imported'])
+    assert.deepEqual(outcomeOf(genuine, 'git'), ['skipped'])
+    assert.deepEqual(outcomeOf(genuine, 'windows-update'), ['skipped'])
+    const airgapPlugins = await api(airgapToken, 'GET', `${airgapRegistry}/plugins`, undefined, airgapPort)
+    assert.deepEqual(Object.fromEntries(airgapPlugins.plugins.map((plugin) => [plugin.name, plugin.source.kind])),
+      { amazon: 'upload', git: 'upload', 'windows-update': 'upload' }, 'bundled plugins are Local on the far side')
+    process.stdout.write(`ASSERT imported ${exported.bundle.filename} on the airgapped instance: amazon verified offline against the HashiCorp key, git and windows-update already held\n`)
+
+    // Stock Packer installs all three from the far side. The 443 forwarder now
+    // points at the airgapped instance; Packer's plugin directory is emptied.
+    const forwarder = `dufflebag-packer-e2e-airgap-443-${process.pid}`
+    await command(docker, ['ps', '-q', '--filter', `name=dufflebag-packer-e2e-443-${process.pid}`]).then((listed) =>
+      listed.stdout.trim() ? command(docker, ['rm', '-f', `dufflebag-packer-e2e-443-${process.pid}`]) : null)
+    await command(docker, ['run', '-d', '--rm', '--name', forwarder, '--network', 'host', 'alpine/socat',
+      'TCP-LISTEN:443,fork,reuseaddr', `TCP:127.0.0.1:${airgapPort}`])
+    t.after(() => command(docker, ['rm', '-f', forwarder]).catch(() => {}))
+    rmSync(path.join(configHome, 'packer', 'plugins', hostname), { recursive: true, force: true })
+    for (const [name, template] of [['git', 'plugin.pkr.hcl'], ['amazon', 'amazon.pkr.hcl'], ['windows-update', 'windows-update.pkr.hcl']]) {
+      const installed = await command(packer, ['init', path.join(work, template)], { env: packerEnv }).then(
+        (result) => ({ ok: true, output: `${result.stdout}${result.stderr}` }),
+        (err) => ({ ok: false, output: `${err.stdout ?? ''}${err.stderr ?? ''}${err.message}` }),
+      )
+      assert.ok(installed.ok, `packer init of ${name} against the airgapped instance failed:\n${installed.output}`)
+    }
+    process.stdout.write(`ASSERT stock Packer installed git, amazon and windows-update from the airgapped instance at ${hostname}\n`)
   })
 
   await t.test('the encrypted keyring rotates without losing retained payloads', {

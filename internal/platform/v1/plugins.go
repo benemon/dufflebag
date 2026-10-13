@@ -36,15 +36,16 @@ const pluginUploadDeadline = 30 * time.Minute
 // or manifest larger than this is not a real one.
 const pluginMetadataBytes = 1 << 20
 
-var pluginUploadPath = regexp.MustCompile(`^/api/v1/organizations/[^/]+/plugin-registry/plugins/[^/]+/versions/[^/]+$`)
+var pluginUploadPath = regexp.MustCompile(`^/api/v1/organizations/[^/]+/plugin-registry/(plugins/[^/]+/versions/[^/]+|bundle/import)$`)
 
 // A bundle's manifest names the host it was exported from, as the stanza does.
 var pluginBundleExportPath = regexp.MustCompile(`^/api/v1/organizations/[^/]+/plugin-registry/bundle/export$`)
 
 type requestHostKey struct{}
 
-// withPluginUpload bounds the upload route's body, extends its deadlines, and
-// records the host the template stanza must name. The strict layer takes the
+// withPluginUpload bounds the upload routes' bodies (a version's files or a
+// bundle), extends their deadlines, and records the host the template stanza
+// must name. The strict layer takes the
 // body before any strict middleware runs, so this wraps the router instead.
 func withPluginUpload(limit int64, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

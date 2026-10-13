@@ -345,8 +345,43 @@ follow under `plugins/<name>/<version>/`.
 
 ![The Plugin bundle card showing an exported registry with its digest and Download](/screenshots/plugin-registry-bundle.png)
 
-Importing a bundle on a disconnected dufflebag is the subject of a later
-release.
+### Import a bundle
+
+On the disconnected dufflebag, a maintainer chooses the bundle file under
+**Administration › Plugin registry › Plugin bundle › Import** and imports
+it; the API form is one multipart request:
+
+```shell
+curl -X PUT "https://airgapped.example.com/api/v1/organizations/$ORG_ID/plugin-registry/bundle/import" \
+  -H "Authorization: Bearer $TOKEN" \
+  -F bundle=@dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz
+```
+
+The bundle is stored and read by a background job, and the card shows the
+digest of the bundle as received, whether it matches the filename, where
+the bundle was exported from, and one outcome per version:
+
+- **Imported.** The version is published as a Local plugin, the way a hand
+  upload is. The bundle's manifest, not the plugin, records where it came
+  from; the outcome shows it.
+- **Already held.** The version exists with the same checksums and is left
+  alone. Importing the same bundle twice is safe.
+- **Held with different checksums.** The version exists but its SHA256SUMS
+  differ from the bundle's. Nothing is overwritten; the difference is
+  reported.
+- **Refused.** A file does not match the manifest, the plugin name is held
+  by another source, or a version that came from releases.hashicorp.com
+  carries no signature or one that does not verify against HashiCorp's
+  key. That verification happens offline from the bundled signature, so
+  the carrier of the bundle is not trusted for HashiCorp plugins.
+
+A bundle that cannot be read (not a gzip archive, no manifest first, or a
+manifest format this release does not know) fails as a whole and says why.
+One import runs at a time per organization; the uploaded bundle is removed
+from object storage once the job has read it. The upload is bounded by the
+same `DFBG_PLUGIN_MAX_UPLOAD_BYTES` as plugin uploads.
+
+![The Plugin bundle card after an import, listing each version's outcome](/screenshots/plugin-registry-bundle-import.png)
 
 ## Platforms
 
@@ -392,8 +427,10 @@ the platform operation `plugin.downloads.read`, with the plugin as its
 target. A bundle export is `plugin_registry.bundle.export`, reading its
 state `plugin_registry.bundle.read`, the download
 `plugin_registry.bundle.download`, and the build itself is recorded by
-`system:plugin-bundler` as `plugin_registry.bundle.build`. See
-[audit](../administration/audit.md).
+`system:plugin-bundler` as `plugin_registry.bundle.build`. A bundle import
+is `plugin_registry.bundle.import`, reading its state
+`plugin_registry.bundle.import.read`, and the ingest itself
+`plugin_registry.bundle.ingest`. See [audit](../administration/audit.md).
 
 ## Where to go next
 

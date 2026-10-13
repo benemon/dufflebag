@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ActionGroup, Alert, Button, Card, CardBody, CardTitle, ClipboardCopy, ClipboardCopyVariant, Content, DescriptionList,
   DescriptionListDescription, DescriptionListGroup, DescriptionListTerm, Flex, FlexItem, Label, NumberInput, PageSection, Switch, TextInput,
+  Title,
 } from '@patternfly/react-core'
+import { Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 
 import { signOutIfUnauthorized } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
@@ -10,10 +12,11 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  cronProblem, describeCron, disablePluginRegistry, downloadPluginBundle, enablePluginRegistry, exportPluginBundle, exposePluginRegistry,
-  getDefaultPlatforms, getPluginBundle, getPluginPrune, getPluginRegistry, pluginBundleDownloadPath, pruneAges, prunePreview, runPluginPrune,
-  scheduleWords, setDefaultPlatforms, setPluginPrune, templateStanza, unexposePluginRegistry,
-  type PluginBundle, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
+  bundleImportSummary, cronProblem, describeCron, disablePluginRegistry, downloadPluginBundle, enablePluginRegistry, exportPluginBundle,
+  exposePluginRegistry, getDefaultPlatforms, getPluginBundle, getPluginBundleImport, getPluginPrune, getPluginRegistry, importPluginBundle,
+  pluginBundleDownloadPath, pruneAges, prunePreview, runPluginPrune, scheduleWords, setDefaultPlatforms, setPluginPrune,
+  templateStanza, unexposePluginRegistry,
+  type PluginBundle, type PluginBundleImport, type PluginBundleVersionOutcome, type PluginPrune, type PluginPruneRequest, type PluginRegistry,
 } from '../data/pluginRegistry'
 import { TemplateStanzaBlock } from './PluginDetail'
 import { useTenant } from '../data/tenant'
@@ -31,6 +34,7 @@ export function PluginRegistrySettings() {
   const [defaultPlatforms, setDefaultPlatformsState] = useState<string[]>([])
   const [prune, setPrune] = useState<PluginPrune | null>(null)
   const [bundle, setBundle] = useState<PluginBundle | null>(null)
+  const [bundleImport, setBundleImport] = useState<PluginBundleImport | null>(null)
   const [bundleShown, setBundleShown] = useState(false)
   const [loading, setLoading] = useState(true)
   const [failure, setFailure] = useState<string | null>(null)
@@ -49,6 +53,7 @@ export function PluginRegistrySettings() {
       // The schedule is maintainer-only on the API, like the rest of this page's controls.
       setPrune(next.enabled && configures ? await getPluginPrune(token, organizationID) : null)
       setBundle(next.enabled && configures ? await getPluginBundle(token, organizationID) : null)
+      setBundleImport(next.enabled && configures ? await getPluginBundleImport(token, organizationID) : null)
       setBundleShown(next.enabled && configures)
       setRegistry(next)
       setFailure(null)
@@ -61,14 +66,17 @@ export function PluginRegistrySettings() {
   }, [organizationID, self?.role, signOut, token])
 
   useEffect(() => { void reload() }, [reload])
-  // An export is queued or running: ask again until it settles.
+  // An export or import is queued or running: ask again until it settles.
   useEffect(() => {
-    if (!organizationID || token === '' || !bundle || (bundle.state !== 'queued' && bundle.state !== 'running')) return
+    if (!organizationID || token === '') return
+    const unsettled = (state?: string) => state === 'queued' || state === 'running'
+    if (!unsettled(bundle?.state) && !unsettled(bundleImport?.state)) return
     const timer = setTimeout(() => {
-      getPluginBundle(token, organizationID).then(setBundle).catch(() => {})
+      if (unsettled(bundle?.state)) getPluginBundle(token, organizationID).then(setBundle).catch(() => {})
+      if (unsettled(bundleImport?.state)) getPluginBundleImport(token, organizationID).then(setBundleImport).catch(() => {})
     }, 5000)
     return () => clearTimeout(timer)
-  }, [bundle, organizationID, token])
+  }, [bundle, bundleImport, organizationID, token])
 
   if (!organizationID) {
     return <PageSection><Alert variant="info" isInline title="Select an organization to manage its plugin registry" /></PageSection>
@@ -84,8 +92,9 @@ export function PluginRegistrySettings() {
       prune={prune}
       onSetPrune={async (request) => { setPrune(await setPluginPrune(token, organizationID, request)) }}
       onPruneNow={async () => { setPrune(await runPluginPrune(token, organizationID)) }}
-      bundle={bundleShown ? { current: bundle, organizationID } : null}
+      bundle={bundleShown ? { current: bundle, lastImport: bundleImport, organizationID } : null}
       onExportBundle={async () => { setBundle(await exportPluginBundle(token, organizationID)) }}
+      onImportBundle={async (file) => { setBundleImport(await importPluginBundle(token, organizationID, file)) }}
       onDownloadBundle={async () => {
         const current = bundle?.bundle
         if (!current) return
@@ -109,6 +118,7 @@ export function PluginRegistrySettings() {
         setDefaultPlatformsState([])
         setPrune(null)
         setBundle(null)
+        setBundleImport(null)
         setBundleShown(false)
       }}
       onSetDefaultPlatforms={async (platforms) => {
@@ -122,14 +132,15 @@ export function PluginRegistrySettingsView({
   organizationName, host, callerRole, registry, defaultPlatforms, loading, failure,
   onRefresh, onEnable, onExpose, onUnexpose, onDisable, onSetDefaultPlatforms,
   prune = null, onSetPrune = async () => {}, onPruneNow = async () => {},
-  bundle = null, onExportBundle = async () => {}, onDownloadBundle = async () => {},
+  bundle = null, onExportBundle = async () => {}, onDownloadBundle = async () => {}, onImportBundle = async () => {},
 }: {
   prune?: PluginPrune | null
   onSetPrune?: (request: PluginPruneRequest) => Promise<void>
   onPruneNow?: () => Promise<void>
-  bundle?: { current: PluginBundle | null; organizationID: string } | null
+  bundle?: { current: PluginBundle | null; lastImport?: PluginBundleImport | null; organizationID: string } | null
   onExportBundle?: () => Promise<void>
   onDownloadBundle?: () => Promise<void>
+  onImportBundle?: (file: File) => Promise<void>
   organizationName: string
   host: string
   callerRole: Role | null
@@ -277,8 +288,8 @@ export function PluginRegistrySettingsView({
                 <CardTitle>Plugin bundle</CardTitle>
                 <CardBody>
                   <PluginBundleCard
-                    bundle={bundle.current} organizationID={bundle.organizationID} busy={busy}
-                    onExport={() => run(onExportBundle)} onDownload={() => run(onDownloadBundle)}
+                    bundle={bundle.current} lastImport={bundle.lastImport ?? null} organizationID={bundle.organizationID} busy={busy}
+                    onExport={() => run(onExportBundle)} onDownload={() => run(onDownloadBundle)} onImport={(file) => run(() => onImportBundle(file))}
                   />
                 </CardBody>
               </Card>
@@ -342,18 +353,41 @@ export function bundleLabels(bundle: PluginBundle | null): { text: string; color
   }
 }
 
-export function PluginBundleCard({ bundle, organizationID, busy, onExport, onDownload }: {
+export function importLabels(job: PluginBundleImport | null): { text: string; color: 'grey' | 'blue' | 'green' | 'orange' | 'red' }[] {
+  if (!job) return []
+  switch (job.state) {
+    case 'queued': return [{ text: 'Import queued', color: 'blue' }]
+    case 'running': return [{ text: 'Importing', color: 'blue' }]
+    case 'succeeded': return [{ text: 'Imported', color: 'green' }]
+    case 'partially_succeeded': return [{ text: 'Partly imported', color: 'orange' }]
+    default: return [{ text: 'Import failed', color: 'red' }]
+  }
+}
+
+const outcomeWords: Record<PluginBundleVersionOutcome['outcome'], string> = {
+  imported: 'Imported', skipped: 'Already held', mismatch: 'Held with different checksums', refused: 'Refused',
+}
+
+// The origin is the connected registry's source kind; an unknown kind is shown as written.
+const originWords = (kind: string) => ({ upload: 'Local', 'releases-hashicorp': 'HashiCorp', github: 'GitHub' } as Record<string, string>)[kind] ?? kind
+
+export function PluginBundleCard({ bundle, lastImport = null, organizationID, busy, onExport, onDownload, onImport = () => {} }: {
   bundle: PluginBundle | null
+  lastImport?: PluginBundleImport | null
   organizationID: string
   busy: boolean
   onExport: () => Promise<void> | void
   onDownload: () => Promise<void> | void
+  onImport?: (file: File) => Promise<void> | void
 }) {
   const exporting = bundle?.state === 'queued' || bundle?.state === 'running'
+  const importing = lastImport?.state === 'queued' || lastImport?.state === 'running'
   const current = bundle?.bundle
   const origin = typeof window === 'undefined' ? '' : window.location.origin
+  const [chosen, setChosen] = useState<File | null>(null)
   return (
     <Flex direction={{ default: 'column' }} gap={{ default: 'gapMd' }}>
+      <Title headingLevel="h3" size="md">Export</Title>
       {bundleLabels(bundle).length ? (
         <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
           {bundleLabels(bundle).map((label) => <FlexItem key={label.text}><Label isCompact color={label.color}>{label.text}</Label></FlexItem>)}
@@ -399,6 +433,72 @@ export function PluginBundleCard({ bundle, organizationID, busy, onExport, onDow
           For a large bundle: <code>curl -H "Authorization: Bearer $TOKEN" -o {current.filename} {origin}{pluginBundleDownloadPath(organizationID)}</code>
         </Content>
       ) : null}
+      <Title headingLevel="h3" size="md" style={{ marginTop: 8 }}>Import</Title>
+      {importLabels(lastImport).length ? (
+        <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+          {importLabels(lastImport).map((label) => <FlexItem key={label.text}><Label isCompact color={label.color}>{label.text}</Label></FlexItem>)}
+        </Flex>
+      ) : null}
+      {lastImport ? (
+        <DescriptionList isHorizontal isCompact>
+          <DescriptionListGroup>
+            <DescriptionListTerm>File</DescriptionListTerm>
+            <DescriptionListDescription><span style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>{lastImport.filename}</span></DescriptionListDescription>
+          </DescriptionListGroup>
+          <DescriptionListGroup>
+            <DescriptionListTerm>SHA-256</DescriptionListTerm>
+            <DescriptionListDescription>
+              <span style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>{lastImport.sha256}</span>
+              {lastImport.filename_matches === false ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}> The filename names a different digest.</span> : null}
+              {lastImport.filename_matches === true ? ' Matches the filename.' : null}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+          {lastImport.bundle ? (
+            <DescriptionListGroup>
+              <DescriptionListTerm>Exported from</DescriptionListTerm>
+              <DescriptionListDescription>
+                {lastImport.bundle.organization} at {lastImport.bundle.host}, {new Date(lastImport.bundle.exported_at).toLocaleString()} ({lastImport.bundle.dufflebag_version}); {lastImport.bundle.plugin_count} {lastImport.bundle.plugin_count === 1 ? 'plugin' : 'plugins'}, {lastImport.bundle.version_count} {lastImport.bundle.version_count === 1 ? 'version' : 'versions'}
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          ) : null}
+          <DescriptionListGroup>
+            <DescriptionListTerm>Result</DescriptionListTerm>
+            <DescriptionListDescription>
+              {lastImport.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{lastImport.error}</span> : bundleImportSummary(lastImport)}
+            </DescriptionListDescription>
+          </DescriptionListGroup>
+        </DescriptionList>
+      ) : null}
+      {lastImport && lastImport.outcomes.length ? (
+        <Table aria-label="Bundle import outcomes" variant="compact">
+          <Thead><Tr><Th>Plugin</Th><Th>Version</Th><Th>Origin</Th><Th>Outcome</Th></Tr></Thead>
+          <Tbody>
+            {lastImport.outcomes.map((outcome) => (
+              <Tr key={`${outcome.plugin}-${outcome.version}`}>
+                <Td dataLabel="Plugin">{outcome.plugin}</Td>
+                <Td dataLabel="Version"><span style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>{outcome.version}</span></Td>
+                <Td dataLabel="Origin">{originWords(outcome.origin_kind)}{outcome.origin_repository ? ` (${outcome.origin_repository})` : ''}</Td>
+                <Td dataLabel="Outcome">
+                  {outcomeWords[outcome.outcome]}
+                  {outcome.error ? <Content component="small"> {outcome.error}</Content> : null}
+                </Td>
+              </Tr>
+            ))}
+          </Tbody>
+        </Table>
+      ) : null}
+      <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+        <input
+          aria-label="Choose a plugin bundle" type="file" accept=".tar.gz,application/gzip" disabled={busy || importing}
+          onChange={(event) => setChosen(event.target.files?.[0] ?? null)}
+        />
+        <Button
+          variant="secondary" isLoading={importing} isDisabled={busy || importing || !chosen}
+          onClick={() => { if (chosen) { void onImport(chosen); setChosen(null) } }}
+        >
+          {importing ? 'Importing…' : 'Import bundle'}
+        </Button>
+      </Flex>
     </Flex>
   )
 }

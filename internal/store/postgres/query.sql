@@ -1342,3 +1342,52 @@ SELECT filename, os, arch, sha256, size, object_key
 FROM plugin_files
 WHERE version_id = $1
 ORDER BY os, arch, filename;
+
+-- name: QueuePluginBundleImport :execrows
+INSERT INTO plugin_bundle_imports (organization_id, state, requested_by, object_key, filename, size, sha256)
+SELECT plugin_registries.organization_id, 'queued', sqlc.arg(requested_by), sqlc.arg(object_key), sqlc.arg(filename), sqlc.arg(size), sqlc.arg(sha256)
+FROM plugin_registries
+WHERE plugin_registries.organization_id = sqlc.arg(organization_id)
+ON CONFLICT (organization_id) DO UPDATE
+SET state = 'queued', requested_by = EXCLUDED.requested_by, object_key = EXCLUDED.object_key,
+    filename = EXCLUDED.filename, size = EXCLUDED.size, sha256 = EXCLUDED.sha256,
+    created_at = now(), claimed_at = NULL, started_at = NULL, finished_at = NULL, error = '',
+    bundle_host = '', bundle_organization = '', bundle_exported_at = NULL, bundle_version = '',
+    plugin_count = 0, version_count = 0, outcomes = '[]'
+WHERE plugin_bundle_imports.state NOT IN ('queued', 'running');
+
+-- name: ClaimPluginBundleImport :one
+UPDATE plugin_bundle_imports
+SET state = 'running', claimed_at = now(), started_at = COALESCE(started_at, now())
+WHERE organization_id = (
+    SELECT candidate.organization_id
+    FROM plugin_bundle_imports AS candidate
+    WHERE candidate.organization_id = sqlc.arg(organization_id)
+      AND (candidate.state = 'queued'
+           OR (candidate.state = 'running'
+               AND candidate.claimed_at < now() - make_interval(secs => sqlc.arg(stale_seconds)::float8)))
+    FOR UPDATE SKIP LOCKED LIMIT 1
+)
+RETURNING object_key, filename, sha256;
+
+-- name: RecordPluginBundleImport :exec
+UPDATE plugin_bundle_imports
+SET state = sqlc.arg(state), claimed_at = now(), error = sqlc.arg(error), outcomes = sqlc.arg(outcomes),
+    bundle_host = sqlc.arg(bundle_host), bundle_organization = sqlc.arg(bundle_organization),
+    bundle_exported_at = sqlc.narg(bundle_exported_at), bundle_version = sqlc.arg(bundle_version),
+    plugin_count = sqlc.arg(plugin_count), version_count = sqlc.arg(version_count),
+    finished_at = CASE WHEN sqlc.arg(state) IN ('succeeded', 'partially_succeeded', 'failed') THEN now() ELSE finished_at END
+WHERE organization_id = sqlc.arg(organization_id);
+
+-- name: GetPluginBundleImport :one
+SELECT state, requested_by, object_key, filename, size, sha256, created_at, started_at, finished_at, error,
+       bundle_host, bundle_organization, bundle_exported_at, bundle_version, plugin_count, version_count, outcomes
+FROM plugin_bundle_imports
+WHERE organization_id = $1;
+
+-- name: GetPluginVersionSumsKey :one
+SELECT plugin_versions.sums_key
+FROM plugin_versions
+JOIN plugins ON plugins.id = plugin_versions.plugin_id
+WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3;
+

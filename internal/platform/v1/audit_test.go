@@ -67,6 +67,8 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"ExportPluginBundle":                {"plugin_registry.bundle.export", "plugin_registry", "organizationId"},
 		"GetPluginBundle":                   {"plugin_registry.bundle.read", "plugin_registry", "organizationId"},
 		"DownloadPluginBundle":              {"plugin_registry.bundle.download", "plugin_registry", "organizationId"},
+		"ImportPluginBundle":                {"plugin_registry.bundle.import", "plugin_registry", "organizationId"},
+		"GetPluginBundleImport":             {"plugin_registry.bundle.import.read", "plugin_registry", "organizationId"},
 		"PublishPluginVersion":              {"plugin.version.publish", "plugin_version", "version"},
 		"ListProjects":                      {"project.list", "project_collection", ""},
 		"CreateProject":                     {"project.create", "project", ""},
@@ -154,7 +156,7 @@ func TestPlatformDescriptorRoutesCrossCheckStrictOperationIDs(t *testing.T) {
 			).Replace(descriptor.path)
 			request := httptest.NewRequest(descriptor.method, path, strings.NewReader("{}"))
 			request.Header.Set("Content-Type", "application/json")
-			if expectedOperationID == "PublishPluginVersion" {
+			if expectedOperationID == "PublishPluginVersion" || expectedOperationID == "ImportPluginBundle" {
 				request = httptest.NewRequest(descriptor.method, path, strings.NewReader("--x--\r\n"))
 				request.Header.Set("Content-Type", "multipart/form-data; boundary=x")
 			}
