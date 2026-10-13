@@ -931,11 +931,11 @@ test('the catalogue is the designed card: toolbar filters, Updates column, kebab
   for (const action of ['Browse HashiCorp', 'Import from GitHub', 'Upload']) assert.match(screen, new RegExp(`<button[^>]*>(?:<span[^>]*>)?${action}<`))
   assert.doesNotMatch(render({ registry: { enabled: true, exposed: true }, callerRole: 'reader', plugins: [] }), /Browse HashiCorp/)
   const html = renderCatalogue()
-  // Toolbar: name filter, source filter, Update available, selection text, Sync selected, pager.
+  // Toolbar: name filter, source filter, Update available, Sync selected, pager. The selection count appears only once something is selected.
   assert.match(html, /aria-label="Filter plugins by name"/)
   assert.match(html, />All sources</)
   assert.match(html, /id="updates-only"[^>]*>/)
-  assert.match(html, /Select plugins with an update/)
+  assert.doesNotMatch(html, /Select plugins with an update<\/span>|0 selected/)
   assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Sync selected</)
   assert.match(html, /aria-label="Plugins pagination"/)
   // Columns and cells.
