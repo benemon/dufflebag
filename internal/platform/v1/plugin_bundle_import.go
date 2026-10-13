@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/identity"
@@ -39,7 +40,7 @@ func (s *server) ImportPluginBundle(ctx context.Context, request ImportPluginBun
 	}
 	audited.actor(caller)
 	tenant := store.ParseOrganizationTenant(organizationID)
-	upload, file, err := spoolPluginBundle(request.Body)
+	upload, expected, file, err := spoolPluginBundle(request.Body)
 	if file != nil {
 		defer func() {
 			_ = file.Close()
@@ -54,6 +55,10 @@ func (s *server) ImportPluginBundle(ctx context.Context, request ImportPluginBun
 	case err != nil:
 		audited.failed("invalid_request")
 		return ImportPluginBundle400JSONResponse{Message: err.Error()}, nil
+	}
+	if expected != "" && expected != upload.SHA256 {
+		audited.failed("digest_mismatch")
+		return ImportPluginBundle400JSONResponse{Message: fmt.Sprintf("the bundle's SHA-256 is %s, not the expected %s; nothing was stored", upload.SHA256, expected)}, nil
 	}
 	upload.ObjectKey = objectstore.BundleImportKey(organizationID, upload.SHA256)
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
@@ -122,37 +127,60 @@ func (s *server) GetPluginBundleImport(ctx context.Context, request GetPluginBun
 	return GetPluginBundleImport200JSONResponse(renderPluginBundleImport(job)), nil
 }
 
-// spoolPluginBundle reads the one bundle part to a temp file, hashing it.
-// The file is returned even on failure so the caller removes it.
-func spoolPluginBundle(body *multipart.Reader) (store.PluginBundleUpload, *os.File, error) {
+// spoolPluginBundle reads the bundle part to a temp file, hashing it, and
+// the optional sha256 part in whichever order the form sends them. The file
+// is returned even on failure so the caller removes it.
+func spoolPluginBundle(body *multipart.Reader) (upload store.PluginBundleUpload, expected string, file *os.File, err error) {
 	if body == nil {
-		return store.PluginBundleUpload{}, nil, errors.New("a multipart body with a bundle part is required")
+		return upload, "", nil, errors.New("a multipart body with a bundle part is required")
 	}
-	part, err := body.NextPart()
-	if errors.Is(err, io.EOF) {
-		return store.PluginBundleUpload{}, nil, errors.New("the request carries no bundle part")
+	for {
+		part, err := body.NextPart()
+		if errors.Is(err, io.EOF) {
+			break
+		}
+		if err != nil {
+			return upload, "", file, err
+		}
+		switch part.FormName() {
+		case "sha256":
+			digest, err := io.ReadAll(io.LimitReader(part, 128))
+			_ = part.Close()
+			if err != nil {
+				return upload, "", file, err
+			}
+			expected = strings.ToLower(strings.TrimSpace(string(digest)))
+			if len(expected) != 64 || strings.Trim(expected, "0123456789abcdef") != "" {
+				return upload, "", file, errors.New("sha256 must be the 64 hex characters of the bundle's digest")
+			}
+		case "bundle":
+			if file != nil {
+				_ = part.Close()
+				return upload, "", file, errors.New("the request carries two bundle parts")
+			}
+			if file, err = os.CreateTemp("", "dufflebag-bundle-upload-*"); err != nil {
+				_ = part.Close()
+				return upload, "", nil, err
+			}
+			hash := sha256.New()
+			size, err := io.Copy(io.MultiWriter(file, hash), part)
+			_ = part.Close()
+			if err != nil {
+				return upload, "", file, err
+			}
+			if size == 0 {
+				return upload, "", file, errors.New("the bundle part is empty")
+			}
+			upload = store.PluginBundleUpload{Filename: part.FileName(), Size: size, SHA256: hex.EncodeToString(hash.Sum(nil))}
+		default:
+			_ = part.Close()
+			return upload, "", file, fmt.Errorf("%s is not the bundle or sha256 part", part.FormName())
+		}
 	}
-	if err != nil {
-		return store.PluginBundleUpload{}, nil, err
+	if file == nil {
+		return upload, "", nil, errors.New("the request carries no bundle part")
 	}
-	if part.FormName() != "bundle" {
-		_ = part.Close()
-		return store.PluginBundleUpload{}, nil, fmt.Errorf("%s is not the bundle part", part.FormName())
-	}
-	file, err := os.CreateTemp("", "dufflebag-bundle-upload-*")
-	if err != nil {
-		return store.PluginBundleUpload{}, nil, err
-	}
-	hash := sha256.New()
-	size, err := io.Copy(io.MultiWriter(file, hash), part)
-	_ = part.Close()
-	if err != nil {
-		return store.PluginBundleUpload{}, file, err
-	}
-	if size == 0 {
-		return store.PluginBundleUpload{}, file, errors.New("the bundle part is empty")
-	}
-	return store.PluginBundleUpload{Filename: part.FileName(), Size: size, SHA256: hex.EncodeToString(hash.Sum(nil))}, file, nil
+	return upload, expected, file, nil
 }
 
 func optionalString(value string) *string {
