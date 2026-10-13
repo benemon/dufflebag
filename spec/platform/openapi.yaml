@@ -879,6 +879,9 @@ paths:
               type: object
               properties:
                 bundle: { type: string, format: binary }
+                sha256:
+                  type: string
+                  description: The expected SHA-256 of the archive, as the exporting card shows it. When given, a bundle whose bytes differ is refused and nothing is stored.
               required: [bundle]
       responses:
         "202":
@@ -887,7 +890,7 @@ paths:
             application/json:
               schema: { $ref: "#/components/schemas/PluginBundleImport" }
         "400":
-          description: The request carries no bundle.
+          description: The request carries no bundle, or the bundle's SHA-256 is not the expected one.
           content:
             application/json:
               schema: { $ref: "#/components/schemas/Error" }

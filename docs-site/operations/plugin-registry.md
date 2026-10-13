@@ -321,15 +321,17 @@ plugin whose versions are all revoked is left out entirely. The airgapped
 registry keeps its own view of what is revoked: a revocation on the
 connected side after a bundle is imported does not propagate.
 
-A maintainer exports under **Administration › Plugin registry › Plugin
-bundle**. The export runs in the background and the card shows the current
-bundle: its filename, when it was exported, its size, how many plugins and
-versions it holds, and its SHA-256, copyable. One export runs at a time, and
-a new export replaces the previous bundle, so an organization holds one
-bundle. A failed export keeps the previous bundle and says why it failed.
+A maintainer generates a bundle under **Administration › Plugin registry ›
+Plugin bundle** with **Generate bundle**. It runs in the background and the
+card shows the current bundle: its filename, when it was generated, its
+size, how many plugins and versions it holds, and its SHA-256, copyable. One
+runs at a time, and a new one replaces the previous bundle, so an
+organization holds one bundle. A failed run keeps the previous bundle and
+says why it failed.
 
-**Download** saves the bundle through the browser. For a large bundle, the
-card shows the curl form:
+**Export bundle** saves the current bundle through the browser, and is
+available once a bundle exists. For a large bundle, the card shows the curl
+form:
 
 ```shell
 curl -H "Authorization: Bearer $TOKEN" -o dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz \
@@ -348,12 +350,15 @@ follow under `plugins/<name>/<version>/`.
 ### Import a bundle
 
 On the disconnected dufflebag, a maintainer chooses the bundle file under
-**Administration › Plugin registry › Plugin bundle › Import** and imports
-it; the API form is one multipart request:
+**Administration › Plugin registry › Plugin bundle › Import**, enters the
+SHA-256 the exporting card showed, and imports it. The digest is optional
+but worth carrying: a bundle whose bytes differ from it is refused before
+anything is stored. The API form is one multipart request:
 
 ```shell
 curl -X PUT "https://airgapped.example.com/api/v1/organizations/$ORG_ID/plugin-registry/bundle/import" \
   -H "Authorization: Bearer $TOKEN" \
+  -F sha256=0123456789abcdef... \
   -F bundle=@dufflebag-plugins-acme-20261013T090040Z-0123456789ab.tar.gz
 ```
 

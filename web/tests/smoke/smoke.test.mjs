@@ -1112,7 +1112,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     assert.equal(uploaded.status, 201, `probe 1.2.0 upload answered ${uploaded.status}: ${await uploaded.text()}`)
     await waitForText('Plugin bundle')
     await waitForText('No bundle yet.')
-    await clickByText('button', 'Export registry')
+    await clickByText('button', 'Generate bundle')
     await until('the export to finish', async () => /dufflebag-plugins-[^\s]+\.tar\.gz/.test(await bodyText()), 60000)
     const bundleState = await api(rootToken, 'GET', `${registryPath}/bundle`)
     assert.equal(bundleState.state, 'succeeded', JSON.stringify(bundleState))
@@ -1162,6 +1162,13 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       }, 60000)
       return job
     }
+    // A wrong expected digest is refused before anything is stored.
+    const wrongDigest = new FormData()
+    wrongDigest.append('sha256', 'f'.repeat(64))
+    wrongDigest.append('bundle', new Blob([archive], { type: 'application/gzip' }), bundleState.bundle.filename)
+    const refusedImport = await fetch(`${base}${offlinePath}/bundle/import`, { method: 'PUT', headers: { Authorization: `Bearer ${rootToken}` }, body: wrongDigest })
+    assert.equal(refusedImport.status, 400, `wrong expected digest answered ${refusedImport.status}`)
+    assert.match(await refusedImport.text(), /not the expected/)
     const imported = await importBundle()
     assert.equal(imported.state, 'succeeded', JSON.stringify(imported))
     assert.equal(imported.sha256, archiveDigest)

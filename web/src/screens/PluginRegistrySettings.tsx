@@ -66,6 +66,17 @@ export function PluginRegistrySettings() {
   }, [organizationID, self?.role, signOut, token])
 
   useEffect(() => { void reload() }, [reload])
+  const downloadBundle = useCallback(async (which: PluginBundle | null) => {
+    const current = which?.bundle
+    if (!current || !organizationID) return
+    const bytes = await downloadPluginBundle(token, organizationID)
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'application/gzip' }))
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = current.filename
+    anchor.click()
+    URL.revokeObjectURL(url)
+  }, [organizationID, token])
   // An export or import is queued or running: ask again until it settles.
   useEffect(() => {
     if (!organizationID || token === '') return
@@ -94,18 +105,8 @@ export function PluginRegistrySettings() {
       onPruneNow={async () => { setPrune(await runPluginPrune(token, organizationID)) }}
       bundle={bundleShown ? { current: bundle, lastImport: bundleImport, organizationID } : null}
       onExportBundle={async () => { setBundle(await exportPluginBundle(token, organizationID)) }}
-      onImportBundle={async (file) => { setBundleImport(await importPluginBundle(token, organizationID, file)) }}
-      onDownloadBundle={async () => {
-        const current = bundle?.bundle
-        if (!current) return
-        const bytes = await downloadPluginBundle(token, organizationID)
-        const url = URL.createObjectURL(new Blob([bytes], { type: 'application/gzip' }))
-        const anchor = document.createElement('a')
-        anchor.href = url
-        anchor.download = current.filename
-        anchor.click()
-        URL.revokeObjectURL(url)
-      }}
+      onImportBundle={async (file, expectedSHA256) => { setBundleImport(await importPluginBundle(token, organizationID, file, expectedSHA256)) }}
+      onDownloadBundle={() => downloadBundle(bundle)}
       loading={loading}
       failure={failure}
       onRefresh={reload}
@@ -140,7 +141,7 @@ export function PluginRegistrySettingsView({
   bundle?: { current: PluginBundle | null; lastImport?: PluginBundleImport | null; organizationID: string } | null
   onExportBundle?: () => Promise<void>
   onDownloadBundle?: () => Promise<void>
-  onImportBundle?: (file: File) => Promise<void>
+  onImportBundle?: (file: File, expectedSHA256: string) => Promise<void>
   organizationName: string
   host: string
   callerRole: Role | null
@@ -288,8 +289,8 @@ export function PluginRegistrySettingsView({
                 <CardTitle>Plugin bundle</CardTitle>
                 <CardBody>
                   <PluginBundleCard
-                    bundle={bundle.current} lastImport={bundle.lastImport ?? null} organizationID={bundle.organizationID} busy={busy}
-                    onExport={() => run(onExportBundle)} onDownload={() => run(onDownloadBundle)} onImport={(file) => run(() => onImportBundle(file))}
+                    bundle={bundle.current} lastImport={bundle.lastImport ?? null} organizationID={bundle.organizationID}
+                    onExport={onExportBundle} onDownload={onDownloadBundle} onImport={onImportBundle}
                   />
                 </CardBody>
               </Card>
@@ -371,22 +372,39 @@ const outcomeWords: Record<PluginBundleVersionOutcome['outcome'], string> = {
 // The origin is the connected registry's source kind; an unknown kind is shown as written.
 const originWords = (kind: string) => ({ upload: 'Local', 'releases-hashicorp': 'HashiCorp', github: 'GitHub' } as Record<string, string>)[kind] ?? kind
 
-export function PluginBundleCard({ bundle, lastImport = null, organizationID, busy, onExport, onDownload, onImport = () => {} }: {
+export function PluginBundleCard({ bundle, lastImport = null, organizationID, onExport, onDownload, onImport = async () => {} }: {
   bundle: PluginBundle | null
   lastImport?: PluginBundleImport | null
   organizationID: string
-  busy: boolean
-  onExport: () => Promise<void> | void
-  onDownload: () => Promise<void> | void
-  onImport?: (file: File) => Promise<void> | void
+  onExport: () => Promise<void>
+  onDownload: () => Promise<void>
+  onImport?: (file: File, expectedSHA256: string) => Promise<void>
 }) {
+  // The card's own working state: a download here must not spin the rest of the page.
+  const [working, setWorking] = useState<'export' | 'download' | 'import' | null>(null)
+  const [failure, setFailure] = useState<string | null>(null)
+  const [chosen, setChosen] = useState<File | null>(null)
+  const [expected, setExpected] = useState('')
+  const [pickerKey, setPickerKey] = useState(0)
   const exporting = bundle?.state === 'queued' || bundle?.state === 'running'
   const importing = lastImport?.state === 'queued' || lastImport?.state === 'running'
   const current = bundle?.bundle
   const origin = typeof window === 'undefined' ? '' : window.location.origin
-  const [chosen, setChosen] = useState<File | null>(null)
+  const run = async (what: 'export' | 'download' | 'import', work: () => Promise<void>) => {
+    setFailure(null)
+    setWorking(what)
+    try {
+      await work()
+    } catch (error: unknown) {
+      setFailure(pluginRegistryErrorMessage(error, 'The plugin bundle action failed.'))
+    } finally {
+      setWorking(null)
+    }
+  }
+  const expectedProblem = expected.trim() !== '' && !/^[0-9a-fA-F]{64}$/.test(expected.trim()) ? 'A SHA-256 is 64 hex characters.' : null
   return (
     <Flex direction={{ default: 'column' }} gap={{ default: 'gapMd' }}>
+      {failure ? <Alert variant="danger" isInline title="The plugin bundle action failed"><Content component="p">{failure}</Content></Alert> : null}
       <Title headingLevel="h3" size="md">Export</Title>
       {bundleLabels(bundle).length ? (
         <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
@@ -423,10 +441,12 @@ export function PluginBundleCard({ bundle, lastImport = null, organizationID, bu
         </DescriptionList>
       ) : <Content component="p">No bundle yet.</Content>}
       <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
-        <Button variant="primary" isLoading={exporting} isDisabled={busy || exporting} onClick={() => void onExport()}>
-          {exporting ? 'Exporting…' : 'Export registry'}
+        <Button variant="primary" isLoading={exporting || working === 'export'} isDisabled={exporting || working !== null} onClick={() => void run('export', onExport)}>
+          {exporting ? 'Generating…' : 'Generate bundle'}
         </Button>
-        {current ? <Button variant="secondary" isDisabled={busy} onClick={() => void onDownload()}>Download</Button> : null}
+        <Button variant="secondary" isLoading={working === 'download'} isDisabled={!current || working !== null} onClick={() => void run('download', onDownload)}>
+          {working === 'download' ? 'Exporting…' : 'Export bundle'}
+        </Button>
       </Flex>
       {current ? (
         <Content component="small">
@@ -487,14 +507,47 @@ export function PluginBundleCard({ bundle, lastImport = null, organizationID, bu
           </Tbody>
         </Table>
       ) : null}
+      <DescriptionList isHorizontal isCompact>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Bundle</DescriptionListTerm>
+          <DescriptionListDescription>
+            <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
+              <input
+                key={pickerKey} id="bundle-file" aria-label="Choose a plugin bundle" type="file" accept=".tar.gz,application/gzip"
+                style={{ display: 'none' }} onChange={(event) => setChosen(event.target.files?.[0] ?? null)}
+              />
+              <Button variant="secondary" isDisabled={importing || working !== null} onClick={() => document.getElementById('bundle-file')?.click()}>
+                Choose bundle…
+              </Button>
+              <span style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}>{chosen ? chosen.name : 'No bundle chosen'}</span>
+            </Flex>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+        <DescriptionListGroup>
+          <DescriptionListTerm>Expected SHA-256</DescriptionListTerm>
+          <DescriptionListDescription>
+            <TextInput
+              id="bundle-expected-sha256" aria-label="Expected SHA-256" value={expected} isDisabled={importing || working !== null}
+              validated={expectedProblem ? 'error' : 'default'} onChange={(_event, value) => setExpected(value)}
+              style={{ fontFamily: 'var(--pf-t--global--font--family--mono)' }}
+            />
+            <Content component="small">{expectedProblem ?? 'The digest the exporting card shows. A bundle whose bytes differ is refused before anything is stored.'}</Content>
+          </DescriptionListDescription>
+        </DescriptionListGroup>
+      </DescriptionList>
       <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }}>
-        <input
-          aria-label="Choose a plugin bundle" type="file" accept=".tar.gz,application/gzip" disabled={busy || importing}
-          onChange={(event) => setChosen(event.target.files?.[0] ?? null)}
-        />
         <Button
-          variant="secondary" isLoading={importing} isDisabled={busy || importing || !chosen}
-          onClick={() => { if (chosen) { void onImport(chosen); setChosen(null) } }}
+          variant="primary" isLoading={importing || working === 'import'} isDisabled={importing || working !== null || !chosen || expectedProblem !== null}
+          onClick={() => {
+            if (!chosen) return
+            const file = chosen
+            void run('import', async () => {
+              await onImport(file, expected)
+              setChosen(null)
+              setExpected('')
+              setPickerKey((key) => key + 1)
+            })
+          }}
         >
           {importing ? 'Importing…' : 'Import bundle'}
         </Button>

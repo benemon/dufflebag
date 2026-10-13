@@ -1421,12 +1421,12 @@ const bundleState = (over = {}) => ({
 
 test('the Plugin bundle card offers one export, shows the current bundle with its digest, and keeps it through a failure', () => {
   const card = (bundle) => renderToStaticMarkup(React.createElement(PluginBundleCard, {
-    bundle, organizationID: 'org-id', busy: false, onExport: () => {}, onDownload: () => {},
+    bundle, organizationID: 'org-id', onExport: async () => {}, onDownload: async () => {},
   }))
   const none = card(null)
   assert.match(none, /No bundle yet\./)
-  assert.doesNotMatch(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export registry</, 'the first export is available at once')
-  assert.doesNotMatch(none, />Download</)
+  assert.doesNotMatch(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Generate bundle</, 'the first generate is available at once')
+  assert.match(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export bundle</, 'nothing to export until a bundle has been generated')
   assert.deepEqual(bundleLabels(null), [])
 
   const done = card(bundleState())
@@ -1435,20 +1435,20 @@ test('the Plugin bundle card offers one export, shows the current bundle with it
   assert.match(done, /3 plugins, 7 versions/)
   assert.match(done, new RegExp('0123456789ab' + 'c'.repeat(52)), 'the full digest is on the card')
   assert.match(done, /id="bundle-sha256"/, 'the digest is copyable')
-  assert.match(done, />Download</)
+  assert.doesNotMatch(done, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export bundle</, 'a generated bundle can be exported')
   assert.match(done, /curl -H &quot;Authorization: Bearer \$TOKEN&quot; -o dufflebag-plugins-acme-20261013T090040Z-0123456789ab\.tar\.gz [^<]*\/api\/v1\/organizations\/org-id\/plugin-registry\/bundle\/download/)
   assert.deepEqual(bundleLabels(bundleState()), [])
 
   const running = card(bundleState({ state: 'running', finished_at: undefined }))
-  assert.match(running, /<button[^>]*disabled[^>]*>[\s\S]{0,300}Exporting…</, 'one export at a time')
+  assert.match(running, /<button[^>]*disabled[^>]*>[\s\S]{0,300}Generating…</, 'one generate at a time')
   assert.deepEqual(bundleLabels(bundleState({ state: 'running' })), [{ text: 'Exporting', color: 'blue' }])
   assert.deepEqual(bundleLabels(bundleState({ state: 'queued' })), [{ text: 'Queued', color: 'blue' }])
 
   const failed = card(bundleState({ state: 'failed', error: 'object storage unavailable' }))
   assert.match(failed, />Last export failed</)
   assert.match(failed, /object storage unavailable/)
-  assert.match(failed, />Download</, 'the previous bundle is still offered')
-  assert.doesNotMatch(failed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export registry</, 'and a new export can be tried')
+  assert.doesNotMatch(failed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Export bundle</, 'the previous bundle is still offered')
+  assert.doesNotMatch(failed, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Generate bundle</, 'and a new generate can be tried')
 
   const settings = (bundle, callerRole = 'maintainer') => renderToStaticMarkup(React.createElement(PluginRegistrySettingsView, {
     organizationName: 'acme', host: 'dufflebag.example.com', callerRole, registry: { enabled: true, exposed: true },
@@ -1476,10 +1476,14 @@ const importState = (over = {}) => ({
 
 test('the Plugin bundle card imports a chosen file and reports the last import version by version', () => {
   const card = (lastImport) => renderToStaticMarkup(React.createElement(PluginBundleCard, {
-    bundle: null, lastImport, organizationID: 'org-id', busy: false, onExport: () => {}, onDownload: () => {}, onImport: () => {},
+    bundle: null, lastImport, organizationID: 'org-id', onExport: async () => {}, onDownload: async () => {}, onImport: async () => {},
   }))
   const none = card(null)
-  assert.match(none, /aria-label="Choose a plugin bundle"[^>]*type="file"/)
+  assert.match(none, /id="bundle-file"[^>]*aria-label="Choose a plugin bundle"[^>]*type="file"[^>]*style="display:none"/, 'the native control is hidden behind a house button')
+  assert.match(none, /<button[^>]*>[\s\S]{0,120}Choose bundle…</)
+  assert.match(none, /No bundle chosen/)
+  assert.match(none, /id="bundle-expected-sha256"/, 'the operator is asked for the digest the exporting card showed')
+  assert.match(none, /A bundle whose bytes differ is refused before anything is stored\./)
   assert.match(none, /<button[^>]*disabled[^>]*>[\s\S]{0,200}Import bundle</, 'nothing chosen, nothing to import')
   assert.doesNotMatch(none, /Bundle import outcomes/)
   assert.deepEqual(importLabels(null), [])

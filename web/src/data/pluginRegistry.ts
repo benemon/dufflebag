@@ -560,8 +560,11 @@ export async function getPluginBundleImport(token: string, organizationID: strin
   }
 }
 
-export function importPluginBundle(token: string, organizationID: string, file: File): Promise<PluginBundleImport> {
+// The expected digest, when the operator has one from the exporting card,
+// goes before the bundle so the server refuses a wrong one without storing it.
+export function importPluginBundle(token: string, organizationID: string, file: File, expectedSHA256 = ''): Promise<PluginBundleImport> {
   const form = new FormData()
+  if (expectedSHA256.trim()) form.append('sha256', expectedSHA256.trim())
   form.append('bundle', file, file.name)
   return platformPutForm<PluginBundleImport>(token, path(organizationID, 'bundle/import'), form)
 }

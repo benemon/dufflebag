@@ -2313,6 +2313,9 @@ type CreateOrganizationJSONBody struct {
 // ImportPluginBundleMultipartBody defines parameters for ImportPluginBundle.
 type ImportPluginBundleMultipartBody struct {
 	Bundle openapi_types.File `json:"bundle"`
+
+	// Sha256 The expected SHA-256 of the archive, as the exporting card shows it. When given, a bundle whose bytes differ is refused and nothing is stored.
+	Sha256 *string `json:"sha256,omitempty"`
 }
 
 // ResolveGithubReleaseJSONBody defines parameters for ResolveGithubRelease.

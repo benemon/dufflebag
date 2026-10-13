@@ -8,6 +8,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -16,10 +17,17 @@ import (
 	"github.com/google/uuid"
 )
 
-func importBundleRequest(t *testing.T, handler http.Handler, filename string, data []byte) *httptest.ResponseRecorder {
+func importBundleRequest(t *testing.T, handler http.Handler, filename string, data []byte, fields ...string) *httptest.ResponseRecorder {
 	t.Helper()
 	var body bytes.Buffer
 	form := multipart.NewWriter(&body)
+	// Extra fields come in pairs; a pair before the file goes before the file part.
+	for i := 0; i+1 < len(fields); i += 2 {
+		if fields[i+1] == "" {
+			continue
+		}
+		_ = form.WriteField(fields[i], fields[i+1])
+	}
 	if filename != "" {
 		writer, err := form.CreateFormFile("bundle", filename)
 		if err != nil {
@@ -104,6 +112,26 @@ func TestPluginBundleImportRendersOutcomesAndFlagsARenamedBundle(t *testing.T) {
 	}, testLogger(), func() time.Time { return initTestTime })
 	if response := call(t, outsider, http.MethodGet, pluginRegistryPath("bundle/import"), nil, testToken); response.Code != http.StatusNotFound {
 		t.Fatalf("caller outside the organization = %d, want 404", response.Code)
+	}
+}
+
+func TestPluginBundleImportHonoursAnExpectedDigest(t *testing.T) {
+	repository := pluginRegistryRepository(store.PluginRegistry{Enabled: true})
+	handler, trail := auditedPlatform(t, pluginRegistryHandler(identity.RoleMaintainer, repository))
+	archive := []byte("gzip bytes of a bundle")
+	sum := sha256.Sum256(archive)
+	digest := hex.EncodeToString(sum[:])
+	wrong := importBundleRequest(t, handler, "bundle.tar.gz", archive, "sha256", strings.Repeat("a", 64))
+	if wrong.Code != http.StatusBadRequest || !strings.Contains(wrong.Body.String(), "not the expected") || len(repository.bundleObjects) != 0 || repository.bundleImport != nil {
+		t.Fatalf("wrong digest = %d %s, objects %d, want 400 and nothing stored", wrong.Code, wrong.Body.String(), len(repository.bundleObjects))
+	}
+	assertPlatformAudit(t, trail.response(t), map[string]any{"operation": "plugin_registry.bundle.import", "outcome": "failure", "reason": "digest_mismatch"})
+	if response := importBundleRequest(t, handler, "bundle.tar.gz", archive, "sha256", "not-hex"); response.Code != http.StatusBadRequest {
+		t.Fatalf("malformed digest = %d, want 400", response.Code)
+	}
+	right := importBundleRequest(t, handler, "bundle.tar.gz", archive, "sha256", "  "+strings.ToUpper(digest)+"\n")
+	if right.Code != http.StatusAccepted {
+		t.Fatalf("right digest (upper case, padded) = %d %s, want 202", right.Code, right.Body.String())
 	}
 }
 
