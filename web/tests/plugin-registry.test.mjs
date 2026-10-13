@@ -861,11 +861,11 @@ const gitRelease = {
   published_at: '2026-09-28T12:00:00Z', platforms: ['darwin_arm64', 'linux_amd64'], has_checksum: true, checksum_asset: 'packer-plugin-git_v0.6.3_SHA256SUMS',
 }
 
-test('a resolved GitHub release shows what was inferred, pinned to its tag', () => {
+test('a resolved GitHub release shows its details, pinned to its tag', () => {
   const html = githubView(gitRelease)
   assert.match(html, /Release link/)
   assert.match(html, /Latest is pinned to an exact version when you resolve it\./)
-  assert.match(html, /Inferred from the release/)
+  assert.match(html, /Release details/)
   assert.match(html, /<dt[^>]*>[\s\S]{0,120}?Repository[\s\S]{0,400}?ethanmdavidson\/packer-plugin-git/)
   assert.match(html, /Plugin name[\s\S]{0,400}?>git<[\s\S]{0,300}?from the repository name/)
   assert.match(html, /Version[\s\S]{0,400}?>0\.6\.3<[\s\S]{0,300}?from \/releases\/latest, tag v0\.6\.3/)
