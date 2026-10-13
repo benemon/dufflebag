@@ -38,6 +38,9 @@ const pluginMetadataBytes = 1 << 20
 
 var pluginUploadPath = regexp.MustCompile(`^/api/v1/organizations/[^/]+/plugin-registry/plugins/[^/]+/versions/[^/]+$`)
 
+// A bundle's manifest names the host it was exported from, as the stanza does.
+var pluginBundleExportPath = regexp.MustCompile(`^/api/v1/organizations/[^/]+/plugin-registry/bundle/export$`)
+
 type requestHostKey struct{}
 
 // withPluginUpload bounds the upload route's body, extends its deadlines, and
@@ -51,6 +54,9 @@ func withPluginUpload(limit int64, next http.Handler) http.Handler {
 			_ = controller.SetReadDeadline(deadline)
 			_ = controller.SetWriteDeadline(deadline)
 			r.Body = http.MaxBytesReader(w, r.Body, limit)
+			r = r.WithContext(context.WithValue(r.Context(), requestHostKey{}, r.Host))
+		}
+		if r.Method == http.MethodPost && pluginBundleExportPath.MatchString(r.URL.Path) {
 			r = r.WithContext(context.WithValue(r.Context(), requestHostKey{}, r.Host))
 		}
 		next.ServeHTTP(w, r)

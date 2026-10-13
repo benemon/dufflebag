@@ -469,6 +469,15 @@ func (response refusalResponse) VisitSetPluginPruneResponse(w http.ResponseWrite
 func (response refusalResponse) VisitRunPluginPruneResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
+func (response refusalResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitResolveGithubReleaseResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

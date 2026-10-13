@@ -448,6 +448,30 @@ func (e KeyringEntryPurpose) Valid() bool {
 	}
 }
 
+// Defines values for PluginBundleState.
+const (
+	PluginBundleStateFailed    PluginBundleState = "failed"
+	PluginBundleStateQueued    PluginBundleState = "queued"
+	PluginBundleStateRunning   PluginBundleState = "running"
+	PluginBundleStateSucceeded PluginBundleState = "succeeded"
+)
+
+// Valid indicates whether the value is a known member of the PluginBundleState enum.
+func (e PluginBundleState) Valid() bool {
+	switch e {
+	case PluginBundleStateFailed:
+		return true
+	case PluginBundleStateQueued:
+		return true
+	case PluginBundleStateRunning:
+		return true
+	case PluginBundleStateSucceeded:
+		return true
+	default:
+		return false
+	}
+}
+
 // Defines values for PluginChangeAction.
 const (
 	Add     PluginChangeAction = "add"
@@ -1545,6 +1569,32 @@ type Plugin struct {
 	UpdateCheck PluginUpdateCheck `json:"update_check"`
 }
 
+// PluginBundle defines model for PluginBundle.
+type PluginBundle struct {
+	// Bundle The last successful export, kept until a later one replaces it; absent before the first success.
+	Bundle *struct {
+		ExportedAt   time.Time `json:"exported_at"`
+		Filename     string    `json:"filename"`
+		PluginCount  int       `json:"plugin_count"`
+		Sha256       string    `json:"sha256"`
+		Size         int64     `json:"size"`
+		VersionCount int       `json:"version_count"`
+	} `json:"bundle,omitempty"`
+
+	// CreatedAt When the current export was queued.
+	CreatedAt time.Time `json:"created_at"`
+
+	// Error Why the last export failed; empty otherwise.
+	Error       string            `json:"error"`
+	FinishedAt  *time.Time        `json:"finished_at,omitempty"`
+	RequestedBy string            `json:"requested_by"`
+	StartedAt   *time.Time        `json:"started_at,omitempty"`
+	State       PluginBundleState `json:"state"`
+}
+
+// PluginBundleState defines model for PluginBundle.State.
+type PluginBundleState string
+
 // PluginChange defines model for PluginChange.
 type PluginChange struct {
 	Action PluginChangeAction `json:"action"`
@@ -2617,6 +2667,25 @@ type ClientInterface interface {
 	//
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// GetPluginBundle Get the current plugin bundle export
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle (the `GetPluginBundle` operationId).
+	GetPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// DownloadPluginBundle Download the last successful plugin bundle
+	//
+	// Requires `maintainer`.
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download (the `DownloadPluginBundle` operationId).
+	DownloadPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
+
+	// ExportPluginBundle Queue an export of the whole plugin registry
+	//
+	// Requires `maintainer`.
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
+	ExportPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error)
 
 	// ResolveGithubReleaseWithBody Resolve a GitHub release link to an exact tag
 	//
@@ -3874,6 +3943,55 @@ func (c *Client) GetOrganization(ctx context.Context, organizationId Organizatio
 // Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 func (c *Client) GetPluginRegistry(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
 	req, err := NewGetPluginRegistryRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// GetPluginBundle Get the current plugin bundle export
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle (the `GetPluginBundle` operationId).
+func (c *Client) GetPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewGetPluginBundleRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// DownloadPluginBundle Download the last successful plugin bundle
+//
+// Requires `maintainer`.
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download (the `DownloadPluginBundle` operationId).
+func (c *Client) DownloadPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewDownloadPluginBundleRequest(c.Server, organizationId)
+	if err != nil {
+		return nil, err
+	}
+	req = req.WithContext(ctx)
+	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
+		return nil, err
+	}
+	return c.Client.Do(req)
+}
+
+// ExportPluginBundle Queue an export of the whole plugin registry
+//
+// Requires `maintainer`.
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
+func (c *Client) ExportPluginBundle(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*http.Response, error) {
+	req, err := NewExportPluginBundleRequest(c.Server, organizationId)
 	if err != nil {
 		return nil, err
 	}
@@ -6166,6 +6284,108 @@ func NewGetPluginRegistryRequest(server string, organizationId OrganizationId) (
 	}
 
 	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewGetPluginBundleRequest constructs an http.Request for the GetPluginBundle method
+func NewGetPluginBundleRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/bundle", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewDownloadPluginBundleRequest constructs an http.Request for the DownloadPluginBundle method
+func NewDownloadPluginBundleRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/bundle/download", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodGet, queryURL.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+
+	return req, nil
+}
+
+// NewExportPluginBundleRequest constructs an http.Request for the ExportPluginBundle method
+func NewExportPluginBundleRequest(server string, organizationId OrganizationId) (*http.Request, error) {
+	var err error
+
+	var pathParam0 string
+
+	pathParam0, err = runtime.StyleParamWithOptions("simple", false, "organizationId", organizationId, runtime.StyleParamOptions{ParamLocation: runtime.ParamLocationPath, Type: "string", Format: "uuid"})
+	if err != nil {
+		return nil, err
+	}
+
+	serverURL, err := url.Parse(server)
+	if err != nil {
+		return nil, err
+	}
+
+	operationPath := fmt.Sprintf("/api/v1/organizations/%s/plugin-registry/bundle/export", pathParam0)
+	if operationPath[0] == '/' {
+		operationPath = "." + operationPath
+	}
+
+	queryURL, err := serverURL.Parse(operationPath)
+	if err != nil {
+		return nil, err
+	}
+
+	req, err := http.NewRequest(http.MethodPost, queryURL.String(), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -9598,6 +9818,31 @@ type ClientWithResponsesInterface interface {
 	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry (the `GetPluginRegistry` operationId).
 	GetPluginRegistryWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginRegistryResponse, error)
 
+	// GetPluginBundleWithResponse Get the current plugin bundle export
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle (the `GetPluginBundle` operationId).
+	GetPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginBundleResponse, error)
+
+	// DownloadPluginBundleWithResponse Download the last successful plugin bundle
+	//
+	// Requires `maintainer`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download (the `DownloadPluginBundle` operationId).
+	DownloadPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*DownloadPluginBundleResponse, error)
+
+	// ExportPluginBundleWithResponse Queue an export of the whole plugin registry
+	//
+	// Requires `maintainer`.
+	//
+	// Returns a wrapper object for the known response body format(s).
+	//
+	// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
+	ExportPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExportPluginBundleResponse, error)
+
 	// ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
 	//
 	// Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
@@ -11437,6 +11682,214 @@ func (r GetPluginRegistryResponse) StatusCode() int {
 
 // ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
 func (r GetPluginRegistryResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type GetPluginBundleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON200 the response for an HTTP 200 `application/json` response
+	JSON200 *PluginBundle
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON200 returns the response for an HTTP 200 `application/json` response
+func (r GetPluginBundleResponse) GetJSON200() *PluginBundle {
+	return r.JSON200
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r GetPluginBundleResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r GetPluginBundleResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r GetPluginBundleResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r GetPluginBundleResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r GetPluginBundleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r GetPluginBundleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r GetPluginBundleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r GetPluginBundleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+// DownloadPluginBundleResponse200Headers the declared response headers of an HTTP 200 response for DownloadPluginBundle
+type DownloadPluginBundleResponse200Headers struct {
+	ContentDisposition *string
+	ContentLength      *int64
+}
+
+type DownloadPluginBundleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *Error
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+	// Headers200 the parsed response headers for an HTTP 200 response
+	Headers200 *DownloadPluginBundleResponse200Headers
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r DownloadPluginBundleResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r DownloadPluginBundleResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r DownloadPluginBundleResponse) GetJSON404() *Error {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r DownloadPluginBundleResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r DownloadPluginBundleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r DownloadPluginBundleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r DownloadPluginBundleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r DownloadPluginBundleResponse) ContentType() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Header.Get("Content-Type")
+	}
+	return ""
+}
+
+type ExportPluginBundleResponse struct {
+	Body         []byte
+	HTTPResponse *http.Response
+	// JSON202 the response for an HTTP 202 `application/json` response
+	JSON202 *PluginBundle
+	// JSON401 the response for an HTTP 401 `application/json` response
+	JSON401 *Unauthorized
+	// JSON403 the response for an HTTP 403 `application/json` response
+	JSON403 *Forbidden
+	// JSON404 the response for an HTTP 404 `application/json` response
+	JSON404 *NotFound
+	// JSON409 the response for an HTTP 409 `application/json` response
+	JSON409 *Error
+}
+
+// GetJSON202 returns the response for an HTTP 202 `application/json` response
+func (r ExportPluginBundleResponse) GetJSON202() *PluginBundle {
+	return r.JSON202
+}
+
+// GetJSON401 returns the response for an HTTP 401 `application/json` response
+func (r ExportPluginBundleResponse) GetJSON401() *Unauthorized {
+	return r.JSON401
+}
+
+// GetJSON403 returns the response for an HTTP 403 `application/json` response
+func (r ExportPluginBundleResponse) GetJSON403() *Forbidden {
+	return r.JSON403
+}
+
+// GetJSON404 returns the response for an HTTP 404 `application/json` response
+func (r ExportPluginBundleResponse) GetJSON404() *NotFound {
+	return r.JSON404
+}
+
+// GetJSON409 returns the response for an HTTP 409 `application/json` response
+func (r ExportPluginBundleResponse) GetJSON409() *Error {
+	return r.JSON409
+}
+
+// GetBody returns the raw response body bytes
+func (r ExportPluginBundleResponse) GetBody() []byte {
+	return r.Body
+}
+
+// Status returns HTTPResponse.Status
+func (r ExportPluginBundleResponse) Status() string {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.Status
+	}
+	return http.StatusText(0)
+}
+
+// StatusCode returns HTTPResponse.StatusCode
+func (r ExportPluginBundleResponse) StatusCode() int {
+	if r.HTTPResponse != nil {
+		return r.HTTPResponse.StatusCode
+	}
+	return 0
+}
+
+// ContentType is a convenience method to retrieve the Content-Type value from the HTTP response headers
+func (r ExportPluginBundleResponse) ContentType() string {
 	if r.HTTPResponse != nil {
 		return r.HTTPResponse.Header.Get("Content-Type")
 	}
@@ -16426,6 +16879,49 @@ func (c *ClientWithResponses) GetPluginRegistryWithResponse(ctx context.Context,
 	return ParseGetPluginRegistryResponse(rsp)
 }
 
+// GetPluginBundleWithResponse Get the current plugin bundle export
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle (the `GetPluginBundle` operationId).
+func (c *ClientWithResponses) GetPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*GetPluginBundleResponse, error) {
+	rsp, err := c.GetPluginBundle(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseGetPluginBundleResponse(rsp)
+}
+
+// DownloadPluginBundleWithResponse Download the last successful plugin bundle
+//
+// Requires `maintainer`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download (the `DownloadPluginBundle` operationId).
+func (c *ClientWithResponses) DownloadPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*DownloadPluginBundleResponse, error) {
+	rsp, err := c.DownloadPluginBundle(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseDownloadPluginBundleResponse(rsp)
+}
+
+// ExportPluginBundleWithResponse Queue an export of the whole plugin registry
+//
+// Requires `maintainer`.
+//
+// Returns a wrapper object for the known response body format(s).
+//
+// Corresponds with POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export (the `ExportPluginBundle` operationId).
+func (c *ClientWithResponses) ExportPluginBundleWithResponse(ctx context.Context, organizationId OrganizationId, reqEditors ...RequestEditorFn) (*ExportPluginBundleResponse, error) {
+	rsp, err := c.ExportPluginBundle(ctx, organizationId, reqEditors...)
+	if err != nil {
+		return nil, err
+	}
+	return ParseExportPluginBundleResponse(rsp)
+}
+
 // ResolveGithubReleaseWithBodyWithResponse Resolve a GitHub release link to an exact tag
 //
 // Accepts .../releases/tag/<tag> and .../releases/latest links to public packer-plugin repositories;
@@ -18632,6 +19128,181 @@ func ParseGetPluginRegistryResponse(rsp *http.Response) (*GetPluginRegistryRespo
 			return nil, err
 		}
 		response.JSON404 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseGetPluginBundleResponse parses an HTTP response from a GetPluginBundleWithResponse call
+func ParseGetPluginBundleResponse(rsp *http.Response) (*GetPluginBundleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &GetPluginBundleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
+		var dest PluginBundle
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON200 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	return response, nil
+}
+
+// ParseDownloadPluginBundleResponse parses an HTTP response from a DownloadPluginBundleWithResponse call
+func ParseDownloadPluginBundleResponse(rsp *http.Response) (*DownloadPluginBundleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &DownloadPluginBundleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
+
+	}
+
+	switch {
+	case rsp.StatusCode == 200:
+		var headers DownloadPluginBundleResponse200Headers
+		if values := rsp.Header.Values("Content-Disposition"); len(values) > 0 {
+			var value string
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Disposition", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "string", Format: ""}); err != nil {
+				return nil, err
+			}
+			headers.ContentDisposition = &value
+		}
+		if values := rsp.Header.Values("Content-Length"); len(values) > 0 {
+			var value int64
+			if err := runtime.BindStyledParameterWithOptions("simple", "Content-Length", values[0], &value, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationHeader, Explode: false, Required: false, Type: "integer", Format: "int64"}); err != nil {
+				return nil, err
+			}
+			headers.ContentLength = &value
+		}
+		response.Headers200 = &headers
+	}
+
+	return response, nil
+}
+
+// ParseExportPluginBundleResponse parses an HTTP response from a ExportPluginBundleWithResponse call
+func ParseExportPluginBundleResponse(rsp *http.Response) (*ExportPluginBundleResponse, error) {
+	bodyBytes, err := io.ReadAll(rsp.Body)
+	defer func() { _ = rsp.Body.Close() }()
+	if err != nil {
+		return nil, err
+	}
+
+	response := &ExportPluginBundleResponse{
+		Body:         bodyBytes,
+		HTTPResponse: rsp,
+	}
+
+	switch {
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 202:
+		var dest PluginBundle
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON202 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 401:
+		var dest Unauthorized
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON401 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 403:
+		var dest Forbidden
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON403 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 404:
+		var dest NotFound
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON404 = &dest
+
+	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 409:
+		var dest Error
+		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
+			return nil, err
+		}
+		response.JSON409 = &dest
 
 	}
 
@@ -22338,6 +23009,15 @@ type ServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// GetPluginBundle Get the current plugin bundle export
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle)
+	GetPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// DownloadPluginBundle Download the last successful plugin bundle
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download)
+	DownloadPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
+	// ExportPluginBundle Queue an export of the whole plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export)
+	ExportPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
 	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
 	ResolveGithubRelease(w http.ResponseWriter, r *http.Request, organizationId OrganizationId)
@@ -22778,6 +23458,84 @@ func (siw *ServerInterfaceWrapper) GetPluginRegistry(w http.ResponseWriter, r *h
 
 	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		siw.Handler.GetPluginRegistry(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// GetPluginBundle operation middleware
+func (siw *ServerInterfaceWrapper) GetPluginBundle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.GetPluginBundle(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// DownloadPluginBundle operation middleware
+func (siw *ServerInterfaceWrapper) DownloadPluginBundle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.DownloadPluginBundle(w, r, organizationId)
+	}))
+
+	for _, middleware := range siw.HandlerMiddlewares {
+		handler = middleware(handler)
+	}
+
+	handler.ServeHTTP(w, r)
+}
+
+// ExportPluginBundle operation middleware
+func (siw *ServerInterfaceWrapper) ExportPluginBundle(w http.ResponseWriter, r *http.Request) {
+
+	var err error
+	_ = err
+
+	// ------------- Path parameter "organizationId" -------------
+	var organizationId OrganizationId
+
+	err = runtime.BindStyledParameterWithOptions("simple", "organizationId", r.PathValue("organizationId"), &organizationId, runtime.BindStyledParameterOptions{ParamLocation: runtime.ParamLocationPath, Explode: false, Required: true, Type: "string", Format: "uuid", ValueIsUnescaped: true})
+	if err != nil {
+		siw.ErrorHandlerFunc(w, r, &InvalidParamFormatError{ParamName: "organizationId", Err: err})
+		return
+	}
+
+	handler := http.Handler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		siw.Handler.ExportPluginBundle(w, r, organizationId)
 	}))
 
 	for _, middleware := range siw.HandlerMiddlewares {
@@ -25404,6 +26162,9 @@ func HandlerWithOptions(si ServerInterface, options StdHTTPServerOptions) http.H
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune", wrapper.GetPluginPrune)
 	m.HandleFunc(http.MethodPut+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune", wrapper.SetPluginPrune)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/prune/run", wrapper.RunPluginPrune)
+	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/export", wrapper.ExportPluginBundle)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle", wrapper.GetPluginBundle)
+	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/bundle/download", wrapper.DownloadPluginBundle)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp", wrapper.ListHashicorpPlugins)
 	m.HandleFunc(http.MethodGet+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/hashicorp/{product}", wrapper.ListHashicorpPluginVersions)
 	m.HandleFunc(http.MethodPost+" "+options.BaseURL+"/api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve", wrapper.ResolveGithubRelease)
@@ -26212,6 +26973,258 @@ func (response GetPluginRegistry404JSONResponse) VisitGetPluginRegistryResponse(
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundleRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type GetPluginBundleResponseObject interface {
+	VisitGetPluginBundleResponse(w http.ResponseWriter) error
+}
+
+type GetPluginBundle200JSONResponse PluginBundle
+
+func (response GetPluginBundle200JSONResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(200)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundle401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response GetPluginBundle401JSONResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundle403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response GetPluginBundle403JSONResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundle404JSONResponse Error
+
+func (response GetPluginBundle404JSONResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type GetPluginBundle409JSONResponse Error
+
+func (response GetPluginBundle409JSONResponse) VisitGetPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadPluginBundleRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type DownloadPluginBundleResponseObject interface {
+	VisitDownloadPluginBundleResponse(w http.ResponseWriter) error
+}
+
+type DownloadPluginBundle200ResponseHeaders struct {
+	ContentDisposition *string
+	ContentLength      *int64
+}
+
+type DownloadPluginBundle200ApplicationgzipResponse struct {
+	Body          io.Reader
+	Headers       DownloadPluginBundle200ResponseHeaders
+	ContentLength int64
+}
+
+func (response DownloadPluginBundle200ApplicationgzipResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+
+	w.Header().Set("Content-Type", "application/gzip")
+	if response.ContentLength != 0 {
+		w.Header().Set("Content-Length", fmt.Sprint(response.ContentLength))
+	}
+	if response.Headers.ContentDisposition != nil {
+		w.Header().Set("Content-Disposition", fmt.Sprint(*response.Headers.ContentDisposition))
+	}
+	if response.Headers.ContentLength != nil {
+		w.Header().Set("Content-Length", fmt.Sprint(*response.Headers.ContentLength))
+	}
+	w.WriteHeader(200)
+
+	if closer, ok := response.Body.(io.ReadCloser); ok {
+		defer closer.Close()
+	}
+	_, err := io.Copy(w, response.Body)
+	return err
+}
+
+type DownloadPluginBundle401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response DownloadPluginBundle401JSONResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadPluginBundle403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response DownloadPluginBundle403JSONResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadPluginBundle404JSONResponse Error
+
+func (response DownloadPluginBundle404JSONResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type DownloadPluginBundle409JSONResponse Error
+
+func (response DownloadPluginBundle409JSONResponse) VisitDownloadPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportPluginBundleRequestObject struct {
+	OrganizationId OrganizationId `json:"organizationId"`
+}
+
+type ExportPluginBundleResponseObject interface {
+	VisitExportPluginBundleResponse(w http.ResponseWriter) error
+}
+
+type ExportPluginBundle202JSONResponse PluginBundle
+
+func (response ExportPluginBundle202JSONResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(202)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportPluginBundle401JSONResponse struct{ UnauthorizedJSONResponse }
+
+func (response ExportPluginBundle401JSONResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(401)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportPluginBundle403JSONResponse struct{ ForbiddenJSONResponse }
+
+func (response ExportPluginBundle403JSONResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(403)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportPluginBundle404JSONResponse struct{ NotFoundJSONResponse }
+
+func (response ExportPluginBundle404JSONResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(404)
+	_, err := buf.WriteTo(w)
+	return err
+}
+
+type ExportPluginBundle409JSONResponse Error
+
+func (response ExportPluginBundle409JSONResponse) VisitExportPluginBundleResponse(w http.ResponseWriter) error {
+
+	var buf bytes.Buffer
+	if err := json.NewEncoder(&buf).Encode(response); err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(409)
 	_, err := buf.WriteTo(w)
 	return err
 }
@@ -31447,6 +32460,15 @@ type StrictServerInterface interface {
 	// GetPluginRegistry Read the organization plugin registry lifecycle state
 	// (GET /api/v1/organizations/{organizationId}/plugin-registry)
 	GetPluginRegistry(ctx context.Context, request GetPluginRegistryRequestObject) (GetPluginRegistryResponseObject, error)
+	// GetPluginBundle Get the current plugin bundle export
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle)
+	GetPluginBundle(ctx context.Context, request GetPluginBundleRequestObject) (GetPluginBundleResponseObject, error)
+	// DownloadPluginBundle Download the last successful plugin bundle
+	// (GET /api/v1/organizations/{organizationId}/plugin-registry/bundle/download)
+	DownloadPluginBundle(ctx context.Context, request DownloadPluginBundleRequestObject) (DownloadPluginBundleResponseObject, error)
+	// ExportPluginBundle Queue an export of the whole plugin registry
+	// (POST /api/v1/organizations/{organizationId}/plugin-registry/bundle/export)
+	ExportPluginBundle(ctx context.Context, request ExportPluginBundleRequestObject) (ExportPluginBundleResponseObject, error)
 	// ResolveGithubRelease Resolve a GitHub release link to an exact tag
 	// (POST /api/v1/organizations/{organizationId}/plugin-registry/catalogue/github/resolve)
 	ResolveGithubRelease(ctx context.Context, request ResolveGithubReleaseRequestObject) (ResolveGithubReleaseResponseObject, error)
@@ -32013,6 +33035,84 @@ func (sh *strictHandler) GetPluginRegistry(w http.ResponseWriter, r *http.Reques
 		sh.options.ResponseErrorHandlerFunc(w, r, err)
 	} else if validResponse, ok := response.(GetPluginRegistryResponseObject); ok {
 		if err := validResponse.VisitGetPluginRegistryResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// GetPluginBundle operation middleware
+func (sh *strictHandler) GetPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request GetPluginBundleRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.GetPluginBundle(ctx, request.(GetPluginBundleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "GetPluginBundle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(GetPluginBundleResponseObject); ok {
+		if err := validResponse.VisitGetPluginBundleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// DownloadPluginBundle operation middleware
+func (sh *strictHandler) DownloadPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request DownloadPluginBundleRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.DownloadPluginBundle(ctx, request.(DownloadPluginBundleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "DownloadPluginBundle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(DownloadPluginBundleResponseObject); ok {
+		if err := validResponse.VisitDownloadPluginBundleResponse(w); err != nil {
+			sh.options.ResponseErrorHandlerFunc(w, r, err)
+		}
+	} else if response != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, fmt.Errorf("unexpected response type: %T", response))
+	}
+}
+
+// ExportPluginBundle operation middleware
+func (sh *strictHandler) ExportPluginBundle(w http.ResponseWriter, r *http.Request, organizationId OrganizationId) {
+	var request ExportPluginBundleRequestObject
+
+	request.OrganizationId = organizationId
+
+	handler := func(ctx context.Context, w http.ResponseWriter, r *http.Request, request interface{}) (interface{}, error) {
+		return sh.ssi.ExportPluginBundle(ctx, request.(ExportPluginBundleRequestObject))
+	}
+	for _, middleware := range sh.middlewares {
+		handler = middleware(handler, "ExportPluginBundle")
+	}
+
+	response, err := handler(r.Context(), w, r, request)
+
+	if err != nil {
+		sh.options.ResponseErrorHandlerFunc(w, r, err)
+	} else if validResponse, ok := response.(ExportPluginBundleResponseObject); ok {
+		if err := validResponse.VisitExportPluginBundleResponse(w); err != nil {
 			sh.options.ResponseErrorHandlerFunc(w, r, err)
 		}
 	} else if response != nil {

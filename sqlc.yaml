@@ -13,6 +13,7 @@ sql:
       - internal/store/postgres/migrations/000013_plugin_import_list.up.sql
       - internal/store/postgres/migrations/000014_plugin_prune.up.sql
       - internal/store/postgres/migrations/000015_plugin_downloads.up.sql
+      - internal/store/postgres/migrations/000016_plugin_bundles.up.sql
     queries: internal/store/postgres/query.sql
     gen:
       go:

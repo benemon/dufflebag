@@ -252,6 +252,11 @@ func main() {
 	if scannerService != nil {
 		go scannerService.Run(scannerCtx)
 	}
+	build := platform.BuildInfo{
+		Version:     normalizedBuildValue(version, "dev"),
+		Commit:      normalizedBuildValue(commit, "unknown"),
+		APIVersions: mountedAPIVersions(rootRoutes(nil, nil, nil, nil, nil)),
+	}
 	pluginKeyring, err := pluginimport.HashiCorpKeyring()
 	if err != nil {
 		log.Fatal(err)
@@ -265,6 +270,9 @@ func main() {
 	// that wait until it is configured rather than failing every version.
 	if objects != nil {
 		go pluginimport.NewWorker(repository, pluginimport.NewImporter(pluginUpstream, pluginGitHub, pluginKeyring, repository), 5*time.Second, logger).Run(importCtx)
+		bundler := pluginimport.NewExporter(repository, audit.NewPluginBundleEmitter(broker), 5*time.Second, logger)
+		bundler.DufflebagVersion = build.Version
+		go bundler.Run(importCtx)
 	}
 	pluginUpdateInterval, err := scannerDuration("DFBG_PLUGIN_UPDATE_INTERVAL", 24*time.Hour)
 	if err != nil {
@@ -280,11 +288,6 @@ func main() {
 	token := hcpauth.NewHandler(repository, issuer, logger, trustedProxies...)
 	packer := hcp2023.NewHandler(repository, issuer, logger, maxRequestBodyBytes)
 	resourceManager := rm2019.NewHandler(repository, repository, issuer, logger)
-	build := platform.BuildInfo{
-		Version:     normalizedBuildValue(version, "dev"),
-		Commit:      normalizedBuildValue(commit, "unknown"),
-		APIVersions: mountedAPIVersions(rootRoutes(nil, nil, nil, nil, nil)),
-	}
 	// A typed nil pointer would satisfy the interface and make every scanner
 	// check look configured, so the nil stays untyped until a service exists.
 	var platformScanner platform.Scanner

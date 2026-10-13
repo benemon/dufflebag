@@ -1,5 +1,5 @@
 import platforms from './platforms.json'
-import { platformDelete, platformGet, platformPost, platformPut, platformPutForm } from '../api/client'
+import { ApiError, platformDelete, platformGet, platformPost, platformPut, platformPutForm } from '../api/client'
 
 export type PluginRegistry = {
   enabled: boolean
@@ -490,6 +490,40 @@ export function getPluginPrune(token: string, organizationID: string): Promise<P
 
 export function setPluginPrune(token: string, organizationID: string, request: PluginPruneRequest): Promise<PluginPrune> {
   return platformPut<PluginPrune>(token, path(organizationID, 'prune'), request)
+}
+
+export type PluginBundle = {
+  state: 'queued' | 'running' | 'succeeded' | 'failed'
+  requested_by: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
+  error: string
+  bundle?: { filename: string; size: number; sha256: string; exported_at: string; plugin_count: number; version_count: number }
+}
+
+// The current export, or null before the first one is queued.
+export async function getPluginBundle(token: string, organizationID: string): Promise<PluginBundle | null> {
+  try {
+    return await platformGet<PluginBundle>(token, path(organizationID, 'bundle'))
+  } catch (error: unknown) {
+    if (error instanceof ApiError && error.status === 404) return null
+    throw error
+  }
+}
+
+export function exportPluginBundle(token: string, organizationID: string): Promise<PluginBundle> {
+  return platformPost<PluginBundle>(token, path(organizationID, 'bundle/export'))
+}
+
+export function pluginBundleDownloadPath(organizationID: string): string {
+  return `/api/v1${path(organizationID, 'bundle/download')}`
+}
+
+export async function downloadPluginBundle(token: string, organizationID: string): Promise<ArrayBuffer> {
+  const response = await fetch(pluginBundleDownloadPath(organizationID), { headers: { Authorization: `Bearer ${token}` } })
+  if (!response.ok) throw new ApiError(response.status, `The bundle download answered ${response.status}.`)
+  return response.arrayBuffer()
 }
 
 export function runPluginPrune(token: string, organizationID: string): Promise<PluginPrune> {

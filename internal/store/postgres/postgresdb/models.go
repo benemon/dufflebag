@@ -223,6 +223,25 @@ type Plugin struct {
 	UpdateLatestTag  sql.NullString `json:"update_latest_tag"`
 }
 
+type PluginBundle struct {
+	OrganizationID uuid.UUID      `json:"organization_id"`
+	State          string         `json:"state"`
+	RequestedBy    string         `json:"requested_by"`
+	RequestedHost  string         `json:"requested_host"`
+	CreatedAt      time.Time      `json:"created_at"`
+	ClaimedAt      sql.NullTime   `json:"claimed_at"`
+	StartedAt      sql.NullTime   `json:"started_at"`
+	FinishedAt     sql.NullTime   `json:"finished_at"`
+	ExportedAt     sql.NullTime   `json:"exported_at"`
+	Error          string         `json:"error"`
+	ObjectKey      sql.NullString `json:"object_key"`
+	Filename       sql.NullString `json:"filename"`
+	Size           sql.NullInt64  `json:"size"`
+	Sha256         sql.NullString `json:"sha256"`
+	PluginCount    sql.NullInt32  `json:"plugin_count"`
+	VersionCount   sql.NullInt32  `json:"version_count"`
+}
+
 type PluginDownload struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	PluginID       uuid.UUID `json:"plugin_id"`

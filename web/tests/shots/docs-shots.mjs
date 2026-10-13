@@ -864,6 +864,8 @@ async function seedFixtures(credentials) {
   })
 
   return {
+    rootToken,
+    organizationID: organization.id,
     ansibleImportID: ansibleImport.id,
     ubuntuBuildID: ubuntuBuild.id,
     postgresBuildID: postgresBuild.id,
@@ -1005,6 +1007,14 @@ async function captureSeededScreens(seeded) {
   await capture('plugin-registry-settings.png')
   await page.$eval('[aria-label="Prune jobs"]', (card) => card.scrollIntoView({ block: 'start' }))
   await capture('plugin-registry-prune.png')
+  // The Plugin bundle card with an exported registry.
+  await api(seeded.rootToken, 'POST', `/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle/export`)
+  await until('the bundle export to finish', async () =>
+    (await api(seeded.rootToken, 'GET', `/api/v1/organizations/${seeded.organizationID}/plugin-registry/bundle`)).state === 'succeeded', 60000)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await waitForText('dufflebag-plugins-')
+  await page.$eval('[aria-label="Plugin bundle"]', (card) => card.scrollIntoView({ block: 'start' }))
+  await capture('plugin-registry-bundle.png')
 
   // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })

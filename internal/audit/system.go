@@ -44,6 +44,10 @@ func NewPluginPruneEmitter(writer Writer) *SystemEmitter {
 	return newSystemEmitter(writer, identity.SystemPluginPrunerPrincipalID, "/plugin-registry/prune", "system.plugin.prune")
 }
 
+func NewPluginBundleEmitter(writer Writer) *SystemEmitter {
+	return newSystemEmitter(writer, identity.SystemPluginBundlerPrincipalID, "/plugin-registry/bundle", "system.plugin.bundle")
+}
+
 func newSystemEmitter(writer Writer, principalID, path, routeID string) *SystemEmitter {
 	return &SystemEmitter{writer: writer, now: time.Now, principalID: principalID, path: path, routeID: routeID}
 }
