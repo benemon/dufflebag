@@ -167,6 +167,32 @@ func (q *Queries) CompleteVersion(ctx context.Context, arg CompleteVersionParams
 	return i, err
 }
 
+const countPluginDownload = `-- name: CountPluginDownload :exec
+INSERT INTO plugin_downloads (organization_id, plugin_id, version, platform, day, count)
+VALUES ($1, $2, $3, $4, $5::date, 1)
+ON CONFLICT (plugin_id, version, platform, day)
+DO UPDATE SET count = plugin_downloads.count + 1
+`
+
+type CountPluginDownloadParams struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	PluginID       uuid.UUID `json:"plugin_id"`
+	Version        string    `json:"version"`
+	Platform       string    `json:"platform"`
+	Day            time.Time `json:"day"`
+}
+
+func (q *Queries) CountPluginDownload(ctx context.Context, arg CountPluginDownloadParams) error {
+	_, err := q.db.ExecContext(ctx, countPluginDownload,
+		arg.OrganizationID,
+		arg.PluginID,
+		arg.Version,
+		arg.Platform,
+		arg.Day,
+	)
+	return err
+}
+
 const countRootPrincipals = `-- name: CountRootPrincipals :one
 SELECT count(*) FROM principals WHERE role = 'root'
 `
@@ -1831,7 +1857,7 @@ func (q *Queries) GetRecoveryVerifier(ctx context.Context) (GetRecoveryVerifierR
 
 const getServedPluginVersion = `-- name: GetServedPluginVersion :one
 SELECT
-    plugin_versions.id, plugin_versions.sums_key, plugin_versions.sums_size,
+    plugin_versions.id, plugins.id AS plugin_id, plugin_versions.sums_key, plugin_versions.sums_size,
     plugin_versions.signature_key, plugin_versions.signature_size,
     plugin_versions.manifest_key, plugin_versions.manifest_size, plugin_versions.protocol_version
 FROM plugin_versions
@@ -1849,6 +1875,7 @@ type GetServedPluginVersionParams struct {
 
 type GetServedPluginVersionRow struct {
 	ID              uuid.UUID      `json:"id"`
+	PluginID        uuid.UUID      `json:"plugin_id"`
 	SumsKey         string         `json:"sums_key"`
 	SumsSize        int64          `json:"sums_size"`
 	SignatureKey    sql.NullString `json:"signature_key"`
@@ -1863,6 +1890,7 @@ func (q *Queries) GetServedPluginVersion(ctx context.Context, arg GetServedPlugi
 	var i GetServedPluginVersionRow
 	err := row.Scan(
 		&i.ID,
+		&i.PluginID,
 		&i.SumsKey,
 		&i.SumsSize,
 		&i.SignatureKey,
@@ -3865,6 +3893,69 @@ func (q *Queries) NextVersionSequence(ctx context.Context, bucketID string) (int
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const pluginDownloadsByVersion = `-- name: PluginDownloadsByVersion :many
+SELECT
+    plugin_downloads.version,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= $1::date - 6), 0)::bigint AS last_7_days,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= $1::date - 29), 0)::bigint AS last_30_days,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= $1::date - 364), 0)::bigint AS last_365_days,
+    COALESCE(sum(plugin_downloads.count), 0)::bigint AS all_time,
+    (plugin_versions.id IS NOT NULL)::boolean AS held,
+    COALESCE(plugin_versions.revoked, false)::boolean AS revoked
+FROM plugin_downloads
+LEFT JOIN plugin_versions
+    ON plugin_versions.plugin_id = plugin_downloads.plugin_id
+    AND plugin_versions.version = plugin_downloads.version
+WHERE plugin_downloads.plugin_id = $2
+GROUP BY plugin_downloads.version, plugin_versions.id, plugin_versions.revoked
+`
+
+type PluginDownloadsByVersionParams struct {
+	Today    time.Time `json:"today"`
+	PluginID uuid.UUID `json:"plugin_id"`
+}
+
+type PluginDownloadsByVersionRow struct {
+	Version     string `json:"version"`
+	Last7Days   int64  `json:"last_7_days"`
+	Last30Days  int64  `json:"last_30_days"`
+	Last365Days int64  `json:"last_365_days"`
+	AllTime     int64  `json:"all_time"`
+	Held        bool   `json:"held"`
+	Revoked     bool   `json:"revoked"`
+}
+
+func (q *Queries) PluginDownloadsByVersion(ctx context.Context, arg PluginDownloadsByVersionParams) ([]PluginDownloadsByVersionRow, error) {
+	rows, err := q.db.QueryContext(ctx, pluginDownloadsByVersion, arg.Today, arg.PluginID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PluginDownloadsByVersionRow
+	for rows.Next() {
+		var i PluginDownloadsByVersionRow
+		if err := rows.Scan(
+			&i.Version,
+			&i.Last7Days,
+			&i.Last30Days,
+			&i.Last365Days,
+			&i.AllTime,
+			&i.Held,
+			&i.Revoked,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const pluginVersionExists = `-- name: PluginVersionExists :one

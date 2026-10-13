@@ -119,13 +119,27 @@ func ListsManifest(name, version string, sums []byte) (bool, error) {
 	return parsed.ManifestSHA256 != "", nil
 }
 
-// parseSums parses a SHA256SUMS file in sha256sum's output format.
-func parseSums(name, version string, data []byte) (Sums, error) {
-	const file = "SHA256SUMS"
+// ParseZipName returns the plugin zip shape encoded in filename.
+func ParseZipName(name, version, filename string) (Zip, bool) {
 	goreleaser := regexp.MustCompile(`^packer-plugin-` + regexp.QuoteMeta(name) + `_v` + regexp.QuoteMeta(version) +
 		`_x([0-9]+\.[0-9]+)_([a-z0-9]+)_([a-z0-9]+)\.zip$`)
 	releaseSite := regexp.MustCompile(`^packer-plugin-` + regexp.QuoteMeta(name) + `_` + regexp.QuoteMeta(version) +
 		`_([a-z0-9]+)_([a-z0-9]+)\.zip$`)
+	zip := Zip{Filename: filename}
+	if match := goreleaser.FindStringSubmatch(filename); match != nil {
+		zip.Protocol, zip.Platform = match[1], Platform{OS: match[2], Arch: match[3]}
+		return zip, true
+	}
+	if match := releaseSite.FindStringSubmatch(filename); match != nil {
+		zip.Platform = Platform{OS: match[1], Arch: match[2]}
+		return zip, true
+	}
+	return Zip{}, false
+}
+
+// parseSums parses a SHA256SUMS file in sha256sum's output format.
+func parseSums(name, version string, data []byte) (Sums, error) {
+	const file = "SHA256SUMS"
 	line := regexp.MustCompile(`^([0-9a-f]{64}) [ *]([^/\s]+)$`)
 
 	var sums Sums
@@ -148,14 +162,11 @@ func parseSums(name, version string, data []byte) (Sums, error) {
 		if !strings.HasSuffix(filename, ".zip") {
 			continue
 		}
-		zip := Zip{Filename: filename, SHA256: digest}
-		if m := goreleaser.FindStringSubmatch(filename); m != nil {
-			zip.Protocol, zip.Platform = m[1], Platform{OS: m[2], Arch: m[3]}
-		} else if m := releaseSite.FindStringSubmatch(filename); m != nil {
-			zip.Platform = Platform{OS: m[1], Arch: m[2]}
-		} else {
+		zip, ok := ParseZipName(name, version, filename)
+		if !ok {
 			return Sums{}, refuse(file, "%s is not a zip name Packer accepts for %s %s", filename, name, version)
 		}
+		zip.SHA256 = digest
 		if seenPlatforms[zip.Platform] {
 			return Sums{}, refuse(file, "%s_%s is listed twice", zip.Platform.OS, zip.Platform.Arch)
 		}

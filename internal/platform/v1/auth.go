@@ -421,6 +421,9 @@ func (response refusalResponse) VisitListPluginsResponse(w http.ResponseWriter) 
 func (response refusalResponse) VisitListPluginVersionsResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }
+func (response refusalResponse) VisitGetPluginDownloadsResponse(w http.ResponseWriter) error {
+	return response.write(w)
+}
 func (response refusalResponse) VisitPublishPluginVersionResponse(w http.ResponseWriter) error {
 	return response.write(w)
 }

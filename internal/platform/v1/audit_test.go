@@ -45,6 +45,7 @@ func TestPlatformDescriptorKeysEqualGeneratedOperationSet(t *testing.T) {
 		"DisablePluginRegistry":             {"plugin_registry.disable", "plugin_registry", "organizationId"},
 		"ListPlugins":                       {"plugin.list", "plugin_collection", "organizationId"},
 		"ListPluginVersions":                {"plugin.version.list", "plugin", "pluginName"},
+		"GetPluginDownloads":                {"plugin.downloads.read", "plugin", "pluginName"},
 		"RevokePluginVersion":               {"plugin.version.revoke", "plugin_version", "version"},
 		"RestorePluginVersion":              {"plugin.version.restore", "plugin_version", "version"},
 		"DeletePluginVersion":               {"plugin.version.delete", "plugin_version", "version"},

@@ -1036,6 +1036,28 @@ paths:
         "401": { $ref: "#/components/responses/Unauthorized" }
         "404": { $ref: "#/components/responses/NotFound" }
 
+  /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/downloads:
+    parameters:
+      - $ref: "#/components/parameters/OrganizationId"
+      - $ref: "#/components/parameters/PluginName"
+    get:
+      tags: [plugin-registry]
+      operationId: getPluginDownloads
+      summary: Get a plugin's download counts
+      responses:
+        "200":
+          description: Rolling download counts for all versions and each counted version.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/PluginDownloads" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The registry is not enabled.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+
   /api/v1/organizations/{organizationId}/plugin-registry/plugins/{pluginName}/versions/{version}:
     parameters:
       - $ref: "#/components/parameters/OrganizationId"
@@ -3114,6 +3136,47 @@ components:
           type: array
           items: { $ref: "#/components/schemas/PluginVersion" }
       required: [name, source, versions]
+
+    PluginDownloads:
+      type: object
+      properties:
+        today: { type: string, format: date, description: The UTC day the windows end on. }
+        all_versions: { $ref: '#/components/schemas/PluginDownloadWindows' }
+        versions:
+          type: array
+          items: { $ref: '#/components/schemas/PluginVersionDownloads' }
+      required: [today, all_versions, versions]
+
+    PluginDownloadWindows:
+      type: object
+      properties:
+        last_7_days:
+          type: integer
+          format: int64
+          description: Downloads in the 7 UTC calendar days ending today, where day is at least today minus 6 days.
+        last_30_days:
+          type: integer
+          format: int64
+          description: Downloads in the 30 UTC calendar days ending today, where day is at least today minus 29 days.
+        last_365_days:
+          type: integer
+          format: int64
+          description: Downloads in the 365 UTC calendar days ending today, where day is at least today minus 364 days.
+        all_time: { type: integer, format: int64, description: Downloads over all UTC calendar days. }
+      required: [last_7_days, last_30_days, last_365_days, all_time]
+
+    PluginVersionDownloads:
+      allOf:
+        - $ref: '#/components/schemas/PluginDownloadWindows'
+        - type: object
+          properties:
+            version: { type: string }
+            state:
+              type: string
+              enum: [available, revoked, removed]
+              x-enum-varnames: [PluginVersionDownloadAvailable, PluginVersionDownloadRevoked, PluginVersionDownloadRemoved]
+              description: removed when the version is no longer held but its counts are kept.
+          required: [version, state]
 
     PluginPlatformList:
       type: object

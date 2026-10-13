@@ -958,6 +958,25 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('Not available for uploaded plugins. To add a version, upload its files.')
     assert.equal(await page.$eval('[title="linux_amd64: Mirrored"]', () => true), true)
     assert.equal(await page.$eval('[title="darwin_arm64: Upstream"]', () => true), true)
+    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
+    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
+    const wizardOrg = organizations.find((o) => o.name === wizardOrganizationName)
+    const registryPath = `/api/v1/organizations/${wizardOrg.id}/plugin-registry`
+    await api(rootToken, 'POST', `${registryPath}/expose`)
+    const readPath = `/plugins/${wizardOrganizationName}/packer-plugin-probe/1.1.0`
+    const zipName = 'packer-plugin-probe_v1.1.0_x5.0_linux_amd64.zip'
+    const sumsName = 'packer-plugin-probe_1.1.0_SHA256SUMS' // the name Packer's getter requests: SumsName has no v
+    for (const file of [zipName, zipName, sumsName]) {
+      const response = await fetch(`${base}${readPath}/${file}`)
+      assert.equal(response.status, 200, `${file} answered ${response.status}`)
+      await response.arrayBuffer()
+    }
+    await api(rootToken, 'POST', `${registryPath}/unexpose`)
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await waitForText('Downloads')
+    const downloadsCard = await page.$$eval('.pf-v6-c-card', (cards) =>
+      cards.find((card) => card.innerText.includes('Downloads'))?.innerText ?? '')
+    assert.match(downloadsCard, /All time\s+2/, 'two zips count; SHA256SUMS does not')
     // Revoke and restore confirm in a dialog, as Remove does, and apply at once.
     // 1.1.0 is the newest held version, so its Revoke is the first on the page.
     const serve = async (restore) => {
@@ -980,9 +999,6 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // Jobs persist beyond the page they were queued from and are found in the
     // Jobs facet. An import of a product HashiCorp never published fails at
     // the worker within seconds, whatever the network says, and leaves a row.
-    const rootToken = await tokenFor(credentials.clientID, credentials.secret)
-    const { organizations } = await api(rootToken, 'GET', '/api/v1/organizations')
-    const wizardOrg = organizations.find((o) => o.name === wizardOrganizationName)
     const missing = await api(rootToken, 'POST', `/api/v1/organizations/${wizardOrg.id}/plugin-registry/imports`,
       { source: 'releases-hashicorp', product: 'packer-plugin-smoke-missing', versions: ['1.0.0'], platforms: ['linux_amd64'] })
     assert.equal(missing.plugin, 'smoke-missing')

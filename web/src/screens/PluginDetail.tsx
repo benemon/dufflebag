@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
-  Pagination, Progress, ProgressMeasureLocation, SearchInput, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
+  MenuToggle, Pagination, Progress, ProgressMeasureLocation, SearchInput, Select, SelectList, SelectOption, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
   CodeBlockAction, CodeBlockCode, Content, DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Flex, FlexItem, Label, PageSection, Switch,
 } from '@patternfly/react-core'
@@ -14,10 +14,10 @@ import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
 import {
-  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, compareVersionsDesc, deletePluginVersion, getPluginRegistry, listHashicorpPluginVersions,
+  PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, compareVersionsDesc, deletePluginVersion, getPluginDownloads, getPluginRegistry, listHashicorpPluginVersions,
   listPluginVersions, listPlugins, pendingItems, pluginChanges, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
   sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginRegistry,
-  type PluginVersions,
+  type PluginDownloads, type PluginVersionDownloads, type PluginVersions,
   activeJobFor, firstError, getPluginImport, importJobSummary, jobTitle, jobWhat, listPluginImports, terminalImportStates, type PluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
@@ -33,6 +33,7 @@ export function PluginDetail() {
   const [registry, setRegistry] = useState<PluginRegistry | null>(null)
   const [detail, setDetail] = useState<PluginVersions | null>(null)
   const [summary, setSummary] = useState<Plugin | null>(null)
+  const [downloads, setDownloads] = useState<PluginDownloads | null>(null)
   const [upstream, setUpstream] = useState<HashicorpPluginVersion[]>([])
   const [olderUpstream, setOlderUpstream] = useState<string | undefined>()
   const [loading, setLoading] = useState(true)
@@ -46,13 +47,15 @@ export function PluginDetail() {
     if (!organizationID || token === '') return
     if (!quiet) setLoading(true)
     try {
-      const [nextRegistry, nextDetail, plugins, jobs] = await Promise.all([
+      const [nextRegistry, nextDetail, plugins, nextDownloads, jobs] = await Promise.all([
         getPluginRegistry(token, organizationID), listPluginVersions(token, organizationID, name), listPlugins(token, organizationID),
+        getPluginDownloads(token, organizationID, name),
         listPluginImports(token, organizationID, { states: ['unfinished'], plugins: [name], limit: 100 }),
       ])
       setRegistry(nextRegistry)
       setDetail(nextDetail)
       setSummary(plugins.find((plugin) => plugin.name === name) ?? null)
+      setDownloads(nextDownloads)
       setActiveJob(activeJobFor(jobs.imports, name) ?? null)
       setFailure(null)
       if (nextDetail.source.kind === 'releases-hashicorp' && nextDetail.source.repository) {
@@ -114,6 +117,7 @@ export function PluginDetail() {
       onOpenJob={(id) => navigate(`/plugin-registry/imports/${id}`)}
       onJobs={() => navigate(`/plugin-registry?facet=jobs&plugin=${encodeURIComponent(name)}`)}
       callerRole={self?.role ?? null} registry={registry} detail={detail} summary={summary}
+      downloads={downloads}
       upstream={upstream} hasOlderUpstream={olderUpstream !== undefined}
       loading={loading} failure={failure} onRefresh={reload}
       onBackToRegistry={() => navigate('/buckets')}
@@ -181,6 +185,72 @@ const MARK_STYLE: Record<MarkKind, { background: string; boxShadow?: string }> =
 
 const platformKey = (p: { os: string; arch: string }) => `${p.os}_${p.arch}`
 const versionsPerPage = 12
+const downloadNumber = new Intl.NumberFormat('en-US')
+
+const emptyDownloadWindows = { last_7_days: 0, last_30_days: 0, last_365_days: 0, all_time: 0 }
+
+function downloadVersionLabel(version: PluginVersionDownloads): string {
+  if (version.state === 'removed') return `${version.version} (removed)`
+  if (version.state === 'revoked') return `${version.version} (revoked)`
+  return version.version
+}
+
+function PluginDownloadsCard({ downloads }: { downloads: PluginDownloads | null }) {
+  const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
+  return <PluginDownloadsCardView downloads={downloads} selectedVersion={selectedVersion} onSelect={setSelectedVersion} />
+}
+
+export function PluginDownloadsCardView({
+  downloads, selectedVersion, onSelect,
+}: {
+  downloads: PluginDownloads | null
+  selectedVersion: string | null
+  onSelect: (version: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const selected = downloads?.versions.find((version) => version.version === selectedVersion)
+  const windows = selected ?? downloads?.all_versions ?? emptyDownloadWindows
+  const label = selected ? downloadVersionLabel(selected) : 'All versions'
+  const rows = [
+    ['Last 7 days', windows.last_7_days],
+    ['Last 30 days', windows.last_30_days],
+    ['Last 365 days', windows.last_365_days],
+    ['All time', windows.all_time],
+  ] as const
+  return (
+    <Card isFullHeight>
+      <CardTitle>
+        <Flex alignItems={{ default: 'alignItemsCenter' }}>
+          <FlexItem>Downloads</FlexItem>
+          <FlexItem align={{ default: 'alignRight' }}>
+            <Select
+              aria-label="Download version" isOpen={open} selected={selectedVersion ?? '__all_versions__'} onOpenChange={setOpen}
+              onSelect={(_event, value) => { onSelect(value === '__all_versions__' ? null : String(value)); setOpen(false) }}
+              toggle={(ref) => <MenuToggle ref={ref} onClick={() => setOpen(!open)} isExpanded={open}>{label}</MenuToggle>}
+            >
+              <SelectList>
+                <SelectOption value="__all_versions__">All versions</SelectOption>
+                {(downloads?.versions ?? []).map((version) => (
+                  <SelectOption key={version.version} value={version.version}>{downloadVersionLabel(version)}</SelectOption>
+                ))}
+              </SelectList>
+            </Select>
+          </FlexItem>
+        </Flex>
+      </CardTitle>
+      <CardBody>
+        <DescriptionList isCompact isHorizontal>
+          {rows.map(([term, count]) => (
+            <DescriptionListGroup key={term}>
+              <DescriptionListTerm>{term}</DescriptionListTerm>
+              <DescriptionListDescription>{downloadNumber.format(count)}</DescriptionListDescription>
+            </DescriptionListGroup>
+          ))}
+        </DescriptionList>
+      </CardBody>
+    </Card>
+  )
+}
 
 export function CoverageStrip({ marks }: { marks: { platform: string; kind: MarkKind }[] }) {
   const firstOfGroup = new Set(PLUGIN_OS_GROUPS.map(([os, arches]) => `${os}_${arches[0]}`))
@@ -197,7 +267,7 @@ export function CoverageStrip({ marks }: { marks: { platform: string; kind: Mark
 }
 
 export function PluginDetailView({
-  name, organizationName, host, callerRole, registry, detail, summary, upstream, hasOlderUpstream, loading, failure,
+  name, organizationName, host, callerRole, registry, detail, summary, downloads, upstream, hasOlderUpstream, loading, failure,
   onRefresh, onBackToRegistry, onBackToPlugins, onUpload, busy, actionFailure, onToggleUpdates,
   onOlderUpstream, onSync, onRevoke, onRestore, onRemove,
   activeJob = null, finishedJob = null, onOpenJob = () => {}, onJobs = () => {},
@@ -213,6 +283,7 @@ export function PluginDetailView({
   registry: PluginRegistry | null
   detail: PluginVersions | null
   summary: Plugin | null
+  downloads?: PluginDownloads | null
   upstream: HashicorpPluginVersion[]
   hasOlderUpstream: boolean
   loading: boolean
@@ -336,45 +407,52 @@ export function PluginDetailView({
           <>
             <Flex gap={{ default: 'gapLg' }} alignItems={{ default: 'alignItemsStretch' }}>
               <FlexItem flex={{ default: 'flex_1' }}>
-                <Card isFullHeight>
-                  <CardTitle>Update check</CardTitle>
-                  <CardBody>
-                    {local ? (
-                      <>
-                        <Content component="p">Not available for uploaded plugins. To add a version, upload its files.</Content>
-                        {canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
-                      </>
-                    ) : (
-                      <>
-                        <Switch
-                          id="update-check" label="Check daily for a newer stable version" isChecked={check?.enabled ?? false}
-                          isDisabled={busy || !canPublish} onChange={(_event, enabled) => onToggleUpdates(enabled)}
-                        />
-                        <DescriptionList isCompact isHorizontal>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>Last checked</DescriptionListTerm>
-                            <DescriptionListDescription>{checkedAt(check)}</DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>Last error</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {check?.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error} The update pill reflects the last successful check.</span> : 'None'}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                        </DescriptionList>
-                      </>
-                    )}
-                  </CardBody>
-                </Card>
+                <Flex direction={{ default: 'column' }} gap={{ default: 'gapLg' }}>
+                  <FlexItem>
+                    <Card>
+                      <CardTitle>Template stanza <Content component="small">newest available version</Content></CardTitle>
+                      <CardBody>
+                        {newest ? <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
+                          : <Content component="p">No version is available: every version is revoked.</Content>}
+                      </CardBody>
+                    </Card>
+                  </FlexItem>
+                  <FlexItem>
+                    <Card>
+                      <CardTitle>Update check</CardTitle>
+                      <CardBody>
+                        {local ? (
+                          <>
+                            <Content component="p">Not available for uploaded plugins. To add a version, upload its files.</Content>
+                            {canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
+                          </>
+                        ) : (
+                          <>
+                            <Switch
+                              id="update-check" label="Check daily for a newer stable version" isChecked={check?.enabled ?? false}
+                              isDisabled={busy || !canPublish} onChange={(_event, enabled) => onToggleUpdates(enabled)}
+                            />
+                            <DescriptionList isCompact isHorizontal>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>Last checked</DescriptionListTerm>
+                                <DescriptionListDescription>{checkedAt(check)}</DescriptionListDescription>
+                              </DescriptionListGroup>
+                              <DescriptionListGroup>
+                                <DescriptionListTerm>Last error</DescriptionListTerm>
+                                <DescriptionListDescription>
+                                  {check?.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error} The update pill reflects the last successful check.</span> : 'None'}
+                                </DescriptionListDescription>
+                              </DescriptionListGroup>
+                            </DescriptionList>
+                          </>
+                        )}
+                      </CardBody>
+                    </Card>
+                  </FlexItem>
+                </Flex>
               </FlexItem>
               <FlexItem flex={{ default: 'flex_1' }}>
-                <Card isFullHeight>
-                  <CardTitle>Template stanza <Content component="small">newest available version</Content></CardTitle>
-                  <CardBody>
-                    {newest ? <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
-                      : <Content component="p">No version is available: every version is revoked.</Content>}
-                  </CardBody>
-                </Card>
+                <PluginDownloadsCard downloads={downloads ?? null} />
               </FlexItem>
             </Flex>
             <Card>

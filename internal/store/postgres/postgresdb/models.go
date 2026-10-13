@@ -223,6 +223,15 @@ type Plugin struct {
 	UpdateLatestTag  sql.NullString `json:"update_latest_tag"`
 }
 
+type PluginDownload struct {
+	OrganizationID uuid.UUID `json:"organization_id"`
+	PluginID       uuid.UUID `json:"plugin_id"`
+	Version        string    `json:"version"`
+	Platform       string    `json:"platform"`
+	Day            time.Time `json:"day"`
+	Count          int64     `json:"count"`
+}
+
 type PluginFile struct {
 	OrganizationID uuid.UUID `json:"organization_id"`
 	VersionID      uuid.UUID `json:"version_id"`

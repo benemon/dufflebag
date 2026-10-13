@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"time"
 
+	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
 	"github.com/benemon/dufflebag/internal/store/objectstore"
 	"github.com/benemon/dufflebag/internal/store/postgres/postgresdb"
@@ -82,6 +84,28 @@ type PluginVersionSummary struct {
 	Listed    []string
 	Stored    []string
 	CreatedAt time.Time
+}
+
+// PluginDownloadWindows counts completed zip serves in rolling UTC windows.
+type PluginDownloadWindows struct {
+	Last7Days   int64
+	Last30Days  int64
+	Last365Days int64
+	AllTime     int64
+}
+
+// PluginVersionDownloads is one version's windows and current state.
+type PluginVersionDownloads struct {
+	PluginDownloadWindows
+	Version string
+	State   string
+}
+
+// PluginDownloads is one plugin's download aggregate.
+type PluginDownloads struct {
+	Today       time.Time
+	AllVersions PluginDownloadWindows
+	Versions    []PluginVersionDownloads
 }
 
 // HeldSourceError names the source already holding a plugin name.
@@ -286,6 +310,59 @@ func (r *Repository) ListPluginVersions(
 		})
 	}
 	return sourceOf(plugin.SourceKind, plugin.SourceRepository), versions, nil
+}
+
+// PluginDownloads returns rolling counts for one plugin and each counted version.
+func (r *Repository) PluginDownloads(
+	ctx context.Context, tenant OrganizationTenant, name string, today time.Time,
+) (PluginDownloads, error) {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return PluginDownloads{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := q.GetPluginRegistry(ctx, tenant.OrganizationID); errors.Is(err, sql.ErrNoRows) {
+		return PluginDownloads{}, ErrPluginRegistryNotEnabled
+	} else if err != nil {
+		return PluginDownloads{}, fmt.Errorf("get plugin registry: %w", err)
+	}
+	stored, err := q.GetPlugin(ctx, postgresdb.GetPluginParams{OrganizationID: tenant.OrganizationID, Name: name})
+	if errors.Is(err, sql.ErrNoRows) {
+		return PluginDownloads{}, fmt.Errorf("%w: plugin %s", registry.ErrNotFound, name)
+	}
+	if err != nil {
+		return PluginDownloads{}, fmt.Errorf("get plugin %s: %w", name, err)
+	}
+	today = today.UTC().Truncate(24 * time.Hour)
+	rows, err := q.PluginDownloadsByVersion(ctx, postgresdb.PluginDownloadsByVersionParams{Today: today, PluginID: stored.ID})
+	if err != nil {
+		return PluginDownloads{}, fmt.Errorf("get plugin downloads: %w", err)
+	}
+	downloads := PluginDownloads{Today: today, Versions: make([]PluginVersionDownloads, 0, len(rows))}
+	for _, row := range rows {
+		state := "removed"
+		if row.Held {
+			state = "available"
+			if row.Revoked {
+				state = "revoked"
+			}
+		}
+		windows := PluginDownloadWindows{
+			Last7Days: row.Last7Days, Last30Days: row.Last30Days,
+			Last365Days: row.Last365Days, AllTime: row.AllTime,
+		}
+		downloads.Versions = append(downloads.Versions, PluginVersionDownloads{
+			PluginDownloadWindows: windows, Version: row.Version, State: state,
+		})
+		downloads.AllVersions.Last7Days += windows.Last7Days
+		downloads.AllVersions.Last30Days += windows.Last30Days
+		downloads.AllVersions.Last365Days += windows.Last365Days
+		downloads.AllVersions.AllTime += windows.AllTime
+	}
+	slices.SortFunc(downloads.Versions, func(a, b PluginVersionDownloads) int {
+		return plugin.Compare(b.Version, a.Version)
+	})
+	return downloads, nil
 }
 
 func sourceOf(kind string, repository sql.NullString) PluginSource {

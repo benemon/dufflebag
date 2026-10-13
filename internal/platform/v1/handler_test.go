@@ -521,6 +521,8 @@ type fakeTenancyRepository struct {
 	plugins               []store.PluginSummary
 	pluginVersions        map[string][]store.PluginVersionSummary
 	pluginSource          store.PluginSource
+	pluginDownloads       store.PluginDownloads
+	pluginDownloadsErr    error
 	imports               []store.PluginImport
 	prune                 store.PluginPrune
 	defaultPlatforms      []string
@@ -843,6 +845,12 @@ func (r *fakeTenancyRepository) ListPluginVersions(
 		return r.pluginSource, versions, nil
 	}
 	return store.PluginSource{Kind: "upload"}, versions, nil
+}
+
+func (r *fakeTenancyRepository) PluginDownloads(
+	_ context.Context, _ store.OrganizationTenant, _ string, _ time.Time,
+) (store.PluginDownloads, error) {
+	return r.pluginDownloads, r.pluginDownloadsErr
 }
 
 func (r *fakeTenancyRepository) DisablePluginRegistry(

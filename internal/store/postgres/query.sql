@@ -1072,7 +1072,7 @@ WHERE plugins.organization_id = $1 AND plugins.name = $2
 
 -- name: GetServedPluginVersion :one
 SELECT
-    plugin_versions.id, plugin_versions.sums_key, plugin_versions.sums_size,
+    plugin_versions.id, plugins.id AS plugin_id, plugin_versions.sums_key, plugin_versions.sums_size,
     plugin_versions.signature_key, plugin_versions.signature_size,
     plugin_versions.manifest_key, plugin_versions.manifest_size, plugin_versions.protocol_version
 FROM plugin_versions
@@ -1080,6 +1080,28 @@ JOIN plugins ON plugins.id = plugin_versions.plugin_id
 JOIN plugin_registries ON plugin_registries.organization_id = plugins.organization_id
 WHERE plugins.organization_id = $1 AND plugins.name = $2 AND plugin_versions.version = $3
   AND plugin_registries.exposed AND NOT plugin_versions.revoked;
+
+-- name: CountPluginDownload :exec
+INSERT INTO plugin_downloads (organization_id, plugin_id, version, platform, day, count)
+VALUES (sqlc.arg(organization_id), sqlc.arg(plugin_id), sqlc.arg(version), sqlc.arg(platform), sqlc.arg(day)::date, 1)
+ON CONFLICT (plugin_id, version, platform, day)
+DO UPDATE SET count = plugin_downloads.count + 1;
+
+-- name: PluginDownloadsByVersion :many
+SELECT
+    plugin_downloads.version,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= sqlc.arg(today)::date - 6), 0)::bigint AS last_7_days,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= sqlc.arg(today)::date - 29), 0)::bigint AS last_30_days,
+    COALESCE(sum(plugin_downloads.count) FILTER (WHERE plugin_downloads.day >= sqlc.arg(today)::date - 364), 0)::bigint AS last_365_days,
+    COALESCE(sum(plugin_downloads.count), 0)::bigint AS all_time,
+    (plugin_versions.id IS NOT NULL)::boolean AS held,
+    COALESCE(plugin_versions.revoked, false)::boolean AS revoked
+FROM plugin_downloads
+LEFT JOIN plugin_versions
+    ON plugin_versions.plugin_id = plugin_downloads.plugin_id
+    AND plugin_versions.version = plugin_downloads.version
+WHERE plugin_downloads.plugin_id = sqlc.arg(plugin_id)
+GROUP BY plugin_downloads.version, plugin_versions.id, plugin_versions.revoked;
 
 -- name: GetServedPluginZip :one
 SELECT object_key, size FROM plugin_files WHERE version_id = $1 AND filename = $2;

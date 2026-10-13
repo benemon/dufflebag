@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"time"
 
 	"github.com/benemon/dufflebag/internal/domain/plugin"
 	"github.com/benemon/dufflebag/internal/domain/registry"
@@ -16,9 +17,11 @@ import (
 // ServedPluginFile is one file the read plane answers with: stored bytes by
 // object key, or content the registry renders.
 type ServedPluginFile struct {
-	ObjectKey string
-	Size      int64
-	Content   []byte
+	OrganizationID uuid.UUID
+	PluginID       uuid.UUID
+	ObjectKey      string
+	Size           int64
+	Content        []byte
 }
 
 // PluginFileKind names which of a version's files a read asks for.
@@ -83,15 +86,18 @@ func (r *Repository) ServedPluginFile(
 	if err != nil {
 		return ServedPluginFile{}, fmt.Errorf("get served plugin version: %w", err)
 	}
+	served := ServedPluginFile{OrganizationID: id, PluginID: row.PluginID}
 	stored := func(key sql.NullString, size sql.NullInt64) (ServedPluginFile, error) {
 		if !key.Valid {
 			return ServedPluginFile{}, registry.ErrNotFound
 		}
-		return ServedPluginFile{ObjectKey: key.String, Size: size.Int64}, nil
+		served.ObjectKey, served.Size = key.String, size.Int64
+		return served, nil
 	}
 	switch kind {
 	case ServedSums:
-		return ServedPluginFile{ObjectKey: row.SumsKey, Size: row.SumsSize}, nil
+		served.ObjectKey, served.Size = row.SumsKey, row.SumsSize
+		return served, nil
 	case ServedSignature:
 		return stored(row.SignatureKey, row.SignatureSize)
 	case ServedManifest:
@@ -99,7 +105,8 @@ func (r *Repository) ServedPluginFile(
 			return stored(row.ManifestKey, row.ManifestSize)
 		}
 		if row.ProtocolVersion.Valid {
-			return ServedPluginFile{Content: plugin.RenderManifest(row.ProtocolVersion.String)}, nil
+			served.Content = plugin.RenderManifest(row.ProtocolVersion.String)
+			return served, nil
 		}
 		return ServedPluginFile{}, registry.ErrNotFound
 	}
@@ -110,7 +117,29 @@ func (r *Repository) ServedPluginFile(
 	if err != nil {
 		return ServedPluginFile{}, fmt.Errorf("get served plugin zip: %w", err)
 	}
-	return ServedPluginFile{ObjectKey: zip.ObjectKey, Size: zip.Size}, nil
+	served.ObjectKey, served.Size = zip.ObjectKey, zip.Size
+	return served, nil
+}
+
+// CountPluginDownload records one completed plugin zip serve.
+func (r *Repository) CountPluginDownload(
+	ctx context.Context, tenant OrganizationTenant, pluginID uuid.UUID, version, platform string, day time.Time,
+) error {
+	tx, q, err := r.beginOrganization(ctx, tenant)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := q.CountPluginDownload(ctx, postgresdb.CountPluginDownloadParams{
+		OrganizationID: tenant.OrganizationID, PluginID: pluginID, Version: version,
+		Platform: platform, Day: day,
+	}); err != nil {
+		return fmt.Errorf("count plugin download: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit plugin download: %w", err)
+	}
+	return nil
 }
 
 // OpenPluginObject streams a stored plugin file.
