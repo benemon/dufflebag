@@ -362,7 +362,6 @@ export function PluginDetailView({
                             </DescriptionListDescription>
                           </DescriptionListGroup>
                         </DescriptionList>
-                        <Content component="small">A check only flags a newer version. Nothing is mirrored until you sync.</Content>
                       </>
                     )}
                   </CardBody>
