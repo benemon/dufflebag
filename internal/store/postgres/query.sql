@@ -734,7 +734,7 @@ SELECT versions.*, buckets.name AS bucket_name
 FROM versions
 JOIN buckets ON buckets.id = versions.bucket_id
 WHERE buckets.name = $1
-ORDER BY versions.sequence DESC, versions.created_at DESC;
+ORDER BY versions.sequence DESC NULLS LAST, versions.created_at DESC;
 
 -- name: GetPrincipalByID :one
 SELECT *

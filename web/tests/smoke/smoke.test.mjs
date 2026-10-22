@@ -2055,8 +2055,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       '.pf-v6-c-card',
       (card) => card.innerText.includes('Bucket details') ? card.innerText : '',
     )
-    assert.match(bucketDetails, /Status\s+incomplete/)
-    assert.doesNotMatch(bucketDetails, /Status\s+complete/)
+    // smoke-wip was created after v1 completed, but an unfinished run never
+    // reads as the newest version while a complete one exists (duf-6dal).
+    assert.match(bucketDetails, /Newest version\s+v1\s+Status\s+complete/)
+    assert.doesNotMatch(bucketDetails, /Status\s+incomplete/)
     assert.equal(historyRequests.length, 0, 'collapsed channels fetched assignment history')
     await clickFacet('Bucket facets', 'Versions')
     await page.waitForSelector('table[aria-label="Versions"]')

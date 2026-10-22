@@ -711,10 +711,11 @@ func (r *Repository) GetVersion(
 	return version, nil
 }
 
-// ListVersions returns a bucket's versions, newest first.
+// ListVersions returns a bucket's versions, newest complete first.
 //
-// Incomplete versions carry no sequence, so created_at breaks the tie and keeps
-// them in a stable order rather than whatever the planner returns.
+// Incomplete versions carry no sequence. PostgreSQL sorts NULL first under
+// DESC, so the query pins them last; created_at keeps them in a stable order
+// among themselves rather than whatever the planner returns.
 func (r *Repository) ListVersions(
 	ctx context.Context,
 	tenant Tenant,

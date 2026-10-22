@@ -355,12 +355,10 @@ function ancestryLink(link?: ApiAncestryLink | null): AncestryLink | null {
 }
 
 function driftOf(channels: ApiChannel[], versions: ApiVersion[]): Drift {
-  // ListVersions orders sequence DESC and an incomplete version has no
-  // sequence yet — PostgreSQL sorts its NULL first — so versions[0] can be an
-  // unnumbered v0. Only a complete version can hold a channel
+  // Only a complete version can hold a channel
   // (internal/domain/registry/version.go), so drift measures against, and in
   // units of, the COMPLETE versions only: a channel holding the newest
-  // complete version is current, whatever incomplete runs sit above it.
+  // complete version is current, whatever incomplete runs exist.
   const complete = versions.filter(isComplete)
   const newest = complete[0]
   if (!newest) return { kind: 'absent', channel: 'versions' }
