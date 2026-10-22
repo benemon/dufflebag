@@ -235,6 +235,54 @@ func TestListVersionsIncludesDescendantsForVersionsWithoutBuilds(t *testing.T) {
 	}
 }
 
+func TestListVersionsOrdersCompleteBeforeIncomplete(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+	ctx := context.Background()
+	tenant := store.ParseTenant(orgA, projectA)
+	repository := store.NewRepository(db)
+	at := time.Date(2026, 10, 21, 0, 48, 0, 0, time.UTC)
+
+	if _, err := repository.CreateBucket(ctx, tenant, store.Bucket{
+		ID: registry.NewID(at), Name: "complete-first", Labels: map[string]string{}, CreatedAt: at,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, incomplete := range []struct {
+		fingerprint string
+		createdAt   time.Time
+	}{
+		{"fp-abandoned", at.Add(time.Minute)},
+		{"fp-inflight", at.Add(4 * time.Minute)},
+	} {
+		version, err := registry.NewVersion(
+			registry.NewID(incomplete.createdAt), "complete-first", incomplete.fingerprint,
+			registry.TemplateHCL2, incomplete.createdAt,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := repository.CreateVersion(ctx, tenant, version); err != nil {
+			t.Fatal(err)
+		}
+	}
+	completeVersionForRollback(t, repository, ctx, tenant, "complete-first", "fp-complete",
+		at.Add(2*time.Minute), at.Add(3*time.Minute))
+
+	listed, _, err := repository.ListVersions(ctx, tenant, "complete-first")
+	if err != nil {
+		t.Fatalf("ListVersions: %v", err)
+	}
+	got := make([]string, 0, len(listed))
+	for _, version := range listed {
+		got = append(got, version.Fingerprint)
+	}
+	want := []string{"fp-complete", "fp-inflight", "fp-abandoned"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ListVersions order = %v, want %v", got, want)
+	}
+}
+
 func TestListVersionsRejectsTamperedArtifactMAC(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()

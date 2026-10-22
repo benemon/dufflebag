@@ -417,7 +417,7 @@ test('the downloads card shows all-version and selected-version windows, includi
   assert.match(removed, /Last 7 days[\s\S]*?>1<[\s\S]*?Last 30 days[\s\S]*?>2<[\s\S]*?Last 365 days[\s\S]*?>3<[\s\S]*?All time[\s\S]*?>4</)
 })
 
-test('the plugin detail left column stacks Template stanza before Update check', () => {
+test('the plugin detail cards run Template stanza, Downloads, Update check in one row above Versions', () => {
   const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'reader',
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
@@ -428,8 +428,10 @@ test('the plugin detail left column stacks Template stanza before Update check',
       version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
     }] },
   }))
-  assert.ok(html.indexOf('Template stanza') < html.indexOf('Update check'))
-  assert.ok(html.indexOf('Update check') < html.indexOf('Downloads'))
+  assert.ok(html.indexOf('Template stanza') < html.indexOf('Downloads'))
+  assert.ok(html.indexOf('Downloads') < html.indexOf('Update check'))
+  assert.ok(html.indexOf('Update check') < html.indexOf('>Versions<'))
+  assert.equal(html.match(/pf-v6-l-grid__item/g)?.length, 3, 'the three cards share one grid row')
   assert.match(html, /Last 7 days[\s\S]*?>0</)
 })
 

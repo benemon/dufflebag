@@ -3,7 +3,7 @@ import {
   Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
   MenuToggle, Pagination, Progress, ProgressMeasureLocation, SearchInput, Select, SelectList, SelectOption, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
   CodeBlockAction, CodeBlockCode, Content, DescriptionList, DescriptionListDescription, DescriptionListGroup,
-  DescriptionListTerm, Flex, FlexItem, Label, PageSection, Switch,
+  DescriptionListTerm, Flex, FlexItem, Grid, GridItem, Label, PageSection, Switch,
 } from '@patternfly/react-core'
 import { ActionsColumn, ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -239,11 +239,17 @@ export function PluginDownloadsCardView({
         </Flex>
       </CardTitle>
       <CardBody>
-        <DescriptionList isCompact isHorizontal>
+        <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
           {rows.map(([term, count]) => (
-            <DescriptionListGroup key={term}>
-              <DescriptionListTerm>{term}</DescriptionListTerm>
-              <DescriptionListDescription>{downloadNumber.format(count)}</DescriptionListDescription>
+            <DescriptionListGroup key={term} style={{ display: 'flex', flexDirection: 'column-reverse', justifyContent: 'flex-end' }}>
+              <DescriptionListTerm>
+                <span style={{ fontWeight: 'normal', color: 'var(--pf-t--global--text--color--subtle)' }}>{term}</span>
+              </DescriptionListTerm>
+              <DescriptionListDescription>
+                <span style={{ fontFamily: 'var(--pf-t--global--font--family--heading)', fontSize: 'var(--pf-t--global--font--size--heading--h3)', fontWeight: 'var(--pf-t--global--font--weight--heading--default)' }}>
+                  {downloadNumber.format(count)}
+                </span>
+              </DescriptionListDescription>
             </DescriptionListGroup>
           ))}
         </DescriptionList>
@@ -405,56 +411,52 @@ export function PluginDetailView({
         {failure ? <PluginErrorCard title={`${name} could not be loaded`} error={failure} onRetry={onRefresh} /> : null}
         {detail ? (
           <>
-            <Flex gap={{ default: 'gapLg' }} alignItems={{ default: 'alignItemsStretch' }}>
-              <FlexItem flex={{ default: 'flex_1' }}>
-                <Flex direction={{ default: 'column' }} gap={{ default: 'gapLg' }}>
-                  <FlexItem>
-                    <Card>
-                      <CardTitle>Template stanza <Content component="small">newest available version</Content></CardTitle>
-                      <CardBody>
-                        {newest ? <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
-                          : <Content component="p">No version is available: every version is revoked.</Content>}
-                      </CardBody>
-                    </Card>
-                  </FlexItem>
-                  <FlexItem>
-                    <Card>
-                      <CardTitle>Update check</CardTitle>
-                      <CardBody>
-                        {local ? (
-                          <>
-                            <Content component="p">Not available for uploaded plugins. To add a version, upload its files.</Content>
-                            {canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
-                          </>
-                        ) : (
-                          <>
-                            <Switch
-                              id="update-check" label="Check daily for a newer stable version" isChecked={check?.enabled ?? false}
-                              isDisabled={busy || !canPublish} onChange={(_event, enabled) => onToggleUpdates(enabled)}
-                            />
-                            <DescriptionList isCompact isHorizontal>
-                              <DescriptionListGroup>
-                                <DescriptionListTerm>Last checked</DescriptionListTerm>
-                                <DescriptionListDescription>{checkedAt(check)}</DescriptionListDescription>
-                              </DescriptionListGroup>
-                              <DescriptionListGroup>
-                                <DescriptionListTerm>Last error</DescriptionListTerm>
-                                <DescriptionListDescription>
-                                  {check?.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error} The update pill reflects the last successful check.</span> : 'None'}
-                                </DescriptionListDescription>
-                              </DescriptionListGroup>
-                            </DescriptionList>
-                          </>
-                        )}
-                      </CardBody>
-                    </Card>
-                  </FlexItem>
-                </Flex>
-              </FlexItem>
-              <FlexItem flex={{ default: 'flex_1' }}>
+            <Grid hasGutter style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
+              <GridItem span={12} lg={6} style={{ minWidth: 0 }}>
+                <Card isFullHeight>
+                  <CardTitle>Template stanza <Content component="small">newest available version</Content></CardTitle>
+                  <CardBody>
+                    {newest ? <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
+                      : <Content component="p">No version is available: every version is revoked.</Content>}
+                  </CardBody>
+                </Card>
+              </GridItem>
+              <GridItem span={12} md={6} lg={3} style={{ minWidth: 0 }}>
                 <PluginDownloadsCard downloads={downloads ?? null} />
-              </FlexItem>
-            </Flex>
+              </GridItem>
+              <GridItem span={12} md={6} lg={3} style={{ minWidth: 0 }}>
+                <Card isFullHeight>
+                  <CardTitle>Update check</CardTitle>
+                  <CardBody>
+                    {local ? (
+                      <>
+                        <Content component="p">Not available for uploaded plugins. To add a version, upload its files.</Content>
+                        {canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
+                      </>
+                    ) : (
+                      <>
+                        <Switch
+                          id="update-check" label="Check daily for a newer stable version" isChecked={check?.enabled ?? false}
+                          isDisabled={busy || !canPublish} onChange={(_event, enabled) => onToggleUpdates(enabled)}
+                        />
+                        <DescriptionList isCompact isHorizontal>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>Last checked</DescriptionListTerm>
+                            <DescriptionListDescription>{checkedAt(check)}</DescriptionListDescription>
+                          </DescriptionListGroup>
+                          <DescriptionListGroup>
+                            <DescriptionListTerm>Last error</DescriptionListTerm>
+                            <DescriptionListDescription>
+                              {check?.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error} The update pill reflects the last successful check.</span> : 'None'}
+                            </DescriptionListDescription>
+                          </DescriptionListGroup>
+                        </DescriptionList>
+                      </>
+                    )}
+                  </CardBody>
+                </Card>
+              </GridItem>
+            </Grid>
             <Card>
               <CardTitle>Versions</CardTitle>
               <CardBody>
