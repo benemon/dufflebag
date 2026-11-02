@@ -10,19 +10,19 @@
     "typecheck": "tsc -b --noEmit"
   },
   "dependencies": {
-    "@patternfly/react-core": "6.6.1",
-    "@patternfly/react-icons": "6.6.1",
-    "@patternfly/react-table": "6.6.1",
-    "react": "19.3.0",
-    "react-dom": "19.3.0",
-    "react-router": "^8.4.0"
+    "@patternfly/react-core": "6.7.0",
+    "@patternfly/react-icons": "6.7.0",
+    "@patternfly/react-table": "6.7.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "react-router": "^8.5.0"
   },
   "devDependencies": {
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "^6.1.2",
-    "puppeteer-core": "^25.12.0",
+    "puppeteer-core": "^25.15.0",
     "typescript": "7.0.2",
-    "vite": "^8.3.3"
+    "vite": "^8.3.5"
   }
 }
