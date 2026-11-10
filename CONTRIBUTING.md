@@ -117,4 +117,6 @@ cannot reference an image tag that does not exist yet: after the release run
 is green, set `appVersion` in `deploy/helm/dufflebag/Chart.yaml` and
 `dufflebag.image.tag` in its `values.yaml` to the new tag, regenerate the
 golden render with `HELM_UPDATE_GOLDEN=1 make helm-lint`, and merge. The
-Pages workflow republishes the chart from `main`.
+Pages workflow republishes the chart from `main`. Label that PR `chart-bump`:
+it merges after the tag, and `.github/release.yml` keeps it out of the next
+release's generated notes.
