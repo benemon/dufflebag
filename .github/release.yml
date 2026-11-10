@@ -1,0 +1,6 @@
+# The chart PR merges after its release's tag, so generated notes would list
+# it under the next release.
+changelog:
+  exclude:
+    labels:
+      - chart-bump
