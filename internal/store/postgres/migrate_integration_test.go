@@ -81,6 +81,56 @@ func TestMigrationsRoundTrip(t *testing.T) {
 	}
 }
 
+func TestScanFindingsIndexesSBOMPackageForeignKey(t *testing.T) {
+	db, _, cleanup := openTestDatabase(t)
+	defer cleanup()
+
+	var columns string
+	var indexed bool
+	err := db.QueryRow(`
+		WITH target_fk AS (
+			SELECT constraint_row.conrelid,
+				array_agg(attribute.attname ORDER BY fk_column.ordinality) AS column_names
+			FROM pg_constraint AS constraint_row
+			CROSS JOIN LATERAL unnest(constraint_row.conkey)
+				WITH ORDINALITY AS fk_column(attnum, ordinality)
+			JOIN pg_attribute AS attribute
+				ON attribute.attrelid = constraint_row.conrelid
+				AND attribute.attnum = fk_column.attnum
+			WHERE constraint_row.contype = 'f'
+				AND constraint_row.conrelid = 'public.scan_findings'::regclass
+				AND constraint_row.confrelid = 'public.sbom_packages'::regclass
+			GROUP BY constraint_row.oid, constraint_row.conrelid
+		)
+		SELECT array_to_string(target_fk.column_names, ', '), EXISTS (
+			SELECT 1
+			FROM pg_index AS index_row
+			WHERE index_row.indrelid = target_fk.conrelid
+				AND index_row.indisvalid
+				AND index_row.indisready
+				AND index_row.indpred IS NULL
+				AND index_row.indnkeyatts >= cardinality(target_fk.column_names)
+				AND ARRAY(
+					SELECT attribute.attname
+					FROM unnest(index_row.indkey)
+						WITH ORDINALITY AS index_column(attnum, ordinality)
+					JOIN pg_attribute AS attribute
+						ON attribute.attrelid = index_row.indrelid
+						AND attribute.attnum = index_column.attnum
+					WHERE index_column.ordinality <= cardinality(target_fk.column_names)
+					ORDER BY index_column.ordinality
+				) = target_fk.column_names
+		)
+		FROM target_fk
+	`).Scan(&columns, &indexed)
+	if err != nil {
+		t.Fatalf("find scan_findings foreign key to sbom_packages: %v", err)
+	}
+	if !indexed {
+		t.Fatalf("scan_findings has no index leading with its sbom_packages foreign key columns: %s", columns)
+	}
+}
+
 func TestOrganizationNameConstraint(t *testing.T) {
 	db, _, cleanup := openTestDatabase(t)
 	defer cleanup()

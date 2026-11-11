@@ -574,7 +574,7 @@ test('a compat-plane ApiError message is rendered verbatim in either modal', () 
     submitting: false, failure: message, onConfirm: async () => {}, onClose: () => {},
   }))
   for (const markup of [revoke, restore]) {
-    assert.match(markup, /The action was refused/)
+    assert.match(markup, /The action did not complete/)
     assert.match(markup, /restore refused by registry policy/)
   }
 })
@@ -964,7 +964,7 @@ test('bulk partial failures render every per-row result and the server refusal v
   assert.equal((markup.match(/>Refused<\/span>/g) ?? []).length, 1)
   for (const name of ['v3', 'v2', 'v1']) assert.match(markup, new RegExp(name))
   assert.match(markup, new RegExp(refusal))
-  assert.doesNotMatch(markup, /The action was refused/)
+  assert.doesNotMatch(markup, /The action did not complete/)
 })
 
 test('fingerprint fields use the compact read-only copy control everywhere they render', () => {

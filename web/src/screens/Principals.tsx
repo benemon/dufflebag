@@ -107,7 +107,7 @@ export function PrincipalsView({
           </Alert>
         ) : null}
         {actionFailure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{actionFailure}</Content>
           </Alert>
         ) : null}
@@ -992,7 +992,7 @@ export function IssueSecretModalView({
       />
       <ModalBody>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}

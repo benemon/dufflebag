@@ -90,6 +90,7 @@ current data with a loading state.
 ## Failure states
 
 Screens report failures directly. A load failure names what could not be
-loaded. A refused action says it was refused. An empty screen explains why it
-is empty. If the console disagrees with an API response, the API response is
-authoritative. Report the discrepancy as an issue.
+loaded. An action that did not complete says so and shows the server's reason
+when one is available. An empty screen explains why it is empty. If the console
+disagrees with an API response, the API response is authoritative. Report the
+discrepancy as an issue.

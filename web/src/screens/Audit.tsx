@@ -73,7 +73,7 @@ export function AuditView({ targets, loading, failure, reload, token, callerRole
           </Alert>
         ) : null}
         {actionFailure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{actionFailure}</Content>
           </Alert>
         ) : null}

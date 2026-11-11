@@ -1427,7 +1427,7 @@ export function CreateChannelModalView({
       <ModalHeader labelId="create-channel-modal-title" title={`Create channel in ${bucket}`} />
       <ModalBody>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
@@ -1558,7 +1558,7 @@ export function AssignChannelModalView({
       />
       <ModalBody>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
@@ -1658,7 +1658,7 @@ export function DeleteChannelModalView({
       onCancel={onClose}
       body={<>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}

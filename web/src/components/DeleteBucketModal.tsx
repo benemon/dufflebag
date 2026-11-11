@@ -78,7 +78,7 @@ export function DeleteBucketModalView({
       onCancel={onClose}
       body={<>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}

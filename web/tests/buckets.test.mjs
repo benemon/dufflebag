@@ -391,7 +391,7 @@ test('bucket deletion names every consequence and renders a server error verbati
     markup,
     /Deleting images permanently removes the bucket and all its versions, builds, artifacts, channels and history\./,
   )
-  assert.match(markup, /The action was refused/)
+  assert.match(markup, /The action did not complete/)
   assert.match(markup, /bucket is protected by registry policy/)
 })
 

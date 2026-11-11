@@ -94,7 +94,7 @@ test('an action refusal has its own danger alert', () => {
     failure: null,
     actionFailure: 'The key service refused or was unreachable. The keyring was not changed.',
   }))
-  assert.match(markup, /The action was refused/)
+  assert.match(markup, /The action did not complete/)
   assert.match(markup, /The key service refused or was unreachable/)
 })
 
