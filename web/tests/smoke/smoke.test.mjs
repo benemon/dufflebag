@@ -1433,7 +1433,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Add target')
     await page.type('#audit-target-path', auditLink)
     await clickByText('button', 'Add target')
-    await waitForText('The action was refused')
+    await waitForText('The action did not complete')
     await waitForText('Symlinks are refused for audit targets')
     await clickByText('button', 'Cancel')
 
@@ -1693,7 +1693,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickByText('button', 'Rewrap keyring')
     await typeToConfirm('rewrap')
     await clickInModal('Rewrap keyring')
-    await waitForText('The action was refused')
+    await waitForText('The action did not complete')
     await waitForText('The key service refused or was unreachable')
     await page.reload({ waitUntil: 'domcontentloaded' })
     await waitForText('The key service could not unwrap the keyring at its last heartbeat')

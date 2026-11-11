@@ -1,0 +1,1 @@
+DROP INDEX public.scan_findings_sbom_package_index;

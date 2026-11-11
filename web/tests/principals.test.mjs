@@ -353,7 +353,7 @@ test('an issue refusal, including a keystone 409, stays inside the modal', () =>
     IssueSecretModalView,
     issueModalProps({ failure: 'A root principal must keep one secret that never expires.' }),
   ))
-  assert.match(markup, /The action was refused/)
+  assert.match(markup, /The action did not complete/)
   assert.match(markup, /root principal must keep one secret that never expires/)
 })
 

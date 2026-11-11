@@ -85,6 +85,11 @@ async function failureMessage(
   } catch {
     // Not JSON, or empty. Fall through to the status line.
   }
+  if ([502, 503, 504].includes(response.status)) {
+    return {
+      message: `${response.status}: dufflebag did not answer before the gateway gave up. Reload to see whether the action took effect.`,
+    }
+  }
   return { message: `${response.status} from ${path}` }
 }
 

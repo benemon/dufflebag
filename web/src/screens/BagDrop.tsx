@@ -452,7 +452,7 @@ export function DestinationActionFailure({
   verification: ApiBagDropVerificationResult | null
 }) {
   return (
-    <Alert variant="danger" isInline title="The action was refused">
+    <Alert variant="danger" isInline title="The action did not complete">
       <Content component="p">{message}</Content>
       {verification ? <VerificationResultView verification={verification} /> : null}
     </Alert>
@@ -627,7 +627,7 @@ export function MirroredBucketsZone({
           </Alert>
         ) : null}
         {actionFailure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{actionFailure}</Content>
           </Alert>
         ) : null}

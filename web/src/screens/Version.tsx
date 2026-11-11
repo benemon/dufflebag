@@ -415,7 +415,7 @@ export function DeleteVersionModalView({
       onCancel={onClose}
       body={<>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
@@ -520,7 +520,7 @@ export function RevokeModalView({
       }))}
       body={<>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
@@ -591,7 +591,7 @@ export function RestoreModalView({
       <ModalHeader labelId="restore-version-modal-title" title={`Restore ${bucket} — ${version.name}`} />
       <ModalBody>
         {failure ? (
-          <Alert variant="danger" isInline title="The action was refused">
+          <Alert variant="danger" isInline title="The action did not complete">
             <Content component="p">{failure}</Content>
           </Alert>
         ) : null}
@@ -912,7 +912,7 @@ export function OperationsCard({
         {version.state === 'complete' ? (
           <Form>
             {failure ? (
-              <Alert variant="danger" isInline title="The action was refused">
+              <Alert variant="danger" isInline title="The action did not complete">
                 <Content component="p">{failure}</Content>
               </Alert>
             ) : null}
