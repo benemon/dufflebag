@@ -252,6 +252,14 @@ export type ApiVersion = {
   status?: string
   template_type?: string
   created_at?: string
+  revoke_at?: string | null
+  revocation_inherited_from?: {
+    bucket_name?: string
+    href?: string
+    version_fingerprint?: string
+    version_id?: string
+    version_name?: string
+  } | null
   builds?: ApiBuild[] | null
   has_descendants?: boolean
   parents?: {

@@ -1,0 +1,1672 @@
+{
+  "/buckets/agent": {
+    "status": 200,
+    "body": {
+      "bucket": {
+        "created_at": "2026-07-29T12:00:00.000Z",
+        "id": "01K1CJ4X8G0000000000000015",
+        "latest_version": {
+          "bucket_name": "agent",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-5",
+          "id": "01K1CJ4X8G0000000000000014",
+          "name": "v5",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        "location": {
+          "organization_id": "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          "project_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        },
+        "name": "agent",
+        "platforms": [],
+        "resource_name": "packer/project/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d/bucket/agent",
+        "updated_at": "2026-07-29T12:00:00.000Z"
+      }
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=agent-1": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=agent-2": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=agent-3": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=agent-4": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=agent-5": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=agent-1": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 1
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=agent-2": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 1
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=agent-3": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 1
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=agent-4": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 1
+    }
+  },
+  "/buckets/agent/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=agent-5": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        }
+      ],
+      "total_count": 1
+    }
+  },
+  "/buckets/agent/channels": {
+    "status": 200,
+    "body": {
+      "channels": [
+        {
+          "bucket_name": "agent",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000016",
+          "managed": true,
+          "name": "latest",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "agent",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "agent-5",
+            "id": "01K1CJ4X8G0000000000000014",
+            "name": "v5",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        },
+        {
+          "bucket_name": "agent",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000017",
+          "name": "production",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "agent",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "agent-5",
+            "id": "01K1CJ4X8G0000000000000014",
+            "name": "v5",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        },
+        {
+          "bucket_name": "agent",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000018",
+          "name": "stable",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "agent",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "agent-3",
+            "id": "01K1CJ4X8G0000000000000012",
+            "name": "v3",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        }
+      ]
+    }
+  },
+  "/buckets/agent/versions": {
+    "status": 200,
+    "body": {
+      "versions": [
+        {
+          "bucket_name": "agent",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000019",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000014"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-5",
+          "id": "01K1CJ4X8G0000000000000014",
+          "name": "v5",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "agent",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000020",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000013"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-4",
+          "id": "01K1CJ4X8G0000000000000013",
+          "name": "v4",
+          "revocation_author": "ops",
+          "revocation_type": "MANUAL",
+          "revoke_at": "2026-11-18T12:00:00.000Z",
+          "status": "VERSION_REVOCATION_SCHEDULED",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "agent",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000021",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000012"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-3",
+          "id": "01K1CJ4X8G0000000000000012",
+          "name": "v3",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "agent",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000022",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000011"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-2",
+          "id": "01K1CJ4X8G0000000000000011",
+          "name": "v2",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "agent",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000023",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000010"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "agent-1",
+          "id": "01K1CJ4X8G0000000000000010",
+          "name": "v1",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "/buckets/base": {
+    "status": 200,
+    "body": {
+      "bucket": {
+        "created_at": "2026-07-29T12:00:00.000Z",
+        "id": "01K1CJ4X8G0000000000000006",
+        "latest_version": {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-5",
+          "id": "01K1CJ4X8G0000000000000005",
+          "name": "v5",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        "location": {
+          "organization_id": "3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d",
+          "project_id": "9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d"
+        },
+        "name": "base",
+        "platforms": [],
+        "resource_name": "packer/project/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d/bucket/base",
+        "updated_at": "2026-07-29T12:00:00.000Z"
+      }
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=base-1": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "retired",
+            "version_fingerprint": "retired-1",
+            "version_id": "01K1CJ4X8G0000000000000032",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-3",
+            "version_id": "01K1CJ4X8G0000000000000026",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "staging",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-2",
+            "version_id": "01K1CJ4X8G0000000000000025",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-1",
+            "version_id": "01K1CJ4X8G0000000000000024",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 9
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=base-2": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "retired",
+            "version_fingerprint": "retired-1",
+            "version_id": "01K1CJ4X8G0000000000000032",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-3",
+            "version_id": "01K1CJ4X8G0000000000000026",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "staging",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-2",
+            "version_id": "01K1CJ4X8G0000000000000025",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-1",
+            "version_id": "01K1CJ4X8G0000000000000024",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 9
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=base-3": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "retired",
+            "version_fingerprint": "retired-1",
+            "version_id": "01K1CJ4X8G0000000000000032",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-3",
+            "version_id": "01K1CJ4X8G0000000000000026",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "staging",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-2",
+            "version_id": "01K1CJ4X8G0000000000000025",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-1",
+            "version_id": "01K1CJ4X8G0000000000000024",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 9
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=base-4": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "retired",
+            "version_fingerprint": "retired-1",
+            "version_id": "01K1CJ4X8G0000000000000032",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-3",
+            "version_id": "01K1CJ4X8G0000000000000026",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "staging",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-2",
+            "version_id": "01K1CJ4X8G0000000000000025",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-1",
+            "version_id": "01K1CJ4X8G0000000000000024",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 9
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_CHILDREN\u0026version_fingerprint=base-5": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": [
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-5",
+            "version_id": "01K1CJ4X8G0000000000000014",
+            "version_name": "v5"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-4",
+            "version_id": "01K1CJ4X8G0000000000000013",
+            "version_name": "v4"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "latest",
+            "channel_version": {
+              "fingerprint": "base-5",
+              "id": "01K1CJ4X8G0000000000000005",
+              "name": "v5"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-3",
+            "version_id": "01K1CJ4X8G0000000000000012",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-2",
+            "version_id": "01K1CJ4X8G0000000000000011",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "agent",
+            "version_fingerprint": "agent-1",
+            "version_id": "01K1CJ4X8G0000000000000010",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-1",
+            "version_id": "01K1CJ4X8G0000000000000001",
+            "version_name": "v1"
+          },
+          "status": "OUT_OF_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "retired",
+            "version_fingerprint": "retired-1",
+            "version_id": "01K1CJ4X8G0000000000000032",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UP_TO_DATE"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-3",
+            "version_id": "01K1CJ4X8G0000000000000026",
+            "version_name": "v3"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "staging",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-2",
+            "version_id": "01K1CJ4X8G0000000000000025",
+            "version_name": "v2"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "version_fingerprint": "base-4",
+            "version_id": "01K1CJ4X8G0000000000000004",
+            "version_name": "v4"
+          },
+          "status": "UNDETERMINED"
+        },
+        {
+          "child": {
+            "bucket_name": "runner",
+            "version_fingerprint": "runner-1",
+            "version_id": "01K1CJ4X8G0000000000000024",
+            "version_name": "v1"
+          },
+          "parent": {
+            "bucket_name": "base",
+            "channel_name": "production",
+            "channel_version": {
+              "fingerprint": "base-4",
+              "id": "01K1CJ4X8G0000000000000004",
+              "name": "v4"
+            },
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "status": "OUT_OF_DATE"
+        }
+      ],
+      "total_count": 9
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=base-1": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=base-2": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=base-3": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=base-4": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/base/ancestry?type=ANCESTRY_TYPE_PARENTS\u0026version_fingerprint=base-5": {
+    "status": 200,
+    "body": {
+      "pagination": {},
+      "relations": []
+    }
+  },
+  "/buckets/base/channels": {
+    "status": 200,
+    "body": {
+      "channels": [
+        {
+          "bucket_name": "base",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000007",
+          "managed": true,
+          "name": "latest",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "base",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "base-5",
+            "id": "01K1CJ4X8G0000000000000005",
+            "name": "v5",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        },
+        {
+          "bucket_name": "base",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000008",
+          "name": "production",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "base",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "base-4",
+            "id": "01K1CJ4X8G0000000000000004",
+            "name": "v4",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        },
+        {
+          "bucket_name": "base",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000009",
+          "name": "staging",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "/buckets/base/versions": {
+    "status": 200,
+    "body": {
+      "versions": [
+        {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-5",
+          "id": "01K1CJ4X8G0000000000000005",
+          "name": "v5",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-4",
+          "id": "01K1CJ4X8G0000000000000004",
+          "name": "v4",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-3",
+          "id": "01K1CJ4X8G0000000000000003",
+          "name": "v3",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-2",
+          "id": "01K1CJ4X8G0000000000000002",
+          "name": "v2",
+          "revocation_author": "ops",
+          "revocation_message": "CVE",
+          "revocation_type": "MANUAL",
+          "revoke_at": "2026-07-29T11:00:00.000Z",
+          "status": "VERSION_REVOKED",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "base",
+          "builds": [],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "base-1",
+          "id": "01K1CJ4X8G0000000000000001",
+          "name": "v1",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        }
+      ]
+    }
+  },
+  "/buckets/base/versions/base-4": {
+    "status": 200,
+    "body": {
+      "version": {
+        "bucket_name": "base",
+        "builds": [],
+        "created_at": "2026-07-29T12:00:00.000Z",
+        "fingerprint": "base-4",
+        "id": "01K1CJ4X8G0000000000000004",
+        "name": "v4",
+        "revoke_at": null,
+        "status": "VERSION_ACTIVE",
+        "template_type": "HCL2",
+        "updated_at": "2026-07-29T12:00:00.000Z"
+      }
+    }
+  },
+  "/buckets/retired/channels": {
+    "status": 404,
+    "body": {
+      "code": 5,
+      "details": [],
+      "message": "Error: The bucket with identifier retired does not exist."
+    }
+  },
+  "/buckets/retired/versions": {
+    "status": 404,
+    "body": {
+      "code": 5,
+      "details": [],
+      "message": "Error: The bucket with identifier retired does not exist."
+    }
+  },
+  "/buckets/runner/channels": {
+    "status": 200,
+    "body": {
+      "channels": [
+        {
+          "bucket_name": "runner",
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "id": "01K1CJ4X8G0000000000000028",
+          "managed": true,
+          "name": "latest",
+          "updated_at": "2026-07-29T12:00:00.000Z",
+          "version": {
+            "bucket_name": "runner",
+            "builds": [],
+            "created_at": "2026-07-29T12:00:00.000Z",
+            "fingerprint": "runner-2",
+            "id": "01K1CJ4X8G0000000000000025",
+            "name": "v2",
+            "revoke_at": null,
+            "status": "VERSION_ACTIVE",
+            "template_type": "HCL2",
+            "updated_at": "2026-07-29T12:00:00.000Z"
+          }
+        }
+      ]
+    }
+  },
+  "/buckets/runner/versions": {
+    "status": 200,
+    "body": {
+      "versions": [
+        {
+          "bucket_name": "runner",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000029",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000026"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "runner-3",
+          "id": "01K1CJ4X8G0000000000000026",
+          "name": "v3",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "runner",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000030",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000025"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "runner-2",
+          "id": "01K1CJ4X8G0000000000000025",
+          "name": "v2",
+          "revoke_at": null,
+          "status": "VERSION_ACTIVE",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        },
+        {
+          "bucket_name": "runner",
+          "builds": [
+            {
+              "artifacts": [],
+              "component_type": "docker.image",
+              "created_at": "2026-07-29T12:00:00.000Z",
+              "id": "01K1CJ4X8G0000000000000031",
+              "platform": "docker",
+              "status": "BUILD_DONE",
+              "updated_at": "2026-07-29T12:00:00.000Z",
+              "version_id": "01K1CJ4X8G0000000000000024"
+            }
+          ],
+          "created_at": "2026-07-29T12:00:00.000Z",
+          "fingerprint": "runner-1",
+          "id": "01K1CJ4X8G0000000000000024",
+          "name": "v1",
+          "revocation_author": "ops",
+          "revocation_inherited_from": {
+            "bucket_name": "base",
+            "href": "/packer/2023-01-01/organizations/3f2b1c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d/projects/9a8b7c6d-5e4f-4a3b-8c2d-1e0f9a8b7c6d/buckets/base/versions/base-2",
+            "version_fingerprint": "base-2",
+            "version_id": "01K1CJ4X8G0000000000000002",
+            "version_name": "v2"
+          },
+          "revocation_type": "INHERITED",
+          "revoke_at": "2026-07-29T11:00:00.000Z",
+          "status": "VERSION_REVOKED",
+          "template_type": "HCL2",
+          "updated_at": "2026-07-29T12:00:00.000Z"
+        }
+      ]
+    }
+  }
+}

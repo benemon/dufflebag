@@ -159,23 +159,43 @@ export type ParentFreshness =
   | { status: 'behind'; currentVersion: string }
   | { status: 'unknown' }
 
-export type AncestryParent = {
+export type AncestryFreshness = {
+  status: ApiAncestryStatus
+  channel: string
+  builtVersion: string
+  currentVersion?: string
+}
+
+export type RevokedAncestor = {
+  bucket: string
+  fingerprint: string
+  versionName: string
+}
+
+type AncestryVersionState = {
+  /** Current channels and state are absent when the related bucket cannot be read. */
+  channels?: string[]
+  newest?: boolean
+  state?: Version['state']
+  revokeAt?: string
+  revocationInheritedFrom?: RevokedAncestor
+}
+
+export type AncestryParent = AncestryVersionState & {
   bucket: string
   versionName: string
   fingerprint: string
   freshness: ParentFreshness
-  /** Channels currently on the parent version; only the version screen's load fetches them. */
-  channels?: string[]
+  buildFreshness: AncestryFreshness
   /** This bucket's own version in the relation — the one built FROM the parent. */
   localVersionName?: string
 }
 
-export type AncestryChild = {
+export type AncestryChild = AncestryVersionState & {
   bucket: string
   versionName: string
   fingerprint: string
-  /** Channels currently on the child version; only the version screen's load fetches them. */
-  channels?: string[]
+  buildFreshness: AncestryFreshness
   /** This bucket's own version in the relation — the one the child was built FROM. */
   localVersionName?: string
 }
@@ -468,6 +488,9 @@ export async function loadBucketPage(
   // here, each carrying the local version it belongs to.
   const parents = dedupeRelations(projected.flatMap((version) => version.parents ?? []))
   const children = dedupeRelations(projected.flatMap((version) => version.children ?? []))
+  const related = await relatedBucketVersions(
+    token, tenant, { parents, children }, bucketName, channels, versions,
+  )
   const newest = projected[0] ?? null
   return {
     ...toBucketHeader(bucket),
@@ -481,8 +504,8 @@ export async function loadBucketPage(
       created: newest.created,
     } : null,
     platforms: bucket.platforms ?? [],
-    parents,
-    children,
+    parents: parents.map((parent) => withRelationVersion(parent, related)),
+    children: children.map((child) => withRelationVersion(child, related)),
   }
 }
 
@@ -599,15 +622,18 @@ export async function loadVersionDetail(
   bucket: string,
   fingerprint: string,
 ): Promise<VersionDetail> {
-  const [version, channels, relations] = await Promise.all([
+  const [version, channels, versions, relations] = await Promise.all([
     getVersion(token, tenant, bucket, fingerprint),
     listChannels(token, tenant, bucket),
+    listVersions(token, tenant, bucket),
     loadVersionRelations(token, tenant, bucket, fingerprint),
   ])
-  const related = await relatedBucketChannels(token, tenant, relations, bucket, channels)
+  const related = await relatedBucketVersions(
+    token, tenant, relations, bucket, channels, versions,
+  )
   const projected = toVersion(version, channels)
-  projected.parents = relations.parents.map((parent) => withRelationChannels(parent, related))
-  projected.children = relations.children.map((child) => withRelationChannels(child, related))
+  projected.parents = relations.parents.map((parent) => withRelationVersion(parent, related))
+  projected.children = relations.children.map((child) => withRelationVersion(child, related))
   return {
     version: projected,
     channels: channels.map(toBucketChannel),
@@ -626,49 +652,75 @@ async function loadVersionRelations(
   ])
   return {
     parents: parents.map(toAncestryParent).filter((parent): parent is AncestryParent => parent !== null),
-    children: children.map(toAncestryChild).filter((child): child is AncestryChild => child !== null),
+    // version_fingerprint selects parents only; children are every child of the
+    // bucket (hcp-sdk-go ListBucketAncestryParams).
+    children: children
+      .filter((relation) => relation.parent?.version_fingerprint === fingerprint)
+      .map(toAncestryChild)
+      .filter((child): child is AncestryChild => child !== null),
   }
 }
 
 /**
- * Channel lists for every bucket the relations point at, one ListChannels per
- * bucket, reusing this bucket's already-fetched list. A related bucket whose
- * channels cannot be read (a deleted ancestor) yields null so its entries stay
- * channel-less instead of failing the whole screen.
+ * Channel and version lists for every related bucket, one request of each per
+ * bucket, reusing this bucket's already-fetched lists. A deleted related
+ * bucket yields null so its entries remain visible without derived state.
  */
-async function relatedBucketChannels(
+async function relatedBucketVersions(
   token: string,
   tenant: ApiTenant,
   relations: { parents: AncestryParent[]; children: AncestryChild[] },
   bucket: string,
   channels: ApiChannel[],
-): Promise<Map<string, ApiChannel[] | null>> {
-  const known = new Map<string, ApiChannel[] | null>([[bucket, channels]])
+  versions: ApiVersion[],
+): Promise<Map<string, { channels: ApiChannel[]; versions: ApiVersion[] } | null>> {
+  const known = new Map<string, { channels: ApiChannel[]; versions: ApiVersion[] } | null>([
+    [bucket, { channels, versions }],
+  ])
   const missing = [...new Set(
     [...relations.parents, ...relations.children].map((entry) => entry.bucket),
   )].filter((name) => !known.has(name))
   await Promise.all(missing.map(async (name) => {
-    known.set(name, await listChannels(token, tenant, name).catch((err: unknown) => {
-      // A dead session must still reach the sign-out path; only an unreadable
-      // bucket (deleted ancestor answering 404) degrades to channel-less rows.
-      if (err instanceof ApiError && err.status === 401) throw err
-      return null
-    }))
+    const [channelResult, versionResult] = await Promise.allSettled([
+      listChannels(token, tenant, name),
+      listVersions(token, tenant, name),
+    ])
+    for (const result of [channelResult, versionResult]) {
+      if (result.status === 'rejected' &&
+          result.reason instanceof ApiError && result.reason.status === 401) {
+        throw result.reason
+      }
+    }
+    known.set(name,
+      channelResult.status === 'fulfilled' && versionResult.status === 'fulfilled'
+        ? { channels: channelResult.value, versions: versionResult.value }
+        : null,
+    )
   }))
   return known
 }
 
-function withRelationChannels<T extends { bucket: string; fingerprint: string }>(
+function withRelationVersion<T extends { bucket: string; fingerprint: string }>(
   entry: T,
-  channelsByBucket: Map<string, ApiChannel[] | null>,
-): T {
-  const channels = channelsByBucket.get(entry.bucket)
-  if (!channels) return entry
+  relatedByBucket: Map<string, { channels: ApiChannel[]; versions: ApiVersion[] } | null>,
+): T & AncestryVersionState {
+  const related = relatedByBucket.get(entry.bucket)
+  if (!related) return entry
+  const version = related.versions.find((candidate) => candidate.fingerprint === entry.fingerprint)
+  // ListVersions orders by sequence descending, so this is the bucket's latest_version rule.
+  const newest = related.versions.find(isComplete)
+  const inherited = toRevokedAncestor(version?.revocation_inherited_from)
   return {
     ...entry,
-    channels: channels
+    channels: related.channels
       .filter((channel) => channel.version?.fingerprint === entry.fingerprint)
       .map((channel) => channel.name),
+    newest: newest?.fingerprint === entry.fingerprint,
+    ...(version ? {
+      state: versionState(version),
+      ...(version.revoke_at ? { revokeAt: version.revoke_at } : {}),
+      ...(inherited ? { revocationInheritedFrom: inherited } : {}),
+    } : {}),
   }
 }
 
@@ -757,6 +809,17 @@ function toVersion(
   }
 }
 
+function toRevokedAncestor(
+  ancestor: ApiVersion['revocation_inherited_from'] | undefined,
+): RevokedAncestor | null {
+  if (!ancestor?.bucket_name || !ancestor.version_fingerprint) return null
+  return {
+    bucket: ancestor.bucket_name,
+    fingerprint: ancestor.version_fingerprint,
+    versionName: ancestor.version_name ?? '—',
+  }
+}
+
 function toBucketHeader(
   bucket: ApiBucket,
 ): Pick<BucketPage, 'name' | 'description' | 'labels' | 'latestVersion'> {
@@ -810,6 +873,7 @@ function toAncestryParent(relation: ApiBucketAncestry): AncestryParent | null {
     versionName: relation.parent.version_name ?? '—',
     fingerprint: relation.parent.version_fingerprint,
     freshness: parentFreshness(relation.status, relation.parent.channel_version?.name),
+    buildFreshness: ancestryFreshness(relation),
     localVersionName: relation.child?.version_name,
   }
 }
@@ -828,7 +892,19 @@ function toAncestryChild(relation: ApiBucketAncestry): AncestryChild | null {
     bucket: relation.child.bucket_name,
     versionName: relation.child.version_name ?? '—',
     fingerprint: relation.child.version_fingerprint,
+    buildFreshness: ancestryFreshness(relation),
     localVersionName: relation.parent?.version_name,
+  }
+}
+
+function ancestryFreshness(relation: ApiBucketAncestry): AncestryFreshness {
+  return {
+    status: relation.status ?? 'UNDETERMINED',
+    channel: relation.parent?.channel_name ?? '',
+    builtVersion: relation.parent?.version_name ?? '—',
+    ...(relation.parent?.channel_version?.name
+      ? { currentVersion: relation.parent.channel_version.name }
+      : {}),
   }
 }
 

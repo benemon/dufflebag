@@ -5,12 +5,11 @@ import {
   Dropdown, DropdownItem, DropdownList, EmptyState, EmptyStateActions, EmptyStateBody,
   EmptyStateFooter, Form, FormGroup, FormSelect, FormSelectOption,
   Label, MenuToggle, MenuToggleCheckbox, Modal, ModalBody, ModalFooter, ModalHeader, PageSection, Pagination,
-  Popover, TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
+  TextInput, Title, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
 } from '@patternfly/react-core'
 import type { MenuToggleElement } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import EllipsisVIcon from '@patternfly/react-icons/dist/esm/icons/ellipsis-v-icon'
-import HelpIcon from '@patternfly/react-icons/dist/esm/icons/help-icon'
 import { useNavigate, useParams } from 'react-router'
 
 import { PlatformList } from '../components/PlatformLabel'
@@ -25,6 +24,7 @@ import {
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { updateBulkSelection } from '../components/BulkSelection'
 import { When } from '../components/When'
+import { AncestryCard } from '../components/AncestryCard'
 
 import {
   assignChannelVersion, createChannel, deleteBucket, deleteChannel, deletePin, deleteVersion,
@@ -42,8 +42,6 @@ import {
 import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
 import { FacetRail, knownCount, type FacetCount } from './RegistryFacets'
-
-const ANCESTRY_SCOPE = 'Follows this bucket\'s newest version. Older versions with ancestry show as "other versions".'
 
 /**
  * Bucket detail — version and channel facets for one registry bucket.
@@ -130,6 +128,10 @@ export function Versions() {
       onConnectClient={() => navigate('/instance')}
       onOpenVersion={(fingerprint) =>
         navigate(`/buckets/${encodeURIComponent(bucket)}/versions/${encodeURIComponent(fingerprint)}`)}
+      onOpenRelatedVersion={(relatedBucket, fingerprint) => navigate(
+        `/buckets/${encodeURIComponent(relatedBucket)}/versions/${encodeURIComponent(fingerprint)}`,
+      )}
+      onOpenBucket={(relatedBucket) => navigate(`/buckets/${encodeURIComponent(relatedBucket)}`)}
       onCreateChannel={async (options) => {
         if (!state || !tenant) throw new Error('No session.')
         try {
@@ -225,6 +227,8 @@ export function VersionsView({
   onBack,
   onConnectClient = () => {},
   onOpenVersion,
+  onOpenRelatedVersion = () => {},
+  onOpenBucket = () => {},
   onCreateChannel = () => Promise.reject(new Error('No session.')),
   onAssignChannel = () => Promise.reject(new Error('No session.')),
   onDeleteChannel = () => Promise.reject(new Error('No session.')),
@@ -254,6 +258,8 @@ export function VersionsView({
   onBack: () => void
   onConnectClient?: () => void
   onOpenVersion: (fingerprint: string) => void
+  onOpenRelatedVersion?: (bucket: string, fingerprint: string) => void
+  onOpenBucket?: (bucket: string) => void
   onCreateChannel?: (options: {
     name: string; restricted?: boolean; fingerprint?: string
   }) => Promise<void>
@@ -371,6 +377,8 @@ export function VersionsView({
                         enforcedProvisionersLoading={enforcedProvisionersLoading}
                         enforcedProvisionersFailure={enforcedProvisionersFailure}
                         onOpenVersion={onOpenVersion}
+                        onOpenRelatedVersion={onOpenRelatedVersion}
+                        onOpenBucket={onOpenBucket}
                       />
                     )
                   : <Content component="p">Bucket details have not been loaded.</Content>,
@@ -428,12 +436,16 @@ function BucketOverview({
   enforcedProvisionersLoading,
   enforcedProvisionersFailure,
   onOpenVersion,
+  onOpenRelatedVersion,
+  onOpenBucket,
 }: {
   bucket: BucketPage
   enforcedProvisioners: string[]
   enforcedProvisionersLoading: boolean
   enforcedProvisionersFailure: string | null
   onOpenVersion: (fingerprint: string) => void
+  onOpenRelatedVersion: (bucket: string, fingerprint: string) => void
+  onOpenBucket: (bucket: string) => void
 }) {
   const newest = bucket.newestVersion
   return (
@@ -483,66 +495,14 @@ function BucketOverview({
             </DescriptionList>
           </CardBody>
         </Card>
-        <Card>
-          <CardTitle>Ancestry</CardTitle>
-          <CardBody style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-            <div style={{ flex: '1 1 220px' }}>
-              <Title headingLevel="h3" size="md">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  Parents
-                  <Popover bodyContent={ANCESTRY_SCOPE}>
-                    <Button
-                      variant="plain"
-                      hasNoPadding
-                      aria-label="Parents ancestry scope"
-                      icon={<HelpIcon />}
-                    />
-                  </Popover>
-                </span>
-              </Title>
-              {bucket.parents.length === 0 ? <Content component="p">None</Content> :
-                bucket.parents.map((parent) => (
-                  <div key={`${parent.bucket}/${parent.fingerprint}/${parent.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
-                    <strong>{parent.bucket} {parent.versionName}</strong>
-                    <div style={{ color: parentColor(parent.freshness) }}>
-                      {parentFreshnessText(parent.freshness)}
-                    </div>
-                    <LocalVersionNote
-                      prefix="parent of"
-                      versionName={parent.localVersionName}
-                      latestName={bucket.latestVersion?.name}
-                    />
-                  </div>
-                ))}
-            </div>
-            <div style={{ flex: '1 1 220px' }}>
-              <Title headingLevel="h3" size="md">
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                  Children
-                  <Popover bodyContent={ANCESTRY_SCOPE}>
-                    <Button
-                      variant="plain"
-                      hasNoPadding
-                      aria-label="Children ancestry scope"
-                      icon={<HelpIcon />}
-                    />
-                  </Popover>
-                </span>
-              </Title>
-              {bucket.children.length === 0 ? <Content component="p">None</Content> :
-                bucket.children.map((child) => (
-                  <div key={`${child.bucket}/${child.fingerprint}/${child.localVersionName ?? ''}`} style={{ padding: '5px 0' }}>
-                    <strong>{child.bucket} {child.versionName}</strong>
-                    <LocalVersionNote
-                      prefix="built from"
-                      versionName={child.localVersionName}
-                      latestName={bucket.latestVersion?.name}
-                    />
-                  </div>
-                ))}
-            </div>
-          </CardBody>
-        </Card>
+        <AncestryCard
+          bucket={bucket.name}
+          scope={{ versions: bucket.versions, newest: bucket.latestVersion?.fingerprint }}
+          parents={bucket.parents}
+          children={bucket.children}
+          onOpenBucket={onOpenBucket}
+          onOpenVersion={onOpenRelatedVersion}
+        />
       </div>
     </div>
   )
@@ -570,28 +530,6 @@ export function EnforcedProvisionersRow({
               : 'None configured'}
       </DescriptionListDescription>
     </DescriptionListGroup>
-  )
-}
-
-/**
- * Which of THIS bucket's versions the relation belongs to, with "latest" said
- * explicitly (duf-okej.11) — the registry table's status columns follow the
- * latest version only, and this card is where there is room to say so.
- */
-function LocalVersionNote({
-  prefix,
-  versionName,
-  latestName,
-}: {
-  prefix: string
-  versionName?: string
-  latestName?: string
-}) {
-  if (!versionName) return null
-  return (
-    <div style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>
-      {prefix} {versionName}{versionName === latestName ? ' (latest)' : ''}
-    </div>
   )
 }
 
@@ -1811,17 +1749,6 @@ export function parentFreshnessText(freshness: ParentFreshness): string {
       return `bucket now at ${freshness.currentVersion}`
     case 'unknown':
       return 'unknown'
-  }
-}
-
-function parentColor(freshness: ParentFreshness): string {
-  switch (freshness.status) {
-    case 'newest':
-      return 'var(--pf-t--global--text--color--status--success--default)'
-    case 'behind':
-      return 'var(--pf-t--global--text--color--status--warning--default)'
-    case 'unknown':
-      return 'var(--pf-t--global--text--color--subtle)'
   }
 }
 
