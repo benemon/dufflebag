@@ -849,7 +849,7 @@ async function seedFixtures(credentials) {
   await api(rootToken, 'POST', `/api/v1/organizations/${organization.id}/plugin-registry/expose`)
   await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.0.0')
   await uploadPluginVersion(rootToken, organization.id, 'netbox', '1.1.0')
-  // Served zips, so the Downloads card carries counts in the shot.
+  // Served zips, so the Downloads fact and column carry counts in the shot.
   for (const [version, times] of [['1.1.0', 7], ['1.0.0', 3]]) {
     for (let i = 0; i < times; i++) {
       const response = await fetch(`${base}/plugins/${organizationName}/packer-plugin-netbox/${version}/packer-plugin-netbox_v${version}_x5.0_linux_amd64.zip`)
@@ -1030,7 +1030,7 @@ async function captureSeededScreens(seeded) {
 
   // The versions list with 1.0.0 expanded and its Revoke confirmation open.
   await page.goto(`${base}/plugin-registry/netbox`, { waitUntil: 'domcontentloaded' })
-  await waitForText('version = "1.1.0"')
+  await waitForText('10 all time')
   await capture('plugin-detail.png')
   await page.$$eval('table[aria-label="Versions"] tbody tr', (rows) => {
     const row = rows.find((candidate) => candidate.innerText.includes('1.0.0'))

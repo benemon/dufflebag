@@ -169,24 +169,26 @@ its own limits: an OpenShift route times out after 30 seconds unless the
 
 ## Change a plugin's versions and platforms
 
-A publisher changes what a plugin serves from its page. The Versions
-card lists the mirrored versions, each with a coverage strip (one mark
-per platform: mirrored, revoked, to be added, upstream, not published)
-and a count; expand a row to see its platforms by operating system.
+A publisher changes what a plugin serves from its page. Its header names
+the plugin's source, with **Copy** beside it, its downloads and its update
+check, and offers **Copy template stanza**. The Versions card lists the
+mirrored versions, each with a coverage strip (one mark per platform:
+mirrored, revoked, to be added, upstream, not published), a count and its
+downloads; **All** adds every upstream version, a prerelease marked
+**Prerelease**. Expand a row to see its platforms by operating system.
 
 1. **Revoke** a version from its row, or **Restore** a revoked one. Each
    asks for confirmation and applies at once. Packer gets 404 for each
    file of a revoked version, and the files are kept. A template pinned
    to that version fails until it is restored.
 2. For an imported plugin, expand a served version and tick an upstream
-   platform to add it. A plugin from releases.hashicorp.com also names
-   its newer releases above the list: **Add x.y.z with N platforms**
-   mirrors the newest with the platforms the plugin already has, and
-   **All** shows every upstream version, each with **Add with N
-   platforms** or its own platforms to tick.
-3. Each addition lands in the pending tray under the list; close a chip to
-   drop it. Choose **Sync N changes**. The additions run in order as one
-   job, and its page shows each one's outcome.
+   platform to add it. For a plugin from releases.hashicorp.com, **All**
+   lists every upstream version with **Add**, which queues it with the
+   platforms the plugin already has, or its own platforms to tick.
+3. Each addition shows as **Will be added** on its row, and the line under
+   the list names the pending changes. **Undo** on the row drops one,
+   **Discard** drops them all. Choose **Sync**. The additions run in order
+   as one job, and its page shows each one's outcome.
 
 ![The Revoke confirmation over the plugin detail versions list](/screenshots/plugin-detail-revoke.png)
 
@@ -263,14 +265,17 @@ cleared.
 A plugin imported from releases.hashicorp.com or GitHub can check its source
 for newer releases. Uploaded plugins have no source to check.
 
-1. Open the plugin and turn on **Check daily for a newer stable version**
-   in its Update check card, which also shows when the last check ran and
-   its last error; or flip the plugin's switch in the **Checks** facet.
+1. Open the plugin and turn on its **Update check** switch, beside which
+   the page shows when the last check ran and its error, if any; or flip
+   the plugin's switch in the **Checks** facet.
 2. dufflebag asks the source for its newest stable release within a minute,
    then once every `DFBG_PLUGIN_UPDATE_INTERVAL` (24 hours by default).
    Prereleases are ignored.
 3. When that release is newer than every version the plugin holds, revoked
-   ones included, the catalogue marks the plugin **Update available**.
+   ones included, the catalogue and the plugin's page mark the plugin
+   **Update available · x.y.z**. On the plugin's page, choosing that label
+   shows the version in **All**, where **Add** queues it. The label stays
+   until a sync has mirrored the version.
 
 A check only looks. Nothing is imported until you sync. When a check first
 sees a newer release, the organization's own
@@ -304,12 +309,15 @@ One download is one plugin zip served completely to `packer init`. Version
 indexes, SHA256SUMS files, signatures, manifests, interrupted transfers and
 missing files do not count. Counts are kept per plugin version and platform.
 
-The Downloads card on the plugin page shows totals for all versions or one
-version. Its rolling windows cover the last 7, 30 and 365 UTC calendar days,
-ending today, plus all time. Removed and revoked versions keep their counts and
-remain available in the version selector with their state.
+The plugin page shows downloads in three places. The header's Downloads
+figure is the plugin's total all time and over the last 7 and 30 days. The
+Versions list shows each version's all-time count, and expanding a version
+shows its last 7, 30 and 365 days and all time. The windows are UTC calendar
+days ending today. A revoked version keeps its counts. A removed version's
+downloads stay in the plugin's totals, but the page no longer shows them on
+their own.
 
-![A plugin detail page showing the Downloads card and rolling windows](/screenshots/plugin-detail.png)
+![A plugin detail page showing the Downloads figure and the versions' counts](/screenshots/plugin-detail.png)
 
 ## Plugin bundle
 
@@ -405,8 +413,8 @@ install an older version there.
 
 ## Use a plugin in a template
 
-The upload result and the plugin's page show the template stanza, pinned to the
-newest available version:
+The upload result shows the template stanza, and **Copy template stanza** on the
+plugin's page copies it, pinned to the newest available version:
 
 ```hcl
 packer {

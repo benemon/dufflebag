@@ -969,7 +969,8 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText(`/plugins/${wizardOrganizationName}/probe"`)
     await waitForText("Packer can’t resolve the template stanza on this page until the registry is exposed.")
     await clickByText('button', 'Open probe')
-    await waitForText('version = "1.1.0"')
+    await waitForText(`/plugins/${wizardOrganizationName}/probe`)
+    await waitForText('Copy template stanza')
     await waitForText('Not available for uploaded plugins. To add a version, upload its files.')
     assert.equal(await page.$eval('[title="linux_amd64: Mirrored"]', () => true), true)
     assert.equal(await page.$eval('[title="darwin_arm64: Upstream"]', () => true), true)
@@ -988,10 +989,12 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     }
     await api(rootToken, 'POST', `${registryPath}/unexpose`)
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await waitForText('Downloads')
-    const downloadsCard = await page.$$eval('.pf-v6-c-card', (cards) =>
-      cards.find((card) => card.innerText.includes('Downloads'))?.innerText ?? '')
-    assert.match(downloadsCard, /All time\s+2/, 'two zips count; SHA256SUMS does not')
+    await page.waitForSelector('dl[aria-label="Plugin facts"]')
+    const facts = await page.$eval('dl[aria-label="Plugin facts"]', (list) => list.innerText)
+    assert.match(facts, /Downloads\s+2 all time · 2 in 7 days · 2 in 30/, 'two zips count; SHA256SUMS does not')
+    const versionDownloads = await page.$$eval('table[aria-label="Versions"] tbody tr', (rows) =>
+      rows.find((row) => row.querySelector('code')?.innerText === '1.1.0')?.querySelector('td[data-label="Downloads"]')?.innerText ?? '')
+    assert.equal(versionDownloads.trim(), '2', 'the row carries its own all-time count')
     // Revoke and restore confirm in a dialog, as Remove does, and apply at once.
     // 1.1.0 is the newest held version, so its Revoke is the first on the page.
     const serve = async (restore) => {
@@ -1000,13 +1003,14 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       await clickInModal(restore ? 'Restore 1.1.0' : 'Revoke 1.1.0')
     }
     await serve(false)
-    await waitForText('version = "1.0.0"')
+    await until('the version to be revoked', () =>
+      page.$$eval('table[aria-label="Versions"] tbody .pf-v6-c-label', (labels) =>
+        labels.some((label) => label.innerText.trim() === 'Revoked')))
     await serve(true)
     // The legend always says "Revoked"; the row's status pill is what changes.
     await until('the version to be served again', () =>
       page.$$eval('table[aria-label="Versions"] tbody .pf-v6-c-label', (labels) =>
         labels.length > 0 && !labels.some((label) => label.innerText.trim() === 'Revoked')))
-    await waitForText('version = "1.1.0"')
     await clickByText('a', 'Plugins')
     await waitForText(`${wizardOrganizationName}/probe`)
     assert.equal(await buttonDisabled('Sync selected'), true)

@@ -107,9 +107,12 @@ export function sourceLabel(source: PluginSource): string {
   return { upload: 'Local', 'releases-hashicorp': 'HashiCorp', github: 'GitHub' }[source.kind]
 }
 
+export function pluginSource(host: string, organization: string, name: string): string {
+  return `${host}/plugins/${organization}/${name}`
+}
+
 export function templateStanza(host: string, organization: string, name: string, version: string): string {
-  const source = `${host}/plugins/${organization}/${name}`
-  return `packer {\n  required_plugins {\n    ${name} = {\n      source  = "${source}"\n      version = "${version}"\n    }\n  }\n}\n`
+  return `packer {\n  required_plugins {\n    ${name} = {\n      source  = "${pluginSource(host, organization, name)}"\n      version = "${version}"\n    }\n  }\n}\n`
 }
 
 type NamedFile = { name: string; size: number }
@@ -742,16 +745,16 @@ export function groupPlatforms(all: readonly string[]): (readonly [string, reado
   return [...groups.entries()].map(([os, arches]) => [os, arches] as const)
 }
 
-export type PendingItem = { text: string; version: string }
-
-// The pending tray's chips, one per change, worded as the design does.
-export function pendingItems(changes: PluginChange[], mirrored: Set<string>): PendingItem[] {
-  return changes.map((change) => {
+export function pendingSummary(changes: PluginChange[], mirrored: Set<string>): string {
+  if (changes.length === 0) return 'No pending changes'
+  const items = changes.map((change) => {
     const platforms = change.platforms ?? []
+    const count = `${platforms.length} ${platforms.length === 1 ? 'platform' : 'platforms'}`
     return mirrored.has(change.version)
-      ? { text: `Add ${platforms.length === 1 ? platforms[0] : `${platforms.length} platforms`} to ${change.version}`, version: change.version }
-      : { text: `Add ${change.version} · ${platforms.length} ${platforms.length === 1 ? 'platform' : 'platforms'}`, version: change.version }
+      ? `add ${platforms.length === 1 ? platforms[0] : count} to ${change.version}`
+      : `add ${change.version} on ${count}`
   })
+  return `${changes.length} pending ${changes.length === 1 ? 'change' : 'changes'}: ${items.join(', ')}`
 }
 
 // Newest first: numeric segments compare as numbers, a prerelease sorts below

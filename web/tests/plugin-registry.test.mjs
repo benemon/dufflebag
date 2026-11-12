@@ -34,7 +34,8 @@ let unexposePluginRegistry
 let planPluginUploads
 let templateStanza
 let PluginDetailView
-let PluginDownloadsCardView
+let UpdateAvailableLabel
+let updateVersionPage
 let JobNotice
 let PluginJobsFacet
 let PluginChecksFacet
@@ -64,7 +65,7 @@ let syncCatalogue
 let setPluginUpdateCheck
 let planCatalogueSync
 let catalogueRows
-let pendingItems
+let pendingSummary
 let retryPluginImport
 let githubRateLimit
 let compareVersionsDesc
@@ -97,9 +98,9 @@ before(async () => {
   ;({
     disablePluginRegistry, enablePluginRegistry, exposePluginRegistry, getPluginDownloads, getPluginRegistry,
     unexposePluginRegistry, planPluginUploads, templateStanza, listPlugins, publishPluginVersion,
-    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingItems, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport, jobWhat, activeJobFor, listPluginImports,
+    deletePluginVersion, pluginChanges, syncPlugin, syncCatalogue, setPluginUpdateCheck, planCatalogueSync, catalogueRows, pendingSummary, retryPluginImport, githubRateLimit, compareVersionsDesc, groupPlatforms, PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, createPluginImport, createGithubImport, jobWhat, activeJobFor, listPluginImports,
   } = await vite.ssrLoadModule('/src/data/pluginRegistry.ts'))
-  ;({ PluginDetailView, PluginDownloadsCardView, versionConfirmation, JobNotice } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
+  ;({ PluginDetailView, UpdateAvailableLabel, updateVersionPage, versionConfirmation, JobNotice } = await vite.ssrLoadModule('/src/screens/PluginDetail.tsx'))
   ;({ PluginUploadView } = await vite.ssrLoadModule('/src/screens/PluginUpload.tsx'))
   ;({ PluginHashicorpView } = await vite.ssrLoadModule('/src/screens/PluginHashicorp.tsx'))
   ;({ PluginImportJobView } = await vite.ssrLoadModule('/src/screens/PluginImportJob.tsx'))
@@ -366,7 +367,7 @@ test('the catalogue lists plugins with their source, newest version and count', 
   assert.match(html, />0\.6\.3</)
 })
 
-test('plugin detail shows the stanza for the newest version and exactly which platforms each version serves', () => {
+test('plugin detail shows the plugin source, a stanza copy action and exactly which platforms each version serves', () => {
   const detail = (registry) => renderToStaticMarkup(React.createElement(PluginDetailView, {
     name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
@@ -378,11 +379,13 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
     }] },
   }))
   const html = detail({ enabled: true, exposed: false })
-  assert.match(html, /source  = &quot;dufflebag\.example\.com\/plugins\/acme\/git&quot;/)
-  assert.match(html, /version = &quot;0\.6\.3&quot;/)
+  assert.match(html, /<code>dufflebag\.example\.com\/plugins\/acme\/git<\/code>/)
+  assert.match(html, /aria-label="Copy source"/)
+  assert.match(html, /<button[^>]*>[\s\S]{0,200}?Copy template stanza</)
+  assert.doesNotMatch(html, /Template stanza/, 'the stanza card is gone')
   assert.match(html, /Packer can’t resolve the template stanza on this page until the registry is exposed/)
   assert.match(html, /href="\/plugin-registry\/settings"[\s\S]{0,300}?Plugin registry</)
-  assert.ok(html.indexOf('Plugin registry') < html.indexOf('Template stanza'))
+  assert.ok(html.indexOf('until the registry is exposed') < html.indexOf('>Versions<'))
   assert.match(html, /title="darwin_arm64: Upstream"/)
   assert.match(html, /title="linux_arm64: Mirrored"/)
   assert.match(html, /title="windows_386: Not published"/)
@@ -391,48 +394,59 @@ test('plugin detail shows the stanza for the newest version and exactly which pl
   assert.doesNotMatch(detail({ enabled: true, exposed: true }), /until the registry is exposed/)
 })
 
-test('the downloads card shows all-version and selected-version windows, including removed versions', () => {
-  // Fixture shape: spec/platform/openapi.yaml PluginDownloads and its two referenced schemas.
-  const downloads = {
-    today: '2026-10-13',
-    all_versions: { last_7_days: 1234, last_30_days: 2345, last_365_days: 3456, all_time: 4567 },
-    versions: [
-      { version: '1.10.0', state: 'available', last_7_days: 101, last_30_days: 202, last_365_days: 303, all_time: 404 },
-      { version: '1.9.0', state: 'revoked', last_7_days: 11, last_30_days: 22, last_365_days: 33, all_time: 44 },
-      { version: '1.8.0', state: 'removed', last_7_days: 1, last_30_days: 2, last_365_days: 3, all_time: 4 },
-    ],
-  }
-  const view = (selectedVersion) => renderToStaticMarkup(React.createElement(PluginDownloadsCardView, {
-    downloads, selectedVersion, onSelect: () => {},
-  }))
-  const all = view(null)
-  assert.match(all, />All versions</)
-  assert.match(all, /Last 7 days[\s\S]*?1,234[\s\S]*?Last 30 days[\s\S]*?2,345[\s\S]*?Last 365 days[\s\S]*?3,456[\s\S]*?All time[\s\S]*?4,567/)
+// Fixture shape: spec/platform/openapi.yaml PluginDownloads and its two referenced schemas.
+const gitDownloads = {
+  today: '2026-10-13',
+  all_versions: { last_7_days: 1234, last_30_days: 2345, last_365_days: 3456, all_time: 4567 },
+  versions: [
+    { version: '0.6.3', state: 'available', last_7_days: 101, last_30_days: 202, last_365_days: 303, all_time: 404 },
+    { version: '0.6.2', state: 'revoked', last_7_days: 11, last_30_days: 22, last_365_days: 33, all_time: 44 },
+    { version: '0.6.1', state: 'removed', last_7_days: 1, last_30_days: 2, last_365_days: 3, all_time: 4 },
+  ],
+}
+const gitDetail = (callerRole, over = {}) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+  name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole,
+  registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+  busy: false, actionFailure: null, upstream: [], summary: null, onOlderUpstream: () => {}, hasOlderUpstream: false,
+  onSync: () => {}, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {}, onBackToRegistry: () => {}, onBackToPlugins: () => {}, onToggleUpdates: () => {},
+  downloads: gitDownloads,
+  detail: { name: 'git', source: { kind: 'upload' }, versions: [
+    { version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [{ os: 'linux', arch: 'amd64' }] },
+    { version: '0.6.2', revoked: true, created_at: '2026-10-01T00:00:00Z', listed_platforms: [], stored_platforms: [{ os: 'linux', arch: 'amd64' }] },
+  ] },
+  ...over,
+}))
 
-  const selected = view('1.10.0')
-  assert.match(selected, />1\.10\.0</)
-  assert.match(selected, /Last 7 days[\s\S]*?101[\s\S]*?Last 30 days[\s\S]*?202[\s\S]*?Last 365 days[\s\S]*?303[\s\S]*?All time[\s\S]*?404/)
-  const removed = view('1.8.0')
-  assert.match(removed, />1\.8\.0 \(removed\)</)
-  assert.match(removed, /Last 7 days[\s\S]*?>1<[\s\S]*?Last 30 days[\s\S]*?>2<[\s\S]*?Last 365 days[\s\S]*?>3<[\s\S]*?All time[\s\S]*?>4</)
+test('the header carries a facts row of Source, Downloads and Update check in place of the three cards', () => {
+  const html = gitDetail('reader')
+  const facts = html.slice(html.indexOf('aria-label="Plugin facts"'), html.indexOf('>Versions<'))
+  assert.ok(facts.length > 0 && html.indexOf('aria-label="Plugin facts"') < html.indexOf('>Versions<'))
+  assert.ok(facts.indexOf('>Source<') < facts.indexOf('>Downloads<'))
+  assert.ok(facts.indexOf('>Downloads<') < facts.indexOf('>Update check<'))
+  assert.match(facts, /<strong>4,567<\/strong> all time <span[^>]*>· 1,234 in 7 days · 2,345 in 30<\/span>/)
+  assert.doesNotMatch(html, /Newest/, 'no newest-available or newest-held fact (design departure 3)')
+  assert.doesNotMatch(html, /pf-v6-l-grid__item/, 'the card grid is gone')
+  assert.doesNotMatch(html, /aria-label="Download version"/, 'the per-version selector is gone')
+  assert.doesNotMatch(html, /Template stanza|Check daily for a newer stable version/)
 })
 
-test('the plugin detail cards run Template stanza, Downloads, Update check in one row above Versions', () => {
-  const html = renderToStaticMarkup(React.createElement(PluginDetailView, {
-    name: 'git', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'reader',
-    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, upstream: [], summary: null, onOlderUpstream: () => {}, hasOlderUpstream: false,
-    onSync: () => {}, onRevoke: () => {}, onRestore: () => {}, onRemove: () => {}, onBackToRegistry: () => {}, onBackToPlugins: () => {}, onToggleUpdates: () => {},
-    downloads: { today: '2026-10-13', all_versions: { last_7_days: 0, last_30_days: 0, last_365_days: 0, all_time: 0 }, versions: [] },
-    detail: { name: 'git', source: { kind: 'upload' }, versions: [{
-      version: '0.6.3', revoked: false, created_at: '2026-10-09T00:00:00Z', listed_platforms: [], stored_platforms: [],
-    }] },
-  }))
-  assert.ok(html.indexOf('Template stanza') < html.indexOf('Downloads'))
-  assert.ok(html.indexOf('Downloads') < html.indexOf('Update check'))
-  assert.ok(html.indexOf('Update check') < html.indexOf('>Versions<'))
-  assert.equal(html.match(/pf-v6-l-grid__item/g)?.length, 3, 'the three cards share one grid row')
-  assert.match(html, /Last 7 days[\s\S]*?>0</)
+test('each version row carries its all-time downloads and its expanded row the four windows', () => {
+  const html = gitDetail('publisher')
+  assert.match(html, /<th[^>]*>Version<\/th><th[^>]*>Status<\/th><th[^>]*>Platforms<\/th><th[^>]*>Downloads<\/th><th[^>]*>Released<\/th>/)
+  assert.match(html, /data-label="Downloads"[^>]*>404<\/td>/)
+  assert.match(html, /data-label="Downloads"[^>]*>44<\/td>/, 'a revoked version keeps its count')
+  const expanded = (version) => {
+    const start = html.indexOf(`aria-label="Downloads of ${version}"`)
+    assert.ok(start > 0, `${version} has expanded-row counts`)
+    return html.slice(start, html.indexOf('</dl>', start))
+  }
+  assert.match(expanded('0.6.3'), /Last 7 days[\s\S]*?>101<[\s\S]*?Last 30 days[\s\S]*?>202<[\s\S]*?Last 365 days[\s\S]*?>303<[\s\S]*?All time[\s\S]*?>404</)
+  assert.match(expanded('0.6.2'), /Last 7 days[\s\S]*?>11<[\s\S]*?Last 30 days[\s\S]*?>22<[\s\S]*?Last 365 days[\s\S]*?>33<[\s\S]*?All time[\s\S]*?>44</)
+  assert.doesNotMatch(html, /0\.6\.1/, 'a removed version has no row; its counts live only in the plugin totals')
+  const none = gitDetail('publisher', { downloads: null })
+  assert.match(none, /<strong>0<\/strong> all time/)
+  assert.match(none, /data-label="Downloads"[^>]*>—<\/td>/)
+  assert.doesNotMatch(none, /aria-label="Downloads of /)
 })
 
 test('getPluginDownloads reads the per-plugin downloads path', async () => {
@@ -567,10 +581,11 @@ test('publishers edit versions and remove them; readers do neither', () => {
   const revoked = view('publisher', true)
   assert.match(revoked, />Revoked</)
   assert.match(revoked, />Restore</)
-  assert.match(revoked, /No version is available: every version is revoked\./)
+  assert.match(revoked, /<button[^>]*aria-disabled="true"[^>]*>[\s\S]{0,200}?Copy template stanza</, 'no stanza to copy while every version is revoked')
+  assert.doesNotMatch(served, /<button[^>]*aria-disabled="true"[^>]*>[\s\S]{0,200}?Copy template stanza</)
   const reader = view('reader', false)
   assert.doesNotMatch(reader, />Revoke</)
-  assert.doesNotMatch(reader, /Pending/)
+  assert.doesNotMatch(reader, /pending change|>Sync<|>Discard</)
   assert.doesNotMatch(reader, /aria-label="Kebab toggle"/)
   assert.doesNotMatch(reader, />Upload version</)
 })
@@ -588,7 +603,7 @@ const amazonUpstream = [
   { version: '1.8.2', created_at: '2026-10-01T00:00:00Z', prerelease: false, platforms: ['linux_amd64', 'linux_arm64', 'darwin_arm64'], mirrored: true },
 ]
 
-test('the versions list shows held versions with a coverage strip, names newer upstream releases, and expands to its platforms', () => {
+test('the versions list shows held versions with a coverage strip and no upstream notice, and expands to its platforms', () => {
   const props = {
     name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
     registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
@@ -599,17 +614,15 @@ test('the versions list shows held versions with a coverage strip, names newer u
     detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: [...amazonVersions].reverse() },
   }
   const html = renderToStaticMarkup(React.createElement(PluginDetailView, props))
-  // Mirrored scope by default: the held versions, newest first, the newer upstream release in the banner, the older one not listed.
+  // Mirrored scope by default: the held versions, newest first; upstream releases only in All, with no notice above the table.
   assert.match(html, />Mirrored · 2</)
   assert.match(html, />All · 4</)
   assert.match(html, /Filter by version/)
-  assert.match(html, /1 newer upstream version/)
-  assert.match(html, /Add 1\.8\.3 with 1 platforms/, 'the newest stable upstream is offered with the platforms the plugin already has')
-  assert.match(html, />Show all versions</)
+  assert.doesNotMatch(html, /newer upstream|Show all versions|Add 1\.8\.3/, 'the inline notice is gone')
   assert.match(html, /<code>1\.8\.2<\/code>[\s\S]*<code>1\.8\.1<\/code>/)
   assert.doesNotMatch(html, /<code>1\.8\.3<\/code>/)
   assert.doesNotMatch(html, /<code>1\.7\.9<\/code>/)
-  assert.match(html, /<th[^>]*>Version<\/th><th[^>]*>Status<\/th><th[^>]*>Platforms<\/th><th[^>]*>Released<\/th>/)
+  assert.match(html, /<th[^>]*>Version<\/th><th[^>]*>Status<\/th><th[^>]*>Platforms<\/th><th[^>]*>Downloads<\/th><th[^>]*>Released<\/th>/)
   assert.match(html, /aria-label="Platform coverage"/)
   assert.match(html, /title="linux_amd64: Mirrored"/)
   assert.match(html, /title="linux_arm64: Upstream"/)
@@ -619,7 +632,8 @@ test('the versions list shows held versions with a coverage strip, names newer u
   assert.match(html, />Restore</)
   assert.match(html, /Mirrored<[\s\S]{0,400}?Revoked<[\s\S]{0,400}?Will be added<[\s\S]{0,400}?Upstream<[\s\S]{0,400}?Not published</, 'the strip legend')
   assert.match(html, /No pending changes/)
-  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Sync</)
+  assert.match(html, /<button[^>]*disabled[^>]*>[\s\S]{0,200}?Sync<\/span><\/button>/, 'the footer action is Sync, without a count')
+  assert.doesNotMatch(html, />Discard</, 'Discard appears only with pending changes')
   // Expanded rows carry the per-platform controls: only unmirrored platforms of a served version are checkboxes.
   assert.match(html, /aria-label="Add linux_arm64 to 1\.8\.2"/)
   assert.match(html, /aria-label="Add darwin_arm64 to 1\.8\.2"/)
@@ -630,7 +644,24 @@ test('the versions list shows held versions with a coverage strip, names newer u
   assert.match(html, /<strong>windows<\/strong> not published/)
   const reader = renderToStaticMarkup(React.createElement(PluginDetailView, { ...props, callerRole: 'reader' }))
   assert.doesNotMatch(reader, /aria-label="Add /)
-  assert.doesNotMatch(reader, />Add 1\.8\.3 with/)
+  assert.doesNotMatch(reader, />(Revoke|Restore|Add|Undo|Sync|Discard)</, 'a reader has no row actions and no footer')
+  assert.doesNotMatch(reader, /No pending changes|aria-label="Kebab toggle"/)
+})
+
+// The All scope and pending rows are component state the SSR harness cannot
+// reach, so their copy is pinned against the source as sibling tests do.
+test('row actions, statuses and the pending row read as the design copy panel', () => {
+  const source = readFileSync(new URL('../src/screens/PluginDetail.tsx', import.meta.url), 'utf8')
+  assert.match(source, /\{ text: 'Undo', run: \(\) => setAdds\(row\.version, undefined\) \}/)
+  assert.match(source, /\{ text: 'Add', run: \(\) => setAdds\(row\.version, defaults\(row\)\) \}/)
+  assert.match(source, /text: 'Revoke'/)
+  assert.match(source, /text: 'Restore'/)
+  assert.doesNotMatch(source, /Add with|'Clear'/)
+  assert.match(source, />Will be added<\/Label>/)
+  assert.match(source, />Upstream<\/Label>\{row\.prerelease \? <> <Label isCompact color="purple">Prerelease<\/Label><\/> : null\}/)
+  assert.match(source, /`\$\{n\} of \$\{row\.published\.size\} to add`/)
+  assert.match(source, /`\$\{row\.published\.size\} published`/)
+  assert.doesNotMatch(source, /Not mirrored/)
 })
 
 test('pending changes add platforms and mirror new versions; revoke and restore are not changes', () => {
@@ -1116,40 +1147,93 @@ test('the catalogue filters combine: name, source and update availability', () =
   assert.deepEqual(names({ source: 'HashiCorp', updatesOnly: true, name: 'doc' }), [])
 })
 
-test('the detail header carries the update pills and the update-check card its last result', () => {
-  const view = (update_check, update_available) => renderToStaticMarkup(React.createElement(PluginDetailView, {
-    name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
-    registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
-    busy: false, actionFailure: null, editing: false, upstream: [], hasOlderUpstream: true,
-    onEdit: () => {}, onDiscard: () => {}, onOlderUpstream: () => {}, onSync: () => {}, onRemove: () => {}, onToggleUpdates: () => {},
-    summary: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, version_count: 2, update_available, update_check },
-    detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
-  }))
-  const failed = view({ enabled: true, checked_at: '2026-10-09T08:00:00Z', latest: '1.8.3', error: 'releases.hashicorp.com: dial tcp: no such host' }, true)
-  assert.match(failed, /Update available · 1\.8\.3/)
-  assert.match(failed, />Last check failed</)
-  assert.match(failed, /Check daily for a newer stable version/)
-  assert.match(failed, /\(failed\)/)
-  assert.match(failed, /no such host The update pill reflects the last successful check\./)
-  assert.doesNotMatch(failed, /releases\.hashicorp\.com · github\.com/, 'the header carries no source subtitle')
-  assert.doesNotMatch(failed, />Show older upstream versions</, 'older upstream paging belongs to the All scope')
-  const off = view({ enabled: false }, false)
-  assert.doesNotMatch(off, /Update available/)
-  assert.doesNotMatch(off, />Last check failed</)
-  assert.match(off, />Checks are off</)
-  assert.match(off, /<dd[^>]*>[\s\S]{0,80}None</)
+const amazonDetail = (over = {}) => renderToStaticMarkup(React.createElement(PluginDetailView, {
+  name: 'amazon', organizationName: 'acme', host: 'dufflebag.example.com', callerRole: 'publisher',
+  registry: { enabled: true, exposed: true }, loading: false, failure: null, onRefresh: () => {}, onUpload: () => {},
+  busy: false, actionFailure: null, upstream: amazonUpstream, hasOlderUpstream: true,
+  onOlderUpstream: () => {}, onSync: () => {}, onRemove: () => {}, onToggleUpdates: () => {},
+  summary: catalogue.find((plugin) => plugin.name === 'amazon'),
+  detail: { name: 'amazon', source: { kind: 'releases-hashicorp', repository: 'packer-plugin-amazon' }, versions: amazonVersions },
+  ...over,
+}))
+const fixturePlugin = (name, over = {}) => ({ ...catalogue.find((plugin) => plugin.name === name), ...over })
+const updateLabel = /<a[^>]*href="#versions"[^>]*><span[^>]*>Update available · (?:<!-- -->)?([^<]+)<\/span><\/a>/
+
+test('the header label is the only update flag and follows update_available alone', () => {
+  const flagged = amazonDetail()
+  assert.equal(flagged.match(updateLabel)?.[1], '1.8.3', 'the fixture amazon has update_available and latest 1.8.3')
+  assert.equal(flagged.match(/Update available/g).length, 1, 'flagged once')
+  assert.ok(flagged.indexOf('Update available') < flagged.indexOf('aria-label="Plugin facts"'), 'in the header')
+
+  const notFlagged = amazonDetail({ summary: fixturePlugin('amazon', { update_available: false }) })
+  assert.doesNotMatch(notFlagged, /Update available/, 'a newer upstream row does not flag without update_available')
+
+  // Prerelease-only: the server's update_available excludes prereleases, so a newer beta upstream shows no label.
+  const prerelease = amazonDetail({
+    summary: fixturePlugin('git', { name: 'amazon' }),
+    upstream: [{ version: '1.9.0-beta.1', created_at: '2026-10-20T00:00:00Z', prerelease: true, platforms: ['linux_amd64'], mirrored: false }, ...amazonUpstream],
+  })
+  assert.doesNotMatch(prerelease, /Update available/)
+
+  const readerFlagged = amazonDetail({ callerRole: 'reader' })
+  assert.equal(readerFlagged.match(updateLabel)?.[1], '1.8.3', 'readers see the same label')
+  assert.equal(amazonDetail({ upstream: [] }).match(updateLabel)?.[1], '1.8.3', 'the label reads the server, not the upstream rows')
 })
 
-test('pending items are worded per change as the design lists them', () => {
-  assert.deepEqual(pendingItems([
-    { version: '1.8.3', action: 'add', platforms: ['linux_amd64', 'linux_arm64'] },
+test('the update label is a link with a PatternFly tooltip that reveals its row in All', () => {
+  const html = renderToStaticMarkup(React.createElement(UpdateAvailableLabel, { version: '1.8.3', onActivate: () => {} }))
+  assert.match(html, /^<span class="pf-v6-c-label[^"]*pf-m-clickable[^"]*"><a class="pf-v6-c-label__content[^"]*" href="#versions">/)
+  assert.doesNotMatch(html, /title=/, 'no native title hint')
+  const source = readFileSync(new URL('../src/screens/PluginDetail.tsx', import.meta.url), 'utf8')
+  assert.match(source, /<Tooltip triggerRef=\{componentRef\} content=\{`Show \$\{version\} in Versions`\} \/>/)
+
+  let activated = 0
+  let prevented = 0
+  const label = UpdateAvailableLabel({ version: '1.8.3', onActivate: () => { activated++ } })
+  const link = React.Children.toArray(label.props.render({ className: '', content: null, componentRef: { current: null } }).props.children)[0]
+  link.props.onClick({ preventDefault: () => { prevented++ } })
+  assert.deepEqual({ activated, prevented }, { activated: 1, prevented: 1 })
+
+  assert.match(source, /const showUpdate = \(\) => \{\n\s+if \(!check\?\.latest\) return\n\s+setScope\('all'\)\n\s+setFilter\(''\)\n\s+setPage\(updateVersionPage\(check\.latest, rows\)\)\n\s+setHighlighted\(check\.latest\)\n\s+\}/)
+  assert.match(source, /<Tr id=\{`version-row-\$\{row\.version\}`\} isRowSelected=\{highlighted === row\.version\}>/)
+  const rows = Array.from({ length: 30 }, (_, i) => ({ version: `1.${30 - i}.0` }))
+  assert.equal(updateVersionPage('1.30.0', rows), 1)
+  assert.equal(updateVersionPage('1.18.0', rows), 2, 'the 13th row is on page 2 of 12')
+  assert.equal(updateVersionPage('9.9.9', rows), 1)
+})
+
+test('the update check fact: a Switch for publishers, text for readers, and the error in place of no errors', () => {
+  const checked = amazonDetail()
+  const facts = (html) => html.slice(html.indexOf('>Update check<'), html.indexOf('>Versions<'))
+  assert.match(facts(checked), /<input[^>]*id="update-check"[^>]*aria-label="Update check"[^>]*checked=""|<input[^>]*checked=""[^>]*id="update-check"/)
+  assert.match(facts(checked), />On <span[^>]*>· checked [\s\S]{0,120}<time[^>]*dateTime="2026-07-30T10:00:00Z"[\s\S]*?<\/time>[\s\S]{0,20} · no errors<\/span>/)
+  const reader = amazonDetail({ callerRole: 'reader' })
+  assert.doesNotMatch(reader, /id="update-check"/)
+  assert.match(facts(reader), />On <span[^>]*>· checked [\s\S]{0,120}<time/)
+
+  const failed = amazonDetail({ summary: fixturePlugin('docker', { name: 'amazon' }) })
+  assert.match(failed, />Last check failed</)
+  assert.doesNotMatch(failed, /Update available/)
+  assert.match(facts(failed), /· checked [\s\S]{0,120}<time[\s\S]*?<\/time>[\s\S]{0,20} · <span[^>]*>releases\.hashicorp\.com could not be reached<\/span>/)
+  assert.doesNotMatch(facts(failed), /no errors/)
+  assert.doesNotMatch(failed, />Show older upstream versions</, 'older upstream paging belongs to the All scope')
+
+  const off = amazonDetail({ summary: fixturePlugin('git', { name: 'amazon' }) })
+  assert.doesNotMatch(off, />Last check failed</)
+  assert.match(facts(off), />Off</)
+  assert.match(gitDetail('publisher'), /Not available for uploaded plugins\. To add a version, upload its files\./)
+})
+
+test('the pending footer line is worded as the design copy panel', () => {
+  const mirrored = new Set(['1.8.2', '1.8.1', '1.8.0'])
+  assert.equal(pendingSummary([], mirrored), 'No pending changes')
+  assert.equal(pendingSummary([{ version: '1.8.4', action: 'add', platforms: ['darwin_arm64', 'linux_amd64', 'linux_arm64'] }], mirrored),
+    '1 pending change: add 1.8.4 on 3 platforms')
+  assert.equal(pendingSummary([
+    { version: '1.8.3', action: 'add', platforms: ['linux_amd64'] },
     { version: '1.8.2', action: 'add', platforms: ['darwin_arm64'] },
-  ], new Set(['1.8.2', '1.8.1', '1.8.0'])), [
-    { text: 'Add 1.8.3 · 2 platforms', version: '1.8.3' },
-    { text: 'Add darwin_arm64 to 1.8.2', version: '1.8.2' },
-  ])
-  assert.deepEqual(pendingItems([{ version: '1.8.2', action: 'add', platforms: ['darwin_arm64', 'linux_arm64'] }], new Set(['1.8.2'])),
-    [{ text: 'Add 2 platforms to 1.8.2', version: '1.8.2' }])
+    { version: '1.8.1', action: 'add', platforms: ['darwin_arm64', 'linux_arm64'] },
+  ], mirrored), '3 pending changes: add 1.8.3 on 1 platform, add darwin_arm64 to 1.8.2, add 2 platforms to 1.8.1')
 })
 
 test('versions order newest first, with a prerelease below its release', () => {
