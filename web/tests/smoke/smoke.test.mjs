@@ -2130,12 +2130,16 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       { label: 'Overview', count: '' },
       { label: 'Builds', count: '4' },
     ])
-    // The Ancestry card groups the parent under its bucket, says whether the
-    // channel it was built from still points at it, and states the childless
-    // side rather than omitting it.
+    // The Ancestry card groups the parent under its bucket, carries no
+    // freshness pill while the channel it was built from still points at it,
+    // and states the childless side rather than omitting it.
     await waitForText('smoke-images v1')
     await waitForText('smoke-base')
-    await waitForText('Built from latest · still current')
+    const ancestryText = await page.evaluate(() => [...document.querySelectorAll('.pf-v6-c-card')]
+      .find((card) => card.querySelector('.pf-v6-c-card__title')?.textContent.trim().startsWith('Ancestry'))
+      ?.innerText ?? '')
+    assert.match(ancestryText, /smoke-base/)
+    assert.doesNotMatch(ancestryText, /behind:|still current|Built from/, 'a current parent carries no freshness pill')
     await waitForText('No children')
     await waitForText('Consume this version')
     await waitForText('data "hcp_packer_version" "smoke_images"')

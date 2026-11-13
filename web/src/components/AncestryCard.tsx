@@ -1,6 +1,6 @@
 import { useRef, useState, type ReactNode } from 'react'
 import {
-  Button, Card, CardBody, CardTitle, ExpandableSection, Label, Skeleton, Title, Truncate,
+  Button, Card, CardBody, CardTitle, ExpandableSection, Label, Skeleton, Title, Tooltip, Truncate,
 } from '@patternfly/react-core'
 
 import type {
@@ -120,7 +120,6 @@ function GroupCard({
   // A group never shows only its caret row: its newest-sequence entry stays out.
   if (visible.length === 0) visible.push(older.shift()!)
   const bucketScope = 'versions' in scope
-  const rowProps = { kind, scope, onOpenVersion }
   return (
     <div className="ancestry-group" role="group" aria-label={group.bucket}>
       <div className="ancestry-group-header">
@@ -135,7 +134,7 @@ function GroupCard({
           </span>
         ) : null}
       </div>
-      {visible.map((row) => <RowView key={row.entry.fingerprint} row={row} {...rowProps} />)}
+      {visible.map((row) => <RowView key={row.entry.fingerprint} row={row} onOpenVersion={onOpenVersion} />)}
       {older.length > 0 ? (
         <ExpandableSection
           className="ancestry-older"
@@ -143,7 +142,7 @@ function GroupCard({
           isExpanded={expanded}
           onToggle={(_event, open) => setExpanded(open)}
         >
-          {older.map((row) => <RowView key={row.entry.fingerprint} row={row} {...rowProps} />)}
+          {older.map((row) => <RowView key={row.entry.fingerprint} row={row} onOpenVersion={onOpenVersion} />)}
         </ExpandableSection>
       ) : null}
     </div>
@@ -151,15 +150,12 @@ function GroupCard({
 }
 
 function RowView({
-  row, kind, scope, onOpenVersion,
+  row, onOpenVersion,
 }: {
   row: Row
-  kind: Kind
-  scope: AncestryScope
   onOpenVersion: (bucket: string, fingerprint: string) => void
 }) {
   const { entry } = row
-  const local = 'versions' in scope ? localContext(row, scope.versions) : ''
   const inherited = entry.revocationInheritedFrom
   return (
     <div className="ancestry-row">
@@ -181,11 +177,10 @@ function RowView({
             Revocation scheduled <When iso={entry.revokeAt} dateOnly />
           </Label>
         ) : null}
+        {distinctFreshness(row.relations).map((freshness) => (
+          <FreshnessPill key={freshnessText(freshness)} freshness={freshness} />
+        ))}
       </div>
-      {local ? <Line>{kind === 'parents' ? 'For' : 'From'} {local}</Line> : null}
-      {distinctFreshness(row.relations).map((freshness) => (
-        <FreshnessLine key={freshnessText(freshness)} freshness={freshness} />
-      ))}
       {inherited ? (
         <Line>
           Inherited from{' '}
@@ -207,17 +202,16 @@ function Line({ children, icon = '', color = subtle }: { children: ReactNode; ic
   )
 }
 
-function FreshnessLine({ freshness }: { freshness: AncestryFreshness }) {
-  const text = freshnessText(freshness)
-  if (!freshness.channel) return <Line icon="?">{text}</Line>
-  switch (freshness.status) {
-    case 'UP_TO_DATE':
-      return <Line icon="✓" color="var(--pf-t--global--text--color--status--success--default)">{text}</Line>
-    case 'OUT_OF_DATE':
-      return <Line icon="↑" color="var(--pf-t--global--text--color--status--warning--default)">{text}</Line>
-    default:
-      return <Line icon="?">{text}</Line>
-  }
+function FreshnessPill({ freshness }: { freshness: AncestryFreshness }) {
+  const { status, channel, currentVersion } = freshness
+  if (channel && status === 'UP_TO_DATE') return null
+  const behind = channel && status === 'OUT_OF_DATE' && currentVersion
+  const text = behind ? `behind: ${channel} at ${currentVersion}` : channel ? `${channel} empty` : 'no channel'
+  return (
+    <Tooltip content={freshnessText(freshness)}>
+      <Label isCompact variant="outline" status={behind ? 'warning' : undefined} tabIndex={0}>{text}</Label>
+    </Tooltip>
+  )
 }
 
 /**
@@ -281,12 +275,3 @@ function olderText(count: number, kind: Kind, bucketScope: boolean): string {
 }
 
 /** "v4 · latest, production" per local version; "; " keeps each one's channels apart. */
-function localContext(row: Row, versions: Version[]): string {
-  const names = new Set(row.relations.map((relation) => relation.localVersionName))
-  const contexts = versions.filter((version) => names.has(version.name)).map((version) => {
-    const details = [version.channels.join(', '), version.state === 'revoked' ? 'revoked' : '']
-      .filter(Boolean)
-    return [version.name, ...details].join(' · ')
-  })
-  return contexts.join(contexts.some((context) => context.includes(' · ')) ? '; ' : ', ')
-}

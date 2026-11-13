@@ -45,15 +45,15 @@ bucket. Each related version shows the channels that point at it, and a
 dashed **Newest** marker on its bucket's highest complete version, which is
 not always the one `latest` points at.
 
-Each relation says whether the channel the child was built from still points
-at the parent:
+A relation whose parent is still where the child's build left it carries no
+marker. Otherwise a pill on the related version says why, and its tooltip
+gives the full reading:
 
-- **still current** - the channel has not moved.
-- **_channel_ now at vN** - the channel has moved, so the child was built from
-  an older parent and needs a rebuild to catch up.
-- **_channel_ has no version** - the channel exists but nothing is assigned.
-- **no channel to compare against** - Packer recorded no channel, or the
-  channel has since been deleted. The registry cannot tell these apart.
+- **behind: _channel_ at vN** - the channel the child was built from has
+  moved on, so the child needs a rebuild to catch up.
+- **_channel_ empty** - the channel exists but nothing is assigned.
+- **no channel** - Packer recorded no channel, or the channel has since been
+  deleted. The registry cannot tell these apart.
 
 Versions that no channel points at fold under a caret row, except the newest.
 Revoked and scheduled versions are labelled, and an inherited revocation names

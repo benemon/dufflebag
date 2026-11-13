@@ -2088,8 +2088,8 @@ test('version detail renders persisted parent links and Terraform from real iden
   assert.match(markup, />stable<[\s\S]*>staging</)
   assert.match(markup, />derived-images</)
   assert.match(markup, />canary</)
-  assert.match(markup, /Built from production · production now at v8/)
-  assert.match(markup, /Built from v1 · no channel to compare against/)
+  assert.match(markup, />behind: production at v8</)
+  assert.match(markup, />no channel</)
   assert.doesNotMatch(markup, />retired</)
   assert.doesNotMatch(markup, /parent-fingerprint|child-fingerprint/)
   assert.doesNotMatch(markup, /resolved through/)
@@ -2625,7 +2625,7 @@ test('empty and gap states are distinct, and list rows remain read-only', async 
   assert.match(detail, />Revoke</)
 })
 
-test('the bucket ancestry card aggregates every version and names the local version', async () => {
+test('the bucket ancestry card aggregates every version', async () => {
   const newestComplete = { ...completeVersion, fingerprint: 'fp-new', name: 'v2' }
   const olderComplete = { ...completeVersion, fingerprint: 'fp-old', name: 'v1' }
   const bucket = await withFetch(
@@ -2690,9 +2690,7 @@ test('the bucket ancestry card aggregates every version and names the local vers
   }))
   assert.match(markup, /images · all versions/)
   assert.match(markup, />base-images</)
-  assert.match(markup, /For v1</)
-  assert.match(markup, /From v2</)
-  assert.match(markup, /From v1</)
+  assert.doesNotMatch(markup, />For |>From /)
   assert.match(markup, />2 built from this bucket</)
   assert.doesNotMatch(markup, /ancestry scope/)
 })
