@@ -144,14 +144,22 @@ test('a build tile shows the build name, not its identifier', () => {
   assert.doesNotMatch(html, />01KZF1QRA3BQ9K913VA8DP23RN</, 'the ULID is not the label')
 })
 
-test('a build tile keeps its full component in PatternFly truncation', () => {
+test('a build tile shows its full component, wrapped rather than truncated', () => {
   const wire = structuredClone(fixtures.generatedClient)
   const component = 'docker.ubuntu-a-provider-component-that-does-not-fit'
   wire.builds[0].component = component
   const html = render(wire)
-  assert.match(html, /pf-v6-c-truncate/)
-  assert.match(html, new RegExp(component))
+  assert.doesNotMatch(html, /pf-v6-c-truncate/)
+  assert.match(html, new RegExp(`>${component.replaceAll('.', '\\.')}</code>`))
   assert.doesNotMatch(html, /title=/)
+})
+
+test('a build tile lists its severity counts under the build name, in the same cell', () => {
+  const html = render(fixtures.mixedBuilds)
+  const name = html.indexOf('>docker.distro</code>')
+  assert.ok(name >= 0)
+  const cell = html.slice(name, html.indexOf('pf-v6-c-data-list__cell', name))
+  assert.match(cell, />1<!-- --> <!-- -->critical<|>1 critical</)
 })
 
 test('coverage appears only when something was not examined', () => {
@@ -173,6 +181,18 @@ test('a coverage gap on any build is reported, not only the first build\'s', () 
   const unnamed = structuredClone(gap)
   unnamed.builds[1].platform = ''
   assert.match(render(unnamed), new RegExp(`Coverage on ${unnamed.builds[1].component}: 180 queried`))
+})
+
+test('coverage names the build when two builds share a platform', () => {
+  const gap = structuredClone(fixtures.mixedBuilds)
+  gap.builds[1].platform = 'docker'
+  gap.builds[0].summary.coverage.unversioned = 3
+  gap.builds[1].summary.coverage.unversioned = 7
+  gap.builds[2].summary.coverage.unversioned = 1
+  const html = render(gap)
+  assert.match(html, /Coverage on docker \(docker\.distro\): [^<]*3 without a version to match\./)
+  assert.match(html, /Coverage on docker \(amazon-ebs\.distro\): [^<]*7 without a version to match\./)
+  assert.match(html, /Coverage on azure \(azure-arm\.empty\): /, 'a shared platform is named even when only one of its builds has a gap')
 })
 
 test('a scanned build without a stored summary is not called unscanned', () => {
