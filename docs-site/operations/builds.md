@@ -130,10 +130,10 @@ With a scanner configured:
   vulnerability summary, packages with vulnerabilities, and a flat
   vulnerability list.
 - The build's Vulnerabilities facet deduplicates advisories across packages,
-  provides build-total severity filters, lists the most affected critical and
-  high severity packages, and expands an advisory to show every affected
-  package, its SBOM, the severity the provider reported verbatim, and the
-  fixed version.
+  lists the most affected critical and high severity packages, provides
+  build-total severity filters for the advisory list, and expands an advisory
+  to show every affected package, its SBOM, the severity the provider
+  reported verbatim, and the fixed version.
 - The Packages facet keeps the inventory lean. Severity labels in its Findings
   column open the Vulnerabilities facet pre-filtered to that package.
 
