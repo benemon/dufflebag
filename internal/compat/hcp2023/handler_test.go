@@ -1475,6 +1475,21 @@ func (r *fakeRepository) ListBucketAncestry(
 			relations = append(relations, relation)
 		}
 	}
+	// The repository's ORDER BY, so map iteration cannot reorder the output.
+	sort.SliceStable(relations, func(i, j int) bool {
+		a, b := relations[i], relations[j]
+		switch {
+		case a.Child.BucketName != b.Child.BucketName:
+			return a.Child.BucketName < b.Child.BucketName
+		case a.Child.Sequence != b.Child.Sequence:
+			return a.Child.Sequence > b.Child.Sequence
+		case a.Parent.BucketName != b.Parent.BucketName:
+			return a.Parent.BucketName < b.Parent.BucketName
+		case a.Parent.Sequence != b.Parent.Sequence:
+			return a.Parent.Sequence > b.Parent.Sequence
+		}
+		return a.ParentChannelName < b.ParentChannelName
+	})
 	return relations, nil
 }
 

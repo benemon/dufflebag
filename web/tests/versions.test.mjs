@@ -50,7 +50,6 @@ let ConsumeCard
 let packerBuildCommand
 let sbomFileName
 let channelVersionGap
-let parentFreshnessText
 let ApiError
 let revokeVersion
 let restoreVersion
@@ -87,7 +86,7 @@ before(async () => {
     runBulkVersionAction, BulkVersionActionModalView,
     BucketChannelsFacet, CreateChannelModalView,
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
-    EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
+    EnforcedProvisionersRow, channelVersionGap, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
   ;({ VersionView, VersionOverview, RevokeModalView, RestoreModalView, DeleteVersionModalView,
     OperationsCard, BuildTable,
@@ -1841,7 +1840,7 @@ test('a version row expands to fingerprint, build summary, parent freshness, and
     builds: [{ artifacts: [{ id: 'artifact-1' }, { id: 'artifact-2' }] }],
     parents: [{
       bucket: 'base-images', versionName: 'v22', fingerprint: 'parent-fingerprint',
-      channel: 'latest', freshness: { status: 'behind', currentVersion: 'v24' },
+      channel: 'latest', buildFreshness: { status: 'OUT_OF_DATE', channel: 'latest', builtVersion: 'v22', currentVersion: 'v24' },
     }],
     children: [{
       bucket: 'derived-images', versionName: 'v3', fingerprint: 'descendant-fingerprint',
@@ -1850,7 +1849,7 @@ test('a version row expands to fingerprint, build summary, parent freshness, and
   const markup = versionsFacetMarkup([version])
   for (const expected of [
     'child-fingerprint', '1 build · 2 artifacts', 'base-images v22',
-    'bucket now at v24', 'derived-images v3', 'Open v14',
+    'Built from latest · latest now at v24', 'derived-images v3', 'Open v14',
   ]) assert.match(markup, new RegExp(expected))
 })
 
@@ -2028,6 +2027,9 @@ test('version detail renders persisted parent links and Terraform from real iden
       '/buckets/derived-images/channels': () => json({ channels: [
         { name: 'canary', version: { name: 'v3', fingerprint: 'child-fingerprint' } },
       ] }),
+      '/buckets/base-images/versions': () => json({ versions: [] }),
+      '/buckets/derived-images/versions': () => json({ versions: [] }),
+      '/buckets/images/versions': () => json({ versions: [completeVersion] }),
       '/channels': () => json({ channels: [
         {
           name: 'latest', managed: true,
@@ -2076,40 +2078,35 @@ test('version detail renders persisted parent links and Terraform from real iden
     bucket: 'images', detail, loading: false, failure: null,
     onBackToRegistry: () => {}, onBackToBucket: () => {},
   }))
-  // The lineage card is the design's two-column ancestry shape (duf-dus4):
-  // "bucket vN" links with the related version's current channels beneath —
-  // no fingerprints, which live on the linked version's own screen.
-  assert.match(markup, /Lineage/)
-  assert.match(markup, /Parents/)
-  assert.match(markup, /Children/)
-  assert.match(markup, /base-images v7/)
-  assert.match(markup, /stable, staging/)
-  assert.match(markup, /derived-images v3/)
-  assert.match(markup, /canary/)
-  assert.doesNotMatch(markup, /retired/)
+  // Bucket and version links with the related version's current channels as
+  // labels — no fingerprints, which live on the linked version's own screen.
+  assert.match(markup, />Ancestry</)
+  assert.match(markup, />Parents · 1</)
+  assert.match(markup, />Children · 1</)
+  assert.match(markup, />base-images</)
+  assert.match(markup, />v7</)
+  assert.match(markup, />stable<[\s\S]*>staging</)
+  assert.match(markup, />derived-images</)
+  assert.match(markup, />canary</)
+  assert.match(markup, /Built from production · production now at v8/)
+  assert.match(markup, /Built from v1 · no channel to compare against/)
+  assert.doesNotMatch(markup, />retired</)
   assert.doesNotMatch(markup, /parent-fingerprint|child-fingerprint/)
   assert.doesNotMatch(markup, /resolved through/)
   assert.doesNotMatch(markup, /Descendants|Revoking/)
-  assert.deepEqual(detail.version.parents[0].freshness, {
-    status: 'behind', currentVersion: 'v8',
-  })
+  assert.equal(detail.version.parents[0].buildFreshness.status, 'OUT_OF_DATE')
+  assert.equal(detail.version.parents[0].buildFreshness.currentVersion, 'v8')
   assert.deepEqual(detail.version.parents[0].channels, ['stable', 'staging'])
   assert.deepEqual(detail.version.children[0].channels, ['canary'])
-  assert.equal(parentFreshnessText({ status: 'newest' }), 'newest')
-  assert.equal(
-    parentFreshnessText({ status: 'behind', currentVersion: 'v24' }),
-    'bucket now at v24',
-  )
 
-  // An empty side is stated, never omitted: both columns read "None." when a
-  // version has no recorded relations.
-  const emptyLineage = renderToStaticMarkup(React.createElement(VersionView, {
+  // An empty side is stated, never omitted.
+  const emptyAncestry = renderToStaticMarkup(React.createElement(VersionView, {
     bucket: 'images',
     detail: { ...detail, version: { ...detail.version, parents: [], children: [] } },
     loading: false, failure: null,
     onBackToRegistry: () => {}, onBackToBucket: () => {},
   }))
-  assert.equal(emptyLineage.split('None.').length - 1, 2)
+  assert.match(emptyAncestry, />Parents · 0<[\s\S]*>No parents<[\s\S]*>Children · 0<[\s\S]*>No children</)
 
   // The copy control must not re-render the snippet: each Terraform block
   // appears exactly once in the card (duf-yxa — ClipboardCopy rendered its
@@ -2153,7 +2150,7 @@ test('version detail stays visible while the security summary shows skeleton row
     onBackToBucket: () => {},
   }))
   assert.match(markup, />v7</)
-  assert.match(markup, /Lineage/)
+  assert.match(markup, />Ancestry</)
   assert.match(markup, /Loading security summary…/)
   assert.match(markup, /pf-v6-c-skeleton/)
   assert.doesNotMatch(markup, /Reading package inventory/)
@@ -2196,7 +2193,7 @@ test('version security-summary failure keeps detail visible and renders the serv
     onBackToBucket: () => {},
   }))
   assert.match(markup, />v7</)
-  assert.match(markup, /Lineage/)
+  assert.match(markup, />Ancestry</)
   assert.match(markup, /Security summary could not be loaded/)
   assert.match(markup, /upstream summary timed out/)
 })
@@ -2515,7 +2512,7 @@ test('version card order and breakpoint grid stay fixed for every consumer', () 
   })
 
   for (const order of orders) {
-    assert.deepEqual(order, ['Lineage', 'Consume this version', 'Operations'])
+    assert.deepEqual(order, ['Ancestry', 'Consume this version', 'Operations'])
   }
 })
 
@@ -2640,7 +2637,7 @@ test('the bucket ancestry card aggregates every version and names the local vers
       '/channels': () => json({ channels: [] }),
       '/ancestry?type=ANCESTRY_TYPE_PARENTS&version_fingerprint=fp-new': () =>
         json({ relations: [] }),
-      // The newest version has a child of its own — its note must say (latest).
+      // The newest version has a child of its own.
       '/ancestry?type=ANCESTRY_TYPE_CHILDREN&version_fingerprint=fp-new': () =>
         json({ relations: [{
           parent: { bucket_name: 'images', version_name: 'v2', version_fingerprint: 'fp-new' },
@@ -2691,13 +2688,13 @@ test('the bucket ancestry card aggregates every version and names the local vers
     bucket: 'images', bucketData: bucket, loading: false, failure: null,
     onBack: () => {}, onOpenVersion: () => {},
   }))
-  assert.match(markup, /base-images v7/)
-  assert.match(markup, /parent of v1/)
-  assert.match(markup, /built from v2 \(latest\)/)
-  assert.match(markup, /built from v1/)
-  assert.match(markup, /aria-label="Parents ancestry scope"/)
-  assert.match(markup, /aria-label="Children ancestry scope"/)
-  assert.doesNotMatch(markup, /parent of v1 \(latest\)/)
+  assert.match(markup, /images · all versions/)
+  assert.match(markup, />base-images</)
+  assert.match(markup, /For v1</)
+  assert.match(markup, /From v2</)
+  assert.match(markup, /From v1</)
+  assert.match(markup, />2 built from this bucket</)
+  assert.doesNotMatch(markup, /ancestry scope/)
 })
 
 test('an empty bucket offers the same connect affordance as an empty list', () => {

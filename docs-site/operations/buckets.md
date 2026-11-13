@@ -38,6 +38,11 @@ bucket also deletes it from the destination. See
 A bucket opens onto its versions and channels. The versions table shows
 completion and revocation state.
 
+Its **Ancestry** card covers every version of the bucket, in the same form as
+a version's [Ancestry](./versions.md#ancestry) card. Each parent names the
+bucket's own versions built from it, and each child the version it was built
+from.
+
 ![dufflebag bucket screen showing bucket details, ancestry, versions, and channels](/screenshots/bucket-facets.png)
 
 The versions table is covered in [Versions](./versions.md); the channels tab

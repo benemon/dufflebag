@@ -1,0 +1,116 @@
+/* The card sits in a half-width column on the version page and spans the
+   page on the bucket page; the sections go side by side on the card's own
+   width, which a viewport media query cannot see. */
+.ancestry-card-body {
+  container-type: inline-size;
+}
+
+.ancestry-sections {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+}
+
+@container (min-width: 800px) {
+  .ancestry-sections {
+    gap: 24px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.ancestry-subtitle {
+  min-width: 0;
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+  font-weight: var(--pf-t--global--font--weight--body--default);
+}
+
+.ancestry-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.ancestry-group {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  padding: 8px 12px 4px;
+  border: 1px solid var(--pf-t--global--border--color--default);
+  border-radius: var(--pf-t--global--border--radius--small);
+}
+
+.ancestry-group-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-bottom: 6px;
+}
+
+.ancestry-group-name {
+  display: flex;
+  min-width: 0;
+  font-weight: var(--pf-t--global--font--weight--body--bold);
+}
+
+.ancestry-group-name .pf-v6-c-button {
+  min-width: 0;
+  max-width: 100%;
+}
+
+.ancestry-group-count {
+  flex: none;
+  color: var(--pf-t--global--text--color--subtle);
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.ancestry-row,
+.ancestry-older .pf-v6-c-expandable-section__toggle {
+  border-top: 1px solid var(--pf-t--global--border--color--default);
+}
+
+.ancestry-row {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 8px 0;
+}
+
+.ancestry-row-labels {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.ancestry-version {
+  margin-right: 4px;
+  font-family: var(--pf-t--global--font--family--mono);
+}
+
+.ancestry-line {
+  display: flex;
+  gap: 6px;
+  font-size: var(--pf-t--global--font--size--body--sm);
+}
+
+.ancestry-line-icon {
+  flex: none;
+  width: 12px;
+  text-align: center;
+}
+
+/* Newest is not a channel: PatternFly draws a label's border on ::before, so
+   the dashed outline has to be set there. */
+.ancestry-newest .pf-v6-c-label__content::before {
+  border-style: dashed;
+}
+
+.ancestry-older .pf-v6-c-expandable-section__content {
+  margin: 0 -12px;
+  padding: 0 12px 0 30px;
+  background: var(--pf-t--global--background--color--secondary--default);
+}
