@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   Alert, AlertActionLink, Breadcrumb, BreadcrumbItem, Button, Card, CardBody, CardTitle, Checkbox, ClipboardCopyButton, CodeBlock,
-  MenuToggle, Pagination, Progress, ProgressMeasureLocation, SearchInput, Select, SelectList, SelectOption, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem,
+  Pagination, Progress, ProgressMeasureLocation, SearchInput, ToggleGroup, ToggleGroupItem, Toolbar, ToolbarContent, ToolbarItem, Tooltip,
   CodeBlockAction, CodeBlockCode, Content, DescriptionList, DescriptionListDescription, DescriptionListGroup,
-  DescriptionListTerm, Flex, FlexItem, Grid, GridItem, Label, PageSection, Switch,
+  DescriptionListTerm, Flex, FlexItem, Label, PageSection, Switch,
 } from '@patternfly/react-core'
 import { ActionsColumn, ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -13,11 +13,12 @@ import { useAuth } from '../auth/AuthContext'
 import { permitsAction, type Role } from '../auth/permissions'
 import { PluginErrorCard, PluginLoadingCard } from '../components/PluginLoadState'
 import { ScreenHeader } from '../components/ScreenHeader'
+import { When } from '../components/When'
 import {
   PLUGIN_ARCHITECTURES, PLUGIN_OS_GROUPS, compareVersionsDesc, deletePluginVersion, getPluginDownloads, getPluginRegistry, listHashicorpPluginVersions,
-  listPluginVersions, listPlugins, pendingItems, pluginChanges, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
+  listPluginVersions, listPlugins, pendingSummary, pluginChanges, pluginSource, restorePluginVersion, revokePluginVersion, setPluginUpdateCheck,
   sourceLabel, syncPlugin, templateStanza, type HashicorpPluginVersion, type Plugin, type PluginChange, type PluginRegistry,
-  type PluginDownloads, type PluginVersionDownloads, type PluginVersions,
+  type PluginDownloads, type PluginVersions,
   activeJobFor, firstError, getPluginImport, importJobSummary, jobTitle, jobWhat, listPluginImports, terminalImportStates, type PluginImport,
 } from '../data/pluginRegistry'
 import { useTenant } from '../data/tenant'
@@ -188,73 +189,28 @@ const versionsPerPage = 12
 const downloadNumber = new Intl.NumberFormat('en-US')
 
 const emptyDownloadWindows = { last_7_days: 0, last_30_days: 0, last_365_days: 0, all_time: 0 }
+const subtle = { color: 'var(--pf-t--global--text--color--subtle)' }
 
-function downloadVersionLabel(version: PluginVersionDownloads): string {
-  if (version.state === 'removed') return `${version.version} (removed)`
-  if (version.state === 'revoked') return `${version.version} (revoked)`
-  return version.version
+export function updateVersionPage(version: string, rows: { version: string }[]): number {
+  const index = rows.findIndex((row) => row.version === version)
+  return index < 0 ? 1 : Math.floor(index / versionsPerPage) + 1
 }
 
-function PluginDownloadsCard({ downloads }: { downloads: PluginDownloads | null }) {
-  const [selectedVersion, setSelectedVersion] = useState<string | null>(null)
-  return <PluginDownloadsCardView downloads={downloads} selectedVersion={selectedVersion} onSelect={setSelectedVersion} />
-}
-
-export function PluginDownloadsCardView({
-  downloads, selectedVersion, onSelect,
-}: {
-  downloads: PluginDownloads | null
-  selectedVersion: string | null
-  onSelect: (version: string | null) => void
-}) {
-  const [open, setOpen] = useState(false)
-  const selected = downloads?.versions.find((version) => version.version === selectedVersion)
-  const windows = selected ?? downloads?.all_versions ?? emptyDownloadWindows
-  const label = selected ? downloadVersionLabel(selected) : 'All versions'
-  const rows = [
-    ['Last 7 days', windows.last_7_days],
-    ['Last 30 days', windows.last_30_days],
-    ['Last 365 days', windows.last_365_days],
-    ['All time', windows.all_time],
-  ] as const
+export function UpdateAvailableLabel({ version, onActivate }: { version: string; onActivate: () => void }) {
   return (
-    <Card isFullHeight>
-      <CardTitle>
-        <Flex alignItems={{ default: 'alignItemsCenter' }}>
-          <FlexItem>Downloads</FlexItem>
-          <FlexItem align={{ default: 'alignRight' }}>
-            <Select
-              aria-label="Download version" isOpen={open} selected={selectedVersion ?? '__all_versions__'} onOpenChange={setOpen}
-              onSelect={(_event, value) => { onSelect(value === '__all_versions__' ? null : String(value)); setOpen(false) }}
-              toggle={(ref) => <MenuToggle ref={ref} onClick={() => setOpen(!open)} isExpanded={open}>{label}</MenuToggle>}
-            >
-              <SelectList>
-                <SelectOption value="__all_versions__">All versions</SelectOption>
-                {(downloads?.versions ?? []).map((version) => (
-                  <SelectOption key={version.version} value={version.version}>{downloadVersionLabel(version)}</SelectOption>
-                ))}
-              </SelectList>
-            </Select>
-          </FlexItem>
-        </Flex>
-      </CardTitle>
-      <CardBody>
-        <DescriptionList isCompact columnModifier={{ default: '2Col' }}>
-          {rows.map(([term, count]) => (
-            <DescriptionListGroup key={term} style={{ display: 'flex', flexDirection: 'column-reverse', justifyContent: 'flex-end' }}>
-              <DescriptionListTerm>
-                <span style={{ fontWeight: 'normal', color: 'var(--pf-t--global--text--color--subtle)' }}>{term}</span>
-              </DescriptionListTerm>
-              <DescriptionListDescription>
-                <span style={{ fontFamily: 'var(--pf-t--global--font--family--heading)', fontSize: 'var(--pf-t--global--font--size--heading--h3)', fontWeight: 'var(--pf-t--global--font--weight--heading--default)' }}>
-                  {downloadNumber.format(count)}
-                </span>
-              </DescriptionListDescription>
-            </DescriptionListGroup>
-          ))}
-        </DescriptionList>
-      </CardBody>
-    </Card>
+    <Label
+      isCompact color="blue" isClickable
+      render={({ className, content, componentRef }) => (
+        <>
+          <a ref={componentRef} className={className} href="#versions" onClick={(event) => { event.preventDefault(); onActivate() }}>
+            {content}
+          </a>
+          <Tooltip triggerRef={componentRef} content={`Show ${version} in Versions`} />
+        </>
+      )}
+    >
+      Update available · {version}
+    </Label>
   )
 }
 
@@ -313,7 +269,14 @@ export function PluginDetailView({
   const [filter, setFilter] = useState('')
   const [page, setPage] = useState(1)
   const [expanded, setExpanded] = useState<string | null>(null)
+  const [highlighted, setHighlighted] = useState<string | null>(null)
   useEffect(() => { setAdded({}) }, [detail])
+  useEffect(() => {
+    if (!highlighted) return
+    document.getElementById(`version-row-${highlighted}`)?.scrollIntoView({ block: 'center' })
+    const timer = window.setTimeout(() => setHighlighted(null), 2000)
+    return () => window.clearTimeout(timer)
+  }, [highlighted])
   const canPublish = permitsAction(callerRole, 'publishPlugin')
   const local = detail?.source.kind === 'upload'
   const newest = detail?.versions.find((version) => !version.revoked)
@@ -332,10 +295,7 @@ export function PluginDetailView({
     })),
   ].sort((a, b) => compareVersionsDesc(a.version, b.version))
   const held = rows.filter((row) => row.state !== 'none')
-  const newestHeld = held[0]
-  const newer = newestHeld ? rows.filter((row) => row.state === 'none' && compareVersionsDesc(row.version, newestHeld.version) < 0) : []
   const changes = detail ? pluginChanges(detail.versions, unmirrored, added) : []
-  const pending = pendingItems(changes, mirrored)
   const adds = (row: VersionRow) => (added[row.version] ?? []).filter((p) => !row.stored.has(p))
   const kind = (row: VersionRow, platform: string): MarkKind => {
     if (!row.published.has(platform)) return 'unpublished'
@@ -360,23 +320,30 @@ export function PluginDetailView({
     if (row.state === 'revoked') return { text: 'Restore', run: () => setConfirming({ kind: 'restore', version: row.version }) }
     if (local) return null
     return adds(row).length
-      ? { text: 'Clear', run: () => setAdds(row.version, undefined) }
-      : { text: `Add with ${defaults(row).length} platforms`, run: () => setAdds(row.version, defaults(row)) }
-  }
-  const marker = (row: VersionRow) => {
-    const n = adds(row).length
-    return n ? (row.state === 'none' ? `→ add ${n}` : `+${n}`) : ''
+      ? { text: 'Undo', run: () => setAdds(row.version, undefined) }
+      : { text: 'Add', run: () => setAdds(row.version, defaults(row)) }
   }
   const coverage = (row: VersionRow) => {
     const n = adds(row).length
+    if (row.state === 'none') return n ? `${n} of ${row.published.size} to add` : `${row.published.size} published`
     return `${row.stored.size} of ${row.published.size}${n ? ` (+${n})` : ''}`
   }
   const listed = (scope === 'mirrored' ? held : rows).filter((row) => row.version.includes(filter.trim()))
   const shown = scope === 'all' ? listed.slice((page - 1) * versionsPerPage, page * versionsPerPage) : listed
-  const newestStable = newer.find((row) => !row.prerelease)
   const confirmingRow = rows.find((row) => row.version === confirming?.version)
   const lastVersion = detail?.versions.length === 1
   const check = summary?.update_check
+  const stanza = newest ? templateStanza(host, organizationName, name, newest.version) : null
+  const source = pluginSource(host, organizationName, name)
+  const totals = downloads?.all_versions ?? emptyDownloadWindows
+  const versionDownloads = new Map((downloads?.versions ?? []).map((version) => [version.version, version]))
+  const showUpdate = () => {
+    if (!check?.latest) return
+    setScope('all')
+    setFilter('')
+    setPage(updateVersionPage(check.latest, rows))
+    setHighlighted(check.latest)
+  }
   const legend: { kind: MarkKind; text: string }[] = [
     { kind: 'mirrored', text: 'Mirrored' }, { kind: 'revoked', text: 'Revoked' }, { kind: 'add', text: 'Will be added' },
     { kind: 'free', text: 'Upstream' }, { kind: 'unpublished', text: 'Not published' },
@@ -396,13 +363,62 @@ export function PluginDetailView({
           <>
             {name}{' '}
             <Label isCompact>{sourceLabel(detail.source)}</Label>{' '}
-            {summary?.update_available ? <><Label isCompact color="purple">Update available · {check?.latest}</Label>{' '}</> : null}
+            {summary?.update_available && check?.latest ? <><UpdateAvailableLabel version={check.latest} onActivate={showUpdate} />{' '}</> : null}
             {check?.enabled && check.error ? <Label isCompact color="red">Last check failed</Label> : null}
           </>
         ) : name}
-        actions={detail ? <Button variant="link" onClick={onJobs}>Jobs for {name}</Button> : undefined}
+        actions={detail ? (
+          <>
+            {local && canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
+            {stanza ? <Button variant="secondary" onClick={() => void navigator.clipboard.writeText(stanza)}>Copy template stanza</Button> : (
+              <Tooltip content="No version is available: every version is revoked.">
+                <Button variant="secondary" isAriaDisabled>Copy template stanza</Button>
+              </Tooltip>
+            )}
+            <Button variant="link" onClick={onJobs}>Jobs for {name}</Button>
+          </>
+        ) : undefined}
         onRefresh={onRefresh} refreshing={loading}
-      />
+      >
+        {detail ? (
+          <DescriptionList aria-label="Plugin facts" isCompact columnModifier={{ default: '1Col', md: '3Col' }} style={{ marginTop: 'var(--pf-t--global--spacer--md)', paddingTop: 'var(--pf-t--global--spacer--md)', borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
+            <DescriptionListGroup style={{ minWidth: 0 }}>
+              <DescriptionListTerm>Source</DescriptionListTerm>
+              <DescriptionListDescription>
+                <Flex gap={{ default: 'gapSm' }} flexWrap={{ default: 'nowrap' }} alignItems={{ default: 'alignItemsCenter' }}>
+                  <FlexItem style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}><code>{source}</code></FlexItem>
+                  <FlexItem>
+                    <ClipboardCopyButton id="plugin-source-copy" aria-label="Copy source" variant="plain" hasNoPadding onClick={() => void navigator.clipboard.writeText(source)}>Copy</ClipboardCopyButton>
+                  </FlexItem>
+                </Flex>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Downloads</DescriptionListTerm>
+              <DescriptionListDescription>
+                <strong>{downloadNumber.format(totals.all_time)}</strong> all time{' '}
+                <span style={subtle}>· {downloadNumber.format(totals.last_7_days)} in 7 days · {downloadNumber.format(totals.last_30_days)} in 30</span>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+            <DescriptionListGroup>
+              <DescriptionListTerm>Update check</DescriptionListTerm>
+              <DescriptionListDescription>
+                <Flex gap={{ default: 'gapSm' }} flexWrap={{ default: 'nowrap' }} alignItems={{ default: 'alignItemsCenter' }}>
+                  {!local && canPublish ? (
+                    <FlexItem>
+                      <Switch
+                        id="update-check" aria-label="Update check" isChecked={check?.enabled ?? false}
+                        isDisabled={busy} onChange={(_event, enabled) => onToggleUpdates(enabled)}
+                      />
+                    </FlexItem>
+                  ) : null}
+                  <FlexItem><UpdateCheckText check={check} local={local} /></FlexItem>
+                </Flex>
+              </DescriptionListDescription>
+            </DescriptionListGroup>
+          </DescriptionList>
+        ) : null}
+      </ScreenHeader>
       <PageSection variant="secondary" isFilled>
         {detail && !registry?.exposed && registry ? <NotExposedAlert registry={registry} /> : null}
         {activeJob ?? finishedJob ? <JobNotice job={(activeJob ?? finishedJob) as PluginImport} organizationName={organizationName} onOpenJob={onOpenJob} onJobs={onJobs} /> : null}
@@ -411,53 +427,7 @@ export function PluginDetailView({
         {failure ? <PluginErrorCard title={`${name} could not be loaded`} error={failure} onRetry={onRefresh} /> : null}
         {detail ? (
           <>
-            <Grid hasGutter style={{ marginBottom: 'var(--pf-t--global--spacer--lg)' }}>
-              <GridItem span={12} lg={6} style={{ minWidth: 0 }}>
-                <Card isFullHeight>
-                  <CardTitle>Template stanza <Content component="small">newest available version</Content></CardTitle>
-                  <CardBody>
-                    {newest ? <TemplateStanzaBlock hcl={templateStanza(host, organizationName, name, newest.version)} />
-                      : <Content component="p">No version is available: every version is revoked.</Content>}
-                  </CardBody>
-                </Card>
-              </GridItem>
-              <GridItem span={12} md={6} lg={3} style={{ minWidth: 0 }}>
-                <PluginDownloadsCard downloads={downloads ?? null} />
-              </GridItem>
-              <GridItem span={12} md={6} lg={3} style={{ minWidth: 0 }}>
-                <Card isFullHeight>
-                  <CardTitle>Update check</CardTitle>
-                  <CardBody>
-                    {local ? (
-                      <>
-                        <Content component="p">Not available for uploaded plugins. To add a version, upload its files.</Content>
-                        {canPublish ? <Button variant="secondary" onClick={onUpload}>Upload version</Button> : null}
-                      </>
-                    ) : (
-                      <>
-                        <Switch
-                          id="update-check" label="Check daily for a newer stable version" isChecked={check?.enabled ?? false}
-                          isDisabled={busy || !canPublish} onChange={(_event, enabled) => onToggleUpdates(enabled)}
-                        />
-                        <DescriptionList isCompact isHorizontal>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>Last checked</DescriptionListTerm>
-                            <DescriptionListDescription>{checkedAt(check)}</DescriptionListDescription>
-                          </DescriptionListGroup>
-                          <DescriptionListGroup>
-                            <DescriptionListTerm>Last error</DescriptionListTerm>
-                            <DescriptionListDescription>
-                              {check?.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error} The update pill reflects the last successful check.</span> : 'None'}
-                            </DescriptionListDescription>
-                          </DescriptionListGroup>
-                        </DescriptionList>
-                      </>
-                    )}
-                  </CardBody>
-                </Card>
-              </GridItem>
-            </Grid>
-            <Card>
+            <Card id="versions">
               <CardTitle>Versions</CardTitle>
               <CardBody>
                 <Toolbar id="plugin-versions-toolbar">
@@ -484,43 +454,29 @@ export function PluginDetailView({
                     </ToolbarItem>
                   </ToolbarContent>
                 </Toolbar>
-                {scope === 'mirrored' && newer.length ? (
-                  <Alert variant="custom" isInline isPlain title={`${newer.length} newer upstream ${newer.length === 1 ? 'version' : 'versions'}`}>
-                    <Flex gap={{ default: 'gapMd' }} alignItems={{ default: 'alignItemsCenter' }}>
-                      <FlexItem>{newer.map((row) => row.version + (row.prerelease ? ' (prerelease)' : '')).join(' · ')}</FlexItem>
-                      {canPublish && newestStable ? (
-                        <FlexItem>
-                          {adds(newestStable).length
-                            ? <Content component="small">{newestStable.version} pending ({adds(newestStable).length} platforms)</Content>
-                            : <Button variant="link" isInline onClick={() => setAdds(newestStable.version, defaults(newestStable))}>Add {newestStable.version} with {defaults(newestStable).length} platforms</Button>}
-                        </FlexItem>
-                      ) : null}
-                      <FlexItem><Button variant="link" isInline onClick={() => { setScope('all'); setPage(1) }}>Show all versions</Button></FlexItem>
-                    </Flex>
-                  </Alert>
-                ) : null}
                 <Table aria-label="Versions" variant="compact">
                   <Thead>
                     <Tr>
                       <Th screenReaderText="Platforms" />
-                      <Th>Version</Th><Th>Status</Th><Th>Platforms</Th><Th>Released</Th>
+                      <Th>Version</Th><Th>Status</Th><Th>Platforms</Th><Th style={{ textAlign: 'right' }}>Downloads</Th><Th>Released</Th>
                       {canPublish ? <Th screenReaderText="Actions" /> : null}
                     </Tr>
                   </Thead>
                   {shown.map((row, index) => {
                     const isExpanded = expanded === row.version
-                    const mark = marker(row)
                     const act = action(row)
+                    const rowDownloads = versionDownloads.get(row.version)
+                    const addCount = adds(row).length
                     return (
                       <Tbody key={row.version} isExpanded={isExpanded}>
-                        <Tr isRowSelected={mark !== ''}>
+                        <Tr id={`version-row-${row.version}`} isRowSelected={highlighted === row.version}>
                           <Td expand={{ rowIndex: index, isExpanded, onToggle: () => setExpanded(isExpanded ? null : row.version), expandId: `platforms-${row.version}` }} />
                           <Td dataLabel="Version"><code>{row.version}</code></Td>
                           <Td dataLabel="Status">
                             {row.state === 'available' ? <Label isCompact color="green">Available</Label>
                               : row.state === 'revoked' ? <Label isCompact color="grey">Revoked</Label>
-                              : <Label isCompact variant="outline">{row.prerelease ? 'Not mirrored · prerelease' : 'Not mirrored'}</Label>}
-                            {mark ? <> <span style={{ color: 'var(--pf-t--global--color--nonstatus--blue--default)', fontSize: 'var(--pf-t--global--font--size--xs)' }}>{mark}</span></> : null}
+                              : addCount ? <Label isCompact variant="outline" color="blue">Will be added</Label>
+                              : <><Label isCompact variant="outline">Upstream</Label>{row.prerelease ? <> <Label isCompact color="purple">Prerelease</Label></> : null}</>}
                           </Td>
                           <Td dataLabel="Platforms" modifier="nowrap">
                             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 12 }}>
@@ -528,7 +484,8 @@ export function PluginDetailView({
                               <span style={{ color: 'var(--pf-t--global--text--color--subtle)', fontSize: 'var(--pf-t--global--font--size--sm)' }}>{coverage(row)}</span>
                             </span>
                           </Td>
-                          <Td dataLabel="Released">{row.released ? new Date(row.released).toLocaleDateString() : ''}</Td>
+                          <Td dataLabel="Downloads" style={{ textAlign: 'right' }}>{rowDownloads ? downloadNumber.format(rowDownloads.all_time) : '—'}</Td>
+                          <Td dataLabel="Released"><When iso={row.released} emptyText="" dateOnly /></Td>
                           {canPublish ? (
                             <Td isActionCell modifier="nowrap">
                               <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} justifyContent={{ default: 'justifyContentFlexEnd' }} flexWrap={{ default: 'nowrap' }}>
@@ -540,7 +497,7 @@ export function PluginDetailView({
                         </Tr>
                         <Tr isExpanded={isExpanded}>
                           <Td />
-                          <Td dataLabel="Platforms" colSpan={canPublish ? 5 : 4}>
+                          <Td dataLabel="Platforms" colSpan={canPublish ? 6 : 5}>
                             <ExpandableRowContent>
                               <Flex gap={{ default: 'gapXl' }} flexWrap={{ default: 'wrap' }}>
                                 {PLUGIN_OS_GROUPS.map(([os, arches]) => {
@@ -565,6 +522,24 @@ export function PluginDetailView({
                                     </FlexItem>
                                   )
                                 })}
+                                {rowDownloads ? (
+                                  <FlexItem>
+                                    <Content component="small"><strong>Downloads</strong></Content>
+                                    <DescriptionList aria-label={`Downloads of ${row.version}`} isCompact isHorizontal>
+                                      {([
+                                        ['Last 7 days', rowDownloads.last_7_days],
+                                        ['Last 30 days', rowDownloads.last_30_days],
+                                        ['Last 365 days', rowDownloads.last_365_days],
+                                        ['All time', rowDownloads.all_time],
+                                      ] as const).map(([term, count]) => (
+                                        <DescriptionListGroup key={term}>
+                                          <DescriptionListTerm>{term}</DescriptionListTerm>
+                                          <DescriptionListDescription>{downloadNumber.format(count)}</DescriptionListDescription>
+                                        </DescriptionListGroup>
+                                      ))}
+                                    </DescriptionList>
+                                  </FlexItem>
+                                ) : null}
                               </Flex>
                             </ExpandableRowContent>
                           </Td>
@@ -583,17 +558,11 @@ export function PluginDetailView({
                 {scope === 'all' && hasOlderUpstream ? <Button variant="link" isInline onClick={onOlderUpstream}>Show older upstream versions</Button> : null}
                 {canPublish ? (
                   <Flex gap={{ default: 'gapSm' }} alignItems={{ default: 'alignItemsCenter' }} style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid var(--pf-t--global--border--color--default)' }}>
-                    <FlexItem><strong>{pending.length ? `Pending · ${pending.length}` : 'No pending changes'}</strong></FlexItem>
-                    {pending.map((item) => (
-                      <FlexItem key={item.version}>
-                        <Label color="blue" onClose={() => setAdds(item.version, undefined)} closeBtnAriaLabel={`Undo ${item.text}`}>
-                          {item.text}
-                        </Label>
-                      </FlexItem>
-                    ))}
+                    <FlexItem><strong>{pendingSummary(changes, mirrored)}</strong></FlexItem>
+                    {changes.length ? <FlexItem><Button variant="link" isInline onClick={() => setAdded({})}>Discard</Button></FlexItem> : null}
                     <FlexItem align={{ default: 'alignRight' }}>
                       <Button variant="primary" isLoading={busy} isDisabled={busy || changes.length === 0} onClick={() => onSync(changes)}>
-                        {changes.length ? `Sync ${changes.length} ${changes.length === 1 ? 'change' : 'changes'}` : 'Sync'}
+                        Sync
                       </Button>
                     </FlexItem>
                   </Flex>
@@ -646,11 +615,18 @@ export function versionConfirmation(
   }
 }
 
-function checkedAt(check: Plugin['update_check'] | undefined): string {
-  if (!check?.enabled) return 'Checks are off'
-  if (!check.checked_at) return 'Not checked yet'
-  const when = new Date(check.checked_at).toLocaleString()
-  return check.error ? `${when} (failed)` : when
+function UpdateCheckText({ check, local }: { check: Plugin['update_check'] | undefined; local: boolean }) {
+  if (local) return 'Not available for uploaded plugins. To add a version, upload its files.'
+  if (!check?.enabled) return 'Off'
+  return (
+    <>
+      On{' '}
+      <span style={subtle}>
+        · {check.checked_at ? <>checked <When iso={check.checked_at} /></> : 'not checked yet'} ·{' '}
+        {check.error ? <span style={{ color: 'var(--pf-t--global--color--status--danger--default)' }}>{check.error}</span> : 'no errors'}
+      </span>
+    </>
+  )
 }
 
 // The plugin page's notice for its unfinished job, and for that job's
