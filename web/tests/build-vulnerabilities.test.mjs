@@ -155,6 +155,20 @@ test('top vulnerable packages sort critical before high and break ties by name',
   )
 })
 
+test('top vulnerable packages precede the severity filter and ignore it', () => {
+  const data = projectBuildFindings(wire([
+    wireAdvisory('CRITICAL-1', 'critical', ['critical-package']),
+    wireAdvisory('HIGH-1', 'high', ['high-package']),
+  ]))
+  const html = renderVulnerabilities(data, { severityFilter: ['high'] })
+  const top = html.indexOf('aria-label="Top vulnerable packages"')
+  assert.ok(top >= 0)
+  assert.ok(top < html.indexOf('aria-label="Filter by severity"'))
+  const topTable = html.slice(top, html.indexOf('</table>', top))
+  assert.match(topTable, /critical-package/)
+  assert.match(topTable, /high-package/)
+})
+
 test('both facets render their run observedAt as the as-of instant', () => {
   const vulnerabilities = renderVulnerabilities(projectBuildFindings(buildFindingsFixture))
   const packages = renderToStaticMarkup(React.createElement(PackagesCard, {

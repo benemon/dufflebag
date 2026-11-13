@@ -4,7 +4,7 @@ import {
   ClipboardCopyButton, CodeBlock, CodeBlockAction, CodeBlockCode, Content,
   DescriptionList, DescriptionListDescription, DescriptionListGroup,
   DescriptionListTerm, Form, FormGroup, FormSelect, FormSelectOption, Grid, GridItem, Label, Modal,
-  ModalBody, ModalFooter, ModalHeader, PageSection, Title, ToggleGroup, ToggleGroupItem,
+  ModalBody, ModalFooter, ModalHeader, PageSection, ToggleGroup, ToggleGroupItem,
 } from '@patternfly/react-core'
 import { ExpandableRowContent, Table, Tbody, Td, Th, Thead, Tr } from '@patternfly/react-table'
 import { useNavigate, useParams } from 'react-router'
@@ -22,12 +22,13 @@ import {
   RevokeVersionOptionsForm, revokeOptions, revokeScheduleFailure, type RevokeWhen,
 } from '../components/RevokeVersionOptionsForm'
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
+import { AncestryCard } from '../components/AncestryCard'
 import { ScreenHeader } from '../components/ScreenHeader'
 import { TenancyGapEmptyState } from '../components/TenancyCreation'
 import { When } from '../components/When'
 import {
   buildIsInProgress, useVersion, useVersionSecuritySummary,
-  type AncestryChild, type BucketChannel, type Build, type BuildState,
+  type BucketChannel, type Build, type BuildState,
   type Version as VersionData, type VersionDetail, type VersionSecuritySummary,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
@@ -37,7 +38,7 @@ import type { TenancyGap } from '../data/tenant'
 import { FacetRail, knownCount } from './RegistryFacets'
 
 /**
- * Version — one version's lineage, operations and expandable build list.
+ * Version — one version's ancestry, operations and expandable build list.
  *
  * Components follow the design's version page (mockup 1a1, isVersion):
  *   Breadcrumb · Title · LabelGroup · DescriptionList · Card · Table
@@ -85,6 +86,7 @@ export function Version() {
       onOpenVersion={(relatedBucket, relatedFingerprint) => navigate(
         `/buckets/${encodeURIComponent(relatedBucket)}/versions/${encodeURIComponent(relatedFingerprint)}`,
       )}
+      onOpenBucket={(relatedBucket) => navigate(`/buckets/${encodeURIComponent(relatedBucket)}`)}
       callerRole={self?.role ?? null}
       onRevoke={async (options) => {
         if (!state || !tenant) throw new Error('No session.')
@@ -146,6 +148,7 @@ export function VersionView({
   onOpenBuild = () => {},
   onOpenSecurityBuild = onOpenBuild,
   onOpenVersion = () => {},
+  onOpenBucket = () => {},
   callerRole = null,
   onRevoke = () => Promise.reject(new Error('No session.')),
   onRestore = () => Promise.reject(new Error('No session.')),
@@ -170,6 +173,7 @@ export function VersionView({
   onOpenBuild?: (build: string) => void
   onOpenSecurityBuild?: (build: string) => void
   onOpenVersion?: (bucket: string, fingerprint: string) => void
+  onOpenBucket?: (bucket: string) => void
   callerRole?: Role | null
   onRevoke?: (options: RevokeVersionOptions) => Promise<void>
   onRestore?: () => Promise<void>
@@ -300,6 +304,7 @@ export function VersionView({
                     callerRole={callerRole}
                     onOpenBuild={onOpenSecurityBuild}
                     onOpenVersion={onOpenVersion}
+                    onOpenBucket={onOpenBucket}
                     onPromote={onPromote}
                   />
                 ),
@@ -627,6 +632,7 @@ export function VersionOverview({
   callerRole,
   onOpenBuild,
   onOpenVersion,
+  onOpenBucket,
   onPromote,
   initialConsumer,
 }: {
@@ -639,6 +645,7 @@ export function VersionOverview({
   callerRole: Role | null
   onOpenBuild: (build: string) => void
   onOpenVersion: (bucket: string, fingerprint: string) => void
+  onOpenBucket: (bucket: string) => void
   onPromote: (channel: string) => Promise<void>
   initialConsumer?: Consumer
 }) {
@@ -671,7 +678,15 @@ export function VersionOverview({
               outOfScanSet={version.channels.length === 0}
             />
           ) : null)}
-          {detail && <LineageCard version={version} onOpenVersion={onOpenVersion} />}
+          <AncestryCard
+            bucket={bucket}
+            scope={{ versionName: version.name }}
+            parents={version.parents}
+            children={version.children}
+            loading={!detail}
+            onOpenBucket={onOpenBucket}
+            onOpenVersion={onOpenVersion}
+          />
         </div>
       </GridItem>
       {detail && (
@@ -689,55 +704,6 @@ export function VersionOverview({
         </GridItem>
       )}
     </Grid>
-  )
-}
-
-function LineageCard({
-  version,
-  onOpenVersion,
-}: {
-  version: VersionData
-  onOpenVersion: (bucket: string, fingerprint: string) => void
-}) {
-  return (
-    <Card>
-      <CardTitle>Lineage</CardTitle>
-      <CardBody style={{ display: 'flex', gap: 32, flexWrap: 'wrap' }}>
-        <LineageSide heading="Parents" entries={version.parents ?? []} onOpenVersion={onOpenVersion} />
-        <LineageSide heading="Children" entries={version.children ?? []} onOpenVersion={onOpenVersion} />
-      </CardBody>
-    </Card>
-  )
-}
-
-/**
- * One side of the lineage card. Entries read "bucket vN" and link to that
- * version's screen, which carries the fingerprint a reader would copy.
- */
-function LineageSide({
-  heading,
-  entries,
-  onOpenVersion,
-}: {
-  heading: string
-  entries: AncestryChild[]
-  onOpenVersion: (bucket: string, fingerprint: string) => void
-}) {
-  return (
-    <div style={{ flex: '1 1 220px' }}>
-      <Title headingLevel="h3" size="md">{heading}</Title>
-      {entries.length === 0 ? <Content component="p">None.</Content> :
-        entries.map((entry) => (
-          <div key={`${entry.bucket}/${entry.fingerprint}`} style={{ padding: '5px 0' }}>
-            <Button variant="link" isInline onClick={() => onOpenVersion(entry.bucket, entry.fingerprint)}>
-              {entry.bucket} {entry.versionName}
-            </Button>
-            {(entry.channels ?? []).length > 0 && (
-              <div style={{ color: 'var(--pf-t--global--text--color--subtle)' }}>{(entry.channels ?? []).join(', ')}</div>
-            )}
-          </div>
-        ))}
-    </div>
   )
 }
 

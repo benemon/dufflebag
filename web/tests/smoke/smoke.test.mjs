@@ -1911,7 +1911,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       `/projects/${seeded.project.id}/buckets`
 
     // A real parent bucket/version/channel is recorded on the child build, so
-    // the lineage card below is proving the baseline's stored relation.
+    // the Ancestry card below is proving the baseline's stored relation.
     await api(builderToken, 'PUT', bucketBase, {
       name: 'smoke-base', description: 'parent seeded by the smoke test',
     })
@@ -2106,7 +2106,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('4 builds · 2 artifacts')
     await waitForText('Parent status')
     await waitForText('smoke-base v1')
-    await waitForText('newest')
+    await waitForText('Built from latest · still current')
     await waitForText('v0')
     await waitForText('incomplete')
     await toggleRow('v0')
@@ -2124,16 +2124,19 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     // The version defaults to Overview; descend through its Builds facet.
     // package state proved in a real browser against the real package route.
     await clickByText('button', 'v1')
-    await waitForText('Lineage')
+    await waitForText('Parents · 1')
     assert.equal(await facetHeading('Version facets'), 'This version')
     assert.deepEqual(await facetItems('Version facets'), [
       { label: 'Overview', count: '' },
       { label: 'Builds', count: '4' },
     ])
-    // The lineage card links the parent as "bucket vN" (duf-dus4); the
-    // childless side is stated as "None." rather than omitted.
-    await waitForText('smoke-base v1')
-    await waitForText('None.')
+    // The Ancestry card groups the parent under its bucket, says whether the
+    // channel it was built from still points at it, and states the childless
+    // side rather than omitting it.
+    await waitForText('smoke-images v1')
+    await waitForText('smoke-base')
+    await waitForText('Built from latest · still current')
+    await waitForText('No children')
     await waitForText('Consume this version')
     await waitForText('data "hcp_packer_version" "smoke_images"')
     await waitForText('version_fingerprint = "smoke-done"')
@@ -2211,7 +2214,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
 
     // The breadcrumb walks back out: build → version → bucket → registry.
     await clickByText('button', 'v1')
-    await waitForText('Lineage')
+    await waitForText('Parents · ')
     await clickByText('button', 'smoke-images')
     await waitForText('Bucket details')
 
@@ -2296,7 +2299,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickFacet('Bucket facets', 'Versions')
     await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
-    await waitForText('Lineage')
+    await waitForText('Parents · ')
 
     // Revoke now, through the danger confirmation; the state label only flips
     // when the wire answered and the refetch landed.
@@ -2914,7 +2917,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await clickFacet('Bucket facets', 'Versions')
     await waitForElement('the Versions table', 'table[aria-label="Versions"]')
     await clickByText('button', 'v1')
-    await waitForText('Lineage')
+    await waitForText('Parents · ')
     await clickByText('button', 'Delete version')
     await waitForText('Delete smoke-deletable — v1')
     await typeToConfirm('v1')

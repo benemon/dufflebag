@@ -1,6 +1,6 @@
 import {
   Card, CardBody, CardTitle, Content, DataList, DataListCell, DataListItem,
-  DataListItemCells, DataListItemRow, Label, Title, Truncate,
+  DataListItemCells, DataListItemRow, Label, Title,
 } from '@patternfly/react-core'
 import AngleRightIcon from '@patternfly/react-icons/dist/esm/icons/angle-right-icon'
 
@@ -55,6 +55,8 @@ export function VersionSecurityCard({
   // found" and "not looked at", which is the distinction the console exists to
   // preserve.
   const coverageGaps = summary.builds.filter((build) => hasCoverageGap(build.summary?.scan))
+  const sharedPlatform = (platform: string) =>
+    summary.builds.filter((build) => build.platform === platform).length > 1
   // Compared as instants: RFC 3339 strings with and without fractional seconds
   // do not sort lexically.
   const failedRescans = summary.builds.filter((build) => build.latestAttempt?.status === 'failed')
@@ -136,7 +138,9 @@ export function VersionSecurityCard({
         )}
         {coverageGaps.map((build) => (
           <Content key={build.buildID} component="p" style={{ color: 'var(--pf-t--global--text--color--subtle)' }} data-coverage="true">
-            Coverage on {build.platform || build.component || build.buildID}: {coverageSummary(build.summary?.scan).join('; ')}.
+            Coverage on {build.platform && build.component && sharedPlatform(build.platform)
+              ? `${build.platform} (${build.component})`
+              : build.platform || build.component || build.buildID}: {coverageSummary(build.summary?.scan).join('; ')}.
           </Content>
         ))}
 
@@ -164,11 +168,22 @@ export function VersionSecurityCard({
                         <span id={`security-build-${build.buildID}`} style={{ display: 'block', fontWeight: 500 }}>
                           {build.platform}
                         </span>
-                        <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)' }}>
-                          <Truncate content={build.component || build.buildID} />
+                        <code style={{ display: 'block', color: 'var(--pf-t--global--text--color--subtle)', overflowWrap: 'anywhere' }}>
+                          {build.component || build.buildID}
                         </code>
+                        {buildSummary && buildSummary.counts.length > 0 ? (
+                          <div style={{ marginTop: 8, display: 'flex', gap: 7, flexWrap: 'wrap' }}>
+                            {buildSummary.counts.map(({ severity, count }) => (
+                              <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
+                                {count} {severity}
+                              </Label>
+                            ))}
+                          </div>
+                        ) : build.inventory === 'unparseable' || !buildSummary ? null : (
+                          <Content component="small" style={{ display: 'block', marginTop: 8 }}>{buildSummary.scanned} scanned</Content>
+                        )}
                       </DataListCell>,
-                      <DataListCell key="severity">
+                      <DataListCell key="severity" isFilled={false}>
                         <Label color={buildSummary?.worst ? SEVERITY_COLOUR[buildSummary.worst] ?? 'grey' : 'grey'} isCompact>
                           {build.inventory === 'unparseable'
                             ? 'SBOM unparseable'
@@ -177,17 +192,6 @@ export function VersionSecurityCard({
                         {build.latestAttempt?.status === 'failed' ? (
                           <Label color="orange" variant="outline" isCompact style={{ marginLeft: 6 }}>rescan failed</Label>
                         ) : null}
-                      </DataListCell>,
-                      <DataListCell key="counts" alignRight>
-                        {buildSummary && buildSummary.counts.length > 0 ? (
-                          buildSummary.counts.map(({ severity, count }) => (
-                            <Label key={severity} color={SEVERITY_COLOUR[severity] ?? 'grey'} isCompact variant="outline">
-                              {count} {severity}
-                            </Label>
-                          ))
-                        ) : build.inventory === 'unparseable' || !buildSummary ? null : (
-                          <Content component="small">{buildSummary.scanned} scanned</Content>
-                        )}
                       </DataListCell>,
                       <DataListCell key="open" isIcon alignRight>
                         <AngleRightIcon aria-hidden />

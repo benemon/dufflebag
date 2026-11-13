@@ -863,6 +863,9 @@ export function VulnerabilitiesCard({
             findings are from the scan above.
           </Content>
         ) : null}
+        {data.topVulnerablePackages.length > 0 ? (
+          <TopVulnerablePackages rows={data.topVulnerablePackages} packagePath={packagePath} />
+        ) : null}
         <ToggleGroup aria-label="Filter by severity" isCompact style={{ marginTop: 16 }}>
           {[...SEVERITY_ORDER].reverse().map((band) => (
             <ToggleGroupItem
@@ -884,10 +887,6 @@ export function VulnerabilitiesCard({
             />
           ))}
         </ToggleGroup>
-
-        {data.topVulnerablePackages.length > 0 ? (
-          <TopVulnerablePackages rows={data.topVulnerablePackages} packagePath={packagePath} />
-        ) : null}
 
         {data.advisories.length === 0 ? (
           <Content component="p" data-state="zero-findings" style={{ marginTop: 18 }}>
