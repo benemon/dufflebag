@@ -391,7 +391,7 @@ spec:
             {}
       containers:
         - name: dufflebag
-          image: "quay.io/benjamin_holmes/dufflebag:v0.5.4"
+          image: "quay.io/benjamin_holmes/dufflebag:v0.5.5"
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
