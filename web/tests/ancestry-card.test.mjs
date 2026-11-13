@@ -7,7 +7,7 @@ import { renderToStaticMarkup } from 'react-dom/server'
 import { createServer } from 'vite'
 
 let vite
-let AncestryCard
+let AncestryCard, freshnessText
 let loadVersionDetail
 let loadBucketPage
 
@@ -25,7 +25,7 @@ before(async () => {
     appType: 'custom',
     ssr: { noExternal: [/@patternfly\//] },
   })
-  ;({ AncestryCard } = await vite.ssrLoadModule('/src/components/AncestryCard.tsx'))
+  ;({ AncestryCard, freshnessText } = await vite.ssrLoadModule('/src/components/AncestryCard.tsx'))
   ;({ loadVersionDetail, loadBucketPage } = await vite.ssrLoadModule('/src/data/versions.ts'))
 })
 
@@ -90,13 +90,23 @@ test('version page children are this version\'s own and each carries its relatio
   )
 })
 
-test('freshness names the channel on child rows, including both undetermined readings', async () => {
+test('freshness is a pill only where it needs attention, on child rows too, with both undetermined readings', async () => {
   const markup = versionCard((await versionPage()).result)
-  assert.match(group(markup, 'agent').shown, /v5<[\s\S]*Built from production · still current/)
-  assert.match(group(markup, 'agent').older, /v4<[\s\S]*Built from latest · latest now at v5/)
-  assert.match(group(markup, 'runner').shown, /v3<[\s\S]*Built from staging · staging has no version/)
-  assert.match(group(markup, 'runner').shown, /v2<[\s\S]*Built from v4 · no channel to compare against/)
-  assert.doesNotMatch(markup, /Built from {2}·/)
+  assert.doesNotMatch(group(markup, 'agent').shown, /behind:|empty<|no channel</, 'a current relation carries no pill')
+  assert.match(group(markup, 'agent').older, /v4<[\s\S]*>behind: latest at v5</)
+  assert.match(group(markup, 'runner').shown, /v3<[\s\S]*>staging empty</)
+  assert.match(group(markup, 'runner').shown, /v2<[\s\S]*>no channel</)
+  assert.doesNotMatch(markup, /Built from|still current/, 'the sentence lives only in the tooltip')
+  assert.doesNotMatch(markup, /title=/)
+})
+
+test('each pill\'s tooltip carries the full sentence', () => {
+  assert.equal(freshnessText({ status: 'OUT_OF_DATE', channel: 'latest', builtVersion: 'v4', currentVersion: 'v5' }),
+    'Built from latest · latest now at v5')
+  assert.equal(freshnessText({ status: 'UNDETERMINED', channel: 'staging', builtVersion: 'v4' }),
+    'Built from staging · staging has no version')
+  assert.equal(freshnessText({ status: 'UNDETERMINED', channel: '', builtVersion: 'v4' }),
+    'Built from v4 · no channel to compare against')
 })
 
 test('version page card states its subject, counts and child group counts', async () => {
@@ -137,7 +147,7 @@ test('an unreadable related bucket keeps its entries without inventing state', a
   assert.equal(retired.state, undefined)
   assert.equal(retired.newest, undefined)
   const markup = group(versionCard(detail), 'retired')
-  assert.match(markup.shown, />v1<[\s\S]*Built from production · still current/)
+  assert.match(markup.shown, />v1</)
   assert.doesNotMatch(markup.shown, /pf-v6-c-label/)
   // One ListChannels and one ListVersions per bucket, the page's own reused.
   for (const bucket of ['base', 'agent', 'runner', 'retired']) {
@@ -157,7 +167,7 @@ test('a dead session still reaches sign-out rather than degrading', async () => 
   )
 })
 
-test('bucket page parents read one row per parent version, naming the local versions it serves', async () => {
+test('bucket page parents read one row per parent version, without per-local-version text', async () => {
   const { result: page, requests } = await bucketPage()
   const markup = render({
     bucket: 'agent',
@@ -169,23 +179,21 @@ test('bucket page parents read one row per parent version, naming the local vers
   assert.match(markup, />Parents · 3</)
   assert.match(markup, />Children · 0<[\s\S]*>No children</)
   const base = group(markup, 'base')
-  assert.match(base.shown, />v4<[\s\S]*>production<[\s\S]*For v5 · latest, production; v4</)
-  assert.match(base.shown, /Built from production · still current/)
-  assert.match(base.shown, /Built from latest · latest now at v5/)
+  assert.match(base.shown, />v4<[\s\S]*>production<[\s\S]*>behind: latest at v5</)
   // Revoked and channel-less, base v2 stays out because agent v3 holds stable.
-  assert.match(base.shown, />v2<[\s\S]*>Revoked<[\s\S]*For v3 · stable</)
+  assert.match(base.shown, />v2<[\s\S]*>Revoked</)
   // base v1 serves only agent v2 and v1, neither holding a channel: it folds.
   assert.match(base.older, /1 parent of older versions</)
   assert.equal(base.older.split('>v1<').length - 1, 1)
-  assert.match(base.older, />v1<[\s\S]*For v2, v1<[\s\S]*Built from production · production now at v4/)
-  assert.doesNotMatch(markup, /built from this/)
+  assert.match(base.older, />v1<[\s\S]*>behind: production at v4</)
+  assert.doesNotMatch(markup, /built from this|>For |Built from/)
   for (const list of ['channels', 'versions']) {
     assert.equal(requests.filter((path) => path.endsWith(`/buckets/base/${list}`)).length, 1)
     assert.equal(requests.filter((path) => path.endsWith(`/buckets/agent/${list}`)).length, 1)
   }
 })
 
-test('bucket page children name their source version, revocation and inherited ancestor', async () => {
+test('bucket page children carry revocation and their inherited ancestor', async () => {
   const { result: page } = await fromFixture(() => loadBucketPage('token', tenant, 'base'))
   const markup = render({
     bucket: 'base',
@@ -197,8 +205,9 @@ test('bucket page children name their source version, revocation and inherited a
   assert.match(markup, />5 built from this bucket</)
   assert.match(markup, />3 built from this bucket</)
   const runner = group(markup, 'runner')
-  assert.match(runner.shown, />v2<[\s\S]*From v4 · production</)
-  assert.match(runner.older, />v1<[\s\S]*>Revoked<[\s\S]*From v2 · revoked<[\s\S]*Inherited from <button[\s\S]*?>base v2</)
+  assert.match(runner.shown, />v2</)
+  assert.match(runner.older, />v1<[\s\S]*>Revoked<[\s\S]*Inherited from <button[\s\S]*?>base v2</)
+  assert.doesNotMatch(markup, />From |Built from/)
   const agent = group(markup, 'agent')
   assert.match(agent.older, /3 older versions</)
   assert.match(agent.older, /Revocation scheduled <[\s\S]*?<time[^>]*dateTime="2026-11-18T12:00:00.000Z"/)
