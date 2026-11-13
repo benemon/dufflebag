@@ -50,7 +50,6 @@ let ConsumeCard
 let packerBuildCommand
 let sbomFileName
 let channelVersionGap
-let parentFreshnessText
 let ApiError
 let revokeVersion
 let restoreVersion
@@ -87,7 +86,7 @@ before(async () => {
     runBulkVersionAction, BulkVersionActionModalView,
     BucketChannelsFacet, CreateChannelModalView,
     AssignChannelModalView, DeleteChannelModalView, AssignmentHistoryTable,
-    EnforcedProvisionersRow, channelVersionGap, parentFreshnessText, VersionStateLabel } =
+    EnforcedProvisionersRow, channelVersionGap, VersionStateLabel } =
     await vite.ssrLoadModule('/src/screens/Versions.tsx'))
   ;({ VersionView, VersionOverview, RevokeModalView, RestoreModalView, DeleteVersionModalView,
     OperationsCard, BuildTable,
@@ -1841,7 +1840,7 @@ test('a version row expands to fingerprint, build summary, parent freshness, and
     builds: [{ artifacts: [{ id: 'artifact-1' }, { id: 'artifact-2' }] }],
     parents: [{
       bucket: 'base-images', versionName: 'v22', fingerprint: 'parent-fingerprint',
-      channel: 'latest', freshness: { status: 'behind', currentVersion: 'v24' },
+      channel: 'latest', buildFreshness: { status: 'OUT_OF_DATE', channel: 'latest', builtVersion: 'v22', currentVersion: 'v24' },
     }],
     children: [{
       bucket: 'derived-images', versionName: 'v3', fingerprint: 'descendant-fingerprint',
@@ -1850,7 +1849,7 @@ test('a version row expands to fingerprint, build summary, parent freshness, and
   const markup = versionsFacetMarkup([version])
   for (const expected of [
     'child-fingerprint', '1 build · 2 artifacts', 'base-images v22',
-    'bucket now at v24', 'derived-images v3', 'Open v14',
+    'Built from latest · latest now at v24', 'derived-images v3', 'Open v14',
   ]) assert.match(markup, new RegExp(expected))
 })
 
@@ -2095,16 +2094,10 @@ test('version detail renders persisted parent links and Terraform from real iden
   assert.doesNotMatch(markup, /parent-fingerprint|child-fingerprint/)
   assert.doesNotMatch(markup, /resolved through/)
   assert.doesNotMatch(markup, /Descendants|Revoking/)
-  assert.deepEqual(detail.version.parents[0].freshness, {
-    status: 'behind', currentVersion: 'v8',
-  })
+  assert.equal(detail.version.parents[0].buildFreshness.status, 'OUT_OF_DATE')
+  assert.equal(detail.version.parents[0].buildFreshness.currentVersion, 'v8')
   assert.deepEqual(detail.version.parents[0].channels, ['stable', 'staging'])
   assert.deepEqual(detail.version.children[0].channels, ['canary'])
-  assert.equal(parentFreshnessText({ status: 'newest' }), 'newest')
-  assert.equal(
-    parentFreshnessText({ status: 'behind', currentVersion: 'v24' }),
-    'bucket now at v24',
-  )
 
   // An empty side is stated, never omitted.
   const emptyAncestry = renderToStaticMarkup(React.createElement(VersionView, {

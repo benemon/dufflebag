@@ -2102,7 +2102,7 @@ test('the console works end to end, from first run to a seeded tenancy', async (
     await waitForText('4 builds · 2 artifacts')
     await waitForText('Parent status')
     await waitForText('smoke-base v1')
-    await waitForText('newest')
+    await waitForText('Built from latest · still current')
     await waitForText('v0')
     await waitForText('incomplete')
     await toggleRow('v0')

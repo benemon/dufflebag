@@ -24,7 +24,7 @@ import {
 import { CopyableIdentifier } from '../components/CopyableIdentifier'
 import { updateBulkSelection } from '../components/BulkSelection'
 import { When } from '../components/When'
-import { AncestryCard } from '../components/AncestryCard'
+import { AncestryCard, freshnessText } from '../components/AncestryCard'
 
 import {
   assignChannelVersion, createChannel, deleteBucket, deleteChannel, deletePin, deleteVersion,
@@ -37,7 +37,7 @@ import { permitsAction, requirementReason, type Role } from '../auth/permissions
 import {
   buildIsInProgress, useChannelHistory, useEnforcedProvisioners, useVersions,
   type BucketChannel, type BucketPage,
-  type ChannelHistoryEntry, type ParentFreshness, type Version,
+  type ChannelHistoryEntry, type Version,
 } from '../data/versions'
 import { useAutoRefresh } from '../data/polling'
 import type { TenancyGap } from '../data/tenant'
@@ -1731,7 +1731,7 @@ function parentStatuses(version: Version): string {
   const parents = version.parents ?? []
   return parents.length === 0
     ? 'None'
-    : parents.map((parent) => parentFreshnessText(parent.freshness)).join(', ')
+    : parents.map((parent) => freshnessText(parent.buildFreshness)).join(', ')
 }
 
 function childNames(version: Version): string {
@@ -1741,16 +1741,6 @@ function childNames(version: Version): string {
     : children.map((child) => `${child.bucket} ${child.versionName}`).join(', ')
 }
 
-export function parentFreshnessText(freshness: ParentFreshness): string {
-  switch (freshness.status) {
-    case 'newest':
-      return 'newest'
-    case 'behind':
-      return `bucket now at ${freshness.currentVersion}`
-    case 'unknown':
-      return 'unknown'
-  }
-}
 
 export function VersionStateLabel({ state }: { state: Version['state'] }) {
   // Completion restates the name's meaning — v0-incomplete / vN-complete —

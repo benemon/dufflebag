@@ -224,7 +224,7 @@ function FreshnessLine({ freshness }: { freshness: AncestryFreshness }) {
  * An empty channel name is both "Packer recorded none" and "that channel was
  * since deleted"; the API cannot tell them apart, so neither does the copy.
  */
-function freshnessText({ status, channel, builtVersion, currentVersion }: AncestryFreshness): string {
+export function freshnessText({ status, channel, builtVersion, currentVersion }: AncestryFreshness): string {
   if (!channel) return `Built from ${builtVersion} · no channel to compare against`
   if (status === 'UP_TO_DATE') return `Built from ${channel} · still current`
   if (status === 'OUT_OF_DATE' && currentVersion) return `Built from ${channel} · ${channel} now at ${currentVersion}`

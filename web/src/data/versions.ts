@@ -154,11 +154,6 @@ export type BucketPage = {
   children: AncestryChild[]
 }
 
-export type ParentFreshness =
-  | { status: 'newest' }
-  | { status: 'behind'; currentVersion: string }
-  | { status: 'unknown' }
-
 export type AncestryFreshness = {
   status: ApiAncestryStatus
   channel: string
@@ -185,7 +180,6 @@ export type AncestryParent = AncestryVersionState & {
   bucket: string
   versionName: string
   fingerprint: string
-  freshness: ParentFreshness
   buildFreshness: AncestryFreshness
   /** This bucket's own version in the relation — the one built FROM the parent. */
   localVersionName?: string
@@ -872,19 +866,11 @@ function toAncestryParent(relation: ApiBucketAncestry): AncestryParent | null {
     bucket: relation.parent.bucket_name,
     versionName: relation.parent.version_name ?? '—',
     fingerprint: relation.parent.version_fingerprint,
-    freshness: parentFreshness(relation.status, relation.parent.channel_version?.name),
     buildFreshness: ancestryFreshness(relation),
     localVersionName: relation.child?.version_name,
   }
 }
 
-function parentFreshness(status: ApiAncestryStatus | undefined, currentVersion?: string): ParentFreshness {
-  if (status === 'UP_TO_DATE') return { status: 'newest' }
-  if (status === 'OUT_OF_DATE' && currentVersion) {
-    return { status: 'behind', currentVersion }
-  }
-  return { status: 'unknown' }
-}
 
 function toAncestryChild(relation: ApiBucketAncestry): AncestryChild | null {
   if (!relation.child?.bucket_name || !relation.child.version_fingerprint) return null
