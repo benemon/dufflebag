@@ -1,19 +1,65 @@
 # Backup and restore
 
-Back up the single PostgreSQL database as a whole-database logical dump. The
-dump contains dufflebag's schema and data. It does not contain PostgreSQL
-roles, Kubernetes Secrets or deployment configuration. Retain those
-separately. The `dufflebag` owner role must exist before a restore.
+A dufflebag backup is a backup of its PostgreSQL database, plus its object
+storage bucket when one is configured. This page states what any backup must
+capture and the constraints it runs under, then gives one tested procedure.
+Use whichever backup mechanism your database platform provides, as long as it
+meets these requirements.
 
-The reference Kubernetes manifests do not configure object storage. In that
-deployment shape, `/sys/health` reports object storage as `unconfigured` and
-there are no external SBOM payloads to include in the backup. If you add
-[object storage](./object-storage.md), the PostgreSQL dump still does not
-contain SBOM bytes or scan transcripts. Back up and restore the S3-compatible
-bucket separately and keep it consistent with the database dump. Restoring
-only PostgreSQL restores object references, not the objects they name.
+## What a backup must capture
 
-## Back up
+- **The whole database, across every tenant.** dufflebag forces row-level
+  security on its tenant tables, owner included, so the
+  [serving role](./database.md#the-role-model) sees one tenant at a time. A
+  `pg_dump` run as that role stops with `query would be affected by row-level
+  security policy` rather than write a partial dump. Back up as something
+  row-level security does not bind: a PostgreSQL superuser, a role with
+  `BYPASSRLS` used only for backups, or a physical backup that copies the
+  database below SQL.
+- **The object storage bucket, if one is configured.** SBOM bytes and scan
+  transcripts live in the bucket, and the database holds only references to
+  them. Back up the bucket together with the database, with no writes between
+  the two. A database restored without its bucket references objects that are
+  not there.
+
+A database backup does not contain PostgreSQL roles, Kubernetes Secrets or
+deployment configuration. On an encrypted deployment it also does not contain
+the key service's key, without which the restored data cannot be decrypted
+([Encryption](./encryption.md)). Keep all of these separately.
+
+## Constraints
+
+- Do not run backups as the serving role, and do not grant it superuser or
+  `BYPASSRLS` to make backups work. The server refuses to start with either,
+  because both disable the tenancy boundary.
+- The database owner role must exist, with the same name, before a restore.
+- Point-in-time recovery depends on the mechanism. A physical backup with
+  continuous WAL archiving can restore to any moment it covers. A logical dump
+  restores to the moment it was taken.
+- A backup is proven only by restoring it. Restore into a scratch database on a
+  schedule and run the checks in [Verify](#verify).
+
+## Platform backups
+
+Database platforms provide backups that run outside row-level security by
+design. On Kubernetes, for example, CloudNativePG's
+[backup and recovery](https://cloudnative-pg.io/documentation/current/backup/)
+takes scheduled base backups and archives WAL to object storage, with
+point-in-time recovery. Other operators, the automated backups of managed
+PostgreSQL services, and pgBackRest, Barman, WAL-G or `pg_basebackup` on your
+own hosts serve the same purpose. Configure them from their own documentation.
+A managed service that withholds full superuser may not let any role bypass
+forced row-level security, so check before relying on a logical dump there.
+
+## A tested procedure: logical dump
+
+This procedure takes a whole-database logical dump as the PostgreSQL superuser.
+It is the one exercised by `make test-backup-restore` in the repository's KIND
+lane. The reference Kubernetes manifests do not configure object storage, so in
+that shape `/sys/health` reports object storage as `unconfigured` and there is
+no bucket to back up.
+
+### Back up
 
 Stop dufflebag before taking the dump so no writes can land after the backup.
 The repository's KIND lane uses the pod, database and role names below. Apply
@@ -29,12 +75,10 @@ kubectl exec postgres -- env PGPASSWORD=postgres pg_dump \
   --format=custom > "$dump"
 ```
 
-Use a PostgreSQL superuser for the dump. The dufflebag server forces row-level security
-on tenant tables, so the serving role is not a whole-database backup role.
 Custom format retains ownership metadata and lets `pg_restore` stop at the
 first error. Protect the archive as production data.
 
-## Restore
+### Restore
 
 Keep dufflebag stopped. Drop and recreate the database, then restore the
 custom-format archive. The owner role must already exist:
@@ -56,7 +100,7 @@ kubectl wait --for=jsonpath='{.status.phase}'=Running pod -l app=dufflebag --tim
 
 Starting a new pod also replaces the old database connection pool.
 
-## Verify
+### Verify
 
 Use an existing authenticated API session to fetch a bucket that was present
 when the dump was taken. In the commands below, `registry` is the tenant's
@@ -77,6 +121,4 @@ grep -Fq "\"name\":\"$bucket_name\"" "$restored_bucket"
 The health request must return HTTP 200. Wait for the dufflebag pod to become
 Ready before returning traffic to it.
 
-Point-in-time recovery is not provided. These backups are whole-database
-logical dumps, and this is exactly the restore procedure exercised by
-`make test-backup-restore` in the repository's KIND lane.
+This procedure restores the database to the moment of the dump.

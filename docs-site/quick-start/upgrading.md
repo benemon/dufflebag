@@ -11,9 +11,8 @@ paths.
 ## Before 1.0
 
 Before a 1.0 release, the database schema and API surface may change between
-versions without a migration path. The
-[GitHub release notes](https://github.com/benemon/dufflebag/releases) are the
-record for each release. Do not assume upgrade compatibility that a release
+versions without a migration path. The [release notes](../reference/releases.md)
+are the record for each release. Do not assume upgrade compatibility that a release
 note does not state.
 
 Deployments that set `DFBG_VAULT_AUTH_METHOD=env` must set it to `token`
