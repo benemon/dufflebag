@@ -58,6 +58,7 @@ const sidebar = [
     items: [
       { text: 'Compatibility', link: '/reference/compatibility' },
       { text: 'Platform API', link: '/reference/platform-api' },
+      { text: 'Releases', link: '/reference/releases' },
     ],
   },
 ]
