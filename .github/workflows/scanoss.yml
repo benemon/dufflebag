@@ -25,12 +25,14 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
-  checks: write
 
 jobs:
   scan:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
     timeout-minutes: 15
     steps:
       - name: Check out repository
