@@ -24,8 +24,9 @@ export default defineLoader({
         day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC',
       }),
       url: release.html_url,
-      notes: md.render((release.body ?? '')
-        .replace(/<!--[\s\S]*?-->/g, '')
+      notes: md.render((release.body ?? '').split('\n')
+        .filter((line) => !(line.startsWith('<!--') && line.trimEnd().endsWith('-->')))
+        .join('\n')
         .replace(/^#{1,6} (.+)$/gm, '**$1**')),
     }))
   },
