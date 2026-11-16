@@ -1868,10 +1868,10 @@ test('the console works end to end, from first run to a seeded tenancy', async (
       (await pickerValue('#tenant-project')) === 'widgets')
     await clickByText('a', 'Buckets')
     await waitForText('smoke-images')
-    assert.equal(
-      await page.$$eval('.pf-v6-c-skeleton', (nodes) => nodes.length), 0,
-      'the buckets screen stuck in skeleton after re-selecting the organisation',
-    )
+    // The pinned-buckets panel loads after the list and shows skeleton rows
+    // until it does; a wedge never clears.
+    await until('the buckets screen to leave skeleton after re-selecting the organisation', async () =>
+      (await page.$$eval('.pf-v6-c-skeleton', (nodes) => nodes.length)) === 0)
     // Restore the selection the previous subtest left, so the sequence that
     // follows finds the bucket detail it expects.
     await choosePickerOption('#tenant-bucket', 'smoke-images')
