@@ -47,6 +47,7 @@ github.com/aws/aws-sdk-go-v2/feature/s3/manager v1.11.33/go.mod h1:84XgODVR8uRhm
 github.com/aws/aws-sdk-go-v2/service/signin v1.12.0/go.mod h1:wxAk0D2oVBSjuXEIzvcKxTZfM90zticdAbh/VD42L0Y=
 github.com/aws/aws-sdk-go-v2/service/signin v1.12.2/go.mod h1:dE+Yn/Y4GJuwfo+Dz+4gMaKJ6y01vx2USPdoo/cgkkg=
 github.com/aws/aws-sdk-go-v2/service/signin v1.13.1/go.mod h1:LdwHjKqPE9VCC7sTlWcOAizZx3ZJYjmfwC/EW2tIIAE=
+github.com/aws/aws-sdk-go-v2/service/signin v1.14.0/go.mod h1:LdwHjKqPE9VCC7sTlWcOAizZx3ZJYjmfwC/EW2tIIAE=
 github.com/aws/aws-sdk-go-v2/service/sso v1.39.0/go.mod h1:UGsEYgWz4Gi+46vDQ5zkFLqUgJziyOE2SXjZjgmfmHc=
 github.com/aws/aws-sdk-go-v2/service/sso v1.39.2/go.mod h1:MHu80D5zcLWzHjfLo3zjAOSCzBMGEnAeZ+uDAEUrN6E=
 github.com/aws/aws-sdk-go-v2/service/sso v1.39.5/go.mod h1:vsMi+SSR7xGQXtV430LVi49qbv/R+U+upHHSp1W/+QI=
