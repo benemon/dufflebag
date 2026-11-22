@@ -5,8 +5,8 @@ go 1.26.4
 require (
 	github.com/ProtonMail/go-crypto v1.5.2
 	github.com/aws/aws-sdk-go-v2 v1.48.0
-	github.com/aws/aws-sdk-go-v2/credentials v1.21.0
-	github.com/aws/aws-sdk-go-v2/service/s3 v1.114.10
+	github.com/aws/aws-sdk-go-v2/credentials v1.21.2
+	github.com/aws/aws-sdk-go-v2/service/s3 v1.116.0
 	github.com/cloudflare/circl v1.6.5
 	github.com/go-openapi/errors v0.22.7
 	github.com/go-openapi/strfmt v0.26.3
